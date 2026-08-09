@@ -3,14 +3,18 @@ intents:
   HassOpenCover:
     data:
       - sentences:
-          - "öffne [den|die|das] {name}"
-          - "fahre [den|die|das] {name} hoch"
-          - "[den|die|das] {name} hochfahren"
-          - "mach [den|die|das] {name} auf"
+          - "[kannst du] öffne [den|die|das] {name}"
+          - "[kannst du] fahre [den|die|das] {name} hoch"
+          - "[kannst du|bitte] [den|die|das] {name} hochfahren"
+          - "[kannst du|bitte] [den|die|das] {name} öffnen"
+          - "[kannst du] mach [den|die|das] {name} auf"
+          - "[bitte] [den|die|das] {name} hoch"
   HassCloseCover:
     data:
       - sentences:
-          - "schließe [den|die|das] {name}"
-          - "fahre [den|die|das] {name} runter"
-          - "[den|die|das] {name} runterfahren"
-          - "mach [den|die|das] {name} zu"
+          - "[kannst du] schließe [den|die|das] {name}"
+          - "[kannst du] fahre [den|die|das] {name} runter"
+          - "[kannst du|bitte] [den|die|das] {name} runterfahren"
+          - "[kannst du|bitte] [den|die|das] {name} schließen"
+          - "[kannst du] mach [den|die|das] {name} zu"
+          - "[bitte] [den|die|das] {name} runter"

@@ -37,31 +37,53 @@ class ResolveResult:
     candidates: tuple[EntitySnapshot, ...] = ()
 
 
-def build_name_map(entities: list[EntitySnapshot]) -> dict[str, EntitySnapshot]:
-    """Map lowercased friendly name -> EntitySnapshot."""
-    return {e.friendly_name.strip().lower(): e for e in entities}
+def build_name_map(entities: list[EntitySnapshot]) -> dict[str, list[EntitySnapshot]]:
+    """Group entities by lowercased friendly name.
+
+    A list (not a single entity) per name, because real HA instances do have
+    duplicate friendly names (e.g. the same device exposed by two
+    integrations) - collapsing those to "last one wins" would silently
+    resolve to the wrong entity instead of surfacing them as AMBIGUOUS.
+    """
+    groups: dict[str, list[EntitySnapshot]] = {}
+    for e in entities:
+        groups.setdefault(e.friendly_name.strip().lower(), []).append(e)
+    return groups
 
 
 def resolve_entity(name: str, entities: list[EntitySnapshot]) -> ResolveResult:
     """Resolve a spoken name to an entity within the given entity set.
 
-    Exact match wins. Otherwise, a case-insensitive "contains" match is
-    accepted only if it is unambiguous (exactly one candidate) - mirrors
-    ``_resolve()`` in xiaozhi_entity_mcp so both integrations agree on what
-    counts as a safe match for entities like ``switch.garagentor``.
+    Exact match wins, but only if it is unambiguous (duplicate friendly
+    names count as AMBIGUOUS, not "first/last wins"). Otherwise, a
+    case-insensitive "contains" match is accepted, checked in both
+    directions - the spoken name inside the friendly name (e.g. "Büro"
+    matches "Rolllade Büro") or the friendly name inside the spoken name
+    (e.g. "Rollladen Wohnzimmer" matches a cover just called "Wohnzimmer") -
+    and only if that is unambiguous too. Mirrors ``_resolve()`` in
+    xiaozhi_entity_mcp so both integrations agree on what counts as a safe
+    match for entities like ``switch.garagentor``.
     """
     key = (name or "").strip().lower()
     if not key:
         return ResolveResult(status=ResolveStatus.NOT_FOUND)
 
-    name_map = build_name_map(entities)
-    exact = name_map.get(key)
-    if exact is not None:
-        return ResolveResult(status=ResolveStatus.OK, entity=exact)
+    groups = build_name_map(entities)
 
-    hits = [e for friendly_name, e in name_map.items() if key in friendly_name]
+    exact = groups.get(key)
+    if exact:
+        if len(exact) == 1:
+            return ResolveResult(status=ResolveStatus.OK, entity=exact[0])
+        return ResolveResult(status=ResolveStatus.AMBIGUOUS, candidates=tuple(exact))
+
+    hits: dict[str, EntitySnapshot] = {}
+    for friendly_name, group in groups.items():
+        if key in friendly_name or friendly_name in key:
+            for e in group:
+                hits[e.entity_id] = e
+
     if len(hits) == 1:
-        return ResolveResult(status=ResolveStatus.OK, entity=hits[0])
+        return ResolveResult(status=ResolveStatus.OK, entity=next(iter(hits.values())))
     if len(hits) > 1:
-        return ResolveResult(status=ResolveStatus.AMBIGUOUS, candidates=tuple(hits))
+        return ResolveResult(status=ResolveStatus.AMBIGUOUS, candidates=tuple(hits.values()))
     return ResolveResult(status=ResolveStatus.NOT_FOUND)

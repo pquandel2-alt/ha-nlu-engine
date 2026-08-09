@@ -15,6 +15,7 @@ this is intentional (see plan: predictability over coverage).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,6 +25,21 @@ from .entities import EntitySnapshot, ResolveStatus, resolve_entity
 from .service_call import INTENTS, ServiceCallPlan
 
 INTENTS_DIR = Path(__file__).parent / "intents" / "de"
+
+# The {name} wildcard captures everything between the fixed template words,
+# so "fahre die Rollade im Büro hoch" captures "Rollade im Büro" verbatim -
+# including the preposition. Real HA friendly names are almost never a
+# grammatically exact match ("Rolllade Büro", not "Rolllade im Büro"), so
+# without stripping these the captured text falls through to a fragile
+# contains-match (or misses an exact match it should have hit). Stripping
+# is safe: none of these words plausibly appear as part of a real entity
+# name, only as connective glue in a spoken sentence.
+_LOCATIVE_PREPOSITIONS = re.compile(r"\b(in der|in dem|im|am|beim)\b", re.IGNORECASE)
+
+
+def _strip_locative_prepositions(name: str) -> str:
+    without_prepositions = _LOCATIVE_PREPOSITIONS.sub(" ", name)
+    return re.sub(r"\s+", " ", without_prepositions).strip()
 
 
 @dataclass(frozen=True)
@@ -57,7 +73,8 @@ class NluEngine:
         if name_slot is None:
             return None
 
-        resolved = resolve_entity(str(name_slot.value), entities)
+        name = _strip_locative_prepositions(str(name_slot.value))
+        resolved = resolve_entity(name, entities)
         if resolved.status is not ResolveStatus.OK or resolved.entity is None:
             return None
         if resolved.entity.domain not in spec.allowed_domains:
