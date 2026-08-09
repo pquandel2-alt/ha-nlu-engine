@@ -1,0 +1,16 @@
+language: "de"
+intents:
+  HassOpenCover:
+    data:
+      - sentences:
+          - "öffne [den|die|das] {name}"
+          - "fahre [den|die|das] {name} hoch"
+          - "[den|die|das] {name} hochfahren"
+          - "mach [den|die|das] {name} auf"
+  HassCloseCover:
+    data:
+      - sentences:
+          - "schließe [den|die|das] {name}"
+          - "fahre [den|die|das] {name} runter"
+          - "[den|die|das] {name} runterfahren"
+          - "mach [den|die|das] {name} zu"

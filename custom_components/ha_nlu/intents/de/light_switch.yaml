@@ -1,0 +1,24 @@
+language: "de"
+intents:
+  HassTurnOn:
+    data:
+      - sentences:
+          - "mach [den|die|das] {name} an"
+          - "schalte [den|die|das] {name} ein"
+          - "[den|die|das] {name} einschalten"
+          - "kannst du [den|die|das] {name} anmachen"
+          - "bitte [den|die|das] {name} an"
+  HassTurnOff:
+    data:
+      - sentences:
+          - "mach [den|die|das] {name} aus"
+          - "schalte [den|die|das] {name} aus"
+          - "[den|die|das] {name} ausschalten"
+          - "kannst du [den|die|das] {name} ausmachen"
+          - "bitte [den|die|das] {name} aus"
+  HassToggle:
+    data:
+      - sentences:
+          - "schalte [den|die|das] {name} um"
+          - "[den|die|das] {name} umschalten"
+          - "toggle [den|die|das] {name}"
