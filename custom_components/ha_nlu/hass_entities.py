@@ -46,10 +46,12 @@ def _friendly(state: State) -> str:
     return state.attributes.get("friendly_name") or state.entity_id
 
 
-def _area_info(hass: HomeAssistant, entity_id: str) -> tuple[str | None, str | None]:
+def _area_info(
+    hass: HomeAssistant, entity_id: str, registry_entry: er.RegistryEntry | None = None
+) -> tuple[str | None, str | None]:
     """(area_id, area_name) via the standard entity -> device -> area
     fallback chain, or (None, None) if the entity has no area assigned."""
-    entry = er.async_get(hass).async_get(entity_id)
+    entry = registry_entry if registry_entry is not None else er.async_get(hass).async_get(entity_id)
     area_id = entry.area_id if entry else None
     if area_id is None and entry is not None and entry.device_id:
         device = dr.async_get(hass).async_get(entry.device_id)
@@ -58,6 +60,13 @@ def _area_info(hass: HomeAssistant, entity_id: str) -> tuple[str | None, str | N
         return None, None
     area = ar.async_get(hass).async_get_area(area_id)
     return area_id, (area.name if area else None)
+
+
+def _entity_aliases(registry_entry: er.RegistryEntry | None) -> tuple[str, ...]:
+    """Aliases the user configured in HA's entity registry (Assist feature)."""
+    if registry_entry is None or not registry_entry.aliases:
+        return ()
+    return tuple(sorted(registry_entry.aliases))
 
 
 def build_entity_snapshots(
@@ -69,7 +78,8 @@ def build_entity_snapshots(
         state = hass.states.get(entity_id)
         if state is None:
             continue
-        area_id, area_name = _area_info(hass, entity_id)
+        registry_entry = er.async_get(hass).async_get(entity_id)
+        area_id, area_name = _area_info(hass, entity_id, registry_entry=registry_entry)
         snapshots.append(
             EntitySnapshot(
                 entity_id=entity_id,
@@ -81,6 +91,7 @@ def build_entity_snapshots(
                 unit=state.attributes.get("unit_of_measurement"),
                 device_class=state.attributes.get("device_class"),
                 state_class=state.attributes.get("state_class"),
+                aliases=_entity_aliases(registry_entry),
                 attributes=state.attributes,
             )
         )

@@ -54,8 +54,68 @@ class ResolveResult:
     candidates: tuple[EntitySnapshot, ...] = ()
 
 
+@dataclass(frozen=True)
+class EntityAlias:
+    """One alternate name candidate for an entity, with its provenance.
+
+    ``source`` is kept (rather than discarded once generated) because Phase
+    6 (Entity Resolver 2.0) scores candidates differently per source - a
+    configured alias and a derived entity-id name are not equally strong
+    evidence.
+    """
+
+    entity_id: str
+    text: str
+    source: str
+
+
+def _humanize_object_id(entity_id: str) -> str:
+    """'light.wohnzimmer_decke' -> 'Wohnzimmer Decke'.
+
+    Pure formatting (underscore -> space, title case), not a translation -
+    safe to apply to any entity_id without risking a wrong guess.
+    """
+    object_id = entity_id.split(".", 1)[1]
+    return object_id.replace("_", " ").strip().title()
+
+
+def generate_aliases(entity: EntitySnapshot) -> tuple[EntityAlias, ...]:
+    """Alternate name candidates for an entity, beyond its friendly_name.
+
+    Sources: the entity_id itself (raw and humanized "Entity Name" form) and
+    the aliases configured in HA's entity registry (``EntitySnapshot.aliases``,
+    wired from ``entry.aliases`` in hass_entities.py - the same field HA's
+    own Assist feature uses). Area and Device Class are deliberately *not*
+    turned into text candidates here: Phase 6 (Entity Resolver 2.0) already
+    scores them as their own dimensions (matching area +30, matching device
+    class +15), and translating a device_class into German text for an
+    unknown/future HA device class would be a guess, not a lookup.
+    """
+    seen: set[str] = {entity.friendly_name.strip().lower()}
+    aliases: list[EntityAlias] = []
+
+    def add(text: str | None, source: str) -> None:
+        if not text:
+            return
+        text = text.strip()
+        key = text.lower()
+        if not text or key in seen:
+            return
+        seen.add(key)
+        aliases.append(EntityAlias(entity_id=entity.entity_id, text=text, source=source))
+
+    add(_humanize_object_id(entity.entity_id), "entity_name")
+    add(entity.entity_id, "entity_id")
+    for configured in entity.aliases:
+        add(configured, "configured")
+
+    return tuple(aliases)
+
+
 def build_name_map(entities: list[EntitySnapshot]) -> dict[str, list[EntitySnapshot]]:
-    """Group entities by lowercased friendly name.
+    """Group entities by every name they can be found under: friendly name
+    plus all generated aliases (entity_id, humanized entity_name, configured
+    HA aliases).
 
     A list (not a single entity) per name, because real HA instances do have
     duplicate friendly names (e.g. the same device exposed by two
@@ -65,6 +125,8 @@ def build_name_map(entities: list[EntitySnapshot]) -> dict[str, list[EntitySnaps
     groups: dict[str, list[EntitySnapshot]] = {}
     for e in entities:
         groups.setdefault(e.friendly_name.strip().lower(), []).append(e)
+        for alias in generate_aliases(e):
+            groups.setdefault(alias.text.strip().lower(), []).append(e)
     return groups
 
 

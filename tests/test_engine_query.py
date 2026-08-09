@@ -27,6 +27,11 @@ def test_query_wrong_domain_returns_none(engine, entities):
     assert engine.match("wie ist der Rollladen Büro", entities) is None
 
 
-def test_query_case_and_question_mark_do_not_matter(engine, sensor_entities):
+def test_query_case_does_not_matter(engine, sensor_entities):
+    # Also incidentally umlaut-tolerant since Phase 5 (Alias-System): the
+    # entity_id "sensor.aussentemperatur" is ASCII by HA convention, so its
+    # generated entity_name alias "Aussentemperatur" matches "AUSSENTEMPERATUR"
+    # - a real alternate-name match, not umlaut normalization/guessing.
     result = engine.match("WIE HOCH IST DIE AUSSENTEMPERATUR", sensor_entities)
-    assert result is None  # umlaut normalization not part of scope; exact text required
+    assert result is not None
+    assert result.response_text == "18.4 Grad."
