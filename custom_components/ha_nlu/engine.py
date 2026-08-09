@@ -23,6 +23,7 @@ from hassil import Intents, RangeSlotList, RangeType, TextSlotList, WildcardSlot
 
 from .areas import AreaResolveStatus, resolve_area_name
 from .entities import EntitySnapshot, ResolveStatus, resolve_entities_by_domain, resolve_entity
+from .nlu.frame import AreaReference, SemanticFrame, TargetReference
 from .service_call import INTENTS, PERCENT_INTENTS, QUERY_INTENTS, ServiceCallPlan
 
 INTENTS_DIR = Path(__file__).parent / "intents" / "de"
@@ -95,6 +96,12 @@ def _strip_locative_prepositions(name: str) -> str:
 class MatchResult:
     plan: ServiceCallPlan | None
     response_text: str
+    # SemanticFrame representation of the same match, built alongside the
+    # existing plan/response_text - not yet consumed anywhere (see plan
+    # Phase 1: "Parser darf zunaechst nur ein Frame erzeugen, noch kein
+    # ServiceCall"). ServiceCallPlan generation still goes through the
+    # pre-existing INTENTS/PERCENT_INTENTS/QUERY_INTENTS specs unchanged.
+    frame: SemanticFrame | None = None
 
 
 class NluEngine:
@@ -146,11 +153,18 @@ class NluEngine:
         if resolved.status is not ResolveStatus.OK or resolved.entity is None:
             return None
 
+        frame = SemanticFrame(
+            intent=result.intent.name,
+            target=TargetReference(text=name, entity_id=resolved.entity.entity_id, domain=resolved.entity.domain),
+            area=None,
+            source_text=text,
+        )
+
         query_spec = QUERY_INTENTS.get(result.intent.name)
         if query_spec is not None:
             if resolved.entity.domain not in query_spec.allowed_domains:
                 return None
-            return MatchResult(plan=None, response_text=query_spec.response([resolved.entity]))
+            return MatchResult(plan=None, response_text=query_spec.response([resolved.entity]), frame=frame)
 
         spec = INTENTS.get(result.intent.name)
         if spec is None:
@@ -161,6 +175,7 @@ class NluEngine:
         return MatchResult(
             plan=spec.build([resolved.entity]),
             response_text=spec.response([resolved.entity]),
+            frame=frame,
         )
 
     def _match_quantifier(self, text: str, entities: list[EntitySnapshot]) -> MatchResult | None:
@@ -205,7 +220,14 @@ class NluEngine:
         if quantifier == "both" and len(matches) != 2:
             return None  # "beide" requires exactly 2 hits - otherwise not understood
 
-        return MatchResult(plan=spec.build(matches), response_text=spec.response(matches))
+        frame = SemanticFrame(
+            intent=result.intent.name,
+            target=TargetReference(text=domain, domain=domain),
+            area=AreaReference(text=area_name, area_id=area_id) if area_id is not None else None,
+            parameters={"quantifier": quantifier},
+            source_text=text,
+        )
+        return MatchResult(plan=spec.build(matches), response_text=spec.response(matches), frame=frame)
 
     def _match_percentage(self, text: str, entities: list[EntitySnapshot]) -> MatchResult | None:
         slot_lists = {
@@ -236,7 +258,15 @@ class NluEngine:
         if spec is None:
             return None
 
+        frame = SemanticFrame(
+            intent=result.intent.name,
+            target=TargetReference(text=name, entity_id=resolved.entity.entity_id, domain=resolved.entity.domain),
+            area=None,
+            parameters={"percent": percent},
+            source_text=text,
+        )
         return MatchResult(
             plan=spec.build([resolved.entity], percent),
             response_text=spec.response([resolved.entity], percent),
+            frame=frame,
         )
