@@ -112,59 +112,148 @@ def generate_aliases(entity: EntitySnapshot) -> tuple[EntityAlias, ...]:
     return tuple(aliases)
 
 
-def build_name_map(entities: list[EntitySnapshot]) -> dict[str, list[EntitySnapshot]]:
-    """Group entities by every name they can be found under: friendly name
-    plus all generated aliases (entity_id, humanized entity_name, configured
-    HA aliases).
+class ResolutionStatus(Enum):
+    RESOLVED = auto()
+    AMBIGUOUS = auto()
+    NOT_FOUND = auto()
 
-    A list (not a single entity) per name, because real HA instances do have
-    duplicate friendly names (e.g. the same device exposed by two
-    integrations) - collapsing those to "last one wins" would silently
-    resolve to the wrong entity instead of surfacing them as AMBIGUOUS.
+
+@dataclass(frozen=True)
+class ResolutionResult:
+    status: ResolutionStatus
+    entity: EntitySnapshot | None = None
+    candidates: tuple[EntitySnapshot, ...] = ()
+    score: float | None = None
+
+
+# Scoring weights (v2 plan Phase 6, "Beispielwerte, experimentell, durch
+# Tests zu validieren" - kept exactly as specified, validated by
+# tests/test_resolver.py rather than tuned further).
+_SCORE_EXACT_FRIENDLY_NAME = 100
+_SCORE_EXACT_ALIAS = 90
+_SCORE_NORMALIZED_EXACT = 85
+_SCORE_ENTITY_ID_MATCH = 70
+_SCORE_CONTAINS = 50
+_SCORE_REVERSE_CONTAINS = 40
+_SCORE_MATCHING_AREA = 30
+_SCORE_MATCHING_DOMAIN = 20
+_SCORE_MATCHING_DEVICE_CLASS = 15
+
+# Two candidates within this many points of each other are "practically
+# equivalent" (plan's Schritt 4, Ambiguity Detection) - report AMBIGUOUS
+# instead of guessing the higher-scored one.
+_AMBIGUITY_MARGIN = 5
+
+
+def _normalize_for_compare(text: str) -> str:
+    """Lowercase + collapse whitespace, for the 'Normalized exact' tier.
+
+    Deliberately does not fold umlauts/punctuation - normalize.py already
+    documents that boundary (semantic decisions belong in resolution, not
+    normalization, but *guessing* a folding of "ß"/"ü" etc. would itself be
+    exactly the kind of guess this project avoids).
     """
-    groups: dict[str, list[EntitySnapshot]] = {}
-    for e in entities:
-        groups.setdefault(e.friendly_name.strip().lower(), []).append(e)
-        for alias in generate_aliases(e):
-            groups.setdefault(alias.text.strip().lower(), []).append(e)
-    return groups
+    return " ".join(text.strip().lower().split())
+
+
+def _score_name_pair(spoken: str, spoken_norm: str, candidate_text: str, source: str) -> float | None:
+    """Best tier score for one (spoken text, candidate name) pair, or None
+    if they don't match under any tier at all."""
+    if not candidate_text or not spoken_norm:
+        return None
+    candidate_norm = _normalize_for_compare(candidate_text)
+    if not candidate_norm:
+        return None
+
+    if source == "entity_id":
+        # Raw entity_ids are lowercase by HA convention - no natural-language
+        # "contains" fragment matching for them, just a dedicated tier.
+        return _SCORE_ENTITY_ID_MATCH if candidate_norm == spoken_norm else None
+
+    if candidate_text == spoken:
+        return _SCORE_EXACT_FRIENDLY_NAME if source == "friendly_name" else _SCORE_EXACT_ALIAS
+    if candidate_norm == spoken_norm:
+        return _SCORE_NORMALIZED_EXACT
+    if spoken_norm in candidate_norm:
+        return _SCORE_CONTAINS
+    if candidate_norm in spoken_norm:
+        return _SCORE_REVERSE_CONTAINS
+    return None
+
+
+def _best_name_score(spoken: str, spoken_norm: str, entity: EntitySnapshot) -> float | None:
+    """Highest tier score across friendly_name and all generated aliases -
+    Schritt 1+2 of the plan (Candidate Generation + Scoring) for one entity."""
+    best: float | None = None
+    for text, source in [(entity.friendly_name, "friendly_name"), *(
+        (a.text, a.source) for a in generate_aliases(entity)
+    )]:
+        score = _score_name_pair(spoken, spoken_norm, text, source)
+        if score is not None and (best is None or score > best):
+            best = score
+    return best
+
+
+def resolve_entity_scored(
+    name: str,
+    entities: list[EntitySnapshot],
+    *,
+    area_id: str | None = None,
+    domain: str | None = None,
+    device_class: str | None = None,
+) -> ResolutionResult:
+    """Multi-stage scored entity resolution (v2 plan Phase 6, "Entity
+    Resolver 2.0"): candidate generation + scoring across friendly_name/
+    aliases/entity_id, optional context bonuses (Schritt 3, Context
+    Filtering - only applied when the caller actually knows the area/domain/
+    device_class it's looking for), then ambiguity detection (Schritt 4) on
+    the final ranking.
+    """
+    spoken = (name or "").strip()
+    if not spoken:
+        return ResolutionResult(status=ResolutionStatus.NOT_FOUND)
+    spoken_norm = _normalize_for_compare(spoken)
+
+    ranked: list[tuple[EntitySnapshot, float]] = []
+    for entity in entities:
+        name_score = _best_name_score(spoken, spoken_norm, entity)
+        if name_score is None:
+            continue
+        total = name_score
+        if area_id is not None and entity.area_id == area_id:
+            total += _SCORE_MATCHING_AREA
+        if domain is not None and entity.domain == domain:
+            total += _SCORE_MATCHING_DOMAIN
+        if device_class is not None and entity.device_class == device_class:
+            total += _SCORE_MATCHING_DEVICE_CLASS
+        ranked.append((entity, total))
+
+    if not ranked:
+        return ResolutionResult(status=ResolutionStatus.NOT_FOUND)
+
+    ranked.sort(key=lambda pair: pair[1], reverse=True)
+    top_score = ranked[0][1]
+    tied = [entity for entity, score in ranked if top_score - score <= _AMBIGUITY_MARGIN]
+
+    if len(tied) > 1:
+        return ResolutionResult(status=ResolutionStatus.AMBIGUOUS, candidates=tuple(tied))
+    return ResolutionResult(status=ResolutionStatus.RESOLVED, entity=tied[0], score=top_score)
 
 
 def resolve_entity(name: str, entities: list[EntitySnapshot]) -> ResolveResult:
     """Resolve a spoken name to an entity within the given entity set.
 
-    Exact match wins, but only if it is unambiguous (duplicate friendly
-    names count as AMBIGUOUS, not "first/last wins"). Otherwise, a
-    case-insensitive "contains" match is accepted, checked in both
-    directions - the spoken name inside the friendly name (e.g. "Büro"
-    matches "Rolllade Büro") or the friendly name inside the spoken name
-    (e.g. "Rollladen Wohnzimmer" matches a cover just called "Wohnzimmer") -
-    and only if that is unambiguous too. Mirrors ``_resolve()`` in
-    xiaozhi_entity_mcp so both integrations agree on what counts as a safe
-    match for entities like ``switch.garagentor``.
+    Thin, context-free wrapper around ``resolve_entity_scored`` (v2 plan
+    Phase 6) for callers that don't need scores/context bonuses - exact and
+    normalized-exact matches win outright (their score gap to any
+    contains-tier competitor always exceeds the ambiguity margin), duplicate
+    names/aliases surface as AMBIGUOUS rather than "first one wins".
     """
-    key = (name or "").strip().lower()
-    if not key:
-        return ResolveResult(status=ResolveStatus.NOT_FOUND)
-
-    groups = build_name_map(entities)
-
-    exact = groups.get(key)
-    if exact:
-        if len(exact) == 1:
-            return ResolveResult(status=ResolveStatus.OK, entity=exact[0])
-        return ResolveResult(status=ResolveStatus.AMBIGUOUS, candidates=tuple(exact))
-
-    hits: dict[str, EntitySnapshot] = {}
-    for friendly_name, group in groups.items():
-        if key in friendly_name or friendly_name in key:
-            for e in group:
-                hits[e.entity_id] = e
-
-    if len(hits) == 1:
-        return ResolveResult(status=ResolveStatus.OK, entity=next(iter(hits.values())))
-    if len(hits) > 1:
-        return ResolveResult(status=ResolveStatus.AMBIGUOUS, candidates=tuple(hits.values()))
+    result = resolve_entity_scored(name, entities)
+    if result.status is ResolutionStatus.RESOLVED:
+        return ResolveResult(status=ResolveStatus.OK, entity=result.entity)
+    if result.status is ResolutionStatus.AMBIGUOUS:
+        return ResolveResult(status=ResolveStatus.AMBIGUOUS, candidates=result.candidates)
     return ResolveResult(status=ResolveStatus.NOT_FOUND)
 
 
