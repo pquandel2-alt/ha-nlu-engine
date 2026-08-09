@@ -22,6 +22,9 @@ class EntitySnapshot:
     friendly_name: str
     domain: str
     state: str
+    area_id: str | None = None
+    area_name: str | None = None
+    unit: str | None = None
 
 
 class ResolveStatus(Enum):
@@ -87,3 +90,17 @@ def resolve_entity(name: str, entities: list[EntitySnapshot]) -> ResolveResult:
     if len(hits) > 1:
         return ResolveResult(status=ResolveStatus.AMBIGUOUS, candidates=tuple(hits.values()))
     return ResolveResult(status=ResolveStatus.NOT_FOUND)
+
+
+def resolve_entities_by_domain(
+    domain: str, entities: list[EntitySnapshot], area_id: str | None = None
+) -> list[EntitySnapshot]:
+    """All entities of a domain, optionally filtered to one area.
+
+    Unlike ``resolve_entity`` there is no ambiguity concept here - a
+    quantifier ("alle"/"beide") is explicitly asking for every matching
+    entity, so this returns everything that matches rather than requiring
+    a single unambiguous hit. Sorted by entity_id for deterministic output.
+    """
+    matches = [e for e in entities if e.domain == domain and (area_id is None or e.area_id == area_id)]
+    return sorted(matches, key=lambda e: e.entity_id)

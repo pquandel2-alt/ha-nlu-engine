@@ -18,41 +18,112 @@ from .entities import EntitySnapshot
 class ServiceCallPlan:
     domain: str
     service: str
-    entity_id: str
+    entity_id: str | list[str]
     data: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class IntentSpec:
     allowed_domains: frozenset[str]
-    build: Callable[[EntitySnapshot], ServiceCallPlan]
-    response: Callable[[EntitySnapshot], str]
+    build: Callable[[list[EntitySnapshot]], ServiceCallPlan]
+    response: Callable[[list[EntitySnapshot]], str]
+
+
+def _entity_id_field(entities: list[EntitySnapshot]) -> str | list[str]:
+    """A bare string for a single entity (keeps existing single-match
+    service calls/tests unchanged), a list for multiple (quantifiers)."""
+    ids = [e.entity_id for e in entities]
+    return ids[0] if len(ids) == 1 else ids
+
+
+_DOMAIN_PLURAL_DE = {"light": "Lichter", "switch": "Schalter", "fan": "Ventilatoren", "cover": "Rollläden"}
+
+
+def _plural_response(entities: list[EntitySnapshot], singular_suffix: str, plural_suffix: str) -> str:
+    """'{Name} {singular_suffix}' for one entity, '{count} {Domain-Plural} {plural_suffix}' for many -
+    short and TTS-friendly rather than listing every name."""
+    if len(entities) == 1:
+        return f"{entities[0].friendly_name} {singular_suffix}"
+    noun = _DOMAIN_PLURAL_DE.get(entities[0].domain, "Geräte")
+    return f"{len(entities)} {noun} {plural_suffix}"
 
 
 INTENTS: dict[str, IntentSpec] = {
     "HassTurnOn": IntentSpec(
         allowed_domains=frozenset({"light", "switch", "fan"}),
-        build=lambda e: ServiceCallPlan("homeassistant", "turn_on", e.entity_id),
-        response=lambda e: f"{e.friendly_name} eingeschaltet.",
+        build=lambda es: ServiceCallPlan("homeassistant", "turn_on", _entity_id_field(es)),
+        response=lambda es: _plural_response(es, "eingeschaltet.", "eingeschaltet."),
     ),
     "HassTurnOff": IntentSpec(
         allowed_domains=frozenset({"light", "switch", "fan"}),
-        build=lambda e: ServiceCallPlan("homeassistant", "turn_off", e.entity_id),
-        response=lambda e: f"{e.friendly_name} ausgeschaltet.",
+        build=lambda es: ServiceCallPlan("homeassistant", "turn_off", _entity_id_field(es)),
+        response=lambda es: _plural_response(es, "ausgeschaltet.", "ausgeschaltet."),
     ),
     "HassToggle": IntentSpec(
         allowed_domains=frozenset({"light", "switch", "fan"}),
-        build=lambda e: ServiceCallPlan("homeassistant", "toggle", e.entity_id),
-        response=lambda e: f"{e.friendly_name} umgeschaltet.",
+        build=lambda es: ServiceCallPlan("homeassistant", "toggle", _entity_id_field(es)),
+        response=lambda es: _plural_response(es, "umgeschaltet.", "umgeschaltet."),
     ),
     "HassOpenCover": IntentSpec(
         allowed_domains=frozenset({"cover"}),
-        build=lambda e: ServiceCallPlan("cover", "open_cover", e.entity_id),
-        response=lambda e: f"{e.friendly_name} wird geöffnet.",
+        build=lambda es: ServiceCallPlan("cover", "open_cover", _entity_id_field(es)),
+        response=lambda es: _plural_response(es, "wird geöffnet.", "geöffnet."),
     ),
     "HassCloseCover": IntentSpec(
         allowed_domains=frozenset({"cover"}),
-        build=lambda e: ServiceCallPlan("cover", "close_cover", e.entity_id),
-        response=lambda e: f"{e.friendly_name} wird geschlossen.",
+        build=lambda es: ServiceCallPlan("cover", "close_cover", _entity_id_field(es)),
+        response=lambda es: _plural_response(es, "wird geschlossen.", "geschlossen."),
+    ),
+}
+
+
+@dataclass(frozen=True)
+class PercentIntentSpec:
+    """Separate from IntentSpec: build/response take an extra percent value,
+    a different callable signature than the 5 action intents above - kept
+    apart deliberately rather than bolting an optional argument onto those."""
+
+    allowed_domains: frozenset[str]
+    build: Callable[[list[EntitySnapshot], int], ServiceCallPlan]
+    response: Callable[[list[EntitySnapshot], int], str]
+
+
+PERCENT_INTENTS: dict[str, PercentIntentSpec] = {
+    "HassSetPosition": PercentIntentSpec(
+        allowed_domains=frozenset({"cover"}),
+        build=lambda es, pct: ServiceCallPlan("cover", "set_cover_position", _entity_id_field(es), {"position": pct}),
+        response=lambda es, pct: f"{es[0].friendly_name} auf {pct} Prozent gefahren.",
+    ),
+    "HassLightSet": PercentIntentSpec(
+        allowed_domains=frozenset({"light"}),
+        build=lambda es, pct: ServiceCallPlan("light", "turn_on", _entity_id_field(es), {"brightness_pct": pct}),
+        response=lambda es, pct: f"{es[0].friendly_name} auf {pct} Prozent Helligkeit gestellt.",
+    ),
+}
+
+
+@dataclass(frozen=True)
+class QueryIntentSpec:
+    """A query never produces a ServiceCallPlan - it only speaks the
+    current state (see MatchResult.plan: ServiceCallPlan | None)."""
+
+    allowed_domains: frozenset[str]
+    response: Callable[[list[EntitySnapshot]], str]
+
+
+# Starter set of commonly seen HA units; unknown units are still spoken
+# (raw, e.g. "42 mbar."), never crash - can be extended as needed.
+_UNIT_SPOKEN_DE = {"°C": "Grad", "%": "Prozent", "hPa": "Hektopascal", "lx": "Lux", "W": "Watt", "kWh": "Kilowattstunden"}
+
+
+def _speak_state(entity: EntitySnapshot) -> str:
+    unit = _UNIT_SPOKEN_DE.get(entity.unit, entity.unit) if entity.unit else None
+    return f"{entity.state} {unit}." if unit else f"{entity.state}."
+
+
+QUERY_INTENTS: dict[str, QueryIntentSpec] = {
+    "HassGetState": QueryIntentSpec(
+        allowed_domains=frozenset({"sensor"}),
+        response=lambda es: _speak_state(es[0]),
     ),
 }

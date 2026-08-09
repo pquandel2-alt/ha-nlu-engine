@@ -95,28 +95,29 @@ class NluConversationEntity(
                 response=response, conversation_id=user_input.conversation_id
             )
 
-        try:
-            await self.hass.services.async_call(
-                result.plan.domain,
-                result.plan.service,
-                {"entity_id": result.plan.entity_id, **result.plan.data},
-                blocking=True,
-            )
-        except HomeAssistantError as err:
-            _LOGGER.error(
-                "Service call %s.%s on %s failed: %s",
-                result.plan.domain,
-                result.plan.service,
-                result.plan.entity_id,
-                err,
-            )
-            response.async_set_error(
-                intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-                f"Fehler beim Ausführen: {err}",
-            )
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
-            )
+        if result.plan is not None:
+            try:
+                await self.hass.services.async_call(
+                    result.plan.domain,
+                    result.plan.service,
+                    {"entity_id": result.plan.entity_id, **result.plan.data},
+                    blocking=True,
+                )
+            except HomeAssistantError as err:
+                _LOGGER.error(
+                    "Service call %s.%s on %s failed: %s",
+                    result.plan.domain,
+                    result.plan.service,
+                    result.plan.entity_id,
+                    err,
+                )
+                response.async_set_error(
+                    intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                    f"Fehler beim Ausführen: {err}",
+                )
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
 
         response.async_set_speech(result.response_text)
         return conversation.ConversationResult(

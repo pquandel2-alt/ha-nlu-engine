@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot, ResolveStatus, resolve_entity
+from ha_nlu.entities import (
+    EntitySnapshot,
+    ResolveStatus,
+    resolve_entities_by_domain,
+    resolve_entity,
+)
 
 
 def test_exact_match(entities):
@@ -63,6 +68,32 @@ def test_reverse_contains_ambiguous_against_generic_entity():
     result = resolve_entity("Rollladen Wohnzimmer", entities)
     assert result.status is ResolveStatus.AMBIGUOUS
     assert len(result.candidates) == 2
+
+
+def test_resolve_entities_by_domain_no_area():
+    entities = [
+        EntitySnapshot("cover.a", "A", "cover", "open", area_id="buro"),
+        EntitySnapshot("cover.b", "B", "cover", "open", area_id="poleraum"),
+        EntitySnapshot("light.c", "C", "light", "on", area_id="buro"),
+    ]
+    result = resolve_entities_by_domain("cover", entities)
+    assert [e.entity_id for e in result] == ["cover.a", "cover.b"]
+
+
+def test_resolve_entities_by_domain_with_area():
+    entities = [
+        EntitySnapshot("cover.a", "A", "cover", "open", area_id="poleraum"),
+        EntitySnapshot("cover.b", "B", "cover", "open", area_id="poleraum"),
+        EntitySnapshot("cover.c", "C", "cover", "open", area_id="buro"),
+    ]
+    result = resolve_entities_by_domain("cover", entities, area_id="poleraum")
+    assert [e.entity_id for e in result] == ["cover.a", "cover.b"]
+
+
+def test_resolve_entities_by_domain_empty_result():
+    entities = [EntitySnapshot("cover.a", "A", "cover", "open", area_id="buro")]
+    result = resolve_entities_by_domain("cover", entities, area_id="poleraum")
+    assert result == []
 
 
 def test_duplicate_friendly_name_is_ambiguous():

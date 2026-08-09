@@ -1,0 +1,14 @@
+language: "de"
+intents:
+  HassSetPosition:
+    data:
+      - sentences:
+          - "[kannst du] fahre [den|die|das] {name} auf {percent} Prozent [runter|hoch]"
+          - "[kannst du|bitte] [den|die|das] {name} auf {percent} Prozent fahren"
+          - "setze [den|die|das] {name} auf {percent} Prozent"
+  HassLightSet:
+    data:
+      - sentences:
+          - "[kannst du] mach [den|die|das] {name} auf {percent} Prozent"
+          - "[kannst du|bitte] [den|die|das] {name} auf {percent} Prozent [dimmen|einstellen]"
+          - "stelle [den|die|das] {name} auf {percent} Prozent Helligkeit"

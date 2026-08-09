@@ -15,6 +15,7 @@ from homeassistant.components.homeassistant.exposed_entities import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, State
+from homeassistant.helpers import area_registry as ar, device_registry as dr, entity_registry as er
 
 from .const import CONF_SELECTED_ENTITIES, SELECTABLE_DOMAINS
 from .entities import EntitySnapshot
@@ -45,6 +46,20 @@ def _friendly(state: State) -> str:
     return state.attributes.get("friendly_name") or state.entity_id
 
 
+def _area_info(hass: HomeAssistant, entity_id: str) -> tuple[str | None, str | None]:
+    """(area_id, area_name) via the standard entity -> device -> area
+    fallback chain, or (None, None) if the entity has no area assigned."""
+    entry = er.async_get(hass).async_get(entity_id)
+    area_id = entry.area_id if entry else None
+    if area_id is None and entry is not None and entry.device_id:
+        device = dr.async_get(hass).async_get(entry.device_id)
+        area_id = device.area_id if device else None
+    if area_id is None:
+        return None, None
+    area = ar.async_get(hass).async_get_area(area_id)
+    return area_id, (area.name if area else None)
+
+
 def build_entity_snapshots(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> list[EntitySnapshot]:
@@ -54,12 +69,16 @@ def build_entity_snapshots(
         state = hass.states.get(entity_id)
         if state is None:
             continue
+        area_id, area_name = _area_info(hass, entity_id)
         snapshots.append(
             EntitySnapshot(
                 entity_id=entity_id,
                 friendly_name=_friendly(state),
                 domain=entity_id.split(".", 1)[0],
                 state=state.state,
+                area_id=area_id,
+                area_name=area_name,
+                unit=state.attributes.get("unit_of_measurement"),
             )
         )
     return snapshots

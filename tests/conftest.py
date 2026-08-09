@@ -91,6 +91,31 @@ ALL_ENTITIES: list[EntitySnapshot] = (
     + _snapshots(FANS, "fan", "off")
 )
 
+# Real-world reproduction of the reported "Fahre beide Rollladen im
+# Poleraum hoch" case: exactly two covers sharing one area.
+POLERAUM_COVERS: list[EntitySnapshot] = [
+    EntitySnapshot(
+        "cover.rolllade_poleraum_links", "Rolllade Poleraum links", "cover", "closed",
+        area_id="poleraum", area_name="Poleraum",
+    ),
+    EntitySnapshot(
+        "cover.rolllade_poleraum_rechts", "Rolllade Poleraum rechts", "cover", "closed",
+        area_id="poleraum", area_name="Poleraum",
+    ),
+]
+
+QUANTIFIER_ENTITIES: list[EntitySnapshot] = ALL_ENTITIES + POLERAUM_COVERS
+
+SENSORS = {
+    "Außentemperatur": ("sensor.aussentemperatur", "18.4", "°C"),
+    "Luftfeuchtigkeit Bad": ("sensor.luftfeuchtigkeit_bad", "52", "%"),
+}
+
+SENSOR_ENTITIES: list[EntitySnapshot] = [
+    EntitySnapshot(eid, name, "sensor", state, unit=unit)
+    for name, (eid, state, unit) in SENSORS.items()
+]
+
 
 @pytest.fixture(scope="session")
 def engine() -> NluEngine:
@@ -100,3 +125,13 @@ def engine() -> NluEngine:
 @pytest.fixture(scope="session")
 def entities() -> list[EntitySnapshot]:
     return ALL_ENTITIES
+
+
+@pytest.fixture(scope="session")
+def quantifier_entities() -> list[EntitySnapshot]:
+    return QUANTIFIER_ENTITIES
+
+
+@pytest.fixture(scope="session")
+def sensor_entities() -> list[EntitySnapshot]:
+    return SENSOR_ENTITIES

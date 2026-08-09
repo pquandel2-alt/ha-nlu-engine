@@ -1,0 +1,7 @@
+language: "de"
+intents:
+  HassGetState:
+    data:
+      - sentences:
+          - "wie [hoch|warm|kalt] ist [die|der|das] {name}"
+          - "wie ist [die|der|das] {name}"

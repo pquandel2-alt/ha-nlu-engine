@@ -6,8 +6,8 @@ DOMAIN = "ha_nlu"
 
 CONF_SELECTED_ENTITIES = "selected_entities"
 
-# Domains the v1 intent set (light_switch.yaml, cover.yaml) can act on.
-# Mirrors service_call.py's IntentSpec.allowed_domains.
-SELECTABLE_DOMAINS = ("light", "switch", "fan", "cover")
+# Domains the intent set can act on or (for "sensor") read state from.
+# Mirrors service_call.py's IntentSpec/QueryIntentSpec.allowed_domains.
+SELECTABLE_DOMAINS = ("light", "switch", "fan", "cover", "sensor")
 
 NOT_UNDERSTOOD_TEXT = "Das habe ich nicht verstanden."
