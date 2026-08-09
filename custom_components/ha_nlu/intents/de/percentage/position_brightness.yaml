@@ -1,14 +1,17 @@
 language: "de"
 intents:
-  HassSetPosition:
+  # A single generic intent for both cover-position and light-brightness
+  # percent targets. Which service call applies is decided in
+  # engine.py::_match_percentage from the *resolved entity's domain*, not
+  # from the verb used here - "stelle"/"setze" are generic German verbs
+  # that speakers use for both covers and lights, so splitting this into
+  # two verb-disambiguated intents either rejects valid phrasings or
+  # (worse) silently mis-routes them to the wrong intent. See
+  # PERCENT_INTENTS in service_call.py.
+  HassSetPercentage:
     data:
       - sentences:
-          - "[kannst du] fahre [den|die|das] {name} auf {percent} Prozent [runter|hoch]"
-          - "[kannst du|bitte] [den|die|das] {name} auf {percent} Prozent fahren"
-          - "setze [den|die|das] {name} auf {percent} Prozent"
-  HassLightSet:
-    data:
-      - sentences:
-          - "[kannst du] mach [den|die|das] {name} auf {percent} Prozent"
-          - "[kannst du|bitte] [den|die|das] {name} auf {percent} Prozent [dimmen|einstellen]"
-          - "stelle [den|die|das] {name} auf {percent} Prozent Helligkeit"
+          # Verb before {name}: "stelle/fahre/mach/setze die Rolllade auf 30 Prozent [runter|hoch]"
+          - "[kannst du|bitte] (fahre|mach|stelle|setze) [den|die|das] {name} auf {percent} Prozent [runter|hoch|Helligkeit]"
+          # Verb after: "kannst du die Rolllade auf 30 Prozent fahren/dimmen/einstellen/stellen"
+          - "[kannst du|bitte] [den|die|das] {name} auf {percent} Prozent (dimmen|einstellen|fahren|stellen)"

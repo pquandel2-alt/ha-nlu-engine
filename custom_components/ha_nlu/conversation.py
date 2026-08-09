@@ -19,6 +19,7 @@ import logging
 from typing import Literal
 
 from homeassistant.components import conversation
+from homeassistant.components.conversation import ConversationEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -49,6 +50,7 @@ class NluConversationEntity(
     _attr_has_entity_name = True
     _attr_name = None
     _attr_supports_streaming = False
+    _attr_supported_features = ConversationEntityFeature.CONTROL
 
     def __init__(self, entry: ConfigEntry) -> None:
         self.entry = entry

@@ -83,19 +83,25 @@ class PercentIntentSpec:
     a different callable signature than the 5 action intents above - kept
     apart deliberately rather than bolting an optional argument onto those."""
 
-    allowed_domains: frozenset[str]
     build: Callable[[list[EntitySnapshot], int], ServiceCallPlan]
     response: Callable[[list[EntitySnapshot], int], str]
 
 
+# Keyed by the *resolved entity's domain*, not by a grammar-level intent
+# name: German speakers use the same generic verbs ("stelle", "setze") for
+# both cover position and light brightness, so the sentence template alone
+# cannot tell them apart (verified empirically - a verb-based split either
+# rejects valid phrasings or silently mis-routes them). The single
+# HassSetPercentage grammar only captures {name}/{percent}; which service
+# call applies is decided here, from the entity that {name} actually
+# resolved to. A domain with no entry here (e.g. sensor) falls through to
+# "not understood" via the dict.get(...) is None check in _match_percentage.
 PERCENT_INTENTS: dict[str, PercentIntentSpec] = {
-    "HassSetPosition": PercentIntentSpec(
-        allowed_domains=frozenset({"cover"}),
+    "cover": PercentIntentSpec(
         build=lambda es, pct: ServiceCallPlan("cover", "set_cover_position", _entity_id_field(es), {"position": pct}),
         response=lambda es, pct: f"{es[0].friendly_name} auf {pct} Prozent gefahren.",
     ),
-    "HassLightSet": PercentIntentSpec(
-        allowed_domains=frozenset({"light"}),
+    "light": PercentIntentSpec(
         build=lambda es, pct: ServiceCallPlan("light", "turn_on", _entity_id_field(es), {"brightness_pct": pct}),
         response=lambda es, pct: f"{es[0].friendly_name} auf {pct} Prozent Helligkeit gestellt.",
     ),

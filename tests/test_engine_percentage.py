@@ -1,4 +1,10 @@
-"""HassSetPosition (cover) / HassLightSet (light) percent-target control."""
+"""HassSetPercentage: percent-target control for cover position / light
+brightness. One grammar for both - which service call applies is decided
+by the *resolved entity's domain*, not by the verb (see PERCENT_INTENTS in
+service_call.py). This was a deliberate redesign after the original
+verb-split grammar (HassSetPosition vs. HassLightSet) turned out to reject
+valid generic-verb phrasings ("Stelle die Rollade auf 30 Prozent") for
+covers, since only the light grammar accepted "stelle"."""
 
 from __future__ import annotations
 
@@ -36,20 +42,45 @@ def test_setze_rollladen_auf_100_prozent(engine, entities):
     assert result.plan.data == {"position": 100}
 
 
+def test_stelle_rollladen_auf_prozent_generic_verb_works_for_cover(engine, entities):
+    # Real-world regression: "stelle"/"mach" are generic German verbs used
+    # for both covers and lights - a cover-position sentence using the
+    # "light-flavoured" verb must still resolve correctly by domain.
+    result = engine.match("Stelle den Rollladen Wohnzimmer auf 40 Prozent", entities)
+    assert result is not None
+    assert result.plan.domain == "cover"
+    assert result.plan.service == "set_cover_position"
+    assert result.plan.data == {"position": 40}
+
+
+def test_percent_symbol_instead_of_word(engine, entities):
+    # Real-world regression: users type "30%" in the Assist chat UI, not
+    # the word "Prozent".
+    result = engine.match("Stelle den Rollladen Wohnzimmer auf 30%", entities)
+    assert result is not None
+    assert result.plan.data == {"position": 30}
+
+
+def test_percent_symbol_no_space(engine, entities):
+    result = engine.match("mach das Treppenlicht auf 50%", entities)
+    assert result is not None
+    assert result.plan.data == {"brightness_pct": 50}
+
+
+def test_trailing_verb_phrasing(engine, entities):
+    # "kannst du <name> auf <percent> Prozent fahren/dimmen/einstellen/stellen"
+    result = engine.match("kannst du den Rollladen Wohnzimmer auf 60 Prozent fahren", entities)
+    assert result is not None
+    assert result.plan.data == {"position": 60}
+
+
 @pytest.mark.parametrize(
     "text",
     [
         "mach das Unbekanntgerät auf 50 Prozent",  # unknown name
-        "mach den Garagentor auf 50 Prozent",  # switch domain not allowed for HassLightSet
+        "mach den Garagentor auf 50 Prozent",  # switch domain has no percent semantics
+        "Rollladen Wohnzimmer auf 50 Prozent",  # missing verb - must not guess
     ],
 )
 def test_unmatched_percentage_returns_none(engine, entities, text):
     assert engine.match(text, entities) is None
-
-
-def test_percent_with_cover_domain_wrong_verb_family_falls_through(engine, entities):
-    # Light sentences use machen/dimmen/stellen, cover sentences use
-    # fahren/runter/hoch/setzen - a light-style sentence must not
-    # accidentally match a cover, and vice versa via the domain guard.
-    result = engine.match("mach die Rolllade im Büro auf 30 Prozent", entities)
-    assert result is None

@@ -36,6 +36,18 @@ PERCENTAGE_DIR = INTENTS_DIR / "percentage"
 # "Rolllade im Büro auf 30 Prozent" as {name}.
 _PERCENT_RE = re.compile(r"\bprozent\b", re.IGNORECASE)
 
+# Real users type "30%"/"30 %" in the Assist chat UI, not the word "Prozent" -
+# neither the router regex above nor the percentage grammar's fixed literal
+# text "Prozent" recognizes the symbol. Normalizing it to the word form
+# before any matching happens keeps hassil's grammar (and RangeSlotList,
+# which has no built-in "%"-symbol parsing - RangeType.PERCENTAGE is just a
+# label) as the single source of truth for the sentence shape.
+_PERCENT_SYMBOL_RE = re.compile(r"(\d)\s*%")
+
+
+def _normalize_percent_symbol(text: str) -> str:
+    return _PERCENT_SYMBOL_RE.sub(r"\1 Prozent", text)
+
 # Sentences containing "alle"/"beide[n/r]" are routed to a separate,
 # separately-compiled Intents grammar (see _match_quantifier) rather than
 # mixed into the {name}-wildcard grammar above - hassil's recognize() would
@@ -112,6 +124,7 @@ class NluEngine:
         self._percentage_intents: Intents = Intents.from_files(percentage_yaml_files)
 
     def match(self, text: str, entities: list[EntitySnapshot]) -> MatchResult | None:
+        text = _normalize_percent_symbol(text)
         if _PERCENT_RE.search(text):
             return self._match_percentage(text, entities)
         if _QUANTIFIER_RE.search(text):
@@ -203,10 +216,6 @@ class NluEngine:
         if result is None or result.intent is None:
             return None
 
-        spec = PERCENT_INTENTS.get(result.intent.name)
-        if spec is None:
-            return None
-
         name_slot = result.entities.get("name")
         percent_slot = result.entities.get("percent")
         if name_slot is None or percent_slot is None:
@@ -220,7 +229,11 @@ class NluEngine:
         resolved = resolve_entity(name, entities)
         if resolved.status is not ResolveStatus.OK or resolved.entity is None:
             return None
-        if resolved.entity.domain not in spec.allowed_domains:
+
+        # Which service call applies is decided by the resolved entity's
+        # actual domain, not by the verb used - see PERCENT_INTENTS docstring.
+        spec = PERCENT_INTENTS.get(resolved.entity.domain)
+        if spec is None:
             return None
 
         return MatchResult(
