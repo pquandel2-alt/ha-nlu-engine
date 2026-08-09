@@ -145,7 +145,7 @@ _SCORE_MATCHING_DEVICE_CLASS = 15
 _AMBIGUITY_MARGIN = 5
 
 
-def _normalize_for_compare(text: str) -> str:
+def normalize_for_compare(text: str) -> str:
     """Lowercase + collapse whitespace, for the 'Normalized exact' tier.
 
     Deliberately does not fold umlauts/punctuation - normalize.py already
@@ -161,7 +161,7 @@ def _score_name_pair(spoken: str, spoken_norm: str, candidate_text: str, source:
     if they don't match under any tier at all."""
     if not candidate_text or not spoken_norm:
         return None
-    candidate_norm = _normalize_for_compare(candidate_text)
+    candidate_norm = normalize_for_compare(candidate_text)
     if not candidate_norm:
         return None
 
@@ -212,7 +212,7 @@ def resolve_entity_scored(
     spoken = (name or "").strip()
     if not spoken:
         return ResolutionResult(status=ResolutionStatus.NOT_FOUND)
-    spoken_norm = _normalize_for_compare(spoken)
+    spoken_norm = normalize_for_compare(spoken)
 
     ranked: list[tuple[EntitySnapshot, float]] = []
     for entity in entities:
