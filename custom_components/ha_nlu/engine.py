@@ -30,6 +30,7 @@ from hassil import Intents
 
 from .entities import EntitySnapshot
 from .nlu.frame import SemanticFrame
+from .nlu.normalize import normalize
 from .nlu.parser import ParseContext, ParseResult
 from .parsers import PercentageParser, QuantifierParser, SingleTargetParser
 from .service_call import INTENTS, PERCENT_INTENTS, QUERY_INTENTS, ServiceCallPlan
@@ -42,21 +43,9 @@ PERCENTAGE_DIR = INTENTS_DIR / "percentage"
 # compiled grammar for the same reason as the quantifier routing below: the
 # existing {name}-wildcard close-cover sentence ("fahre {name} runter")
 # would otherwise structurally swallow "Rolllade im Büro auf 30 Prozent" as
-# {name}.
+# {name}. Checked after normalize() so a "%" symbol (normalized to the word
+# "Prozent" - see nlu/normalize.py) is routed correctly too.
 _PERCENT_RE = re.compile(r"\bprozent\b", re.IGNORECASE)
-
-# Real users type "30%"/"30 %" in the Assist chat UI, not the word "Prozent" -
-# neither the router regex above nor the percentage grammar's fixed literal
-# text "Prozent" recognizes the symbol. Normalizing it to the word form
-# before any matching happens keeps hassil's grammar (and RangeSlotList,
-# which has no built-in "%"-symbol parsing - RangeType.PERCENTAGE is just a
-# label) as the single source of truth for the sentence shape.
-_PERCENT_SYMBOL_RE = re.compile(r"(\d)\s*%")
-
-
-def _normalize_percent_symbol(text: str) -> str:
-    return _PERCENT_SYMBOL_RE.sub(r"\1 Prozent", text)
-
 
 # Sentences containing "alle"/"beide[n/r]" are routed to QuantifierParser's
 # separately-compiled grammar rather than mixed into the {name}-wildcard
@@ -107,7 +96,7 @@ class NluEngine:
         self._percentage_parser = PercentageParser(percentage_intents)
 
     def match(self, text: str, entities: list[EntitySnapshot]) -> MatchResult | None:
-        text = _normalize_percent_symbol(text)
+        text = normalize(text)
         if _PERCENT_RE.search(text):
             parser = self._percentage_parser
         elif _QUANTIFIER_RE.search(text):
