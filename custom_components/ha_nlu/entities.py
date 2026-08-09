@@ -10,13 +10,22 @@ Home Assistant instance.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
+from typing import Any, Mapping
 
 
 @dataclass(frozen=True)
 class EntitySnapshot:
-    """Minimal, hass-free view of a Home Assistant entity."""
+    """Hass-free view of a Home Assistant entity.
+
+    ``aliases`` and ``capabilities`` are structurally present from here on
+    (v2 plan Phase 4) but populated empty until their own phases build the
+    logic that fills them - the alias system (Phase 5) and the Capability
+    concept (Phase 9). ``attributes`` holds the raw HA state attributes for
+    later domain-specific extensions (e.g. Phase 14+) to read from, without
+    needing new EntitySnapshot fields per attribute.
+    """
 
     entity_id: str
     friendly_name: str
@@ -25,6 +34,11 @@ class EntitySnapshot:
     area_id: str | None = None
     area_name: str | None = None
     unit: str | None = None
+    device_class: str | None = None
+    state_class: str | None = None
+    aliases: tuple[str, ...] = ()
+    attributes: Mapping[str, Any] = field(default_factory=dict)
+    capabilities: frozenset[str] = field(default_factory=frozenset)
 
 
 class ResolveStatus(Enum):

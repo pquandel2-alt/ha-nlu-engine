@@ -79,6 +79,9 @@ def build_entity_snapshots(
                 area_id=area_id,
                 area_name=area_name,
                 unit=state.attributes.get("unit_of_measurement"),
+                device_class=state.attributes.get("device_class"),
+                state_class=state.attributes.get("state_class"),
+                attributes=state.attributes,
             )
         )
     return snapshots
