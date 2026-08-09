@@ -5,7 +5,7 @@ is purely additive: plan/response_text keep driving behaviour unchanged
 
 from __future__ import annotations
 
-from ha_nlu.nlu.frame import AreaReference, SemanticFrame, TargetReference
+from ha_nlu.nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
 
 
 def test_single_match_frame_has_resolved_target(engine, entities):
@@ -41,14 +41,16 @@ def test_quantifier_match_frame_has_domain_target_and_area(engine, quantifier_en
     assert result.frame.intent == "HassOpenCover"
     assert result.frame.target == TargetReference(text="cover", domain="cover")
     assert result.frame.area == AreaReference(text="Poleraum", area_id="poleraum")
-    assert result.frame.parameters == {"quantifier": "both"}
+    assert result.frame.quantifier == Quantifier(kind="both")
+    assert result.frame.parameters == {}
 
 
 def test_quantifier_match_without_area_has_no_area_reference(engine, quantifier_entities):
     result = engine.match("fahre alle Rolladen hoch", quantifier_entities)
     assert result is not None
     assert result.frame.area is None
-    assert result.frame.parameters == {"quantifier": "all"}
+    assert result.frame.quantifier == Quantifier(kind="all")
+    assert result.frame.parameters == {}
 
 
 def test_no_match_returns_none_not_a_frame(engine, entities):

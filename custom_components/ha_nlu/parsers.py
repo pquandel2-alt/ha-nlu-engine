@@ -15,7 +15,7 @@ from hassil import Intents, RangeSlotList, RangeType, TextSlotList, WildcardSlot
 
 from .areas import AreaResolveStatus, resolve_area_name
 from .entities import ResolveStatus, resolve_entities_by_domain, resolve_entity
-from .nlu.frame import AreaReference, SemanticFrame, TargetReference
+from .nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
 from .nlu.parser import ParseContext, ParseResult
 from .service_call import INTENTS, PERCENT_INTENTS, QUERY_INTENTS
 
@@ -151,7 +151,7 @@ class QuantifierParser:
             intent=result.intent.name,
             target=TargetReference(text=domain, domain=domain),
             area=AreaReference(text=area_name, area_id=area_id) if area_id is not None else None,
-            parameters={"quantifier": quantifier},
+            quantifier=Quantifier(kind=quantifier),
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=matches)
