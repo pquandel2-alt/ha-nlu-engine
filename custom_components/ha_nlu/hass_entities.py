@@ -19,6 +19,7 @@ from homeassistant.helpers import area_registry as ar, device_registry as dr, en
 
 from .const import CONF_SELECTED_ENTITIES, SELECTABLE_DOMAINS
 from .entities import EntitySnapshot
+from .nlu.capabilities import derive_capabilities
 
 
 def default_exposed_entities(hass: HomeAssistant) -> list[str]:
@@ -80,19 +81,23 @@ def build_entity_snapshots(
             continue
         registry_entry = er.async_get(hass).async_get(entity_id)
         area_id, area_name = _area_info(hass, entity_id, registry_entry=registry_entry)
+        domain = entity_id.split(".", 1)[0]
+        device_class = state.attributes.get("device_class")
+        capabilities = derive_capabilities(domain, device_class, state.attributes)
         snapshots.append(
             EntitySnapshot(
                 entity_id=entity_id,
                 friendly_name=_friendly(state),
-                domain=entity_id.split(".", 1)[0],
+                domain=domain,
                 state=state.state,
                 area_id=area_id,
                 area_name=area_name,
                 unit=state.attributes.get("unit_of_measurement"),
-                device_class=state.attributes.get("device_class"),
+                device_class=device_class,
                 state_class=state.attributes.get("state_class"),
                 aliases=_entity_aliases(registry_entry),
                 attributes=state.attributes,
+                capabilities=frozenset(c.name for c in capabilities),
             )
         )
     return snapshots
