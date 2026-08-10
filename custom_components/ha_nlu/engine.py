@@ -29,6 +29,7 @@ from pathlib import Path
 from hassil import Intents
 
 from .entities import EntitySnapshot
+from .nlu.command import SemanticCommand, build_semantic_command
 from .nlu.frame import SemanticFrame
 from .nlu.normalize import normalize
 from .nlu.parser import ParseContext, ParseResult
@@ -63,6 +64,11 @@ class MatchResult:
     # in parsers.py and used here to look up the ServiceCall spec (see
     # _build_match_result) - see Phase 1/2 of the v2 plan.
     frame: SemanticFrame | None = None
+    # Fully-resolved counterpart to ``frame`` (real EntitySnapshot/AreaSnapshot
+    # objects instead of text references) - see Phase 10 of the v2 plan.
+    # Purely additive like ``frame`` was in Phase 1/2: plan/response_text
+    # keep driving behaviour, no consumer reads this yet (Phase 11 Validator).
+    command: SemanticCommand | None = None
 
 
 class NluEngine:
@@ -113,6 +119,7 @@ class NluEngine:
     def _build_match_result(result: ParseResult) -> MatchResult | None:
         frame = result.frame
         matched = result.resolved_entities
+        command = build_semantic_command(result)
 
         percent = frame.parameters.get("percent")
         if percent is not None:
@@ -123,13 +130,16 @@ class NluEngine:
                 plan=spec.build(matched, percent),
                 response_text=spec.response(matched, percent),
                 frame=frame,
+                command=command,
             )
 
         query_spec = QUERY_INTENTS.get(frame.intent)
         if query_spec is not None:
-            return MatchResult(plan=None, response_text=query_spec.response(matched), frame=frame)
+            return MatchResult(plan=None, response_text=query_spec.response(matched), frame=frame, command=command)
 
         spec = INTENTS.get(frame.intent)
         if spec is None:
             return None
-        return MatchResult(plan=spec.build(matched), response_text=spec.response(matched), frame=frame)
+        return MatchResult(
+            plan=spec.build(matched), response_text=spec.response(matched), frame=frame, command=command
+        )
