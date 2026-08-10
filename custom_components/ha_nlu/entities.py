@@ -269,3 +269,59 @@ def resolve_entities_by_domain(
     """
     matches = [e for e in entities if e.domain == domain and (area_id is None or e.area_id == area_id)]
     return sorted(matches, key=lambda e: e.entity_id)
+
+
+@dataclass(frozen=True)
+class EntityIndex:
+    """Precomputed candidate lookups (v2 plan Phase 23, "Performance"):
+    normalized_name/alias/area/domain -> matching entities.
+
+    Building this costs the same O(n) scan ``resolve_entity_scored()``
+    already does per call, so it only pays off once a single conversation
+    turn needs *multiple* resolutions against the same entity list - not yet
+    the case, since every parser today (see ``engine.py``'s
+    ``_select_parser()``) calls ``resolve_entity``/``resolve_entities_by_domain``/
+    ``resolve_area_name`` at most once per utterance. Built and tested now,
+    ahead of its consumer - the same additive pattern already established
+    for ``SemanticFrame``/``SemanticCommand``/``respond()`` (see their
+    phases' docstrings): a future multi-target phase (Pronomen/Referenzen,
+    Hierarchische Orte) can build one ``EntityIndex`` per turn and reuse it
+    instead of rescanning ``entities`` for every candidate, rather than
+    every future phase inventing its own indexing scheme ad hoc.
+    """
+
+    by_domain: Mapping[str, tuple[EntitySnapshot, ...]]
+    by_area: Mapping[str, tuple[EntitySnapshot, ...]]
+    by_normalized_name: Mapping[str, tuple[EntitySnapshot, ...]]
+    by_normalized_alias: Mapping[str, tuple[EntitySnapshot, ...]]
+
+
+def build_entity_index(entities: list[EntitySnapshot]) -> EntityIndex:
+    """Group ``entities`` into the four lookups ``EntityIndex`` exposes.
+
+    ``by_normalized_name`` covers the friendly name; ``by_normalized_alias``
+    covers every ``generate_aliases()`` candidate (entity_id, humanized
+    entity_id, configured aliases) - ``generate_aliases()`` already excludes
+    the friendly name via its own ``seen`` set, so the two indices together,
+    without overlap, cover every name tier ``resolve_entity_scored`` scores -
+    just grouped for O(1) exact-tier lookup instead of a fresh scan.
+    """
+    by_domain: dict[str, list[EntitySnapshot]] = {}
+    by_area: dict[str, list[EntitySnapshot]] = {}
+    by_normalized_name: dict[str, list[EntitySnapshot]] = {}
+    by_normalized_alias: dict[str, list[EntitySnapshot]] = {}
+
+    for entity in entities:
+        by_domain.setdefault(entity.domain, []).append(entity)
+        if entity.area_id is not None:
+            by_area.setdefault(entity.area_id, []).append(entity)
+        by_normalized_name.setdefault(normalize_for_compare(entity.friendly_name), []).append(entity)
+        for alias in generate_aliases(entity):
+            by_normalized_alias.setdefault(normalize_for_compare(alias.text), []).append(entity)
+
+    return EntityIndex(
+        by_domain={key: tuple(value) for key, value in by_domain.items()},
+        by_area={key: tuple(value) for key, value in by_area.items()},
+        by_normalized_name={key: tuple(value) for key, value in by_normalized_name.items()},
+        by_normalized_alias={key: tuple(value) for key, value in by_normalized_alias.items()},
+    )
