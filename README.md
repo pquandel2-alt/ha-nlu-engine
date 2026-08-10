@@ -1,39 +1,605 @@
-# HA NLU Engine
+HomeIntent
 
-Eigenständiger, deterministischer Conversation Agent für Home Assistants
-**Assist** (Settings → Sprachassistenten → Assist → Conversation Agent) -
-kein LLM, kein Fallback, kein Fuzzy-Scoring.
+Fast, local and deterministic Natural Language Understanding for Home Assistant.
 
-## Wie es matcht
+HomeIntent is a lightweight Natural Language Understanding (NLU) engine for Home Assistant Assist.
 
-1. [hassil](https://github.com/home-assistant/hassil) (HA Cores eigene
-   Satzmuster-Bibliothek) matcht die Satzstruktur gegen `intents/de/*.yaml`.
-2. Der erkannte `{name}`-Slot wird gegen die aktuell für Assist freigegebenen
-   Entities aufgelöst - exakter Treffer, sonst ein eindeutiger
-   Teilstring-Treffer. Mehrdeutige oder unbekannte Namen zählen als kein
-   Treffer.
-3. Die aufgelöste Entity muss zur erlaubten Domain des Intents passen
-   (`service_call.py`).
+Its goal is simple:
 
-Nur wenn alle drei Schritte greifen, wird ein Service-Call ausgeführt. Sonst
-antwortet die Engine mit einer festen "Das habe ich nicht verstanden."
-Es gibt in v1 keine Weiterleitung an ein LLM.
+Understand natural language commands for your smart home quickly, locally and reliably — without requiring an LLM, cloud service or GPU.
 
-## v1-Scope
+HomeIntent is designed specifically for Home Assistant and therefore does not try to understand all of human language. Instead, it focuses on the much smaller and more structured problem of understanding smart-home commands.
 
-- Licht/Schalter/Fan: an, aus, umschalten
-- Rollladen: öffnen, schließen
+⸻
 
-## Installation
+Why HomeIntent?
 
-`custom_components/ha_nlu/` in die Home-Assistant-Config kopieren (manuell
-oder als HACS Custom Repository), Home Assistant neu starten, Integration
-"HA NLU Engine" hinzufügen, danach in den Assist-Einstellungen als
-Conversation Agent auswählen.
+Large Language Models are powerful, but they are not necessarily the best solution for everyday smart-home commands.
 
-## Tests
+A typical Home Assistant installation may run on:
 
-```bash
-pip install hassil pytest
-pytest tests/
-```
+* Raspberry Pi
+* Home Assistant Green
+* small x86 systems
+* low-power home servers
+* other resource-constrained hardware
+
+Running a local LLM on these systems can require significant RAM, CPU resources and sometimes additional hardware.
+
+HomeIntent takes a different approach.
+
+Instead of asking a general-purpose AI to understand everything, HomeIntent uses a deterministic NLU pipeline specifically designed for Home Assistant.
+
+User
+ │
+ ▼
+Natural Language
+ │
+ ▼
+HomeIntent
+ │
+ ├── Intent Recognition
+ ├── Entity Resolution
+ ├── Area Resolution
+ ├── Quantifiers
+ ├── Capability Detection
+ ├── Context
+ └── Validation
+ │
+ ▼
+Semantic Command
+ │
+ ▼
+Home Assistant
+
+The result is intended to be:
+
+* fast
+* local
+* deterministic
+* predictable
+* privacy-friendly
+* lightweight
+* safe
+
+No cloud connection is required.
+
+No GPU is required.
+
+No LLM is required.
+
+⸻
+
+Current Status
+
+HomeIntent is currently in the v1 – Deterministic NLU stage.
+
+The current implementation already provides a foundation for deterministic natural-language control using hassil grammars and Home Assistant entity information.
+
+Current functionality includes:
+
+* Home Assistant Conversation Agent integration
+* German language grammars
+* deterministic intent matching
+* Home Assistant entity resolution
+* area resolution
+* domain validation
+* percentage values
+* quantifiers such as alle and beide
+* ambiguity detection
+* Light control
+* Cover / blind control
+* Fan-related functionality
+* query handling
+* extensive regression tests
+
+The project is actively evolving toward a more general semantic NLU architecture.
+
+⸻
+
+Example Commands
+
+HomeIntent is designed to understand different natural-language formulations of the same intent.
+
+For example:
+
+Mach das Licht an.
+Schalte das Licht ein.
+Kannst du bitte das Licht anschalten?
+
+All of these can represent:
+
+TURN_ON
+
+The language can vary while the semantic intent remains the same.
+
+⸻
+
+Multiple Devices
+
+For example:
+
+Mach alle Lichter im Wohnzimmer aus.
+
+The intended semantic structure is:
+
+Intent:     TURN_OFF
+Domain:     light
+Area:       Wohnzimmer
+Quantifier: ALL
+
+⸻
+
+Percentage Values
+
+Examples:
+
+Stell das Licht auf 50 Prozent.
+Mach die Rollläden auf 30 %.
+
+The percentage is interpreted as a semantic parameter rather than being tied directly to a specific Home Assistant service.
+
+⸻
+
+Ambiguity
+
+HomeIntent is designed to prefer not executing anything when a command cannot be resolved safely.
+
+For example, if several lights match:
+
+Mach das Licht an.
+
+the engine should not arbitrarily choose one.
+
+Instead, the system can identify the situation as:
+
+AMBIGUOUS_ENTITY
+
+This is an intentional design decision.
+
+A smart-home NLU should prefer asking over controlling the wrong device.
+
+⸻
+
+Architecture
+
+The long-term architecture is based on several separate stages.
+
+Natural Language
+       │
+       ▼
+Normalization
+       │
+       ▼
+Intent Parsing
+       │
+       ▼
+Semantic Frame
+       │
+       ▼
+Entity / Area Resolution
+       │
+       ▼
+Context Resolution
+       │
+       ▼
+Capability Resolution
+       │
+       ▼
+Validation
+       │
+       ▼
+Semantic Command
+       │
+       ▼
+Home Assistant Service Mapping
+       │
+       ▼
+Execution
+
+This separation is important.
+
+The language parser should not directly execute Home Assistant services.
+
+Instead:
+
+Language
+   ↓
+Meaning
+   ↓
+Validated Command
+   ↓
+Home Assistant Service
+
+This makes the system easier to test, extend and secure.
+
+⸻
+
+Semantic Understanding
+
+The long-term goal is to transform natural language into a structured semantic representation.
+
+For example:
+
+Mach bitte die beiden Wohnzimmerlampen etwas heller.
+
+could become:
+
+Intent:
+    ADJUST_BRIGHTNESS
+Target:
+    light
+Area:
+    Wohnzimmer
+Quantifier:
+    TWO
+Operation:
+    INCREASE
+Amount:
+    SMALL
+
+Only after resolving and validating these values should HomeIntent determine the appropriate Home Assistant service call.
+
+⸻
+
+Entity Resolution
+
+HomeIntent does not rely solely on exact string matching.
+
+The planned resolver considers information such as:
+
+* friendly names
+* normalized names
+* entity IDs
+* aliases
+* areas
+* domains
+* device classes
+* capabilities
+* conversation context
+
+A future resolver can therefore distinguish between:
+
+Wohnzimmer Deckenlicht
+Wohnzimmer Stehlampe
+Küchen Deckenlicht
+
+when the user says:
+
+Mach die Deckenlampe im Wohnzimmer an.
+
+The resolver should rank candidates deterministically and detect genuine ambiguity instead of guessing.
+
+⸻
+
+Capability Awareness
+
+Home Assistant entities do not all support the same operations.
+
+For example:
+
+Light A
+- on/off
+- brightness
+- color
+Light B
+- on/off
+- brightness
+
+The command:
+
+Mach Light A blau.
+
+can be valid.
+
+The same command for Light B should result in an unsupported-capability response rather than an invalid service call.
+
+This capability-based architecture allows HomeIntent to reason about what a device can actually do.
+
+⸻
+
+Roadmap
+
+v1 – Deterministic NLU
+
+Current stage
+
+The foundation for deterministic natural-language understanding.
+
+Includes:
+
+* hassil
+* intent grammars
+* entity resolution
+* area resolution
+* quantifiers
+* percentage handling
+* domain validation
+* Home Assistant service execution
+* regression testing
+
+⸻
+
+v2 – Semantic NLU
+
+The next major architectural step.
+
+Goals:
+
+* Semantic Frames
+* Semantic Commands
+* improved Entity Resolver
+* aliases
+* improved Area Resolver
+* deterministic candidate ranking
+* capability system
+* command validation
+* service mapping
+* query engine
+* expanded Light support
+* expanded Cover support
+* Fan support
+* Climate support
+* structured responses
+* extensive golden tests
+
+The key change:
+
+v1:
+Text
+ ↓
+Intent
+ ↓
+Service
+v2:
+Text
+ ↓
+Semantic Frame
+ ↓
+Resolution
+ ↓
+Capabilities
+ ↓
+Validation
+ ↓
+Semantic Command
+ ↓
+Service
+
+⸻
+
+v3 – Conversational NLU
+
+The engine begins to understand conversations rather than isolated commands.
+
+Goals:
+
+* conversation context
+* follow-up commands
+* clarification questions
+* pending commands
+* pronoun resolution
+* references to previous entities
+* context-aware targets
+* multi-turn interactions
+
+Example:
+
+User:
+Mach das Wohnzimmerlicht an.
+Assistant:
+Okay.
+User:
+Mach es etwas heller.
+
+The second command can refer to the previously selected entity.
+
+⸻
+
+v4 – Advanced Natural Language
+
+The focus shifts toward more natural German language without introducing an LLM requirement.
+
+Planned capabilities include:
+
+Implicit Targets
+
+Mach oben die Lichter aus.
+
+Relative Locations
+
+Mach die Lampe neben dem Sofa an.
+
+Complex Quantifiers
+
+Mach die drei Lampen an.
+Alle außer der Stehlampe aus.
+
+Better Number Understanding
+
+fünfzig Prozent
+50 %
+auf 21 Grad
+Stufe drei
+
+Comparisons
+
+Mindestens 50 Prozent.
+Nicht höher als 70 Prozent.
+
+Temporal Expressions
+
+Mach das Licht in fünf Minuten aus.
+Schalte die Heizung für eine Stunde ein.
+
+Multi-Step Commands
+
+Mach das Wohnzimmerlicht an und fahr gleichzeitig die Rollläden hoch.
+
+Cross-Sentence References
+
+Wie warm ist es im Wohnzimmer?
+Und in der Küche?
+Und oben?
+
+⸻
+
+v5 – Natural-Language Automation
+
+A possible future direction is understanding natural-language automation requests.
+
+For example:
+
+Wenn ich das Haus verlasse, mach alle Lichter aus und fahr die Rollläden runter.
+
+or:
+
+Wenn es draußen dunkel wird, mach das Wohnzimmerlicht auf 30 Prozent.
+
+This would move HomeIntent beyond simple Assist commands toward a natural-language automation layer.
+
+This stage is intentionally separate from the core NLU roadmap.
+
+⸻
+
+Design Principles
+
+Local First
+
+HomeIntent should work without:
+
+* cloud APIs
+* external servers
+* GPU hardware
+* LLMs
+
+⸻
+
+Deterministic First
+
+Given the same:
+
+input
++
+Home Assistant state
++
+context
+
+the engine should produce the same result.
+
+⸻
+
+Safety First
+
+The engine should never execute an uncertain command merely to produce a successful result.
+
+Ambiguous commands should be:
+
+AMBIGUOUS
+
+not randomly resolved.
+
+⸻
+
+Semantic Separation
+
+Natural language understanding and Home Assistant execution are separate layers.
+
+The parser should produce meaning.
+
+The validator should determine whether that meaning is valid.
+
+The service mapper should translate the validated command into Home Assistant operations.
+
+⸻
+
+Lightweight
+
+HomeIntent is designed with low-resource Home Assistant installations in mind.
+
+The goal is that normal smart-home commands can be processed extremely quickly even on small systems such as a Raspberry Pi.
+
+⸻
+
+LLM Policy
+
+HomeIntent does not require an LLM.
+
+The core project deliberately follows a deterministic approach.
+
+An optional LLM integration may be considered in the future as an external adapter, but it must never bypass:
+
+Entity Resolution
+Capability Validation
+Parameter Validation
+Command Validation
+
+An LLM, if ever used, may help produce a semantic representation.
+
+It must never directly control Home Assistant.
+
+The deterministic core remains the authoritative execution layer.
+
+⸻
+
+Project Philosophy
+
+HomeIntent is based on a simple idea:
+
+Smart-home commands are a much smaller language problem than general human language.
+
+A user asking:
+
+Mach das Wohnzimmerlicht auf 40 Prozent.
+
+does not require a general-purpose AI.
+
+The system needs to reliably understand:
+
+intent
+target
+location
+value
+
+and safely turn that into a Home Assistant command.
+
+That makes a lightweight deterministic NLU a very attractive solution for local smart-home systems.
+
+⸻
+
+Development
+
+The project is being developed incrementally.
+
+The development roadmap prioritizes:
+
+1. preserving existing behavior
+2. test coverage
+3. semantic separation
+4. deterministic resolution
+5. capability awareness
+6. conversational context
+7. advanced natural-language understanding
+
+Each major architectural change should be backed by regression tests.
+
+⸻
+
+Contributing
+
+Contributions are welcome.
+
+When adding new language understanding:
+
+* prefer deterministic rules,
+* avoid unnecessary complexity,
+* add regression tests,
+* do not bypass entity validation,
+* do not introduce direct service execution into parser code,
+* preserve the local-first architecture.
+
+⸻
+
+License
+
+See the repository license for details.
