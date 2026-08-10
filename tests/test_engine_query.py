@@ -1,6 +1,19 @@
-"""HassGetState: sensor state queries. No service call - only speech."""
+"""HassGetState: sensor state / light brightness queries (v2 plan Phase 18,
+"Query Engine"). No service call - only speech."""
 
 from __future__ import annotations
+
+from ha_nlu.entities import EntitySnapshot
+
+DIMMED_LIGHT = EntitySnapshot(
+    "light.wohnzimmer_decke", "Wohnzimmer Decke", "light", "on", attributes={"brightness": 128}
+)
+ONOFF_LIGHT = EntitySnapshot("light.flur", "Flur", "light", "on")
+OFF_LIGHT = EntitySnapshot(
+    "light.keller", "Keller", "light", "off", attributes={"brightness": 255}
+)
+
+LIGHT_QUERY_ENTITIES = [DIMMED_LIGHT, ONOFF_LIGHT, OFF_LIGHT]
 
 
 def test_wie_hoch_ist_die_aussentemperatur(engine, sensor_entities):
@@ -35,3 +48,22 @@ def test_query_case_does_not_matter(engine, sensor_entities):
     result = engine.match("WIE HOCH IST DIE AUSSENTEMPERATUR", sensor_entities)
     assert result is not None
     assert result.response_text == "18.4 Grad."
+
+
+def test_wie_hell_ist_dimmed_light_speaks_percentage(engine):
+    result = engine.match("wie hell ist die Wohnzimmer Decke", LIGHT_QUERY_ENTITIES)
+    assert result is not None
+    assert result.plan is None
+    assert result.response_text == "50 Prozent."
+
+
+def test_wie_hell_ist_onoff_light_without_brightness_attribute(engine):
+    result = engine.match("wie hell ist die Flur", LIGHT_QUERY_ENTITIES)
+    assert result is not None
+    assert result.response_text == "an."
+
+
+def test_wie_hell_ist_off_light_ignores_stale_brightness_attribute(engine):
+    result = engine.match("wie hell ist die Keller", LIGHT_QUERY_ENTITIES)
+    assert result is not None
+    assert result.response_text == "aus."

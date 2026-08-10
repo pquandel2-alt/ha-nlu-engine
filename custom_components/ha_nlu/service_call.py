@@ -13,6 +13,7 @@ from typing import Any, Callable, Mapping
 
 from .entities import EntitySnapshot
 from .nlu.capabilities import Capability
+from .nlu.query import QueryType, derive_query_type
 
 
 @dataclass(frozen=True)
@@ -128,10 +129,32 @@ def _speak_state(entity: EntitySnapshot) -> str:
     return f"{entity.state} {unit}." if unit else f"{entity.state}."
 
 
+# A light's ``state`` is "on"/"off", not a number - its brightness lives in
+# the raw HA "brightness" attribute (0-255, HA's own scale). Converted to a
+# percentage here (not stored pre-converted anywhere) since nothing else in
+# this project needs a light's brightness as a fraction of 255.
+def _speak_brightness(entity: EntitySnapshot) -> str:
+    if entity.state == "off":
+        return "aus."
+    brightness = entity.attributes.get("brightness")
+    if brightness is None:
+        return "an."  # on, but the light doesn't report a brightness level (e.g. onoff-only)
+    return f"{round(brightness / 255 * 100)} Prozent."
+
+
+def _speak_query(entity: EntitySnapshot) -> str:
+    """Dispatches on nlu/query.py's QueryType - today only BRIGHTNESS needs
+    its own phrasing, every other type (including STATE) is spoken via the
+    same raw state+unit logic ``_speak_state`` already provided."""
+    if derive_query_type(entity) is QueryType.BRIGHTNESS:
+        return _speak_brightness(entity)
+    return _speak_state(entity)
+
+
 QUERY_INTENTS: dict[str, QueryIntentSpec] = {
     "HassGetState": QueryIntentSpec(
-        allowed_domains=frozenset({"sensor"}),
-        response=lambda es: _speak_state(es[0]),
+        allowed_domains=frozenset({"sensor", "light"}),
+        response=lambda es: _speak_query(es[0]),
     ),
 }
 

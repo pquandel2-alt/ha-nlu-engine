@@ -1,7 +1,11 @@
 language: "de"
 intents:
+  # "hell" added for Phase 18 (Query Engine, "Wie hell ist das Wohnzimmer?")
+  # - safe alongside the existing "heller"/"dunkler" light_extended keywords
+  # (engine.py's _LIGHT_EXTENDED_RE): \bhell\b never matches inside the
+  # longer word "heller", so no routing collision.
   HassGetState:
     data:
       - sentences:
-          - "wie [hoch|warm|kalt] ist [die|der|das] {name}"
+          - "wie [hoch|warm|kalt|hell] ist [die|der|das] {name}"
           - "wie ist [die|der|das] {name}"
