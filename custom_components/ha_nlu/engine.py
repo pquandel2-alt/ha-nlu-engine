@@ -13,7 +13,7 @@ returns ``None`` - the caller (``conversation.py``) turns that into a fixed
 this is intentional (see plan: predictability over coverage).
 
 Sentence-matching and entity/area resolution live in ``parsers.py`` (one
-``IntentParser`` per grammar - see its module docstring for why three
+``IntentParser`` per grammar - see its module docstring for why four
 grammars stay separately compiled). This module only routes text to the
 right parser and turns its ``ParseResult`` into a ``ServiceCallPlan`` -
 see the v2 plan, Phase 2 ("Intent-System vereinheitlichen"):
@@ -35,12 +35,13 @@ from .nlu.normalize import normalize
 from .nlu.parser import ParseContext, ParseResult
 from .nlu.service_mapper import map_to_service_call
 from .nlu.validator import validate_command
-from .parsers import PercentageParser, QuantifierParser, SingleTargetParser
-from .service_call import INTENTS, PERCENT_INTENTS, QUERY_INTENTS, ServiceCallPlan
+from .parsers import LightExtendedParser, PercentageParser, QuantifierParser, SingleTargetParser
+from .service_call import INTENTS, LIGHT_EXTENDED_INTENTS, PERCENT_INTENTS, QUERY_INTENTS, ServiceCallPlan
 
 INTENTS_DIR = Path(__file__).parent / "intents" / "de"
 QUANTIFIERS_DIR = INTENTS_DIR / "quantifiers"
 PERCENTAGE_DIR = INTENTS_DIR / "percentage"
+LIGHT_EXTENDED_DIR = INTENTS_DIR / "light_extended"
 
 # Sentences containing "Prozent" are routed to PercentageParser's separately-
 # compiled grammar for the same reason as the quantifier routing below: the
@@ -56,6 +57,16 @@ _PERCENT_RE = re.compile(r"\bprozent\b", re.IGNORECASE)
 # both grammars for the same sentence and silently pick whichever comes
 # first in file/sentence order.
 _QUANTIFIER_RE = re.compile(r"\b(alle|beide[nr]?)\b", re.IGNORECASE)
+
+# Sentences containing a brightness-adjust or colour/colour-temperature
+# keyword are routed to LightExtendedParser's separately-compiled grammar
+# (v2 plan Phase 14). Checked *before* _PERCENT_RE below: "mach das Licht 20
+# Prozent heller" contains both "Prozent" and "heller" and must not fall
+# into PercentageParser's absolute {name}/{percent} grammar.
+_LIGHT_EXTENDED_RE = re.compile(
+    r"\b(heller|dunkler|rot|grün|blau|gelb|orange|lila|violett|weiß|pink|rosa|türkis|cyan|warmweiß|kaltweiß)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -83,6 +94,7 @@ class NluEngine:
         intents_dir: Path = INTENTS_DIR,
         quantifiers_dir: Path = QUANTIFIERS_DIR,
         percentage_dir: Path = PERCENTAGE_DIR,
+        light_extended_dir: Path = LIGHT_EXTENDED_DIR,
     ) -> None:
         yaml_files = sorted(intents_dir.glob("*.yaml"))
         if not yaml_files:
@@ -99,13 +111,21 @@ class NluEngine:
             raise FileNotFoundError(f"No intent YAML files found in {percentage_dir}")
         percentage_intents: Intents = Intents.from_files(percentage_yaml_files)
 
+        light_extended_yaml_files = sorted(light_extended_dir.glob("*.yaml"))
+        if not light_extended_yaml_files:
+            raise FileNotFoundError(f"No intent YAML files found in {light_extended_dir}")
+        light_extended_intents: Intents = Intents.from_files(light_extended_yaml_files)
+
         self._single_parser = SingleTargetParser(intents)
         self._quantifier_parser = QuantifierParser(quantifier_intents)
         self._percentage_parser = PercentageParser(percentage_intents)
+        self._light_extended_parser = LightExtendedParser(light_extended_intents)
 
     def match(self, text: str, entities: list[EntitySnapshot]) -> MatchResult | None:
         text = normalize(text)
-        if _PERCENT_RE.search(text):
+        if _LIGHT_EXTENDED_RE.search(text):
+            parser = self._light_extended_parser
+        elif _PERCENT_RE.search(text):
             parser = self._percentage_parser
         elif _QUANTIFIER_RE.search(text):
             parser = self._quantifier_parser
@@ -141,6 +161,15 @@ class NluEngine:
             return MatchResult(
                 plan=map_to_service_call(command),
                 response_text=spec.response(matched, percent),
+                frame=frame,
+                command=command,
+            )
+
+        light_extended_spec = LIGHT_EXTENDED_INTENTS.get(frame.intent)
+        if light_extended_spec is not None:
+            return MatchResult(
+                plan=map_to_service_call(command),
+                response_text=light_extended_spec.response(matched, frame.parameters),
                 frame=frame,
                 command=command,
             )

@@ -2,13 +2,14 @@
 the 9 error classes the plan defines, returning the first violated one (or
 ``None`` if the command is safe to execute).
 
-Today's three hassil-based parsers (``parsers.py``) already self-police most
+Today's four hassil-based parsers (``parsers.py``) already self-police most
 of these - they return ``None`` *before* a frame/command is ever built
 whenever entity resolution fails, ambiguity occurs, the domain is wrong, an
 area doesn't resolve, a quantifier count is wrong, or the intent isn't
 registered (see docstrings on ``SingleTargetParser``/``QuantifierParser``/
-``PercentageParser``). This validator is deliberately built anyway, for the
-same reason ``Capability`` (Phase 9) and ``SemanticCommand`` (Phase 10) were
+``PercentageParser``/``LightExtendedParser``). This validator is deliberately
+built anyway, for the same reason ``Capability`` (Phase 9) and
+``SemanticCommand`` (Phase 10) were
 built ahead of their consumers: the plan's later LLM Adapter phase (LLM
 output is always untrusted input) will not self-police the way the current
 parsers do, and will need this as its actual gatekeeper. The one check with
@@ -24,7 +25,7 @@ from __future__ import annotations
 
 from enum import Enum, auto
 
-from ..service_call import INTENTS, PERCENT_INTENTS, QUERY_INTENTS
+from ..service_call import INTENTS, LIGHT_EXTENDED_INTENTS, PERCENT_INTENTS, QUERY_INTENTS
 from .capabilities import Capability
 from .command import SemanticCommand
 
@@ -57,9 +58,15 @@ _PERCENT_CAPABILITY_BY_DOMAIN: dict[str, Capability] = {
 def validate_command(command: SemanticCommand) -> ValidationError | None:
     frame = command.source_frame
     is_percent_intent = command.intent == _PERCENT_INTENT_NAME
+    is_light_extended_intent = command.intent in LIGHT_EXTENDED_INTENTS
 
     # 1. Intent vorhanden?
-    if not is_percent_intent and command.intent not in QUERY_INTENTS and command.intent not in INTENTS:
+    if (
+        not is_percent_intent
+        and not is_light_extended_intent
+        and command.intent not in QUERY_INTENTS
+        and command.intent not in INTENTS
+    ):
         return ValidationError.UNKNOWN_INTENT
 
     # 2. Target vorhanden?
@@ -80,6 +87,8 @@ def validate_command(command: SemanticCommand) -> ValidationError | None:
     # 5. Domain erlaubt?
     if is_percent_intent:
         allowed_domains = PERCENT_INTENTS.keys()
+    elif is_light_extended_intent:
+        allowed_domains = frozenset({"light"})
     elif command.intent in QUERY_INTENTS:
         allowed_domains = QUERY_INTENTS[command.intent].allowed_domains
     else:
@@ -92,6 +101,11 @@ def validate_command(command: SemanticCommand) -> ValidationError | None:
         for entity in command.entities:
             required = _PERCENT_CAPABILITY_BY_DOMAIN.get(entity.domain)
             if required is not None and required.name not in entity.capabilities:
+                return ValidationError.UNSUPPORTED_CAPABILITY
+    elif is_light_extended_intent:
+        required_light_capability = LIGHT_EXTENDED_INTENTS[command.intent].capability
+        for entity in command.entities:
+            if required_light_capability.name not in entity.capabilities:
                 return ValidationError.UNSUPPORTED_CAPABILITY
 
     # 7. Parameter vorhanden?

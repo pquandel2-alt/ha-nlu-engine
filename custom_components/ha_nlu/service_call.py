@@ -9,9 +9,10 @@ working integration rather than inventing new semantics.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Any, Callable, Mapping
 
 from .entities import EntitySnapshot
+from .nlu.capabilities import Capability
 
 
 @dataclass(frozen=True)
@@ -131,5 +132,71 @@ QUERY_INTENTS: dict[str, QueryIntentSpec] = {
     "HassGetState": QueryIntentSpec(
         allowed_domains=frozenset({"sensor"}),
         response=lambda es: _speak_state(es[0]),
+    ),
+}
+
+
+@dataclass(frozen=True)
+class LightExtendedIntentSpec:
+    """Separate from IntentSpec/PercentIntentSpec: these 4 intents (v2 plan
+    Phase 14, "Licht-NLU erweitern") only ever target the ``light`` domain
+    but need different capabilities per intent, and build/response need the
+    full parameters mapping (step_percent, or color_name, or
+    color_temp_kelvin - one differently-named parameter per intent, unlike
+    the single uniform ``percent`` PercentIntentSpec carries). ``capability``
+    is the single source of truth nlu/validator.py reads for its
+    UNSUPPORTED_CAPABILITY check - no separate intent-to-capability dict
+    duplicated there.
+    """
+
+    capability: Capability
+    build: Callable[[list[EntitySnapshot], Mapping[str, Any]], ServiceCallPlan]
+    response: Callable[[list[EntitySnapshot], Mapping[str, Any]], str]
+
+
+# German word spoken back in a response is not necessarily the one the user
+# said (e.g. both "lila" and "violett" resolve to "purple") - same
+# not-an-exact-echo precedent as _plural_response's domain-plural wording.
+_COLOR_SPOKEN_DE = {
+    "red": "rot", "green": "grün", "blue": "blau", "yellow": "gelb", "orange": "orange",
+    "purple": "lila", "white": "weiß", "pink": "pink", "turquoise": "türkis", "cyan": "cyan",
+}
+_COLOR_TEMP_SPOKEN_DE = {2700: "warmweiß", 6500: "kaltweiß"}
+
+
+LIGHT_EXTENDED_INTENTS: dict[str, LightExtendedIntentSpec] = {
+    "HassLightBrighten": LightExtendedIntentSpec(
+        capability=Capability.BRIGHTNESS,
+        build=lambda es, params: ServiceCallPlan(
+            "light", "turn_on", _entity_id_field(es), {"brightness_step_pct": params["step_percent"]}
+        ),
+        response=lambda es, params: f"{es[0].friendly_name} um {params['step_percent']} Prozent heller gestellt.",
+    ),
+    "HassLightDim": LightExtendedIntentSpec(
+        capability=Capability.BRIGHTNESS,
+        build=lambda es, params: ServiceCallPlan(
+            "light", "turn_on", _entity_id_field(es), {"brightness_step_pct": -params["step_percent"]}
+        ),
+        response=lambda es, params: f"{es[0].friendly_name} um {params['step_percent']} Prozent dunkler gestellt.",
+    ),
+    "HassLightSetColor": LightExtendedIntentSpec(
+        capability=Capability.COLOR,
+        build=lambda es, params: ServiceCallPlan(
+            "light", "turn_on", _entity_id_field(es), {"color_name": params["color_name"]}
+        ),
+        response=lambda es, params: (
+            f"{es[0].friendly_name} auf {_COLOR_SPOKEN_DE.get(params['color_name'], params['color_name'])} gestellt."
+        ),
+    ),
+    "HassLightSetColorTemp": LightExtendedIntentSpec(
+        capability=Capability.COLOR_TEMPERATURE,
+        build=lambda es, params: ServiceCallPlan(
+            "light", "turn_on", _entity_id_field(es), {"kelvin": params["color_temp_kelvin"]}
+        ),
+        response=lambda es, params: (
+            f"{es[0].friendly_name} auf "
+            f"{_COLOR_TEMP_SPOKEN_DE.get(params['color_temp_kelvin'], str(params['color_temp_kelvin']) + ' Kelvin')} "
+            "gestellt."
+        ),
     ),
 }

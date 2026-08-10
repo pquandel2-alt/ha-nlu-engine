@@ -1,5 +1,5 @@
 """Concrete IntentParser implementations (v2 plan, Phase 2 - "Intent-System
-vereinheitlichen"). Each parser wraps one of the three separately-compiled
+vereinheitlichen"). Each parser wraps one of the four separately-compiled
 hassil grammars (see engine.py's module docstring for why they must stay
 separate) and turns a recognized sentence into a ``ParseResult`` -
 sentence-matching + entity/area resolution stays here, so ``engine.py``
@@ -17,7 +17,7 @@ from .areas import AreaResolveStatus, resolve_area_name
 from .entities import ResolveStatus, resolve_entities_by_domain, resolve_entity
 from .nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
 from .nlu.parser import ParseContext, ParseResult
-from .service_call import INTENTS, PERCENT_INTENTS, QUERY_INTENTS
+from .service_call import INTENTS, LIGHT_EXTENDED_INTENTS, PERCENT_INTENTS, QUERY_INTENTS
 
 # The {name} wildcard captures everything between the fixed template words,
 # so "fahre die Rollade im Büro hoch" captures "Rollade im Büro" verbatim -
@@ -54,6 +54,39 @@ _QUANTIFIER_SLOT_LIST = TextSlotList.from_tuples(
     [("alle", "all"), ("beide", "both"), ("beiden", "both"), ("beider", "both")],
     name="quantifier",
 )
+
+# German colour words -> HA's native `color_name` service parameter (CSS
+# colour names, so HA itself validates/converts them - not RGB triples
+# invented here). "Basis-Set" per user decision (v2 plan Phase 14).
+_COLOR_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("rot", "red"),
+        ("grün", "green"),
+        ("blau", "blue"),
+        ("gelb", "yellow"),
+        ("orange", "orange"),
+        ("lila", "purple"),
+        ("violett", "purple"),
+        ("weiß", "white"),
+        ("pink", "pink"),
+        ("rosa", "pink"),
+        ("türkis", "turquoise"),
+        ("cyan", "cyan"),
+    ],
+    name="color",
+)
+
+# String values (cast to int by LightExtendedParser), same pattern as the
+# domain/quantifier slot lists above - standard lighting-industry Kelvin
+# reference values, not a UX decision requiring user input.
+_COLOR_TEMP_SLOT_LIST = TextSlotList.from_tuples(
+    [("warmweiß", "2700"), ("kaltweiß", "6500")],
+    name="color_temp",
+)
+
+# User decision (AskUserQuestion, v2 plan Phase 14): "heller"/"dunkler"
+# without an explicit {percent} slot default to 10% per command.
+_DEFAULT_DIMMING_STEP_PERCENT = 10
 
 
 class SingleTargetParser:
@@ -196,6 +229,71 @@ class PercentageParser:
             target=TargetReference(text=name, entity_id=resolved.entity.entity_id, domain=resolved.entity.domain),
             area=None,
             parameters={"percent": percent},
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=[resolved.entity])
+
+
+class LightExtendedParser:
+    """Wraps the {name}/{percent}/{color}/{color_temp} grammar (brightness
+    adjust, colour, colour temperature) - the 4th separately-compiled hassil
+    grammar (v2 plan Phase 14). Kept apart from PercentageParser's {name}/
+    {percent} grammar because these sentences use "heller"/"dunkler"/colour
+    words rather than an absolute "auf X Prozent" target, and apart from the
+    plain {name} grammar because an unanchored {color}/{color_temp} slot
+    directly adjacent to {name} (e.g. "mach das Licht rot") is a different
+    sentence shape - empirically verified against hassil==3.11.0 not to
+    collide with the "an"/"aus" turn-on/off sentences.
+    """
+
+    def __init__(self, intents: Intents) -> None:
+        self._intents = intents
+
+    def parse(self, text: str, context: ParseContext) -> ParseResult | None:
+        slot_lists = {
+            "name": WildcardSlotList(name="name"),
+            "percent": RangeSlotList(name="percent", start=0, stop=100, step=1, type=RangeType.PERCENTAGE),
+            "color": _COLOR_SLOT_LIST,
+            "color_temp": _COLOR_TEMP_SLOT_LIST,
+        }
+        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+        if result is None or result.intent is None:
+            return None
+
+        name_slot = result.entities.get("name")
+        if name_slot is None:
+            return None
+        name = _strip_locative_prepositions(str(name_slot.value))
+        resolved = resolve_entity(name, context.entities)
+        if resolved.status is not ResolveStatus.OK or resolved.entity is None:
+            return None
+
+        # All 4 intents only ever target the light domain (see
+        # LIGHT_EXTENDED_INTENTS's docstring) - no per-intent allowed_domains
+        # lookup needed, unlike INTENTS/PERCENT_INTENTS.
+        if result.intent.name not in LIGHT_EXTENDED_INTENTS or resolved.entity.domain != "light":
+            return None
+
+        if result.intent.name in ("HassLightBrighten", "HassLightDim"):
+            percent_slot = result.entities.get("percent")
+            step = int(percent_slot.value) if percent_slot is not None else _DEFAULT_DIMMING_STEP_PERCENT
+            parameters: dict[str, object] = {"step_percent": step}
+        elif result.intent.name == "HassLightSetColor":
+            color_slot = result.entities.get("color")
+            if color_slot is None:
+                return None
+            parameters = {"color_name": str(color_slot.value)}
+        else:  # HassLightSetColorTemp
+            color_temp_slot = result.entities.get("color_temp")
+            if color_temp_slot is None:
+                return None
+            parameters = {"color_temp_kelvin": int(color_temp_slot.value)}
+
+        frame = SemanticFrame(
+            intent=result.intent.name,
+            target=TargetReference(text=name, entity_id=resolved.entity.entity_id, domain=resolved.entity.domain),
+            area=None,
+            parameters=parameters,
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=[resolved.entity])
