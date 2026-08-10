@@ -1,0 +1,244 @@
+[
+  {
+    "text": "mach den Rollladen Büro ganz auf",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "open_cover",
+      "entity_id": "cover.buero",
+      "data": {}
+    },
+    "response_text": "Rollladen Büro wird geöffnet."
+  },
+  {
+    "text": "öffne den Rollladen Büro",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "open_cover",
+      "entity_id": "cover.buero",
+      "data": {}
+    },
+    "response_text": "Rollladen Büro wird geöffnet."
+  },
+  {
+    "text": "fahre den Rollladen Büro hoch",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "open_cover",
+      "entity_id": "cover.buero",
+      "data": {}
+    },
+    "response_text": "Rollladen Büro wird geöffnet."
+  },
+  {
+    "text": "bitte den Rollladen Büro hochfahren",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "open_cover",
+      "entity_id": "cover.buero",
+      "data": {}
+    },
+    "response_text": "Rollladen Büro wird geöffnet."
+  },
+  {
+    "text": "kannst du den Rollladen Büro öffnen",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "open_cover",
+      "entity_id": "cover.buero",
+      "data": {}
+    },
+    "response_text": "Rollladen Büro wird geöffnet."
+  },
+  {
+    "text": "mach den Rollladen Schlafzimmer zu",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "close_cover",
+      "entity_id": "cover.schlafzimmer",
+      "data": {}
+    },
+    "response_text": "Rollladen Schlafzimmer wird geschlossen."
+  },
+  {
+    "text": "schließe den Rollladen Schlafzimmer",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "close_cover",
+      "entity_id": "cover.schlafzimmer",
+      "data": {}
+    },
+    "response_text": "Rollladen Schlafzimmer wird geschlossen."
+  },
+  {
+    "text": "fahre den Rollladen Schlafzimmer runter",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "close_cover",
+      "entity_id": "cover.schlafzimmer",
+      "data": {}
+    },
+    "response_text": "Rollladen Schlafzimmer wird geschlossen."
+  },
+  {
+    "text": "bitte den Rollladen Schlafzimmer runterfahren",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "close_cover",
+      "entity_id": "cover.schlafzimmer",
+      "data": {}
+    },
+    "response_text": "Rollladen Schlafzimmer wird geschlossen."
+  },
+  {
+    "text": "kannst du den Rollladen Schlafzimmer schließen",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "close_cover",
+      "entity_id": "cover.schlafzimmer",
+      "data": {}
+    },
+    "response_text": "Rollladen Schlafzimmer wird geschlossen."
+  },
+  {
+    "text": "mach den Rollladen Schlafzimmer ganz auf",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "open_cover",
+      "entity_id": "cover.schlafzimmer",
+      "data": {}
+    },
+    "response_text": "Rollladen Schlafzimmer wird geöffnet."
+  },
+  {
+    "text": "öffne den Rollladen Schlafzimmer",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "open_cover",
+      "entity_id": "cover.schlafzimmer",
+      "data": {}
+    },
+    "response_text": "Rollladen Schlafzimmer wird geöffnet."
+  },
+  {
+    "text": "fahre den Rollladen Schlafzimmer hoch",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "open_cover",
+      "entity_id": "cover.schlafzimmer",
+      "data": {}
+    },
+    "response_text": "Rollladen Schlafzimmer wird geöffnet."
+  },
+  {
+    "text": "bitte den Rollladen Büro hoch",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "open_cover",
+      "entity_id": "cover.buero",
+      "data": {}
+    },
+    "response_text": "Rollladen Büro wird geöffnet."
+  },
+  {
+    "text": "bitte den Rollladen Schlafzimmer hoch",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "open_cover",
+      "entity_id": "cover.schlafzimmer",
+      "data": {}
+    },
+    "response_text": "Rollladen Schlafzimmer wird geöffnet."
+  },
+  {
+    "text": "mach den Rollladen Büro zu",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "close_cover",
+      "entity_id": "cover.buero",
+      "data": {}
+    },
+    "response_text": "Rollladen Büro wird geschlossen."
+  },
+  {
+    "text": "schließe den Rollladen Büro",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "close_cover",
+      "entity_id": "cover.buero",
+      "data": {}
+    },
+    "response_text": "Rollladen Büro wird geschlossen."
+  },
+  {
+    "text": "fahre den Rollladen Büro runter",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "close_cover",
+      "entity_id": "cover.buero",
+      "data": {}
+    },
+    "response_text": "Rollladen Büro wird geschlossen."
+  },
+  {
+    "text": "bitte den Rollladen Büro runter",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "close_cover",
+      "entity_id": "cover.buero",
+      "data": {}
+    },
+    "response_text": "Rollladen Büro wird geschlossen."
+  },
+  {
+    "text": "bitte den Rollladen Schlafzimmer runter",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "close_cover",
+      "entity_id": "cover.schlafzimmer",
+      "data": {}
+    },
+    "response_text": "Rollladen Schlafzimmer wird geschlossen."
+  },
+  {
+    "text": "kannst du die Rolllade Poleraum links öffnen",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "open_cover",
+      "entity_id": "cover.poleraum_links",
+      "data": {}
+    },
+    "response_text": "Rolllade Poleraum links wird geöffnet."
+  },
+  {
+    "text": "kannst du die Rolllade Poleraum rechts schließen",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "close_cover",
+      "entity_id": "cover.poleraum_rechts",
+      "data": {}
+    },
+    "response_text": "Rolllade Poleraum rechts wird geschlossen."
+  }
+]

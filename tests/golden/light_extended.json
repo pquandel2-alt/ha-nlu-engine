@@ -1,0 +1,301 @@
+[
+  {
+    "text": "mach das Wohnzimmerlicht um 20 Prozent heller",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "brightness_step_pct": 20
+      }
+    },
+    "response_text": "Wohnzimmerlicht um 20 Prozent heller gestellt."
+  },
+  {
+    "text": "kannst du das Wohnzimmerlicht heller machen",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "brightness_step_pct": 10
+      }
+    },
+    "response_text": "Wohnzimmerlicht um 10 Prozent heller gestellt."
+  },
+  {
+    "text": "mach das Wohnzimmerlicht um 30 Prozent dunkler",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "brightness_step_pct": -30
+      }
+    },
+    "response_text": "Wohnzimmerlicht um 30 Prozent dunkler gestellt."
+  },
+  {
+    "text": "bitte das Wohnzimmerlicht dunkler machen",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "brightness_step_pct": -10
+      }
+    },
+    "response_text": "Wohnzimmerlicht um 10 Prozent dunkler gestellt."
+  },
+  {
+    "text": "mach das Wohnzimmerlicht rot",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "color_name": "red"
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf rot gestellt."
+  },
+  {
+    "text": "stelle das Wohnzimmerlicht auf blau",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "color_name": "blue"
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf blau gestellt."
+  },
+  {
+    "text": "kannst du das Wohnzimmerlicht grün machen",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "color_name": "green"
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf grün gestellt."
+  },
+  {
+    "text": "mach das Wohnzimmerlicht warmweiß",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "kelvin": 2700
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf warmweiß gestellt."
+  },
+  {
+    "text": "stelle das Wohnzimmerlicht auf kaltweiß",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "kelvin": 6500
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf kaltweiß gestellt."
+  },
+  {
+    "text": "mach das Küchenlicht heller",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.kueche",
+      "data": {
+        "brightness_step_pct": 10
+      }
+    },
+    "response_text": "Küchenlicht um 10 Prozent heller gestellt."
+  },
+  {
+    "text": "bitte das Küchenlicht heller machen",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.kueche",
+      "data": {
+        "brightness_step_pct": 10
+      }
+    },
+    "response_text": "Küchenlicht um 10 Prozent heller gestellt."
+  },
+  {
+    "text": "mach das Küchenlicht dunkler",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.kueche",
+      "data": {
+        "brightness_step_pct": -10
+      }
+    },
+    "response_text": "Küchenlicht um 10 Prozent dunkler gestellt."
+  },
+  {
+    "text": "kannst du das Küchenlicht dunkler machen",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.kueche",
+      "data": {
+        "brightness_step_pct": -10
+      }
+    },
+    "response_text": "Küchenlicht um 10 Prozent dunkler gestellt."
+  },
+  {
+    "text": "mach das Wohnzimmerlicht gelb",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "color_name": "yellow"
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf gelb gestellt."
+  },
+  {
+    "text": "stelle das Wohnzimmerlicht auf orange",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "color_name": "orange"
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf orange gestellt."
+  },
+  {
+    "text": "mach das Wohnzimmerlicht lila",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "color_name": "purple"
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf lila gestellt."
+  },
+  {
+    "text": "stelle das Wohnzimmerlicht auf violett",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "color_name": "purple"
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf lila gestellt."
+  },
+  {
+    "text": "mach das Wohnzimmerlicht weiß",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "color_name": "white"
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf weiß gestellt."
+  },
+  {
+    "text": "kannst du das Wohnzimmerlicht pink machen",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "color_name": "pink"
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf pink gestellt."
+  },
+  {
+    "text": "mach das Wohnzimmerlicht rosa",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "color_name": "pink"
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf pink gestellt."
+  },
+  {
+    "text": "stelle das Wohnzimmerlicht auf türkis",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "color_name": "turquoise"
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf türkis gestellt."
+  },
+  {
+    "text": "kannst du das Wohnzimmerlicht cyan machen",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "color_name": "cyan"
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf cyan gestellt."
+  },
+  {
+    "text": "kannst du das Wohnzimmerlicht warmweiß machen",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "kelvin": 2700
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf warmweiß gestellt."
+  }
+]

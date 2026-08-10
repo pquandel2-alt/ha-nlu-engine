@@ -1,0 +1,197 @@
+[
+  {
+    "text": "stelle die Heizung Wohnzimmer auf 21 Grad",
+    "expect_match": true,
+    "plan": {
+      "domain": "climate",
+      "service": "set_temperature",
+      "entity_id": "climate.heizung",
+      "data": {
+        "temperature": 21
+      }
+    },
+    "response_text": "Heizung Wohnzimmer auf 21 Grad gestellt."
+  },
+  {
+    "text": "mach die Heizung Wohnzimmer auf 19 Grad",
+    "expect_match": true,
+    "plan": {
+      "domain": "climate",
+      "service": "set_temperature",
+      "entity_id": "climate.heizung",
+      "data": {
+        "temperature": 19
+      }
+    },
+    "response_text": "Heizung Wohnzimmer auf 19 Grad gestellt."
+  },
+  {
+    "text": "kannst du die Heizung Wohnzimmer auf 22 Grad stellen",
+    "expect_match": true,
+    "plan": {
+      "domain": "climate",
+      "service": "set_temperature",
+      "entity_id": "climate.heizung",
+      "data": {
+        "temperature": 22
+      }
+    },
+    "response_text": "Heizung Wohnzimmer auf 22 Grad gestellt."
+  },
+  {
+    "text": "mach die Heizung Wohnzimmer wärmer",
+    "expect_match": true,
+    "plan": {
+      "domain": "climate",
+      "service": "set_temperature",
+      "entity_id": "climate.heizung",
+      "data": {
+        "temperature": 21
+      }
+    },
+    "response_text": "Heizung Wohnzimmer wärmer gestellt."
+  },
+  {
+    "text": "kannst du die Heizung Wohnzimmer wärmer machen",
+    "expect_match": true,
+    "plan": {
+      "domain": "climate",
+      "service": "set_temperature",
+      "entity_id": "climate.heizung",
+      "data": {
+        "temperature": 21
+      }
+    },
+    "response_text": "Heizung Wohnzimmer wärmer gestellt."
+  },
+  {
+    "text": "erhöhe die Temperatur von der Heizung Wohnzimmer",
+    "expect_match": true,
+    "plan": {
+      "domain": "climate",
+      "service": "set_temperature",
+      "entity_id": "climate.heizung",
+      "data": {
+        "temperature": 21
+      }
+    },
+    "response_text": "Heizung Wohnzimmer wärmer gestellt."
+  },
+  {
+    "text": "mach die Heizung Wohnzimmer kälter",
+    "expect_match": true,
+    "plan": {
+      "domain": "climate",
+      "service": "set_temperature",
+      "entity_id": "climate.heizung",
+      "data": {
+        "temperature": 19
+      }
+    },
+    "response_text": "Heizung Wohnzimmer kälter gestellt."
+  },
+  {
+    "text": "senke die Temperatur bei der Heizung Wohnzimmer",
+    "expect_match": true,
+    "plan": {
+      "domain": "climate",
+      "service": "set_temperature",
+      "entity_id": "climate.heizung",
+      "data": {
+        "temperature": 19
+      }
+    },
+    "response_text": "Heizung Wohnzimmer kälter gestellt."
+  },
+  {
+    "text": "stelle die Heizung Wohnzimmer auf 18 Grad",
+    "expect_match": true,
+    "plan": {
+      "domain": "climate",
+      "service": "set_temperature",
+      "entity_id": "climate.heizung",
+      "data": {
+        "temperature": 18
+      }
+    },
+    "response_text": "Heizung Wohnzimmer auf 18 Grad gestellt."
+  },
+  {
+    "text": "mach die Heizung Wohnzimmer auf 24 Grad",
+    "expect_match": true,
+    "plan": {
+      "domain": "climate",
+      "service": "set_temperature",
+      "entity_id": "climate.heizung",
+      "data": {
+        "temperature": 24
+      }
+    },
+    "response_text": "Heizung Wohnzimmer auf 24 Grad gestellt."
+  },
+  {
+    "text": "kannst du die Heizung Wohnzimmer auf 16 Grad stellen",
+    "expect_match": true,
+    "plan": {
+      "domain": "climate",
+      "service": "set_temperature",
+      "entity_id": "climate.heizung",
+      "data": {
+        "temperature": 16
+      }
+    },
+    "response_text": "Heizung Wohnzimmer auf 16 Grad gestellt."
+  },
+  {
+    "text": "bitte die Heizung Wohnzimmer wärmer machen",
+    "expect_match": true,
+    "plan": {
+      "domain": "climate",
+      "service": "set_temperature",
+      "entity_id": "climate.heizung",
+      "data": {
+        "temperature": 21
+      }
+    },
+    "response_text": "Heizung Wohnzimmer wärmer gestellt."
+  },
+  {
+    "text": "bitte die Heizung Wohnzimmer kälter machen",
+    "expect_match": true,
+    "plan": {
+      "domain": "climate",
+      "service": "set_temperature",
+      "entity_id": "climate.heizung",
+      "data": {
+        "temperature": 19
+      }
+    },
+    "response_text": "Heizung Wohnzimmer kälter gestellt."
+  },
+  {
+    "text": "erhöhe die Temperatur an der Heizung Wohnzimmer",
+    "expect_match": true,
+    "plan": {
+      "domain": "climate",
+      "service": "set_temperature",
+      "entity_id": "climate.heizung",
+      "data": {
+        "temperature": 21
+      }
+    },
+    "response_text": "Heizung Wohnzimmer wärmer gestellt."
+  },
+  {
+    "text": "senke die Temperatur von der Heizung Wohnzimmer",
+    "expect_match": true,
+    "plan": {
+      "domain": "climate",
+      "service": "set_temperature",
+      "entity_id": "climate.heizung",
+      "data": {
+        "temperature": 19
+      }
+    },
+    "response_text": "Heizung Wohnzimmer kälter gestellt."
+  }
+]

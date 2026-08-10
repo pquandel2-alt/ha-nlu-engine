@@ -1,0 +1,62 @@
+[
+  {
+    "text": "wie hoch ist die Außentemperatur?",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "18.4 Grad."
+  },
+  {
+    "text": "wie ist die Außentemperatur",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "18.4 Grad."
+  },
+  {
+    "text": "wie hoch ist die Luftfeuchtigkeit Bad",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "52 Prozent."
+  },
+  {
+    "text": "wie hell ist das Wohnzimmerlicht",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "aus."
+  },
+  {
+    "text": "wie ist das Wohnzimmerlicht",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "aus."
+  },
+  {
+    "text": "wie warm ist die Außentemperatur",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "18.4 Grad."
+  },
+  {
+    "text": "wie ist die Luftfeuchtigkeit Bad",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "52 Prozent."
+  },
+  {
+    "text": "wie hell ist das Küchenlicht",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "aus."
+  },
+  {
+    "text": "wie ist das Küchenlicht",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "aus."
+  },
+  {
+    "text": "wie hell ist das Flurlicht",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "an."
+  }
+]

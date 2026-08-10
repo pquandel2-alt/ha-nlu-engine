@@ -1,0 +1,251 @@
+[
+  {
+    "text": "fahre alle Rollläden hoch",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "open_cover",
+      "entity_id": [
+        "cover.buero",
+        "cover.poleraum_links",
+        "cover.poleraum_rechts",
+        "cover.schlafzimmer"
+      ],
+      "data": {}
+    },
+    "response_text": "4 Rollläden geöffnet."
+  },
+  {
+    "text": "fahre alle Rollläden runter",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "close_cover",
+      "entity_id": [
+        "cover.buero",
+        "cover.poleraum_links",
+        "cover.poleraum_rechts",
+        "cover.schlafzimmer"
+      ],
+      "data": {}
+    },
+    "response_text": "4 Rollläden geschlossen."
+  },
+  {
+    "text": "mach alle Lichter an",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_on",
+      "entity_id": [
+        "light.flur",
+        "light.kueche",
+        "light.wohnzimmer"
+      ],
+      "data": {}
+    },
+    "response_text": "3 Lichter eingeschaltet."
+  },
+  {
+    "text": "mach alle Lichter aus",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_off",
+      "entity_id": [
+        "light.flur",
+        "light.kueche",
+        "light.wohnzimmer"
+      ],
+      "data": {}
+    },
+    "response_text": "3 Lichter ausgeschaltet."
+  },
+  {
+    "text": "schalte alle Schalter aus",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_off",
+      "entity_id": "switch.steckdose_buero",
+      "data": {}
+    },
+    "response_text": "Steckdose Büro ausgeschaltet."
+  },
+  {
+    "text": "fahre beide Rollläden im Poleraum hoch",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "open_cover",
+      "entity_id": [
+        "cover.poleraum_links",
+        "cover.poleraum_rechts"
+      ],
+      "data": {}
+    },
+    "response_text": "2 Rollläden geöffnet."
+  },
+  {
+    "text": "fahre beide Rollläden im Poleraum runter",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "close_cover",
+      "entity_id": [
+        "cover.poleraum_links",
+        "cover.poleraum_rechts"
+      ],
+      "data": {}
+    },
+    "response_text": "2 Rollläden geschlossen."
+  },
+  {
+    "text": "öffne alle Rollläden im Poleraum",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "open_cover",
+      "entity_id": [
+        "cover.poleraum_links",
+        "cover.poleraum_rechts"
+      ],
+      "data": {}
+    },
+    "response_text": "2 Rollläden geöffnet."
+  },
+  {
+    "text": "schließe alle Rollläden im Poleraum",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "close_cover",
+      "entity_id": [
+        "cover.poleraum_links",
+        "cover.poleraum_rechts"
+      ],
+      "data": {}
+    },
+    "response_text": "2 Rollläden geschlossen."
+  },
+  {
+    "text": "schalte alle Schalter ein",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_on",
+      "entity_id": "switch.steckdose_buero",
+      "data": {}
+    },
+    "response_text": "Steckdose Büro eingeschaltet."
+  },
+  {
+    "text": "kannst du alle Lichter anmachen",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_on",
+      "entity_id": [
+        "light.flur",
+        "light.kueche",
+        "light.wohnzimmer"
+      ],
+      "data": {}
+    },
+    "response_text": "3 Lichter eingeschaltet."
+  },
+  {
+    "text": "bitte alle Lichter aus",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_off",
+      "entity_id": [
+        "light.flur",
+        "light.kueche",
+        "light.wohnzimmer"
+      ],
+      "data": {}
+    },
+    "response_text": "3 Lichter ausgeschaltet."
+  },
+  {
+    "text": "öffne alle Rollläden",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "open_cover",
+      "entity_id": [
+        "cover.buero",
+        "cover.poleraum_links",
+        "cover.poleraum_rechts",
+        "cover.schlafzimmer"
+      ],
+      "data": {}
+    },
+    "response_text": "4 Rollläden geöffnet."
+  },
+  {
+    "text": "schließe alle Rollläden",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "close_cover",
+      "entity_id": [
+        "cover.buero",
+        "cover.poleraum_links",
+        "cover.poleraum_rechts",
+        "cover.schlafzimmer"
+      ],
+      "data": {}
+    },
+    "response_text": "4 Rollläden geschlossen."
+  },
+  {
+    "text": "mach alle Rollläden auf",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "open_cover",
+      "entity_id": [
+        "cover.buero",
+        "cover.poleraum_links",
+        "cover.poleraum_rechts",
+        "cover.schlafzimmer"
+      ],
+      "data": {}
+    },
+    "response_text": "4 Rollläden geöffnet."
+  },
+  {
+    "text": "mach alle Rollläden zu",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "close_cover",
+      "entity_id": [
+        "cover.buero",
+        "cover.poleraum_links",
+        "cover.poleraum_rechts",
+        "cover.schlafzimmer"
+      ],
+      "data": {}
+    },
+    "response_text": "4 Rollläden geschlossen."
+  },
+  {
+    "text": "schalte alle Lichter um",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "toggle",
+      "entity_id": [
+        "light.flur",
+        "light.kueche",
+        "light.wohnzimmer"
+      ],
+      "data": {}
+    },
+    "response_text": "3 Lichter umgeschaltet."
+  }
+]

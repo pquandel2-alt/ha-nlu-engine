@@ -1,0 +1,262 @@
+[
+  {
+    "text": "fahre den Rollladen Büro auf 30 Prozent runter",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "set_cover_position",
+      "entity_id": "cover.buero",
+      "data": {
+        "position": 30
+      }
+    },
+    "response_text": "Rollladen Büro auf 30 Prozent gefahren."
+  },
+  {
+    "text": "fahre den Rollladen Büro auf 70 Prozent hoch",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "set_cover_position",
+      "entity_id": "cover.buero",
+      "data": {
+        "position": 70
+      }
+    },
+    "response_text": "Rollladen Büro auf 70 Prozent gefahren."
+  },
+  {
+    "text": "kannst du den Rollladen Schlafzimmer auf 50 Prozent stellen",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "set_cover_position",
+      "entity_id": "cover.schlafzimmer",
+      "data": {
+        "position": 50
+      }
+    },
+    "response_text": "Rollladen Schlafzimmer auf 50 Prozent gefahren."
+  },
+  {
+    "text": "den Rollladen Büro auf 0 Prozent fahren",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "set_cover_position",
+      "entity_id": "cover.buero",
+      "data": {
+        "position": 0
+      }
+    },
+    "response_text": "Rollladen Büro auf 0 Prozent gefahren."
+  },
+  {
+    "text": "den Rollladen Schlafzimmer auf 100 Prozent dimmen",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "set_cover_position",
+      "entity_id": "cover.schlafzimmer",
+      "data": {
+        "position": 100
+      }
+    },
+    "response_text": "Rollladen Schlafzimmer auf 100 Prozent gefahren."
+  },
+  {
+    "text": "mach das Wohnzimmerlicht auf 50 Prozent",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "brightness_pct": 50
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf 50 Prozent Helligkeit gestellt."
+  },
+  {
+    "text": "mach das Küchenlicht auf 20 Prozent",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.kueche",
+      "data": {
+        "brightness_pct": 20
+      }
+    },
+    "response_text": "Küchenlicht auf 20 Prozent Helligkeit gestellt."
+  },
+  {
+    "text": "kannst du das Wohnzimmerlicht auf 80 Prozent dimmen",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "brightness_pct": 80
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf 80 Prozent Helligkeit gestellt."
+  },
+  {
+    "text": "bitte das Küchenlicht auf 1 Prozent einstellen",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.kueche",
+      "data": {
+        "brightness_pct": 1
+      }
+    },
+    "response_text": "Küchenlicht auf 1 Prozent Helligkeit gestellt."
+  },
+  {
+    "text": "stelle das Wohnzimmerlicht auf 100 Prozent",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "brightness_pct": 100
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf 100 Prozent Helligkeit gestellt."
+  },
+  {
+    "text": "fahre den Rollladen Schlafzimmer auf 45 Prozent runter",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "set_cover_position",
+      "entity_id": "cover.schlafzimmer",
+      "data": {
+        "position": 45
+      }
+    },
+    "response_text": "Rollladen Schlafzimmer auf 45 Prozent gefahren."
+  },
+  {
+    "text": "fahre den Rollladen Schlafzimmer auf 90 Prozent hoch",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "set_cover_position",
+      "entity_id": "cover.schlafzimmer",
+      "data": {
+        "position": 90
+      }
+    },
+    "response_text": "Rollladen Schlafzimmer auf 90 Prozent gefahren."
+  },
+  {
+    "text": "den Rollladen Büro auf 60 Prozent stellen",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "set_cover_position",
+      "entity_id": "cover.buero",
+      "data": {
+        "position": 60
+      }
+    },
+    "response_text": "Rollladen Büro auf 60 Prozent gefahren."
+  },
+  {
+    "text": "den Rollladen Schlafzimmer auf 15 Prozent fahren",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "set_cover_position",
+      "entity_id": "cover.schlafzimmer",
+      "data": {
+        "position": 15
+      }
+    },
+    "response_text": "Rollladen Schlafzimmer auf 15 Prozent gefahren."
+  },
+  {
+    "text": "mach das Küchenlicht auf 100 Prozent",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.kueche",
+      "data": {
+        "brightness_pct": 100
+      }
+    },
+    "response_text": "Küchenlicht auf 100 Prozent Helligkeit gestellt."
+  },
+  {
+    "text": "mach das Wohnzimmerlicht auf 0 Prozent",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "brightness_pct": 0
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf 0 Prozent Helligkeit gestellt."
+  },
+  {
+    "text": "kannst du das Küchenlicht auf 75 Prozent dimmen",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.kueche",
+      "data": {
+        "brightness_pct": 75
+      }
+    },
+    "response_text": "Küchenlicht auf 75 Prozent Helligkeit gestellt."
+  },
+  {
+    "text": "bitte das Wohnzimmerlicht auf 33 Prozent einstellen",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "brightness_pct": 33
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf 33 Prozent Helligkeit gestellt."
+  },
+  {
+    "text": "stelle das Küchenlicht auf 10 Prozent",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.kueche",
+      "data": {
+        "brightness_pct": 10
+      }
+    },
+    "response_text": "Küchenlicht auf 10 Prozent Helligkeit gestellt."
+  },
+  {
+    "text": "setze den Rollladen Büro auf 25 Prozent",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "set_cover_position",
+      "entity_id": "cover.buero",
+      "data": {
+        "position": 25
+      }
+    },
+    "response_text": "Rollladen Büro auf 25 Prozent gefahren."
+  }
+]

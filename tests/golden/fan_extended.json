@@ -1,0 +1,146 @@
+[
+  {
+    "text": "stelle den Ventilator auf Stufe 3",
+    "expect_match": true,
+    "plan": {
+      "domain": "fan",
+      "service": "turn_on",
+      "entity_id": "fan.venti",
+      "data": {
+        "percentage": 60
+      }
+    },
+    "response_text": "Ventilator auf Stufe 3 gestellt."
+  },
+  {
+    "text": "mach den Ventilator auf Stufe 1",
+    "expect_match": true,
+    "plan": {
+      "domain": "fan",
+      "service": "turn_on",
+      "entity_id": "fan.venti",
+      "data": {
+        "percentage": 20
+      }
+    },
+    "response_text": "Ventilator auf Stufe 1 gestellt."
+  },
+  {
+    "text": "kannst du den Ventilator auf Stufe 5 stellen",
+    "expect_match": true,
+    "plan": {
+      "domain": "fan",
+      "service": "turn_on",
+      "entity_id": "fan.venti",
+      "data": {
+        "percentage": 100
+      }
+    },
+    "response_text": "Ventilator auf Stufe 5 gestellt."
+  },
+  {
+    "text": "mach den Ventilator schneller",
+    "expect_match": true,
+    "plan": {
+      "domain": "fan",
+      "service": "increase_speed",
+      "entity_id": "fan.venti",
+      "data": {}
+    },
+    "response_text": "Ventilator schneller gestellt."
+  },
+  {
+    "text": "bitte den Ventilator schneller machen",
+    "expect_match": true,
+    "plan": {
+      "domain": "fan",
+      "service": "increase_speed",
+      "entity_id": "fan.venti",
+      "data": {}
+    },
+    "response_text": "Ventilator schneller gestellt."
+  },
+  {
+    "text": "mach den Ventilator langsamer",
+    "expect_match": true,
+    "plan": {
+      "domain": "fan",
+      "service": "decrease_speed",
+      "entity_id": "fan.venti",
+      "data": {}
+    },
+    "response_text": "Ventilator langsamer gestellt."
+  },
+  {
+    "text": "bitte den Ventilator langsamer machen",
+    "expect_match": true,
+    "plan": {
+      "domain": "fan",
+      "service": "decrease_speed",
+      "entity_id": "fan.venti",
+      "data": {}
+    },
+    "response_text": "Ventilator langsamer gestellt."
+  },
+  {
+    "text": "stelle den Ventilator auf Stufe 2",
+    "expect_match": true,
+    "plan": {
+      "domain": "fan",
+      "service": "turn_on",
+      "entity_id": "fan.venti",
+      "data": {
+        "percentage": 40
+      }
+    },
+    "response_text": "Ventilator auf Stufe 2 gestellt."
+  },
+  {
+    "text": "mach den Ventilator auf Stufe 4",
+    "expect_match": true,
+    "plan": {
+      "domain": "fan",
+      "service": "turn_on",
+      "entity_id": "fan.venti",
+      "data": {
+        "percentage": 80
+      }
+    },
+    "response_text": "Ventilator auf Stufe 4 gestellt."
+  },
+  {
+    "text": "kannst du den Ventilator auf Stufe 1 stellen",
+    "expect_match": true,
+    "plan": {
+      "domain": "fan",
+      "service": "turn_on",
+      "entity_id": "fan.venti",
+      "data": {
+        "percentage": 20
+      }
+    },
+    "response_text": "Ventilator auf Stufe 1 gestellt."
+  },
+  {
+    "text": "kannst du den Ventilator schneller machen",
+    "expect_match": true,
+    "plan": {
+      "domain": "fan",
+      "service": "increase_speed",
+      "entity_id": "fan.venti",
+      "data": {}
+    },
+    "response_text": "Ventilator schneller gestellt."
+  },
+  {
+    "text": "kannst du den Ventilator langsamer machen",
+    "expect_match": true,
+    "plan": {
+      "domain": "fan",
+      "service": "decrease_speed",
+      "entity_id": "fan.venti",
+      "data": {}
+    },
+    "response_text": "Ventilator langsamer gestellt."
+  }
+]

@@ -1,0 +1,299 @@
+[
+  {
+    "text": "Mach das Wohnzimmerlicht an",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {}
+    },
+    "response_text": "Wohnzimmerlicht eingeschaltet."
+  },
+  {
+    "text": "Mach das Wohnzimmerlicht aus",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_off",
+      "entity_id": "light.wohnzimmer",
+      "data": {}
+    },
+    "response_text": "Wohnzimmerlicht ausgeschaltet."
+  },
+  {
+    "text": "Schalte das Küchenlicht ein",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_on",
+      "entity_id": "light.kueche",
+      "data": {}
+    },
+    "response_text": "Küchenlicht eingeschaltet."
+  },
+  {
+    "text": "Küchenlicht ausschalten",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_off",
+      "entity_id": "light.kueche",
+      "data": {}
+    },
+    "response_text": "Küchenlicht ausgeschaltet."
+  },
+  {
+    "text": "Kannst du das Flurlicht anmachen?",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_on",
+      "entity_id": "light.flur",
+      "data": {}
+    },
+    "response_text": "Flurlicht eingeschaltet."
+  },
+  {
+    "text": "Bitte das Flurlicht aus",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_off",
+      "entity_id": "light.flur",
+      "data": {}
+    },
+    "response_text": "Flurlicht ausgeschaltet."
+  },
+  {
+    "text": "schalte die Steckdose Büro um",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "toggle",
+      "entity_id": "switch.steckdose_buero",
+      "data": {}
+    },
+    "response_text": "Steckdose Büro umgeschaltet."
+  },
+  {
+    "text": "Steckdose Büro umschalten",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "toggle",
+      "entity_id": "switch.steckdose_buero",
+      "data": {}
+    },
+    "response_text": "Steckdose Büro umgeschaltet."
+  },
+  {
+    "text": "toggle das Flurlicht",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "toggle",
+      "entity_id": "light.flur",
+      "data": {}
+    },
+    "response_text": "Flurlicht umgeschaltet."
+  },
+  {
+    "text": "mach den Ventilator an",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_on",
+      "entity_id": "fan.venti",
+      "data": {}
+    },
+    "response_text": "Ventilator eingeschaltet."
+  },
+  {
+    "text": "schalte den Ventilator aus",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_off",
+      "entity_id": "fan.venti",
+      "data": {}
+    },
+    "response_text": "Ventilator ausgeschaltet."
+  },
+  {
+    "text": "mach die Heizung Wohnzimmer an",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_on",
+      "entity_id": "climate.heizung",
+      "data": {}
+    },
+    "response_text": "Heizung Wohnzimmer eingeschaltet."
+  },
+  {
+    "text": "schalte die Einfache Heizung aus",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_off",
+      "entity_id": "climate.einfach",
+      "data": {}
+    },
+    "response_text": "Einfache Heizung ausgeschaltet."
+  },
+  {
+    "text": "Mach das Küchenlicht an",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_on",
+      "entity_id": "light.kueche",
+      "data": {}
+    },
+    "response_text": "Küchenlicht eingeschaltet."
+  },
+  {
+    "text": "Schalte das Flurlicht ein",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_on",
+      "entity_id": "light.flur",
+      "data": {}
+    },
+    "response_text": "Flurlicht eingeschaltet."
+  },
+  {
+    "text": "Flurlicht ausschalten",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_off",
+      "entity_id": "light.flur",
+      "data": {}
+    },
+    "response_text": "Flurlicht ausgeschaltet."
+  },
+  {
+    "text": "Kannst du die Steckdose Büro anmachen?",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_on",
+      "entity_id": "switch.steckdose_buero",
+      "data": {}
+    },
+    "response_text": "Steckdose Büro eingeschaltet."
+  },
+  {
+    "text": "Bitte das Wohnzimmerlicht an",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {}
+    },
+    "response_text": "Wohnzimmerlicht eingeschaltet."
+  },
+  {
+    "text": "schalte das Wohnzimmerlicht um",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "toggle",
+      "entity_id": "light.wohnzimmer",
+      "data": {}
+    },
+    "response_text": "Wohnzimmerlicht umgeschaltet."
+  },
+  {
+    "text": "Wohnzimmerlicht umschalten",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "toggle",
+      "entity_id": "light.wohnzimmer",
+      "data": {}
+    },
+    "response_text": "Wohnzimmerlicht umgeschaltet."
+  },
+  {
+    "text": "toggle die Steckdose Büro",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "toggle",
+      "entity_id": "switch.steckdose_buero",
+      "data": {}
+    },
+    "response_text": "Steckdose Büro umgeschaltet."
+  },
+  {
+    "text": "Kannst du den Ventilator anmachen?",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_on",
+      "entity_id": "fan.venti",
+      "data": {}
+    },
+    "response_text": "Ventilator eingeschaltet."
+  },
+  {
+    "text": "Bitte den Ventilator aus",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_off",
+      "entity_id": "fan.venti",
+      "data": {}
+    },
+    "response_text": "Ventilator ausgeschaltet."
+  },
+  {
+    "text": "kannst du die Heizung Wohnzimmer anmachen",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_on",
+      "entity_id": "climate.heizung",
+      "data": {}
+    },
+    "response_text": "Heizung Wohnzimmer eingeschaltet."
+  },
+  {
+    "text": "bitte die Einfache Heizung aus",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_off",
+      "entity_id": "climate.einfach",
+      "data": {}
+    },
+    "response_text": "Einfache Heizung ausgeschaltet."
+  },
+  {
+    "text": "mach die Steckdose Büro an",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_on",
+      "entity_id": "switch.steckdose_buero",
+      "data": {}
+    },
+    "response_text": "Steckdose Büro eingeschaltet."
+  },
+  {
+    "text": "schalte das Küchenlicht aus",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_off",
+      "entity_id": "light.kueche",
+      "data": {}
+    },
+    "response_text": "Küchenlicht ausgeschaltet."
+  }
+]

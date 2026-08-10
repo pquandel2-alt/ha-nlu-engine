@@ -1,0 +1,62 @@
+[
+  {
+    "text": "blubb schnarch wuppdi",
+    "expect_match": false
+  },
+  {
+    "text": "Mach irgendwas.",
+    "expect_match": false
+  },
+  {
+    "text": "Mach das Licht.",
+    "expect_match": false
+  },
+  {
+    "text": "Mach das Wohnzimmerlicht lila leuchten tanzen",
+    "expect_match": false
+  },
+  {
+    "text": "Mach die Küchenlampe blau",
+    "expect_match": false
+  },
+  {
+    "text": "stelle den Rollladen Büro auf 200 Prozent",
+    "expect_match": false
+  },
+  {
+    "text": "mach beide Lichter an",
+    "expect_match": false
+  },
+  {
+    "text": "fahre beide Rollläden im Büro hoch",
+    "expect_match": false
+  },
+  {
+    "text": "stelle die Einfache Heizung auf 21 Grad",
+    "expect_match": false
+  },
+  {
+    "text": "mach den Ventilator lila",
+    "expect_match": false
+  },
+  {
+    "text": "wie hoch ist der Rollladen Büro",
+    "expect_match": false
+  },
+  {
+    "text": "Mach das Kellerlicht an",
+    "expect_match": false
+  },
+  {
+    "text": "fahre die Rolllade im Keller hoch",
+    "expect_match": false
+  },
+  {
+    "text": "mach das Licht auf 150 Prozent",
+    "expect_match": false
+  },
+  {
+    "text": "stelle die Steckdose Büro auf 50 Prozent",
+    "expect_match": false
+  }
+]
