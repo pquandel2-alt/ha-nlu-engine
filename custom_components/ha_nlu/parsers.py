@@ -16,7 +16,7 @@ from hassil import Intents, RangeSlotList, RangeType, TextSlotList, WildcardSlot
 from .areas import AreaResolveStatus, resolve_area_name
 from .entities import ResolveStatus, resolve_entities_by_domain, resolve_entity
 from .nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
-from .nlu.parser import ParseContext, ParseResult
+from .nlu.parser import ClarificationRequest, ParseContext, ParseResult
 from .service_call import (
     CLIMATE_EXTENDED_INTENTS,
     FAN_EXTENDED_INTENTS,
@@ -103,7 +103,7 @@ class SingleTargetParser:
     def __init__(self, intents: Intents) -> None:
         self._intents = intents
 
-    def parse(self, text: str, context: ParseContext) -> ParseResult | None:
+    def parse(self, text: str, context: ParseContext) -> ParseResult | ClarificationRequest | None:
         slot_lists = {"name": WildcardSlotList(name="name")}
         result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
         if result is None or result.intent is None:
@@ -115,6 +115,20 @@ class SingleTargetParser:
 
         name = _strip_locative_prepositions(str(name_slot.value))
         resolved = resolve_entity(name, context.entities)
+        if resolved.status is ResolveStatus.AMBIGUOUS:
+            # Only the 5 basic action intents (v2 plan Phase 25,
+            # "Clarification") get a follow-up question - QUERY_INTENTS
+            # (sensor reads) keep today's NOT_FOUND-equivalent behaviour,
+            # since finishing a query needs no further parameters and an
+            # ambiguous sensor name is rare enough that the extra round-trip
+            # isn't worth the added branch; INTENTS.get() also doubles as
+            # the "is this even a known intent" guard the non-ambiguous path
+            # below performs via ``spec``.
+            if INTENTS.get(result.intent.name) is not None:
+                return ClarificationRequest(
+                    pending_intent=result.intent.name, pending_target=name, candidates=resolved.candidates,
+                )
+            return None
         if resolved.status is not ResolveStatus.OK or resolved.entity is None:
             return None
 

@@ -28,12 +28,13 @@ from pathlib import Path
 
 from hassil import Intents
 
-from .entities import EntitySnapshot
+from .areas import AreaResolveStatus, resolve_area_name
+from .entities import EntitySnapshot, ResolveStatus, resolve_entity
 from .nlu.command import SemanticCommand, build_semantic_command
 from .nlu.debug import DebugTrace, format_command
 from .nlu.frame import SemanticFrame
 from .nlu.normalize import normalize
-from .nlu.parser import ParseContext, ParseResult
+from .nlu.parser import ClarificationRequest, ParseContext, ParseResult
 from .nlu.response import NluError, NluResponse
 from .nlu.service_mapper import map_to_service_call
 from .nlu.validator import validate_command
@@ -103,6 +104,29 @@ _FAN_EXTENDED_RE = re.compile(r"\b(stufe|schneller|langsamer)\b", re.IGNORECASE)
 # between "Außen" and "temperatur".
 _CLIMATE_EXTENDED_RE = re.compile(r"\b(grad|wärmer|kälter|temperatur)\b", re.IGNORECASE)
 
+# Per-domain question word for the clarification round-trip (v2 plan Phase
+# 25). Same kind of small, explicit German-grammar lookup as
+# service_call.py's ``_DOMAIN_PLURAL_DE`` - only covers the domains
+# SingleTargetParser's basic INTENTS can actually produce ambiguity for.
+# Unknown/mixed-domain candidate sets fall back to a grammatically safe,
+# gender-neutral phrasing rather than guessing an article.
+_DOMAIN_QUESTION_WORD_DE = {
+    "light": "Welches Licht",
+    "switch": "Welchen Schalter",
+    "cover": "Welche Rollläden",
+    "fan": "Welchen Ventilator",
+    "climate": "Welche Heizung",
+}
+
+
+def _clarification_question(clarification: ClarificationRequest) -> str:
+    domains = {candidate.domain for candidate in clarification.candidates}
+    if len(domains) == 1:
+        question_word = _DOMAIN_QUESTION_WORD_DE.get(next(iter(domains)))
+        if question_word is not None:
+            return f"{question_word} meinst du?"
+    return "Das war nicht eindeutig. Welches meinst du?"
+
 
 @dataclass(frozen=True)
 class MatchResult:
@@ -117,6 +141,14 @@ class MatchResult:
     # Purely additive like ``frame`` was in Phase 1/2: plan/response_text
     # keep driving behaviour, no consumer reads this yet (Phase 11 Validator).
     command: SemanticCommand | None = None
+    # Set instead of ``plan``/``command`` when the name resolved to more than
+    # one tied candidate (v2 plan Phase 25, "Clarification") - ``plan`` is
+    # ``None`` here too, but unlike a successful query (also ``plan=None``)
+    # this means "ask the user, don't execute anything yet". Callers must
+    # check ``clarification`` before falling back to the ``plan is None``
+    # query-vs-action distinction ``conversation.py`` already made in Phase
+    # 19/Query-Engine (see its module docstring).
+    clarification: ClarificationRequest | None = None
 
 
 class NluEngine:
@@ -189,7 +221,59 @@ class NluEngine:
         result = parser.parse(text, ParseContext(entities=entities))
         if result is None:
             return None
+        if isinstance(result, ClarificationRequest):
+            return MatchResult(
+                plan=None, response_text=_clarification_question(result), clarification=result,
+            )
         return self._build_match_result(result)
+
+    def resolve_clarification(
+        self, reply_text: str, clarification: ClarificationRequest, entities: list[EntitySnapshot]
+    ) -> MatchResult | None:
+        """Complete a pending clarification (v2 plan Phase 25) with the
+        user's follow-up reply - e.g. "Das im Wohnzimmer." after "Welches
+        Licht meinst du?". Deterministic, same "never guess" rule as the
+        rest of the engine: resolves only if the reply narrows
+        ``clarification.candidates`` down to exactly one entity, either by
+        name (tried first, against just the candidates - not the full
+        ``entities`` list, so a reply like "Küche" can't accidentally match
+        some unrelated entity outside the original candidate set) or by area
+        (tried second, against the full ``entities`` list since area
+        resolution needs to see every entity to judge unambiguity - then
+        filtered down to the candidates). Anything else - reply resolves to
+        zero or more than one candidate - returns ``None``, same as any
+        other non-match; the caller decides how to respond (today: the
+        fixed "not understood" text, same as everywhere else in this
+        engine).
+
+        Only supports the intents ``SingleTargetParser`` can actually
+        produce a ``ClarificationRequest`` for (``INTENTS``: basic
+        turn_on/off/toggle/open/close-cover) - the extended parsers
+        (percentage, light/fan/climate-extended) don't build
+        ``ClarificationRequest`` yet (see parsers.py's ``SingleTargetParser.
+        parse()``), so ``clarification.pending_intent`` is always one of
+        those five.
+        """
+        normalized = normalize(reply_text)
+
+        name_resolved = resolve_entity(normalized, list(clarification.candidates))
+        entity = name_resolved.entity if name_resolved.status is ResolveStatus.OK else None
+
+        if entity is None:
+            area_resolved = resolve_area_name(normalized, entities)
+            if area_resolved.status is AreaResolveStatus.OK:
+                area_matches = [c for c in clarification.candidates if c.area_id == area_resolved.area_id]
+                if len(area_matches) == 1:
+                    entity = area_matches[0]
+
+        if entity is None:
+            return None
+
+        spec = INTENTS.get(clarification.pending_intent)
+        if spec is None:
+            return None
+        matched = [entity]
+        return MatchResult(plan=spec.build(matched), response_text=spec.response(matched))
 
     def respond(self, text: str, entities: list[EntitySnapshot]) -> NluResponse:
         """Same matching as ``match()``, but never collapses a miss to a bare
@@ -206,6 +290,8 @@ class NluEngine:
         result = parser.parse(normalized, ParseContext(entities=entities))
         if result is None:
             return NluResponse(success=False, speech=None, command=None, error=NluError.NO_MATCH)
+        if isinstance(result, ClarificationRequest):
+            return NluResponse(success=False, speech=None, command=None, error=NluError.AMBIGUOUS_ENTITY)
 
         command = build_semantic_command(result)
         validation_error = validate_command(command)
@@ -241,7 +327,11 @@ class NluEngine:
         CANDIDATES/RESOLUTION only ever show the parser's *final* resolved
         entity/entities - see nlu/debug.py's module docstring for why a
         failed resolution can't show ranked alternatives without
-        restructuring every ``IntentParser``'s return type.
+        restructuring every ``IntentParser``'s return type. Since Phase 25
+        ("Clarification") that restructuring exists for exactly one case -
+        ``SingleTargetParser``'s AMBIGUOUS outcome, surfaced below as
+        ``validation="AMBIGUOUS_ENTITY"`` with the tied candidates - other
+        failure causes (NOT_FOUND, no template match) are still collapsed.
         """
         normalized = normalize(text)
         parser = self._select_parser(normalized)
@@ -260,6 +350,22 @@ class NluEngine:
                 capabilities=(),
                 command=None,
                 validation="NO_MATCH",
+                service=None,
+                data=None,
+            )
+        if isinstance(result, ClarificationRequest):
+            return DebugTrace(
+                input=text,
+                normalized=normalized,
+                parser=parser_name,
+                intent=result.pending_intent,
+                target=result.pending_target,
+                area=None,
+                candidates=tuple(entity.entity_id for entity in result.candidates),
+                resolution=None,
+                capabilities=(),
+                command=None,
+                validation="AMBIGUOUS_ENTITY",
                 service=None,
                 data=None,
             )

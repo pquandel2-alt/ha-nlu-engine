@@ -29,6 +29,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN, NOT_UNDERSTOOD_TEXT
 from .engine import NluEngine
 from .hass_entities import build_entity_snapshots
+from .nlu.context import ConversationContext, ConversationContextStore
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ class NluConversationEntity(
             entry_type=dr.DeviceEntryType.SERVICE,
         )
         self._engine = NluEngine()
+        self._context_store = ConversationContextStore()
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -82,17 +84,47 @@ class NluConversationEntity(
         user_input: conversation.ConversationInput,
         chat_log: conversation.ChatLog,
     ) -> conversation.ConversationResult:
-        """Match the utterance and either act on it or say "not understood"."""
+        """Match the utterance and either act on it or say "not understood".
+
+        A pending clarification (v2 plan Phase 25) for this
+        ``conversation_id`` takes priority over a fresh match: the reply is
+        resolved against the pending candidates instead of parsed as a new
+        sentence (see ``NluEngine.resolve_clarification()``'s docstring for
+        why - a reply like "Das im Wohnzimmer" isn't itself a full command).
+        """
         response = intent.IntentResponse(language=user_input.language)
 
         entities = build_entity_snapshots(self.hass, self.entry)
-        result = self._engine.match(user_input.text, entities)
+        pending = self._context_store.get(user_input.conversation_id)
+
+        if pending is not None and pending.pending_clarification is not None:
+            result = self._engine.resolve_clarification(
+                user_input.text, pending.pending_clarification, entities
+            )
+            self._context_store.clear(user_input.conversation_id)
+        else:
+            result = self._engine.match(user_input.text, entities)
 
         if result is None:
             response.async_set_error(
                 intent.IntentResponseErrorCode.NO_INTENT_MATCH,
                 NOT_UNDERSTOOD_TEXT,
             )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        if result.clarification is not None:
+            self._context_store.set(
+                user_input.conversation_id,
+                ConversationContext(
+                    last_command=None,
+                    last_entities=(),
+                    last_area=None,
+                    pending_clarification=result.clarification,
+                ),
+            )
+            response.async_set_speech(result.response_text)
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
             )

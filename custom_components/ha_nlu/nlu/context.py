@@ -24,6 +24,14 @@ from typing import Callable
 from ..areas import AreaSnapshot
 from ..entities import EntitySnapshot
 from .command import SemanticCommand
+from .parser import ClarificationRequest
+
+__all__ = [
+    "ClarificationRequest",
+    "ConversationContext",
+    "ConversationContextStore",
+    "DEFAULT_CONTEXT_TTL_SECONDS",
+]
 
 # No TTL value is specified anywhere in the plan (only the test case name
 # "context expiration", brain node 9ced4390, section 26). 30s covers a
@@ -31,17 +39,6 @@ from .command import SemanticCommand
 # without keeping stale state around for unrelated later commands in the
 # same HA conversation_id. Revisit if Phase 26/27 wiring shows it's wrong.
 DEFAULT_CONTEXT_TTL_SECONDS = 30.0
-
-
-@dataclass(frozen=True)
-class ClarificationRequest:
-    """A pending disambiguation question, per the plan's ``ConversationState``
-    sketch (brain node e2946a55, section 23) - field names match it exactly.
-    """
-
-    pending_intent: str
-    pending_target: str | None
-    candidates: tuple[EntitySnapshot, ...]
 
 
 @dataclass(frozen=True)
