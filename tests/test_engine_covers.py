@@ -69,3 +69,23 @@ def test_close_cover_infinitive_and_politeness_forms(engine, entities):
         assert result is not None, f"no match for {text!r}"
         assert result.plan.service == "close_cover"
         assert result.plan.entity_id == "cover.rolllade_buro"
+
+
+def test_ganz_auf_ganz_zu_do_not_swallow_ganz_into_entity_name(engine, entities):
+    # v2 plan Phase 15: "ganz auf"/"ganz zu" reuse open_cover/close_cover
+    # (fully open/closed is already their meaning) - pinned separately from
+    # the parametrized OPEN_CASES/CLOSE_CASES above because the interesting
+    # regression here is *name resolution*, not just matching: without the
+    # "ganz auf"/"ganz zu" sentences listed before their plain counterparts
+    # in cover.yaml, hassil's unanchored {name} in the plain sentence
+    # swallows "ganz" too (name="Rollladen Büro ganz"), which fails to
+    # resolve - same sentence-ordering bug class found in Phase 14.
+    open_result = engine.match("Mach den Rollladen Büro ganz auf", entities)
+    assert open_result is not None
+    assert open_result.plan.service == "open_cover"
+    assert open_result.plan.entity_id == "cover.rolllade_buro"
+
+    close_result = engine.match("Mach den Rollladen Büro ganz zu", entities)
+    assert close_result is not None
+    assert close_result.plan.service == "close_cover"
+    assert close_result.plan.entity_id == "cover.rolllade_buro"

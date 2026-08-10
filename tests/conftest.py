@@ -71,12 +71,14 @@ COVER_OPEN_PHRASES = [
     "Fahre {name} hoch",
     "{name} hochfahren",
     "Mach {name} auf",
+    "Mach {name} ganz auf",
 ]
 COVER_CLOSE_PHRASES = [
     "Schließe {name}",
     "Fahre {name} runter",
     "{name} runterfahren",
     "Mach {name} zu",
+    "Mach {name} ganz zu",
 ]
 
 
