@@ -30,6 +30,7 @@ from hassil import Intents
 
 from .entities import EntitySnapshot
 from .nlu.command import SemanticCommand, build_semantic_command
+from .nlu.debug import DebugTrace, format_command
 from .nlu.frame import SemanticFrame
 from .nlu.normalize import normalize
 from .nlu.parser import ParseContext, ParseResult
@@ -222,6 +223,79 @@ class NluEngine:
             return NluResponse(success=False, speech=None, command=None, error=NluError.NO_MATCH)
         return NluResponse(
             success=True, speech=match_result.response_text, command=match_result.command, error=None
+        )
+
+    def debug(self, text: str, entities: list[EntitySnapshot]) -> DebugTrace:
+        """Structured trace of every pipeline stage for one utterance (v2
+        plan Phase 22, "Debug-Modus"). Purely a read-only view alongside
+        ``respond()`` - duplicates the same small, cheap, pure calls
+        (``build_semantic_command``/``validate_command``) rather than
+        threading trace-collection through ``_build_match_result``, same
+        documented tradeoff as ``respond()`` itself (see its docstring).
+        Not wired into ``conversation.py`` or a HA service: the plan calls
+        this feature optional and explicitly "kein Debugging von normalen
+        Nutzern verlangen" - there is no current consumer, same additive
+        pattern as ``SemanticFrame``/``SemanticCommand``/``respond()``
+        before their consuming phases existed.
+
+        CANDIDATES/RESOLUTION only ever show the parser's *final* resolved
+        entity/entities - see nlu/debug.py's module docstring for why a
+        failed resolution can't show ranked alternatives without
+        restructuring every ``IntentParser``'s return type.
+        """
+        normalized = normalize(text)
+        parser = self._select_parser(normalized)
+        parser_name = type(parser).__name__
+        result = parser.parse(normalized, ParseContext(entities=entities))
+        if result is None:
+            return DebugTrace(
+                input=text,
+                normalized=normalized,
+                parser=parser_name,
+                intent=None,
+                target=None,
+                area=None,
+                candidates=(),
+                resolution=None,
+                capabilities=(),
+                command=None,
+                validation="NO_MATCH",
+                service=None,
+                data=None,
+            )
+
+        frame = result.frame
+        matched = result.resolved_entities
+        command = build_semantic_command(result)
+        validation_error = validate_command(command)
+        capabilities = tuple(sorted({capability for entity in matched for capability in entity.capabilities}))
+        candidates = tuple(entity.entity_id for entity in matched)
+
+        service = None
+        data = None
+        validation = "OK"
+        if validation_error is not None:
+            validation = validation_error.name
+        else:
+            match_result = self._build_match_result(result)
+            if match_result is not None and match_result.plan is not None:
+                service = f"{match_result.plan.domain}.{match_result.plan.service}"
+                data = match_result.plan.data
+
+        return DebugTrace(
+            input=text,
+            normalized=normalized,
+            parser=parser_name,
+            intent=frame.intent,
+            target=frame.target.text if frame.target is not None else None,
+            area=frame.area.text if frame.area is not None else None,
+            candidates=candidates,
+            resolution=", ".join(candidates) or None,
+            capabilities=capabilities,
+            command=format_command(command),
+            validation=validation,
+            service=service,
+            data=data,
         )
 
     @staticmethod
