@@ -1,5 +1,5 @@
 """Concrete IntentParser implementations (v2 plan, Phase 2 - "Intent-System
-vereinheitlichen"). Each parser wraps one of the five separately-compiled
+vereinheitlichen"). Each parser wraps one of the six separately-compiled
 hassil grammars (see engine.py's module docstring for why they must stay
 separate) and turns a recognized sentence into a ``ParseResult`` -
 sentence-matching + entity/area resolution stays here, so ``engine.py``
@@ -17,7 +17,14 @@ from .areas import AreaResolveStatus, resolve_area_name
 from .entities import ResolveStatus, resolve_entities_by_domain, resolve_entity
 from .nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
 from .nlu.parser import ParseContext, ParseResult
-from .service_call import FAN_EXTENDED_INTENTS, INTENTS, LIGHT_EXTENDED_INTENTS, PERCENT_INTENTS, QUERY_INTENTS
+from .service_call import (
+    CLIMATE_EXTENDED_INTENTS,
+    FAN_EXTENDED_INTENTS,
+    INTENTS,
+    LIGHT_EXTENDED_INTENTS,
+    PERCENT_INTENTS,
+    QUERY_INTENTS,
+)
 
 # The {name} wildcard captures everything between the fixed template words,
 # so "fahre die Rollade im Büro hoch" captures "Rollade im Büro" verbatim -
@@ -276,6 +283,59 @@ class FanExtendedParser:
                 return None
             parameters: dict[str, object] = {"level": int(level_slot.value)}
         else:  # HassFanIncreaseSpeed / HassFanDecreaseSpeed - no parameters
+            parameters = {}
+
+        frame = SemanticFrame(
+            intent=result.intent.name,
+            target=TargetReference(text=name, entity_id=resolved.entity.entity_id, domain=resolved.entity.domain),
+            area=None,
+            parameters=parameters,
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=[resolved.entity])
+
+
+class ClimateExtendedParser:
+    """Wraps the {name}/{temperature} grammar (climate set/increase/decrease
+    temperature) - the 6th separately-compiled hassil grammar (v2 plan Phase
+    17). {temperature} is anchored by the literal "auf ... Grad" around it
+    (not directly adjacent to {name}), same anchoring precedent
+    FanExtendedParser's {level} slot already established - empirically
+    verified against hassil==3.11.0 before this grammar was written.
+    """
+
+    def __init__(self, intents: Intents) -> None:
+        self._intents = intents
+
+    def parse(self, text: str, context: ParseContext) -> ParseResult | None:
+        slot_lists = {
+            "name": WildcardSlotList(name="name"),
+            "temperature": RangeSlotList(name="temperature", start=5, stop=30, step=1, type=RangeType.NUMBER),
+        }
+        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+        if result is None or result.intent is None:
+            return None
+
+        name_slot = result.entities.get("name")
+        if name_slot is None:
+            return None
+        name = _strip_locative_prepositions(str(name_slot.value))
+        resolved = resolve_entity(name, context.entities)
+        if resolved.status is not ResolveStatus.OK or resolved.entity is None:
+            return None
+
+        # All 3 intents only ever target the climate domain (see
+        # CLIMATE_EXTENDED_INTENTS's docstring) - no per-intent allowed_domains
+        # lookup needed, unlike INTENTS/PERCENT_INTENTS.
+        if result.intent.name not in CLIMATE_EXTENDED_INTENTS or resolved.entity.domain != "climate":
+            return None
+
+        if result.intent.name == "HassClimateSetTemperature":
+            temperature_slot = result.entities.get("temperature")
+            if temperature_slot is None:
+                return None
+            parameters: dict[str, object] = {"temperature": int(temperature_slot.value)}
+        else:  # HassClimateIncreaseTemperature / HassClimateDecreaseTemperature - no parameters
             parameters = {}
 
         frame = SemanticFrame(

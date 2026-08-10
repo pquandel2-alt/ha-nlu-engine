@@ -51,17 +51,17 @@ def _plural_response(entities: list[EntitySnapshot], singular_suffix: str, plura
 
 INTENTS: dict[str, IntentSpec] = {
     "HassTurnOn": IntentSpec(
-        allowed_domains=frozenset({"light", "switch", "fan"}),
+        allowed_domains=frozenset({"light", "switch", "fan", "climate"}),
         build=lambda es: ServiceCallPlan("homeassistant", "turn_on", _entity_id_field(es)),
         response=lambda es: _plural_response(es, "eingeschaltet.", "eingeschaltet."),
     ),
     "HassTurnOff": IntentSpec(
-        allowed_domains=frozenset({"light", "switch", "fan"}),
+        allowed_domains=frozenset({"light", "switch", "fan", "climate"}),
         build=lambda es: ServiceCallPlan("homeassistant", "turn_off", _entity_id_field(es)),
         response=lambda es: _plural_response(es, "ausgeschaltet.", "ausgeschaltet."),
     ),
     "HassToggle": IntentSpec(
-        allowed_domains=frozenset({"light", "switch", "fan"}),
+        allowed_domains=frozenset({"light", "switch", "fan", "climate"}),
         build=lambda es: ServiceCallPlan("homeassistant", "toggle", _entity_id_field(es)),
         response=lambda es: _plural_response(es, "umgeschaltet.", "umgeschaltet."),
     ),
@@ -206,6 +206,55 @@ FAN_EXTENDED_INTENTS: dict[str, FanExtendedIntentSpec] = {
         capability=Capability.FAN_SPEED,
         build=lambda es, params: ServiceCallPlan("fan", "decrease_speed", _entity_id_field(es)),
         response=lambda es, params: f"{es[0].friendly_name} langsamer gestellt.",
+    ),
+}
+
+
+@dataclass(frozen=True)
+class ClimateExtendedIntentSpec:
+    """Separate from FanExtendedIntentSpec: different domain (climate) and a
+    different parameter shape (an absolute ``temperature`` target, not
+    ``level``/step_percent) - same "one dataclass per domain extension"
+    precedent FanExtendedIntentSpec's own docstring explains (v2 plan Phase
+    17, "Climate-NLU")."""
+
+    capability: Capability
+    build: Callable[[list[EntitySnapshot], Mapping[str, Any]], ServiceCallPlan]
+    response: Callable[[list[EntitySnapshot], Mapping[str, Any]], str]
+
+
+# "wärmer"/"kälter" have no user-specified amount (unlike light brightness in
+# Phase 14) - a fixed default step, same design choice FanExtendedIntentSpec's
+# docstring explains for why *that* phase didn't need one (climate has no
+# native increase/decrease service to defer to, unlike fan.increase_speed).
+_CLIMATE_TEMPERATURE_STEP = 1
+
+
+def _climate_step_plan(es: list[EntitySnapshot], step: int) -> ServiceCallPlan:
+    """New absolute target = the resolved entity's current setpoint (its
+    ``temperature`` attribute - the same signal nlu/capabilities.py already
+    reads to derive Capability.TEMPERATURE) plus/minus the fixed step."""
+    current = es[0].attributes["temperature"]
+    return ServiceCallPlan("climate", "set_temperature", _entity_id_field(es), {"temperature": current + step})
+
+
+CLIMATE_EXTENDED_INTENTS: dict[str, ClimateExtendedIntentSpec] = {
+    "HassClimateSetTemperature": ClimateExtendedIntentSpec(
+        capability=Capability.TEMPERATURE,
+        build=lambda es, params: ServiceCallPlan(
+            "climate", "set_temperature", _entity_id_field(es), {"temperature": params["temperature"]}
+        ),
+        response=lambda es, params: f"{es[0].friendly_name} auf {params['temperature']} Grad gestellt.",
+    ),
+    "HassClimateIncreaseTemperature": ClimateExtendedIntentSpec(
+        capability=Capability.TEMPERATURE,
+        build=lambda es, params: _climate_step_plan(es, _CLIMATE_TEMPERATURE_STEP),
+        response=lambda es, params: f"{es[0].friendly_name} wärmer gestellt.",
+    ),
+    "HassClimateDecreaseTemperature": ClimateExtendedIntentSpec(
+        capability=Capability.TEMPERATURE,
+        build=lambda es, params: _climate_step_plan(es, -_CLIMATE_TEMPERATURE_STEP),
+        response=lambda es, params: f"{es[0].friendly_name} kälter gestellt.",
     ),
 }
 

@@ -13,7 +13,7 @@ returns ``None`` - the caller (``conversation.py``) turns that into a fixed
 this is intentional (see plan: predictability over coverage).
 
 Sentence-matching and entity/area resolution live in ``parsers.py`` (one
-``IntentParser`` per grammar - see its module docstring for why five
+``IntentParser`` per grammar - see its module docstring for why six
 grammars stay separately compiled). This module only routes text to the
 right parser and turns its ``ParseResult`` into a ``ServiceCallPlan`` -
 see the v2 plan, Phase 2 ("Intent-System vereinheitlichen"):
@@ -35,8 +35,16 @@ from .nlu.normalize import normalize
 from .nlu.parser import ParseContext, ParseResult
 from .nlu.service_mapper import map_to_service_call
 from .nlu.validator import validate_command
-from .parsers import FanExtendedParser, LightExtendedParser, PercentageParser, QuantifierParser, SingleTargetParser
+from .parsers import (
+    ClimateExtendedParser,
+    FanExtendedParser,
+    LightExtendedParser,
+    PercentageParser,
+    QuantifierParser,
+    SingleTargetParser,
+)
 from .service_call import (
+    CLIMATE_EXTENDED_INTENTS,
     FAN_EXTENDED_INTENTS,
     INTENTS,
     LIGHT_EXTENDED_INTENTS,
@@ -50,6 +58,7 @@ QUANTIFIERS_DIR = INTENTS_DIR / "quantifiers"
 PERCENTAGE_DIR = INTENTS_DIR / "percentage"
 LIGHT_EXTENDED_DIR = INTENTS_DIR / "light_extended"
 FAN_EXTENDED_DIR = INTENTS_DIR / "fan_extended"
+CLIMATE_EXTENDED_DIR = INTENTS_DIR / "climate_extended"
 
 # Sentences containing "Prozent" are routed to PercentageParser's separately-
 # compiled grammar for the same reason as the quantifier routing below: the
@@ -84,6 +93,14 @@ _LIGHT_EXTENDED_RE = re.compile(
 # vocabulary precedent LightExtendedParser already established.
 _FAN_EXTENDED_RE = re.compile(r"\b(stufe|schneller|langsamer)\b", re.IGNORECASE)
 
+# Sentences containing a climate-temperature keyword are routed to
+# ClimateExtendedParser's separately-compiled grammar (v2 plan Phase 17) -
+# same reasoning as the other dedicated grammars above. "temperatur" is safe
+# as a standalone \b-bounded word here: it never matches inside compound
+# words like "Außentemperatur" (query.yaml), since there's no boundary
+# between "Außen" and "temperatur".
+_CLIMATE_EXTENDED_RE = re.compile(r"\b(grad|wärmer|kälter|temperatur)\b", re.IGNORECASE)
+
 
 @dataclass(frozen=True)
 class MatchResult:
@@ -112,6 +129,7 @@ class NluEngine:
         percentage_dir: Path = PERCENTAGE_DIR,
         light_extended_dir: Path = LIGHT_EXTENDED_DIR,
         fan_extended_dir: Path = FAN_EXTENDED_DIR,
+        climate_extended_dir: Path = CLIMATE_EXTENDED_DIR,
     ) -> None:
         yaml_files = sorted(intents_dir.glob("*.yaml"))
         if not yaml_files:
@@ -138,11 +156,17 @@ class NluEngine:
             raise FileNotFoundError(f"No intent YAML files found in {fan_extended_dir}")
         fan_extended_intents: Intents = Intents.from_files(fan_extended_yaml_files)
 
+        climate_extended_yaml_files = sorted(climate_extended_dir.glob("*.yaml"))
+        if not climate_extended_yaml_files:
+            raise FileNotFoundError(f"No intent YAML files found in {climate_extended_dir}")
+        climate_extended_intents: Intents = Intents.from_files(climate_extended_yaml_files)
+
         self._single_parser = SingleTargetParser(intents)
         self._quantifier_parser = QuantifierParser(quantifier_intents)
         self._percentage_parser = PercentageParser(percentage_intents)
         self._light_extended_parser = LightExtendedParser(light_extended_intents)
         self._fan_extended_parser = FanExtendedParser(fan_extended_intents)
+        self._climate_extended_parser = ClimateExtendedParser(climate_extended_intents)
 
     def match(self, text: str, entities: list[EntitySnapshot]) -> MatchResult | None:
         text = normalize(text)
@@ -150,6 +174,8 @@ class NluEngine:
             parser = self._light_extended_parser
         elif _FAN_EXTENDED_RE.search(text):
             parser = self._fan_extended_parser
+        elif _CLIMATE_EXTENDED_RE.search(text):
+            parser = self._climate_extended_parser
         elif _PERCENT_RE.search(text):
             parser = self._percentage_parser
         elif _QUANTIFIER_RE.search(text):
@@ -204,6 +230,15 @@ class NluEngine:
             return MatchResult(
                 plan=map_to_service_call(command),
                 response_text=fan_extended_spec.response(matched, frame.parameters),
+                frame=frame,
+                command=command,
+            )
+
+        climate_extended_spec = CLIMATE_EXTENDED_INTENTS.get(frame.intent)
+        if climate_extended_spec is not None:
+            return MatchResult(
+                plan=map_to_service_call(command),
+                response_text=climate_extended_spec.response(matched, frame.parameters),
                 frame=frame,
                 command=command,
             )

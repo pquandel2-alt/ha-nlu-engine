@@ -54,7 +54,7 @@ def derive_capabilities(
     """
     caps: set[Capability] = set()
 
-    if domain in ("light", "switch", "fan"):
+    if domain in ("light", "switch", "fan", "climate"):
         caps.add(Capability.TURN_ON)
         caps.add(Capability.TURN_OFF)
 
@@ -78,5 +78,12 @@ def derive_capabilities(
             caps.add(Capability.TEMPERATURE)
         if device_class == "humidity":
             caps.add(Capability.HUMIDITY)
+
+    # A climate entity's "temperature" attribute is its single-setpoint
+    # target (climate.set_temperature's own parameter name) - present only
+    # for HVAC modes that support one, same "read the real signal, don't
+    # infer from domain alone" rule FAN_SPEED already follows above.
+    if domain == "climate" and "temperature" in attributes:
+        caps.add(Capability.TEMPERATURE)
 
     return frozenset(caps)

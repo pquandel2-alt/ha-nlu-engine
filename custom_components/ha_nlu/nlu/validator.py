@@ -2,12 +2,13 @@
 the 9 error classes the plan defines, returning the first violated one (or
 ``None`` if the command is safe to execute).
 
-Today's five hassil-based parsers (``parsers.py``) already self-police most
+Today's six hassil-based parsers (``parsers.py``) already self-police most
 of these - they return ``None`` *before* a frame/command is ever built
 whenever entity resolution fails, ambiguity occurs, the domain is wrong, an
 area doesn't resolve, a quantifier count is wrong, or the intent isn't
 registered (see docstrings on ``SingleTargetParser``/``QuantifierParser``/
-``PercentageParser``/``LightExtendedParser``/``FanExtendedParser``). This validator is deliberately
+``PercentageParser``/``LightExtendedParser``/``FanExtendedParser``/
+``ClimateExtendedParser``). This validator is deliberately
 built anyway, for the same reason ``Capability`` (Phase 9) and
 ``SemanticCommand`` (Phase 10) were
 built ahead of their consumers: the plan's later LLM Adapter phase (LLM
@@ -25,7 +26,14 @@ from __future__ import annotations
 
 from enum import Enum, auto
 
-from ..service_call import FAN_EXTENDED_INTENTS, INTENTS, LIGHT_EXTENDED_INTENTS, PERCENT_INTENTS, QUERY_INTENTS
+from ..service_call import (
+    CLIMATE_EXTENDED_INTENTS,
+    FAN_EXTENDED_INTENTS,
+    INTENTS,
+    LIGHT_EXTENDED_INTENTS,
+    PERCENT_INTENTS,
+    QUERY_INTENTS,
+)
 from .capabilities import Capability
 from .command import SemanticCommand
 
@@ -54,18 +62,26 @@ _PERCENT_CAPABILITY_BY_DOMAIN: dict[str, Capability] = {
     "light": Capability.BRIGHTNESS,
 }
 
+# Matches ClimateExtendedParser's RangeSlotList bounds (parsers.py) - kept in
+# sync there and here rather than importing across that boundary, same
+# precedent PERCENT/level range checks below already follow (0-100, 1-10).
+_CLIMATE_TEMPERATURE_MIN = 5
+_CLIMATE_TEMPERATURE_MAX = 30
+
 
 def validate_command(command: SemanticCommand) -> ValidationError | None:
     frame = command.source_frame
     is_percent_intent = command.intent == _PERCENT_INTENT_NAME
     is_light_extended_intent = command.intent in LIGHT_EXTENDED_INTENTS
     is_fan_extended_intent = command.intent in FAN_EXTENDED_INTENTS
+    is_climate_extended_intent = command.intent in CLIMATE_EXTENDED_INTENTS
 
     # 1. Intent vorhanden?
     if (
         not is_percent_intent
         and not is_light_extended_intent
         and not is_fan_extended_intent
+        and not is_climate_extended_intent
         and command.intent not in QUERY_INTENTS
         and command.intent not in INTENTS
     ):
@@ -93,6 +109,8 @@ def validate_command(command: SemanticCommand) -> ValidationError | None:
         allowed_domains = frozenset({"light"})
     elif is_fan_extended_intent:
         allowed_domains = frozenset({"fan"})
+    elif is_climate_extended_intent:
+        allowed_domains = frozenset({"climate"})
     elif command.intent in QUERY_INTENTS:
         allowed_domains = QUERY_INTENTS[command.intent].allowed_domains
     else:
@@ -116,11 +134,18 @@ def validate_command(command: SemanticCommand) -> ValidationError | None:
         for entity in command.entities:
             if required_fan_capability.name not in entity.capabilities:
                 return ValidationError.UNSUPPORTED_CAPABILITY
+    elif is_climate_extended_intent:
+        required_climate_capability = CLIMATE_EXTENDED_INTENTS[command.intent].capability
+        for entity in command.entities:
+            if required_climate_capability.name not in entity.capabilities:
+                return ValidationError.UNSUPPORTED_CAPABILITY
 
     # 7. Parameter vorhanden?
     if is_percent_intent and "percent" not in command.parameters:
         return ValidationError.MISSING_PARAMETER
     if command.intent == "HassFanSetSpeed" and "level" not in command.parameters:
+        return ValidationError.MISSING_PARAMETER
+    if command.intent == "HassClimateSetTemperature" and "temperature" not in command.parameters:
         return ValidationError.MISSING_PARAMETER
 
     # 8. Parameter gültig?
@@ -131,6 +156,10 @@ def validate_command(command: SemanticCommand) -> ValidationError | None:
     if command.intent == "HassFanSetSpeed":
         level = command.parameters["level"]
         if not isinstance(level, int) or not 1 <= level <= 10:
+            return ValidationError.INVALID_PARAMETER
+    if command.intent == "HassClimateSetTemperature":
+        temperature = command.parameters["temperature"]
+        if not isinstance(temperature, int) or not _CLIMATE_TEMPERATURE_MIN <= temperature <= _CLIMATE_TEMPERATURE_MAX:
             return ValidationError.INVALID_PARAMETER
 
     # 9. Quantifier gültig?
