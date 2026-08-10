@@ -80,15 +80,20 @@ COVER_CLOSE_PHRASES = [
 ]
 
 
-def _snapshots(names: dict[str, str], domain: str, state: str) -> list[EntitySnapshot]:
-    return [EntitySnapshot(eid, name, domain, state) for name, eid in names.items()]
+def _snapshots(
+    names: dict[str, str], domain: str, state: str, capabilities: frozenset[str] = frozenset()
+) -> list[EntitySnapshot]:
+    return [EntitySnapshot(eid, name, domain, state, capabilities=capabilities) for name, eid in names.items()]
 
 
 ALL_ENTITIES: list[EntitySnapshot] = (
-    _snapshots(LIGHTS, "light", "off")
-    + _snapshots(SWITCHES, "switch", "off")
-    + _snapshots(COVERS, "cover", "closed")
-    + _snapshots(FANS, "fan", "off")
+    # Dimmable/positionable by default, same as a real light/cover would be
+    # via hass_entities.py's derive_capabilities() - needed since Phase 11
+    # (Command Validator) checks these on percent commands.
+    _snapshots(LIGHTS, "light", "off", capabilities=frozenset({"TURN_ON", "TURN_OFF", "BRIGHTNESS"}))
+    + _snapshots(SWITCHES, "switch", "off", capabilities=frozenset({"TURN_ON", "TURN_OFF"}))
+    + _snapshots(COVERS, "cover", "closed", capabilities=frozenset({"POSITION"}))
+    + _snapshots(FANS, "fan", "off", capabilities=frozenset({"TURN_ON", "TURN_OFF"}))
 )
 
 # Real-world reproduction of the reported "Fahre beide Rollladen im

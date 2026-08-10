@@ -50,16 +50,8 @@ def test_single_match_validates_clean(engine, entities):
     assert validate_command(result.command) is None
 
 
-def test_percentage_match_validates_clean(engine):
-    # The shared ``entities`` fixture predates Phase 9 (Capability System)
-    # and carries no capabilities (hass_entities.py is the only thing that
-    # populates them, from real HA attributes) - build a dedicated light
-    # here so this test reflects what a real dimmable light looks like.
-    dimmable_light = EntitySnapshot(
-        "light.treppen_licht_gruppe", "Treppenlicht", "light", "off",
-        capabilities=frozenset({"TURN_ON", "TURN_OFF", "BRIGHTNESS"}),
-    )
-    result = engine.match("mach das Treppenlicht auf 50 Prozent", [dimmable_light])
+def test_percentage_match_validates_clean(engine, entities):
+    result = engine.match("mach das Treppenlicht auf 50 Prozent", entities)
     assert validate_command(result.command) is None
 
 

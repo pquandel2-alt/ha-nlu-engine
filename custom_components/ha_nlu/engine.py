@@ -33,6 +33,8 @@ from .nlu.command import SemanticCommand, build_semantic_command
 from .nlu.frame import SemanticFrame
 from .nlu.normalize import normalize
 from .nlu.parser import ParseContext, ParseResult
+from .nlu.service_mapper import map_to_service_call
+from .nlu.validator import validate_command
 from .parsers import PercentageParser, QuantifierParser, SingleTargetParser
 from .service_call import INTENTS, PERCENT_INTENTS, QUERY_INTENTS, ServiceCallPlan
 
@@ -121,13 +123,23 @@ class NluEngine:
         matched = result.resolved_entities
         command = build_semantic_command(result)
 
+        # Gate on the Command Validator (v2 plan Phase 11) before building
+        # anything. Today's parsers already self-police everything this
+        # checks, so this never actually rejects a real match (see the 5
+        # "real matches validate clean" regression tests in
+        # tests/test_validator.py) - it is wired in now so a future,
+        # non-self-policing parser (LLM Adapter) gets a real gatekeeper
+        # instead of a silent no-op.
+        if validate_command(command) is not None:
+            return None
+
         percent = frame.parameters.get("percent")
         if percent is not None:
             spec = PERCENT_INTENTS.get(matched[0].domain)
             if spec is None:
                 return None
             return MatchResult(
-                plan=spec.build(matched, percent),
+                plan=map_to_service_call(command),
                 response_text=spec.response(matched, percent),
                 frame=frame,
                 command=command,
@@ -141,5 +153,5 @@ class NluEngine:
         if spec is None:
             return None
         return MatchResult(
-            plan=spec.build(matched), response_text=spec.response(matched), frame=frame, command=command
+            plan=map_to_service_call(command), response_text=spec.response(matched), frame=frame, command=command
         )
