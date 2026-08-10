@@ -31,8 +31,9 @@ from hassil import Intents
 from .areas import AreaResolveStatus, resolve_area_name
 from .entities import EntitySnapshot, ResolveStatus, resolve_entity
 from .nlu.command import SemanticCommand, build_semantic_command
+from .nlu.context import ConversationContext
 from .nlu.debug import DebugTrace, format_command
-from .nlu.frame import SemanticFrame
+from .nlu.frame import SemanticFrame, TargetReference
 from .nlu.normalize import normalize
 from .nlu.parser import ClarificationRequest, ParseContext, ParseResult
 from .nlu.response import NluError, NluResponse
@@ -40,11 +41,13 @@ from .nlu.service_mapper import map_to_service_call
 from .nlu.validator import validate_command
 from .parsers import (
     ClimateExtendedParser,
+    ContextFollowupParser,
     FanExtendedParser,
     LightExtendedParser,
     PercentageParser,
     QuantifierParser,
     SingleTargetParser,
+    _DEFAULT_DIMMING_STEP_PERCENT,
 )
 from .service_call import (
     CLIMATE_EXTENDED_INTENTS,
@@ -62,6 +65,7 @@ PERCENTAGE_DIR = INTENTS_DIR / "percentage"
 LIGHT_EXTENDED_DIR = INTENTS_DIR / "light_extended"
 FAN_EXTENDED_DIR = INTENTS_DIR / "fan_extended"
 CLIMATE_EXTENDED_DIR = INTENTS_DIR / "climate_extended"
+CONTEXT_FOLLOWUP_DIR = INTENTS_DIR / "context_followup"
 
 # Sentences containing "Prozent" are routed to PercentageParser's separately-
 # compiled grammar for the same reason as the quantifier routing below: the
@@ -164,6 +168,7 @@ class NluEngine:
         light_extended_dir: Path = LIGHT_EXTENDED_DIR,
         fan_extended_dir: Path = FAN_EXTENDED_DIR,
         climate_extended_dir: Path = CLIMATE_EXTENDED_DIR,
+        context_followup_dir: Path = CONTEXT_FOLLOWUP_DIR,
     ) -> None:
         yaml_files = sorted(intents_dir.glob("*.yaml"))
         if not yaml_files:
@@ -195,12 +200,18 @@ class NluEngine:
             raise FileNotFoundError(f"No intent YAML files found in {climate_extended_dir}")
         climate_extended_intents: Intents = Intents.from_files(climate_extended_yaml_files)
 
+        context_followup_yaml_files = sorted(context_followup_dir.glob("*.yaml"))
+        if not context_followup_yaml_files:
+            raise FileNotFoundError(f"No intent YAML files found in {context_followup_dir}")
+        context_followup_intents: Intents = Intents.from_files(context_followup_yaml_files)
+
         self._single_parser = SingleTargetParser(intents)
         self._quantifier_parser = QuantifierParser(quantifier_intents)
         self._percentage_parser = PercentageParser(percentage_intents)
         self._light_extended_parser = LightExtendedParser(light_extended_intents)
         self._fan_extended_parser = FanExtendedParser(fan_extended_intents)
         self._climate_extended_parser = ClimateExtendedParser(climate_extended_intents)
+        self._context_followup_parser = ContextFollowupParser(context_followup_intents)
 
     def _select_parser(self, text: str):
         if _LIGHT_EXTENDED_RE.search(text):
@@ -226,6 +237,46 @@ class NluEngine:
                 plan=None, response_text=_clarification_question(result), clarification=result,
             )
         return self._build_match_result(result)
+
+    def match_followup(self, text: str, context: ConversationContext | None) -> MatchResult | None:
+        """Complete an elliptical follow-up sentence that omits its own
+        target (v2 plan Phase 26, "Context") - e.g. "Etwas heller." right
+        after "Mach das Wohnzimmerlicht an.". Tried by ``conversation.py``
+        *before* a fresh ``match()``, since these sentences have no {name}
+        of their own for any other parser to resolve.
+
+        Scope deliberately narrowed to exactly one light in
+        ``context.last_entities``: ``LIGHT_EXTENDED_INTENTS``'
+        ``HassLightBrighten``/``HassLightDim`` responses only ever read
+        ``entities[0].friendly_name`` (see service_call.py), so passing
+        through 2+ entities would silently name only one of several lights
+        actually changed. 0 or 2+ matching lights therefore both return
+        ``None`` here - same "never guess" rule as the rest of the engine,
+        not a bug: the plan's own example is single-light anyway. Falls
+        through to the normal "not understood" response, same as any other
+        non-match.
+        """
+        if context is None:
+            return None
+
+        matched = [entity for entity in context.last_entities if entity.domain == "light"]
+        if len(matched) != 1:
+            return None
+
+        normalized = normalize(text)
+        intent = self._context_followup_parser.parse(normalized)
+        if intent is None:
+            return None
+
+        entity = matched[0]
+        frame = SemanticFrame(
+            intent=intent,
+            target=TargetReference(text=text, entity_id=entity.entity_id, domain=entity.domain),
+            area=None,
+            parameters={"step_percent": _DEFAULT_DIMMING_STEP_PERCENT},
+            source_text=text,
+        )
+        return self._build_match_result(ParseResult(frame=frame, resolved_entities=[entity]))
 
     def resolve_clarification(
         self, reply_text: str, clarification: ClarificationRequest, entities: list[EntitySnapshot]

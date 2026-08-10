@@ -150,6 +150,33 @@ class SingleTargetParser:
         return ParseResult(frame=frame, resolved_entities=[resolved.entity])
 
 
+class ContextFollowupParser:
+    """Wraps a small, name-less grammar for elliptical follow-up commands
+    that omit their target entirely ("Etwas heller.") - v2 plan Phase 26,
+    "Context". Structurally distinct from every other grammar here (no
+    {name} wildcard at all, just fixed sentences), so it's safe to try
+    unconditionally rather than needing a keyword-routing regex like
+    PercentageParser/LightExtendedParser/etc. in engine.py - the caller
+    (``NluEngine.match_followup()``) decides *when* to try it (only with a
+    stored ``ConversationContext``), not *whether the text could collide*.
+
+    Deliberately entity-resolution-free: unlike every other parser, this one
+    doesn't take a ``ParseContext`` and can't resolve a target itself - the
+    caller supplies the previous turn's entity. Returns the bare intent name
+    rather than a ``ParseResult``, since building the ``SemanticFrame``
+    requires context this parser doesn't have.
+    """
+
+    def __init__(self, intents: Intents) -> None:
+        self._intents = intents
+
+    def parse(self, text: str) -> str | None:
+        result = recognize(text, self._intents, language="de")
+        if result is None or result.intent is None:
+            return None
+        return result.intent.name
+
+
 class QuantifierParser:
     """Wraps the {domain}/{area}/{quantifier} grammar ("alle"/"beide[n/r]")."""
 

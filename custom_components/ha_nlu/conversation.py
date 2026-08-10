@@ -91,6 +91,11 @@ class NluConversationEntity(
         resolved against the pending candidates instead of parsed as a new
         sentence (see ``NluEngine.resolve_clarification()``'s docstring for
         why - a reply like "Das im Wohnzimmer" isn't itself a full command).
+
+        Otherwise, an elliptical follow-up without its own target ("Etwas
+        heller.", v2 plan Phase 26) is tried against the stored context
+        before a fresh ``match()`` - see ``NluEngine.match_followup()``'s
+        docstring for the single-light scope decision.
         """
         response = intent.IntentResponse(language=user_input.language)
 
@@ -103,7 +108,9 @@ class NluConversationEntity(
             )
             self._context_store.clear(user_input.conversation_id)
         else:
-            result = self._engine.match(user_input.text, entities)
+            result = self._engine.match_followup(user_input.text, pending)
+            if result is None:
+                result = self._engine.match(user_input.text, entities)
 
         if result is None:
             response.async_set_error(
@@ -128,6 +135,19 @@ class NluConversationEntity(
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
             )
+
+        if result.command is not None:
+            self._context_store.set(
+                user_input.conversation_id,
+                ConversationContext(
+                    last_command=result.command,
+                    last_entities=tuple(result.command.entities),
+                    last_area=result.command.area,
+                    pending_clarification=None,
+                ),
+            )
+        else:
+            self._context_store.clear(user_input.conversation_id)
 
         if result.plan is not None:
             try:
