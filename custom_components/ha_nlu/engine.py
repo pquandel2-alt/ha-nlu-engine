@@ -33,6 +33,7 @@ from .nlu.command import SemanticCommand, build_semantic_command
 from .nlu.frame import SemanticFrame
 from .nlu.normalize import normalize
 from .nlu.parser import ParseContext, ParseResult
+from .nlu.response import NluError, NluResponse
 from .nlu.service_mapper import map_to_service_call
 from .nlu.validator import validate_command
 from .parsers import (
@@ -168,25 +169,60 @@ class NluEngine:
         self._fan_extended_parser = FanExtendedParser(fan_extended_intents)
         self._climate_extended_parser = ClimateExtendedParser(climate_extended_intents)
 
+    def _select_parser(self, text: str):
+        if _LIGHT_EXTENDED_RE.search(text):
+            return self._light_extended_parser
+        if _FAN_EXTENDED_RE.search(text):
+            return self._fan_extended_parser
+        if _CLIMATE_EXTENDED_RE.search(text):
+            return self._climate_extended_parser
+        if _PERCENT_RE.search(text):
+            return self._percentage_parser
+        if _QUANTIFIER_RE.search(text):
+            return self._quantifier_parser
+        return self._single_parser
+
     def match(self, text: str, entities: list[EntitySnapshot]) -> MatchResult | None:
         text = normalize(text)
-        if _LIGHT_EXTENDED_RE.search(text):
-            parser = self._light_extended_parser
-        elif _FAN_EXTENDED_RE.search(text):
-            parser = self._fan_extended_parser
-        elif _CLIMATE_EXTENDED_RE.search(text):
-            parser = self._climate_extended_parser
-        elif _PERCENT_RE.search(text):
-            parser = self._percentage_parser
-        elif _QUANTIFIER_RE.search(text):
-            parser = self._quantifier_parser
-        else:
-            parser = self._single_parser
-
+        parser = self._select_parser(text)
         result = parser.parse(text, ParseContext(entities=entities))
         if result is None:
             return None
         return self._build_match_result(result)
+
+    def respond(self, text: str, entities: list[EntitySnapshot]) -> NluResponse:
+        """Same matching as ``match()``, but never collapses a miss to a bare
+        ``None`` - see nlu/response.py's module docstring for why. Not yet
+        wired into ``conversation.py``: today's Assist agent shows the same
+        fixed "not understood" text regardless of cause, so there is no
+        current consumer for the distinction - kept additive, like
+        ``SemanticFrame``/``SemanticCommand`` were ahead of Phases 10/11,
+        until a later phase (Debug-Modus, Clarification) actually branches
+        on ``NluResponse.error``.
+        """
+        normalized = normalize(text)
+        parser = self._select_parser(normalized)
+        result = parser.parse(normalized, ParseContext(entities=entities))
+        if result is None:
+            return NluResponse(success=False, speech=None, command=None, error=NluError.NO_MATCH)
+
+        command = build_semantic_command(result)
+        validation_error = validate_command(command)
+        if validation_error is not None:
+            return NluResponse(
+                success=False, speech=None, command=None, error=NluError[validation_error.name]
+            )
+
+        match_result = self._build_match_result(result)
+        if match_result is None:
+            # Structurally unreachable once validate_command() has passed -
+            # every remaining lookup in _build_match_result mirrors a check
+            # the validator already performed (see its module docstring).
+            # Kept as a safe fallback rather than an assert.
+            return NluResponse(success=False, speech=None, command=None, error=NluError.NO_MATCH)
+        return NluResponse(
+            success=True, speech=match_result.response_text, command=match_result.command, error=None
+        )
 
     @staticmethod
     def _build_match_result(result: ParseResult) -> MatchResult | None:
