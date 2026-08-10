@@ -212,6 +212,8 @@ NEGATIVE_SENTENCES: list[str] = [
     "fahre die Rolllade im Keller hoch",  # unresolvable area
     "mach das Licht auf 150 Prozent",  # out of range percentage
     "stelle die Steckdose Büro auf 50 Prozent",  # switch has no PERCENT-capable domain mapping
+    "mach beide Ventilatoren an",  # v2 plan Phase 21 example: "beide" but only 1 fan exists
+    "schalte beide Schalter aus",  # same rule, switch domain (only 1 switch entity)
 ]
 
 

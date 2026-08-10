@@ -58,5 +58,13 @@
   {
     "text": "stelle die Steckdose Büro auf 50 Prozent",
     "expect_match": false
+  },
+  {
+    "text": "mach beide Ventilatoren an",
+    "expect_match": false
+  },
+  {
+    "text": "schalte beide Schalter aus",
+    "expect_match": false
   }
 ]
