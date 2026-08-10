@@ -19,7 +19,7 @@ is the Validator's job, not this module's.
 
 from __future__ import annotations
 
-from ..service_call import INTENTS, LIGHT_EXTENDED_INTENTS, PERCENT_INTENTS, ServiceCallPlan
+from ..service_call import FAN_EXTENDED_INTENTS, INTENTS, LIGHT_EXTENDED_INTENTS, PERCENT_INTENTS, ServiceCallPlan
 from .command import SemanticCommand
 
 
@@ -33,6 +33,10 @@ def map_to_service_call(command: SemanticCommand) -> ServiceCallPlan | None:
     light_extended_spec = LIGHT_EXTENDED_INTENTS.get(command.intent)
     if light_extended_spec is not None:
         return light_extended_spec.build(entities, command.parameters)
+
+    fan_extended_spec = FAN_EXTENDED_INTENTS.get(command.intent)
+    if fan_extended_spec is not None:
+        return fan_extended_spec.build(entities, command.parameters)
 
     spec = INTENTS.get(command.intent)
     return spec.build(entities) if spec is not None else None

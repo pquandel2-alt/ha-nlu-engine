@@ -13,7 +13,7 @@ returns ``None`` - the caller (``conversation.py``) turns that into a fixed
 this is intentional (see plan: predictability over coverage).
 
 Sentence-matching and entity/area resolution live in ``parsers.py`` (one
-``IntentParser`` per grammar - see its module docstring for why four
+``IntentParser`` per grammar - see its module docstring for why five
 grammars stay separately compiled). This module only routes text to the
 right parser and turns its ``ParseResult`` into a ``ServiceCallPlan`` -
 see the v2 plan, Phase 2 ("Intent-System vereinheitlichen"):
@@ -35,13 +35,21 @@ from .nlu.normalize import normalize
 from .nlu.parser import ParseContext, ParseResult
 from .nlu.service_mapper import map_to_service_call
 from .nlu.validator import validate_command
-from .parsers import LightExtendedParser, PercentageParser, QuantifierParser, SingleTargetParser
-from .service_call import INTENTS, LIGHT_EXTENDED_INTENTS, PERCENT_INTENTS, QUERY_INTENTS, ServiceCallPlan
+from .parsers import FanExtendedParser, LightExtendedParser, PercentageParser, QuantifierParser, SingleTargetParser
+from .service_call import (
+    FAN_EXTENDED_INTENTS,
+    INTENTS,
+    LIGHT_EXTENDED_INTENTS,
+    PERCENT_INTENTS,
+    QUERY_INTENTS,
+    ServiceCallPlan,
+)
 
 INTENTS_DIR = Path(__file__).parent / "intents" / "de"
 QUANTIFIERS_DIR = INTENTS_DIR / "quantifiers"
 PERCENTAGE_DIR = INTENTS_DIR / "percentage"
 LIGHT_EXTENDED_DIR = INTENTS_DIR / "light_extended"
+FAN_EXTENDED_DIR = INTENTS_DIR / "fan_extended"
 
 # Sentences containing "Prozent" are routed to PercentageParser's separately-
 # compiled grammar for the same reason as the quantifier routing below: the
@@ -67,6 +75,14 @@ _LIGHT_EXTENDED_RE = re.compile(
     r"\b(heller|dunkler|rot|grün|blau|gelb|orange|lila|violett|weiß|pink|rosa|türkis|cyan|warmweiß|kaltweiß)\b",
     re.IGNORECASE,
 )
+
+# Sentences containing a fan-speed keyword are routed to FanExtendedParser's
+# separately-compiled grammar (v2 plan Phase 16) - same reasoning as the
+# other dedicated grammars above: "auf Stufe 3" would otherwise collide with
+# nothing existing (no overlap with prozent/quantifier/color keywords), but
+# keeping it as its own grammar/parser follows the same one-parser-per-
+# vocabulary precedent LightExtendedParser already established.
+_FAN_EXTENDED_RE = re.compile(r"\b(stufe|schneller|langsamer)\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -95,6 +111,7 @@ class NluEngine:
         quantifiers_dir: Path = QUANTIFIERS_DIR,
         percentage_dir: Path = PERCENTAGE_DIR,
         light_extended_dir: Path = LIGHT_EXTENDED_DIR,
+        fan_extended_dir: Path = FAN_EXTENDED_DIR,
     ) -> None:
         yaml_files = sorted(intents_dir.glob("*.yaml"))
         if not yaml_files:
@@ -116,15 +133,23 @@ class NluEngine:
             raise FileNotFoundError(f"No intent YAML files found in {light_extended_dir}")
         light_extended_intents: Intents = Intents.from_files(light_extended_yaml_files)
 
+        fan_extended_yaml_files = sorted(fan_extended_dir.glob("*.yaml"))
+        if not fan_extended_yaml_files:
+            raise FileNotFoundError(f"No intent YAML files found in {fan_extended_dir}")
+        fan_extended_intents: Intents = Intents.from_files(fan_extended_yaml_files)
+
         self._single_parser = SingleTargetParser(intents)
         self._quantifier_parser = QuantifierParser(quantifier_intents)
         self._percentage_parser = PercentageParser(percentage_intents)
         self._light_extended_parser = LightExtendedParser(light_extended_intents)
+        self._fan_extended_parser = FanExtendedParser(fan_extended_intents)
 
     def match(self, text: str, entities: list[EntitySnapshot]) -> MatchResult | None:
         text = normalize(text)
         if _LIGHT_EXTENDED_RE.search(text):
             parser = self._light_extended_parser
+        elif _FAN_EXTENDED_RE.search(text):
+            parser = self._fan_extended_parser
         elif _PERCENT_RE.search(text):
             parser = self._percentage_parser
         elif _QUANTIFIER_RE.search(text):
@@ -170,6 +195,15 @@ class NluEngine:
             return MatchResult(
                 plan=map_to_service_call(command),
                 response_text=light_extended_spec.response(matched, frame.parameters),
+                frame=frame,
+                command=command,
+            )
+
+        fan_extended_spec = FAN_EXTENDED_INTENTS.get(frame.intent)
+        if fan_extended_spec is not None:
+            return MatchResult(
+                plan=map_to_service_call(command),
+                response_text=fan_extended_spec.response(matched, frame.parameters),
                 frame=frame,
                 command=command,
             )

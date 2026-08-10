@@ -1,5 +1,5 @@
 """Concrete IntentParser implementations (v2 plan, Phase 2 - "Intent-System
-vereinheitlichen"). Each parser wraps one of the four separately-compiled
+vereinheitlichen"). Each parser wraps one of the five separately-compiled
 hassil grammars (see engine.py's module docstring for why they must stay
 separate) and turns a recognized sentence into a ``ParseResult`` -
 sentence-matching + entity/area resolution stays here, so ``engine.py``
@@ -17,7 +17,7 @@ from .areas import AreaResolveStatus, resolve_area_name
 from .entities import ResolveStatus, resolve_entities_by_domain, resolve_entity
 from .nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
 from .nlu.parser import ParseContext, ParseResult
-from .service_call import INTENTS, LIGHT_EXTENDED_INTENTS, PERCENT_INTENTS, QUERY_INTENTS
+from .service_call import FAN_EXTENDED_INTENTS, INTENTS, LIGHT_EXTENDED_INTENTS, PERCENT_INTENTS, QUERY_INTENTS
 
 # The {name} wildcard captures everything between the fixed template words,
 # so "fahre die Rollade im Büro hoch" captures "Rollade im Büro" verbatim -
@@ -229,6 +229,60 @@ class PercentageParser:
             target=TargetReference(text=name, entity_id=resolved.entity.entity_id, domain=resolved.entity.domain),
             area=None,
             parameters={"percent": percent},
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=[resolved.entity])
+
+
+class FanExtendedParser:
+    """Wraps the {name}/{level} grammar (fan speed set/increase/decrease) -
+    the 5th separately-compiled hassil grammar (v2 plan Phase 16). {level}
+    is anchored by the literal "auf Stufe" before it (not directly adjacent
+    to {name}), avoiding the unanchored-WildcardSlotList-next-to-
+    RangeSlotList bug documented for LightExtendedParser/PercentageParser -
+    empirically verified against hassil==3.11.0 before this grammar was
+    written.
+    """
+
+    def __init__(self, intents: Intents) -> None:
+        self._intents = intents
+
+    def parse(self, text: str, context: ParseContext) -> ParseResult | None:
+        slot_lists = {
+            "name": WildcardSlotList(name="name"),
+            "level": RangeSlotList(name="level", start=1, stop=10, step=1, type=RangeType.NUMBER),
+        }
+        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+        if result is None or result.intent is None:
+            return None
+
+        name_slot = result.entities.get("name")
+        if name_slot is None:
+            return None
+        name = _strip_locative_prepositions(str(name_slot.value))
+        resolved = resolve_entity(name, context.entities)
+        if resolved.status is not ResolveStatus.OK or resolved.entity is None:
+            return None
+
+        # All 3 intents only ever target the fan domain (see
+        # FAN_EXTENDED_INTENTS's docstring) - no per-intent allowed_domains
+        # lookup needed, unlike INTENTS/PERCENT_INTENTS.
+        if result.intent.name not in FAN_EXTENDED_INTENTS or resolved.entity.domain != "fan":
+            return None
+
+        if result.intent.name == "HassFanSetSpeed":
+            level_slot = result.entities.get("level")
+            if level_slot is None:
+                return None
+            parameters: dict[str, object] = {"level": int(level_slot.value)}
+        else:  # HassFanIncreaseSpeed / HassFanDecreaseSpeed - no parameters
+            parameters = {}
+
+        frame = SemanticFrame(
+            intent=result.intent.name,
+            target=TargetReference(text=name, entity_id=resolved.entity.entity_id, domain=resolved.entity.domain),
+            area=None,
+            parameters=parameters,
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=[resolved.entity])

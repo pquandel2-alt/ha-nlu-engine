@@ -164,6 +164,52 @@ _COLOR_SPOKEN_DE = {
 _COLOR_TEMP_SPOKEN_DE = {2700: "warmweiß", 6500: "kaltweiß"}
 
 
+@dataclass(frozen=True)
+class FanExtendedIntentSpec:
+    """Separate from LightExtendedIntentSpec: different domain (fan) and a
+    different parameter shape (``level``, not step_percent/color_name) -
+    same "one dataclass per domain extension" precedent LightExtendedIntentSpec's
+    own docstring explains (v2 plan Phase 16, "Fan-NLU erweitern")."""
+
+    capability: Capability
+    build: Callable[[list[EntitySnapshot], Mapping[str, Any]], ServiceCallPlan]
+    response: Callable[[list[EntitySnapshot], Mapping[str, Any]], str]
+
+
+def _fan_set_speed_plan(es: list[EntitySnapshot], params: Mapping[str, Any]) -> ServiceCallPlan:
+    """"Stufe N" -> a percentage, via the resolved fan's own percentage_step
+    attribute (HA's FanEntity base class always exposes it, = 100 /
+    speed_count - defaults to 1.0 for a continuous-percentage fan). Clamped
+    to 100 so an unusually high level on a coarse-stepped fan can't produce
+    an out-of-range service call."""
+    percentage_step = es[0].attributes.get("percentage_step") or 1.0
+    percentage = min(round(params["level"] * percentage_step), 100)
+    return ServiceCallPlan("fan", "turn_on", _entity_id_field(es), {"percentage": percentage})
+
+
+FAN_EXTENDED_INTENTS: dict[str, FanExtendedIntentSpec] = {
+    "HassFanSetSpeed": FanExtendedIntentSpec(
+        capability=Capability.FAN_SPEED,
+        build=_fan_set_speed_plan,
+        response=lambda es, params: f"{es[0].friendly_name} auf Stufe {params['level']} gestellt.",
+    ),
+    # "schneller"/"langsamer" call HA's native fan.increase_speed/
+    # decrease_speed directly, with no extra data - unlike light brightness
+    # (Phase 14) there is no invented step size to decide on here; HA/the
+    # device own the step.
+    "HassFanIncreaseSpeed": FanExtendedIntentSpec(
+        capability=Capability.FAN_SPEED,
+        build=lambda es, params: ServiceCallPlan("fan", "increase_speed", _entity_id_field(es)),
+        response=lambda es, params: f"{es[0].friendly_name} schneller gestellt.",
+    ),
+    "HassFanDecreaseSpeed": FanExtendedIntentSpec(
+        capability=Capability.FAN_SPEED,
+        build=lambda es, params: ServiceCallPlan("fan", "decrease_speed", _entity_id_field(es)),
+        response=lambda es, params: f"{es[0].friendly_name} langsamer gestellt.",
+    ),
+}
+
+
 LIGHT_EXTENDED_INTENTS: dict[str, LightExtendedIntentSpec] = {
     "HassLightBrighten": LightExtendedIntentSpec(
         capability=Capability.BRIGHTNESS,
