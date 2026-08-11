@@ -163,7 +163,10 @@ def validate_command(command: SemanticCommand) -> ValidationError | None:
             return ValidationError.INVALID_PARAMETER
 
     # 9. Quantifier gültig?
-    if frame.quantifier is not None and frame.quantifier.kind == "both" and len(command.entities) != 2:
-        return ValidationError.INVALID_QUANTIFIER
+    if frame.quantifier is not None:
+        if frame.quantifier.kind == "both" and len(command.entities) != 2:
+            return ValidationError.INVALID_QUANTIFIER
+        if frame.quantifier.kind == "count" and len(command.entities) != frame.quantifier.value:
+            return ValidationError.INVALID_QUANTIFIER
 
     return None

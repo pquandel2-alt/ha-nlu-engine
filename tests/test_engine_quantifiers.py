@@ -75,3 +75,86 @@ def test_domain_with_no_matches_in_room_returns_none(engine):
     ]
     result = engine.match("fahre alle Rollläden im Keller hoch", entities)
     assert result is None
+
+
+# Phase 29 ("Natural Quantifiers") - plan examples: "die beiden Lampen", "die
+# drei Lichter", "alle außer der Küchenlampe", "nur die Wohnzimmerlampen".
+# The last one is tested via "nur die Lampen im Wohnzimmer" instead of the
+# literal compound word "Wohnzimmerlampen": splitting a German compound noun
+# into a room + domain pair is a deliberate, documented scope cut (see
+# QuantifierParser's docstring) - "nur" maps to the same "all" quantifier
+# value as "alle", so an area-scoped "nur"-sentence exercises the same
+# resolution path without needing compound-word parsing.
+
+
+def test_die_beiden_lampen_both_with_die_prefix(engine):
+    entities = [
+        EntitySnapshot("light.deckenlicht", "Deckenlicht", "light", "off"),
+        EntitySnapshot("light.stehlampe", "Stehlampe", "light", "off"),
+    ]
+    result = engine.match("mach die beiden Lampen an", entities)
+    assert result is not None
+    assert sorted(result.plan.entity_id) == ["light.deckenlicht", "light.stehlampe"]
+
+
+def test_die_drei_lichter_count_quantifier(engine):
+    entities = [
+        EntitySnapshot("light.deckenlicht", "Deckenlicht", "light", "off"),
+        EntitySnapshot("light.stehlampe", "Stehlampe", "light", "off"),
+        EntitySnapshot("light.wandlicht", "Wandlicht", "light", "off"),
+    ]
+    result = engine.match("mach die drei Lichter an", entities)
+    assert result is not None
+    assert sorted(result.plan.entity_id) == ["light.deckenlicht", "light.stehlampe", "light.wandlicht"]
+
+
+def test_count_rejects_wrong_number_of_matches(engine):
+    entities = [
+        EntitySnapshot("light.deckenlicht", "Deckenlicht", "light", "off"),
+        EntitySnapshot("light.stehlampe", "Stehlampe", "light", "off"),
+    ]
+    result = engine.match("mach die drei Lichter an", entities)
+    assert result is None
+
+
+def test_alle_ausser_exclusion(engine):
+    entities = [
+        EntitySnapshot("light.wohnzimmerlampe", "Wohnzimmerlampe", "light", "off"),
+        EntitySnapshot("light.schlafzimmerlampe", "Schlafzimmerlampe", "light", "off"),
+        EntitySnapshot("light.kuechenlampe", "Küchenlampe", "light", "off"),
+    ]
+    result = engine.match("mach alle Lichter an außer der Küchenlampe", entities)
+    assert result is not None
+    assert sorted(result.plan.entity_id) == ["light.schlafzimmerlampe", "light.wohnzimmerlampe"]
+
+
+def test_exclusion_target_outside_match_set_returns_none(engine):
+    # "Küchenrollladen" resolves, but to a cover, not a light - the
+    # domain-filtered match set never contained it, so excluding it must
+    # refuse the whole command rather than silently matching everyone.
+    entities = [
+        EntitySnapshot("light.wohnzimmerlampe", "Wohnzimmerlampe", "light", "off"),
+        EntitySnapshot("cover.kuechenrollladen", "Küchenrollladen", "cover", "closed"),
+    ]
+    result = engine.match("mach alle Lichter an außer der Küchenrollladen", entities)
+    assert result is None
+
+
+def test_exclusion_target_unresolvable_returns_none(engine):
+    entities = [
+        EntitySnapshot("light.wohnzimmerlampe", "Wohnzimmerlampe", "light", "off"),
+        EntitySnapshot("light.schlafzimmerlampe", "Schlafzimmerlampe", "light", "off"),
+    ]
+    result = engine.match("mach alle Lichter an außer der Küchenlampe", entities)
+    assert result is None
+
+
+def test_nur_quantifier_area_scoped(engine):
+    entities = [
+        EntitySnapshot("light.decke", "Deckenlicht", "light", "off", area_id="wohnzimmer", area_name="Wohnzimmer"),
+        EntitySnapshot("light.steh", "Stehlampe", "light", "off", area_id="wohnzimmer", area_name="Wohnzimmer"),
+        EntitySnapshot("light.kueche", "Küchenlicht", "light", "off", area_id="kueche", area_name="Küche"),
+    ]
+    result = engine.match("mach nur die Lampen im Wohnzimmer an", entities)
+    assert result is not None
+    assert sorted(result.plan.entity_id) == ["light.decke", "light.steh"]

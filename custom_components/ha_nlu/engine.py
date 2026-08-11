@@ -77,12 +77,18 @@ REFERENCE_DIR = INTENTS_DIR / "reference"
 # "Prozent" - see nlu/normalize.py) is routed correctly too.
 _PERCENT_RE = re.compile(r"\bprozent\b", re.IGNORECASE)
 
-# Sentences containing "alle"/"beide[n/r]" are routed to QuantifierParser's
-# separately-compiled grammar rather than mixed into the {name}-wildcard
-# grammar above - hassil's recognize() would otherwise structurally match
-# both grammars for the same sentence and silently pick whichever comes
-# first in file/sentence order.
-_QUANTIFIER_RE = re.compile(r"\b(alle|beide[nr]?)\b", re.IGNORECASE)
+# Sentences containing "alle"/"beide[n/r]"/"nur"/a count word are routed to
+# QuantifierParser's separately-compiled grammar rather than mixed into the
+# {name}-wildcard grammar above - hassil's recognize() would otherwise
+# structurally match both grammars for the same sentence and silently pick
+# whichever comes first in file/sentence order. The count-word list (v2 plan
+# Phase 29, "Natural Quantifiers") mirrors parsers.py's _COUNT_SLOT_LIST -
+# "nur"/count-only sentences like "nur die Wohnzimmerlampen an" or "mach die
+# drei Lichter an" contain neither "alle" nor "beide[n/r]", so without this
+# they'd never even reach QuantifierParser.
+_QUANTIFIER_RE = re.compile(
+    r"\b(alle|beide[nr]?|nur|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn)\b", re.IGNORECASE
+)
 
 # Sentences containing a brightness-adjust or colour/colour-temperature
 # keyword are routed to LightExtendedParser's separately-compiled grammar

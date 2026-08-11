@@ -34,11 +34,12 @@ class AreaReference:
 
 @dataclass(frozen=True)
 class Quantifier:
-    """A structured quantifier reference ("alle"/"beide[n/r]") - v2 plan
-    Phase 8, generalizing the raw "all"/"both" string previously stashed in
-    ``SemanticFrame.parameters``. ``value`` is reserved for quantifier kinds
-    the v3 plan adds later (e.g. "die drei Lampen" -> kind="count", value=3);
-    "all"/"both" always carry ``value=None`` today.
+    """A structured quantifier reference ("alle"/"beide[n/r]"/"nur"/count
+    words) - v2 plan Phase 8, generalizing the raw "all"/"both" string
+    previously stashed in ``SemanticFrame.parameters``. ``value`` holds the
+    parsed count for ``kind="count"`` (e.g. "die drei Lampen" ->
+    kind="count", value=3) - added in Phase 29, "Natural Quantifiers".
+    "all"/"both" always carry ``value=None``.
     """
 
     kind: str

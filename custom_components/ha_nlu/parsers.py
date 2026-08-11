@@ -67,9 +67,27 @@ _DOMAIN_SLOT_LIST = TextSlotList.from_tuples(
 
 # Maps straight to "all"/"both" (rather than the raw German word) so
 # QuantifierParser can apply the "beide" == exactly 2 hits rule directly.
+# "nur" (v2 plan Phase 29, "Natural Quantifiers") also maps to "all" - "nur
+# die Wohnzimmerlampen" restricts to a domain/area filter exactly like
+# "alle", it just doesn't additionally claim "every matching light in the
+# house" the way a bare "alle" does; the engine can't tell the two apart
+# once the filter is applied, so there's no separate "only" kind.
 _QUANTIFIER_SLOT_LIST = TextSlotList.from_tuples(
-    [("alle", "all"), ("beide", "both"), ("beiden", "both"), ("beider", "both")],
+    [("alle", "all"), ("beide", "both"), ("beiden", "both"), ("beider", "both"), ("nur", "all")],
     name="quantifier",
+)
+
+# "zwei".."zehn" (v2 plan Phase 29) generalizes "beide"'s exact-count rule
+# ("beide" == exactly 2) to arbitrary N ("die drei Lichter" == exactly 3).
+# Same fixed, closed-vocabulary pattern as the slot lists above - string
+# values (cast to int in QuantifierParser.parse()), same precedent
+# _COLOR_TEMP_SLOT_LIST already established.
+_COUNT_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("zwei", "2"), ("drei", "3"), ("vier", "4"), ("fünf", "5"),
+        ("sechs", "6"), ("sieben", "7"), ("acht", "8"), ("neun", "9"), ("zehn", "10"),
+    ],
+    name="count",
 )
 
 # "oben"/"unten" (v2 plan Phase 28, "Hierarchische Orte") - a fixed, closed
@@ -198,9 +216,37 @@ class ContextFollowupParser:
 
 
 class QuantifierParser:
-    """Wraps the {domain}/{area}/{level}/{quantifier} grammar ("alle"/
-    "beide[n/r]"). {level} ("oben"/"unten") is v2 plan Phase 28,
-    "Hierarchische Orte" - the plan's own example, "alle Lichter oben".
+    """Wraps the {domain}/{area}/{level}/{quantifier}/{count}/{name} grammar
+    ("alle"/"beide[n/r]"/"nur"/count words/exclusion). {level} ("oben"/
+    "unten") is v2 plan Phase 28, "Hierarchische Orte". {count}/{name} and
+    the "nur" quantifier value are v2 plan Phase 29, "Natural Quantifiers" -
+    the plan's own examples: "die beiden Lampen" (existing "both" quantifier,
+    now reachable with an optional "die" prefix - see the quantifier YAMLs),
+    "die drei Lichter" ({count} slot, generalizes "beide"'s exact-count rule
+    to arbitrary N), "alle außer der Küchenlampe" ({name} exclusion clause),
+    "nur die Wohnzimmerlampen" ("nur" added to _QUANTIFIER_SLOT_LIST,
+    mapping to "all" - see that slot list's docstring for why there's no
+    separate "only" kind).
+
+    Three ways a sentence can express *how many*, mutually exclusive by
+    sentence template (a sentence uses at most one of these slots):
+      1. ``{quantifier}`` slot present -> "all"/"both" (or "all" via "nur").
+      2. ``{count}`` slot present -> "count", with ``Quantifier.value`` set
+         to the parsed number; ``len(matches)`` must equal it exactly, same
+         "never guess" rule "beide" already established for count=2.
+      3. Neither slot present -> the exclusion sentences ("alle {domain} an
+         außer [dem|der|den] {name}") hardcode the literal "alle" in the
+         YAML rather than using the {quantifier} slot (so "außer ..." can
+         follow it without the quantifier grammar getting in the way) -
+         defaults to "all" here.
+
+    ``{name}``, when present, is the entity excluded from the match set
+    ("außer der Küchenlampe"). Resolved with the same ``resolve_entity()``
+    used for singular targets elsewhere, and the domain/area-filtered
+    ``matches`` must already contain it - an exclusion target that doesn't
+    resolve unambiguously, or that resolves to an entity outside the
+    filtered set (wrong domain/room), refuses the whole command rather than
+    silently matching everyone (that would misreport what got excluded).
 
     Area resolution has a floor fallback: if the captured {area} text
     doesn't resolve to a known room (``AreaResolveStatus.NOT_FOUND``), it's
@@ -223,6 +269,8 @@ class QuantifierParser:
             "area": WildcardSlotList(name="area"),
             "level": _LEVEL_SLOT_LIST,
             "quantifier": _QUANTIFIER_SLOT_LIST,
+            "count": _COUNT_SLOT_LIST,
+            "name": WildcardSlotList(name="name"),
         }
         result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
         if result is None or result.intent is None:
@@ -240,9 +288,17 @@ class QuantifierParser:
             return None
 
         quantifier_slot = result.entities.get("quantifier")
-        if quantifier_slot is None:
-            return None
-        quantifier = str(quantifier_slot.value)
+        count_slot = result.entities.get("count")
+        quantifier_value: int | None = None
+        if quantifier_slot is not None:
+            quantifier = str(quantifier_slot.value)
+        elif count_slot is not None:
+            quantifier = "count"
+            quantifier_value = int(count_slot.value)
+        else:
+            # Exclusion sentences hardcode the literal "alle" instead of
+            # using the {quantifier} slot - see the class docstring.
+            quantifier = "all"
 
         area_id = None
         area_name = None
@@ -272,16 +328,29 @@ class QuantifierParser:
             floor_id = level_resolved.floor_id
 
         matches = resolve_entities_by_domain(domain, context.entities, area_id=area_id, floor_id=floor_id)
+
+        name_slot = result.entities.get("name")
+        if name_slot is not None:
+            exclude_name = _strip_locative_prepositions(str(name_slot.value))
+            excluded = resolve_entity(exclude_name, context.entities)
+            if excluded.status is not ResolveStatus.OK or excluded.entity is None:
+                return None  # exclusion target doesn't resolve unambiguously - never guess
+            if excluded.entity not in matches:
+                return None  # not part of the filtered match set - refuse, don't silently no-op
+            matches = [e for e in matches if e.entity_id != excluded.entity.entity_id]
+
         if not matches:
             return None
         if quantifier == "both" and len(matches) != 2:
             return None  # "beide" requires exactly 2 hits - otherwise not understood
+        if quantifier == "count" and len(matches) != quantifier_value:
+            return None  # "die drei Lichter" requires exactly 3 hits - same rule, generalized
 
         frame = SemanticFrame(
             intent=result.intent.name,
             target=TargetReference(text=domain, domain=domain),
             area=AreaReference(text=area_name, area_id=area_id) if area_id is not None else None,
-            quantifier=Quantifier(kind=quantifier),
+            quantifier=Quantifier(kind=quantifier, value=quantifier_value),
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=matches)
