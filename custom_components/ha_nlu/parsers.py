@@ -10,13 +10,14 @@ a ``ServiceCallPlan``.
 from __future__ import annotations
 
 import re
+from typing import Callable
 
 from hassil import Intents, RangeSlotList, RangeType, TextSlotList, WildcardSlotList, recognize
 
 from .areas import AreaResolveStatus, AreaSnapshot, resolve_area_name
 from .entities import EntitySnapshot, ResolveStatus, resolve_entities_by_domain, resolve_entity
 from .floors import FloorResolveStatus, resolve_floor_by_level_keyword, resolve_floor_name
-from .nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
+from .nlu.frame import AreaReference, Comparison, Quantifier, SemanticFrame, TargetReference
 from .nlu.parser import AmbiguousReference, ClarificationRequest, ParseContext, ParseResult
 from .service_call import (
     CLIMATE_EXTENDED_INTENTS,
@@ -132,6 +133,83 @@ _COLOR_TEMP_SLOT_LIST = TextSlotList.from_tuples(
 # User decision (AskUserQuestion, v2 plan Phase 14): "heller"/"dunkler"
 # without an explicit {percent} slot default to 10% per command.
 _DEFAULT_DIMMING_STEP_PERCENT = 10
+
+# "mindestens"/"höchstens"/"nicht höher als"/"über"/"unter" (HomeIntent plan
+# V4.6, "Comparisons") -> Comparison.operator. "nicht höher als" is a
+# multi-word text key - hassil's TextSlotList.from_tuples supports this
+# (empirically verified against hassil==3.11.0 before this list was written,
+# same discipline as _COLOR_TEMP_SLOT_LIST/_DOMAIN_SLOT_LIST). Both
+# "höchstens" and "nicht höher als" map to "lte" - two spoken phrasings, one
+# operator, same precedent _QUANTIFIER_SLOT_LIST's "nur"->"all" already set.
+_COMPARATOR_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("mindestens", "gte"),
+        ("höchstens", "lte"),
+        ("nicht höher als", "lte"),
+        ("über", "gt"),
+        ("unter", "lt"),
+    ],
+    name="comparator",
+)
+
+# Dedicated {domain} vocabulary for ComparisonQueryParser's grammar only -
+# not merged into _DOMAIN_SLOT_LIST (shared by QuantifierParser/
+# ReferenceParser for every other command), since "Heizung"/"Raum" as
+# synonyms for the climate domain only make sense in a comparison-query
+# context ("welche Räume sind unter 20 Grad") and adding them to the shared
+# list would silently enable "mach alle Räume an" etc. elsewhere - out of
+# V4.6's scope. Plural before singular, same reordering reason
+# _DOMAIN_SLOT_LIST's docstring documents.
+_COMPARISON_DOMAIN_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("Lichter", "light"), ("Licht", "light"), ("Lampen", "light"), ("Lampe", "light"),
+        ("Rollläden", "cover"), ("Rollladen", "cover"), ("Rolladen", "cover"), ("Rolläden", "cover"),
+        ("Rollos", "cover"), ("Rollo", "cover"),
+        ("Heizungen", "climate"), ("Heizung", "climate"),
+        ("Thermostate", "climate"), ("Thermostat", "climate"),
+        ("Räume", "climate"), ("Raum", "climate"),
+    ],
+    name="domain",
+)
+
+# Comparison operator -> a Python callable, shared by both the {percent} and
+# {temperature} branches of ComparisonQueryParser (the operator's meaning
+# doesn't depend on which unit it's comparing).
+_COMPARATORS: dict[str, Callable[[float, float], bool]] = {
+    "gte": lambda current, threshold: current >= threshold,
+    "lte": lambda current, threshold: current <= threshold,
+    "gt": lambda current, threshold: current > threshold,
+    "lt": lambda current, threshold: current < threshold,
+}
+
+
+def _current_percent(entity: EntitySnapshot) -> float | None:
+    """The entity's current value on a 0-100 scale, for the {percent} branch
+    of a comparison query - light brightness (raw HA "brightness" attribute,
+    0-255, same conversion _speak_brightness in service_call.py already
+    performs) or cover position (raw HA "current_position" attribute,
+    already 0-100 - same attribute nlu/capabilities.py reads for
+    Capability.POSITION). Returns ``None`` when the entity doesn't report the
+    attribute at all (e.g. an on/off-only light) - never guessed, just
+    excluded from the match set by the caller.
+    """
+    if entity.domain == "light":
+        brightness = entity.attributes.get("brightness")
+        return brightness / 255 * 100 if brightness is not None else None
+    if entity.domain == "cover":
+        position = entity.attributes.get("current_position")
+        return float(position) if position is not None else None
+    return None
+
+
+def _current_temperature(entity: EntitySnapshot) -> float | None:
+    """The climate entity's current *room* temperature, for the
+    {temperature} branch - the raw HA "current_temperature" attribute, not
+    "temperature" (that one's the target setpoint, already read elsewhere by
+    Capability.TEMPERATURE/HassClimateIncreaseTemperature - a different
+    signal, see nlu/capabilities.py)."""
+    current = entity.attributes.get("current_temperature")
+    return float(current) if current is not None else None
 
 
 class SingleTargetParser:
@@ -357,7 +435,14 @@ class QuantifierParser:
 
 
 class PercentageParser:
-    """Wraps the {name}/{percent} grammar (cover position / light brightness)."""
+    """Wraps the {name}/{percent} grammar (cover position / light brightness).
+
+    {comparator} (HomeIntent plan V4.6, "Comparisons", setpoint-synonym half
+    per user decision 2026-08-11) is an optional slot on the same sentences -
+    "stelle die Lampe auf mindestens 50 Prozent" still sets the target to
+    exactly ``percent`` (the comparator doesn't change *what* gets set, only
+    records *how* the user phrased it, in ``parameters["comparison"]`` for
+    observability/future use)."""
 
     def __init__(self, intents: Intents) -> None:
         self._intents = intents
@@ -366,6 +451,7 @@ class PercentageParser:
         slot_lists = {
             "name": WildcardSlotList(name="name"),
             "percent": RangeSlotList(name="percent", start=0, stop=100, step=1, type=RangeType.PERCENTAGE),
+            "comparator": _COMPARATOR_SLOT_LIST,
         }
         result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
         if result is None or result.intent is None:
@@ -390,11 +476,16 @@ class PercentageParser:
         if PERCENT_INTENTS.get(resolved.entity.domain) is None:
             return None
 
+        parameters: dict[str, object] = {"percent": percent}
+        comparator_slot = result.entities.get("comparator")
+        if comparator_slot is not None:
+            parameters["comparison"] = Comparison(operator=str(comparator_slot.value), value=percent)
+
         frame = SemanticFrame(
             intent=result.intent.name,
             target=TargetReference(text=name, entity_id=resolved.entity.entity_id, domain=resolved.entity.domain),
             area=None,
-            parameters={"percent": percent},
+            parameters=parameters,
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=[resolved.entity])
@@ -461,6 +552,11 @@ class ClimateExtendedParser:
     (not directly adjacent to {name}), same anchoring precedent
     FanExtendedParser's {level} slot already established - empirically
     verified against hassil==3.11.0 before this grammar was written.
+
+    {comparator} (HomeIntent plan V4.6, "Comparisons", setpoint-synonym half)
+    is an optional slot on ``HassClimateSetTemperature``'s sentences only -
+    same "records how it was phrased, doesn't change the target" behaviour
+    as PercentageParser's own {comparator} handling.
     """
 
     def __init__(self, intents: Intents) -> None:
@@ -470,6 +566,7 @@ class ClimateExtendedParser:
         slot_lists = {
             "name": WildcardSlotList(name="name"),
             "temperature": RangeSlotList(name="temperature", start=5, stop=30, step=1, type=RangeType.NUMBER),
+            "comparator": _COMPARATOR_SLOT_LIST,
         }
         result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
         if result is None or result.intent is None:
@@ -493,7 +590,11 @@ class ClimateExtendedParser:
             temperature_slot = result.entities.get("temperature")
             if temperature_slot is None:
                 return None
-            parameters: dict[str, object] = {"temperature": int(temperature_slot.value)}
+            temperature = int(temperature_slot.value)
+            parameters: dict[str, object] = {"temperature": temperature}
+            comparator_slot = result.entities.get("comparator")
+            if comparator_slot is not None:
+                parameters["comparison"] = Comparison(operator=str(comparator_slot.value), value=temperature)
         else:  # HassClimateIncreaseTemperature / HassClimateDecreaseTemperature - no parameters
             parameters = {}
 
@@ -570,6 +671,120 @@ class LightExtendedParser:
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=[resolved.entity])
+
+
+class ComparisonQueryParser:
+    """Wraps the {domain}/{comparator}/{percent}/{temperature}/{area}
+    grammar ("welche Lichter sind mindestens 50 Prozent", "welche Räume sind
+    unter 20 Grad") - the 9th separately-compiled hassil grammar, HomeIntent
+    plan V4.6's query-filter half (user decision 2026-08-11: needed alongside
+    the setpoint-synonym half PercentageParser/ClimateExtendedParser now
+    carry). Unlike every other query intent (``QUERY_INTENTS``' only other
+    entry, ``HassGetState``, always resolves to exactly one entity),
+    this is the first multi-entity query - it keeps only the entities whose
+    *current* value satisfies the comparison, same "resolve then filter"
+    shape ``QuantifierParser`` already established for "alle X im Y".
+
+    Two mutually exclusive branches by which value slot is present ({percent}
+    or {temperature} - a sentence uses exactly one, never both):
+      - {percent}: current value read via ``_current_percent`` (light
+        brightness 0-255->0-100, cover position already 0-100) - only valid
+        for ``domain in ("light", "cover")``.
+      - {temperature}: current value read via ``_current_temperature`` (the
+        climate entity's *current room* temperature, not its target setpoint)
+        - only valid for ``domain == "climate"``.
+    A domain/value-slot mismatch ("welche Lichter sind unter 20 Grad" - a
+    light has no Grad value) has no defined meaning and returns ``None``
+    rather than guessing what was meant.
+
+    Entities that don't report the needed attribute at all (e.g. an
+    on/off-only light has no "brightness") are silently excluded from the
+    match set, not treated as a comparison failure or a hard error - same
+    "skip what can't be evaluated" behaviour capabilities.py already applies
+    elsewhere. An empty result set after filtering returns ``None`` (nothing
+    to report), same as ``QuantifierParser``'s "no matches" case.
+
+    ``frame.quantifier`` is always set to ``Quantifier(kind="all")`` (even
+    for a single-entity result) - required so ``validate_command()``'s check
+    #3 doesn't misfire on a multi-entity match, same precedent
+    ``ReferenceParser`` already established for its own multi-entity
+    branches.
+    """
+
+    def __init__(self, intents: Intents) -> None:
+        self._intents = intents
+
+    def parse(self, text: str, context: ParseContext) -> ParseResult | None:
+        slot_lists = {
+            "domain": _COMPARISON_DOMAIN_SLOT_LIST,
+            "comparator": _COMPARATOR_SLOT_LIST,
+            "percent": RangeSlotList(name="percent", start=0, stop=100, step=1, type=RangeType.PERCENTAGE),
+            "temperature": RangeSlotList(name="temperature", start=0, stop=40, step=1, type=RangeType.NUMBER),
+            "area": WildcardSlotList(name="area"),
+        }
+        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+        if result is None or result.intent is None:
+            return None
+
+        spec = QUERY_INTENTS.get(result.intent.name)
+        if spec is None:
+            return None
+
+        domain_slot = result.entities.get("domain")
+        comparator_slot = result.entities.get("comparator")
+        if domain_slot is None or comparator_slot is None:
+            return None
+        domain = str(domain_slot.value)
+        if domain not in spec.allowed_domains:
+            return None
+        comparator = str(comparator_slot.value)
+
+        percent_slot = result.entities.get("percent")
+        temperature_slot = result.entities.get("temperature")
+        if percent_slot is not None and domain in ("light", "cover"):
+            threshold = float(percent_slot.value)
+            current_value = _current_percent
+        elif temperature_slot is not None and domain == "climate":
+            threshold = float(temperature_slot.value)
+            current_value = _current_temperature
+        else:
+            return None  # value slot doesn't match the domain - no defined meaning, never guess
+
+        area_id = None
+        area_name = None
+        floor_id = None
+        area_slot = result.entities.get("area")
+        if area_slot is not None:
+            area_name = _strip_locative_prepositions(str(area_slot.value))
+            if area_name:
+                area_resolved = resolve_area_name(area_name, context.entities)
+                if area_resolved.status is AreaResolveStatus.OK:
+                    area_id = area_resolved.area_id
+                elif area_resolved.status is AreaResolveStatus.NOT_FOUND:
+                    floor_resolved = resolve_floor_name(area_name, context.entities)
+                    if floor_resolved.status is not FloorResolveStatus.OK:
+                        return None  # neither a known room nor a known floor - never guess
+                    floor_id = floor_resolved.floor_id
+                else:
+                    return None  # ambiguous room name - never guess
+            else:
+                area_name = None
+
+        candidates = resolve_entities_by_domain(domain, context.entities, area_id=area_id, floor_id=floor_id)
+        compare = _COMPARATORS[comparator]
+        matches = [e for e in candidates if (v := current_value(e)) is not None and compare(v, threshold)]
+        if not matches:
+            return None
+
+        frame = SemanticFrame(
+            intent=result.intent.name,
+            target=TargetReference(text=domain, domain=domain),
+            area=AreaReference(text=area_name, area_id=area_id) if area_id is not None else None,
+            quantifier=Quantifier(kind="all"),
+            parameters={"comparison": Comparison(operator=comparator, value=threshold)},
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=matches)
 
 
 # Custom, non-HA-core intent names for the "die anderen" complement grammar

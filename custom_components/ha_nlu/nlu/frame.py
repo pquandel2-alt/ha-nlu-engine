@@ -47,6 +47,26 @@ class Quantifier:
 
 
 @dataclass(frozen=True)
+class Comparison:
+    """A relative threshold ("mindestens"/"höchstens"/"nicht höher als"/
+    "über"/"unter" + a percent/degree value) - HomeIntent plan V4.6,
+    "Comparisons". User decision (2026-08-11): needed both as a SET-command
+    setpoint synonym (parsers.py's PercentageParser/ClimateExtendedParser -
+    the comparator is captured for observability, but ``value`` still
+    drives the actual target the same way a plain number would) and as a
+    standalone filter query (parsers.py's ComparisonQueryParser - keeps only
+    entities whose current value satisfies the comparison). ``operator`` is
+    one of "gte" (mindestens), "lte" (höchstens/nicht höher als), "gt"
+    (über), "lt" (unter) - stashed in ``SemanticFrame.parameters["comparison"]``
+    rather than becoming a new top-level frame field, same as how percent/
+    temperature/step_percent already flow through ``parameters``.
+    """
+
+    operator: str
+    value: float
+
+
+@dataclass(frozen=True)
 class SemanticFrame:
     intent: str
     target: TargetReference | None

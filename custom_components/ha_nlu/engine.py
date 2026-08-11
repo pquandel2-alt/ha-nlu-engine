@@ -41,6 +41,7 @@ from .nlu.service_mapper import map_to_service_call
 from .nlu.validator import validate_command
 from .parsers import (
     ClimateExtendedParser,
+    ComparisonQueryParser,
     ContextFollowupParser,
     FanExtendedParser,
     LightExtendedParser,
@@ -68,6 +69,19 @@ FAN_EXTENDED_DIR = INTENTS_DIR / "fan_extended"
 CLIMATE_EXTENDED_DIR = INTENTS_DIR / "climate_extended"
 CONTEXT_FOLLOWUP_DIR = INTENTS_DIR / "context_followup"
 REFERENCE_DIR = INTENTS_DIR / "reference"
+COMPARISON_QUERY_DIR = INTENTS_DIR / "comparison_query"
+
+# Sentences containing "welche" are routed to ComparisonQueryParser's
+# separately-compiled grammar (HomeIntent plan V4.6, "Comparisons",
+# query-filter half) - checked *first*, before every other regex below: a
+# sentence like "welche Heizungen sind unter 20 Grad" also contains "Grad"
+# (would otherwise match _CLIMATE_EXTENDED_RE) and "welche Lichter sind
+# mindestens 50 Prozent" also contains "Prozent" (would otherwise match
+# _PERCENT_RE) - both would be structurally swallowed by the wrong grammar
+# if checked after those, same "one keyword, one dedicated grammar, checked
+# before anything it could collide with" reasoning _LIGHT_EXTENDED_RE's own
+# comment documents for its position ahead of _PERCENT_RE.
+_COMPARISON_QUERY_RE = re.compile(r"\bwelche\b", re.IGNORECASE)
 
 # Sentences containing "Prozent" are routed to PercentageParser's separately-
 # compiled grammar for the same reason as the quantifier routing below: the
@@ -192,6 +206,7 @@ class NluEngine:
         climate_extended_dir: Path = CLIMATE_EXTENDED_DIR,
         context_followup_dir: Path = CONTEXT_FOLLOWUP_DIR,
         reference_dir: Path = REFERENCE_DIR,
+        comparison_query_dir: Path = COMPARISON_QUERY_DIR,
     ) -> None:
         yaml_files = sorted(intents_dir.glob("*.yaml"))
         if not yaml_files:
@@ -233,6 +248,11 @@ class NluEngine:
             raise FileNotFoundError(f"No intent YAML files found in {reference_dir}")
         reference_intents: Intents = Intents.from_files(reference_yaml_files)
 
+        comparison_query_yaml_files = sorted(comparison_query_dir.glob("*.yaml"))
+        if not comparison_query_yaml_files:
+            raise FileNotFoundError(f"No intent YAML files found in {comparison_query_dir}")
+        comparison_query_intents: Intents = Intents.from_files(comparison_query_yaml_files)
+
         self._single_parser = SingleTargetParser(intents)
         self._quantifier_parser = QuantifierParser(quantifier_intents)
         self._percentage_parser = PercentageParser(percentage_intents)
@@ -241,8 +261,11 @@ class NluEngine:
         self._climate_extended_parser = ClimateExtendedParser(climate_extended_intents)
         self._context_followup_parser = ContextFollowupParser(context_followup_intents)
         self._reference_parser = ReferenceParser(reference_intents)
+        self._comparison_query_parser = ComparisonQueryParser(comparison_query_intents)
 
     def _select_parser(self, text: str):
+        if _COMPARISON_QUERY_RE.search(text):
+            return self._comparison_query_parser
         if _LIGHT_EXTENDED_RE.search(text):
             return self._light_extended_parser
         if _FAN_EXTENDED_RE.search(text):

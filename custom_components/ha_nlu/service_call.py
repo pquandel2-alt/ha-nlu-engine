@@ -151,10 +151,46 @@ def _speak_query(entity: EntitySnapshot) -> str:
     return _speak_state(entity)
 
 
+# Which raw HA attribute a comparison-query match's current value is spoken
+# from, per domain (HomeIntent plan V4.6, "Comparisons", query-filter half -
+# user decision 2026-08-11). Deliberately a separate small read here rather
+# than importing parsers.py's ``_current_percent``/``_current_temperature``:
+# parsers.py already imports from this module (QUERY_INTENTS itself), so the
+# reverse import would be circular - same reasoning kept everywhere else in
+# this project for the parsers.py/service_call.py boundary.
+def _speak_comparison_value(entity: EntitySnapshot) -> str:
+    if entity.domain == "light":
+        brightness = entity.attributes.get("brightness")
+        return f"{round(brightness / 255 * 100)} Prozent" if brightness is not None else "unbekannt"
+    if entity.domain == "cover":
+        position = entity.attributes.get("current_position")
+        return f"{round(position)} Prozent" if position is not None else "unbekannt"
+    if entity.domain == "climate":
+        current = entity.attributes.get("current_temperature")
+        return f"{round(current)} Grad" if current is not None else "unbekannt"
+    return "unbekannt"
+
+
+def _speak_comparison_matches(entities: list[EntitySnapshot]) -> str:
+    """ComparisonQueryParser already filtered ``entities`` down to the ones
+    satisfying the comparison (see its docstring) - this only speaks the
+    result, same "no matches" bailout as everywhere else in this engine
+    doesn't apply here since an empty list never reaches this function
+    (parsers.py returns ``None`` instead)."""
+    if len(entities) == 1:
+        entity = entities[0]
+        return f"{entity.friendly_name}: {_speak_comparison_value(entity)}."
+    return ", ".join(f"{e.friendly_name} ({_speak_comparison_value(e)})" for e in entities) + "."
+
+
 QUERY_INTENTS: dict[str, QueryIntentSpec] = {
     "HassGetState": QueryIntentSpec(
         allowed_domains=frozenset({"sensor", "light"}),
         response=lambda es: _speak_query(es[0]),
+    ),
+    "HassQueryComparison": QueryIntentSpec(
+        allowed_domains=frozenset({"light", "cover", "climate"}),
+        response=_speak_comparison_matches,
     ),
 }
 

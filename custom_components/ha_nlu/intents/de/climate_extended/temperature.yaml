@@ -12,6 +12,13 @@ intents:
           - "stelle [den|die|dem|der|das] {name} auf {temperature} Grad"
           - "[kannst du] mach [den|die|dem|der|das] {name} auf {temperature} Grad"
           - "[kannst du|bitte] [den|die|dem|der|das] {name} auf {temperature} Grad stellen"
+          # {comparator} (HomeIntent plan V4.6, "Comparisons", setpoint-
+          # synonym half - user decision 2026-08-11): same "records how it
+          # was phrased, doesn't change the target" behaviour as
+          # percentage/position_brightness.yaml's own {comparator} sentences.
+          - "stelle [den|die|dem|der|das] {name} auf {comparator} {temperature} Grad"
+          - "[kannst du] mach [den|die|dem|der|das] {name} auf {comparator} {temperature} Grad"
+          - "[kannst du|bitte] [den|die|dem|der|das] {name} auf {comparator} {temperature} Grad stellen"
   # "wärmer"/"kälter" and "erhöhe/senke die Temperatur" - no {amount} slot:
   # the plan's own example parameter ({"operation": "increase", "amount": 1})
   # only calls for a fixed default step, not a user-specified one (unlike
