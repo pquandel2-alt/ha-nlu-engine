@@ -99,3 +99,33 @@ def test_unknown_area_and_unknown_floor_returns_none(engine):
 def test_floor_with_no_matching_domain_returns_none(engine):
     result = engine.match("fahre alle Rollläden im Erdgeschoss hoch", TWO_FLOOR_HOUSE)
     assert result is None
+
+
+def test_mach_oben_die_lichter_aus_without_quantifier_word(engine):
+    # HomeIntent plan V4.3 ("Implicit Targets"): the plan's own literal
+    # example has no alle/beide/nur - just verb + {level} + {domain}. Same
+    # resolve_floor_by_level_keyword() resolution as "alle Lichter oben",
+    # QuantifierParser.parse() already defaults to quantifier="all" when
+    # neither {quantifier} nor {count} is present.
+    result = engine.match("Mach oben die Lichter aus", TWO_FLOOR_HOUSE)
+    assert result is not None
+    assert result.plan.service == "turn_off"
+    assert sorted(result.plan.entity_id) == ["light.buero", "light.schlafzimmer"]
+
+
+def test_schalte_unten_die_lichter_ein_without_quantifier_word(engine):
+    result = engine.match("schalte unten die Lichter ein", TWO_FLOOR_HOUSE)
+    assert result is not None
+    assert result.plan.service == "turn_on"
+    assert sorted(result.plan.entity_id) == ["light.kueche", "light.wohnzimmer"]
+
+
+def test_kannst_du_oben_die_lichter_anmachen_without_quantifier_word(engine):
+    result = engine.match("kannst du oben die Lichter anmachen", TWO_FLOOR_HOUSE)
+    assert result is not None
+    assert sorted(result.plan.entity_id) == ["light.buero", "light.schlafzimmer"]
+
+
+def test_oben_without_quantifier_word_and_without_floor_data_returns_none(engine, entities):
+    # Same "never guess" rule as the pre-existing quantifier-word form.
+    assert engine.match("mach oben die Lichter aus", entities) is None

@@ -25,6 +25,18 @@ intents:
           # restraint the plan itself asks for.
           - "dreh [die] {quantifier} [die] {domain} an"
           - "lass [die] {quantifier} [die] {domain} an"
+          # {level} without a {quantifier} word (HomeIntent plan V4.3,
+          # "Implicit Targets" - "Mach oben die Lichter aus." has no
+          # alle/beide/nur, and "oben" sits *before* the domain, unlike the
+          # {quantifier} sentences' trailing {level} above). QuantifierParser
+          # .parse() already defaults to quantifier="all" whenever neither
+          # {quantifier} nor {count} is present (see its docstring, case 3) -
+          # same fallback the {domain}-außer-{name} exclusion sentences
+          # already rely on - so this needs no new resolution code, only the
+          # sentence itself.
+          - "mach {level} [die] {domain} an"
+          - "schalte {level} [die] {domain} ein"
+          - "kannst du {level} [die] {domain} anmachen"
   HassTurnOff:
     data:
       - sentences:
@@ -47,6 +59,9 @@ intents:
           - "schalte alle {domain} aus außer [dem|der|den] {name}"
           - "dreh [die] {quantifier} [die] {domain} aus"
           - "lass [die] {quantifier} [die] {domain} aus"
+          - "mach {level} [die] {domain} aus"
+          - "schalte {level} [die] {domain} aus"
+          - "kannst du {level} [die] {domain} ausmachen"
   HassToggle:
     data:
       - sentences:

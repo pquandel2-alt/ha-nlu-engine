@@ -164,6 +164,30 @@ def test_match_reference_area_anchored_returns_none_for_wrong_domain(engine, qua
     assert engine.match_reference("Der Ventilator dort runter.", quantifier_entities, context) is None
 
 
+def test_match_reference_area_anchored_verb_first_dort_before_domain(engine, quantifier_entities):
+    # HomeIntent plan V4.3 ("Implicit Targets"): the plan's own example is
+    # verb-first with "dort" *before* the domain ("Mach dort die Rollläden
+    # runter."), not just the pre-existing trailing "{domain} dort runter"
+    # word order - same _resolve_area_anchored() resolution either way.
+    single_area = AreaSnapshot(area_id="buero", name="Büro")
+    entities_with_area = quantifier_entities + [
+        EntitySnapshot("cover.rolllade_buero_2", "Rolllade Büro 2", "cover", "open", area_id="buero", area_name="Büro"),
+    ]
+    context = _context(last_area=single_area)
+    result = engine.match_reference("Mach dort die Rollläden runter.", entities_with_area, context)
+    assert result is not None
+    assert result.plan.service == "close_cover"
+    assert result.plan.entity_id == "cover.rolllade_buero_2"
+
+
+def test_match_reference_area_anchored_verb_first_domain_before_dort(engine, quantifier_entities):
+    context = _context(last_area=POLERAUM)
+    result = engine.match_reference("Mach die Rollläden dort hoch.", quantifier_entities, context)
+    assert result is not None
+    assert result.plan.service == "open_cover"
+    assert sorted(result.plan.entity_id) == ["cover.rolllade_poleraum_links", "cover.rolllade_poleraum_rechts"]
+
+
 def test_match_reference_ambiguous_reference_returns_none(engine, entities):
     context = _context((SWITCH_A,))
     assert engine.match_reference("Die andere.", entities, context) is None

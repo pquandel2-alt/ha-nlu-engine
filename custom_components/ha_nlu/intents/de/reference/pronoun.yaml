@@ -33,12 +33,21 @@ intents:
           - "[die|der|das] {domain} dort hoch"
           - "fahr [die|der|das] {domain} dort hoch"
           - "fahre [die|der|das] {domain} dort hoch"
+          # Verb-first word order with "dort" before the domain (HomeIntent
+          # plan V4.3, "Implicit Targets" - plan's own example is "Mach dort
+          # die Rollläden runter.", mirrored here for the open direction).
+          # Same _resolve_area_anchored() resolution as the sentences above -
+          # only the wording differs, not the resolution logic.
+          - "mach dort [die|der|das] {domain} hoch"
+          - "mach [die|der|das] {domain} dort hoch"
   HassCloseCover:
     data:
       - sentences:
           - "[die|der|das] {domain} dort runter"
           - "fahr [die|der|das] {domain} dort runter"
           - "fahre [die|der|das] {domain} dort runter"
+          - "mach dort [die|der|das] {domain} runter"
+          - "mach [die|der|das] {domain} dort runter"
   HassReferenceOther:
     data:
       - sentences:

@@ -96,9 +96,12 @@ _BARE_PERCENT_RE = re.compile(r"\bauf\s+\d{1,3}\b")
 # Phase 29, "Natural Quantifiers") mirrors parsers.py's _COUNT_SLOT_LIST -
 # "nur"/count-only sentences like "nur die Wohnzimmerlampen an" or "mach die
 # drei Lichter an" contain neither "alle" nor "beide[n/r]", so without this
-# they'd never even reach QuantifierParser.
+# they'd never even reach QuantifierParser. Same reasoning applies to
+# "oben"/"unten" (HomeIntent plan V4.3, "Implicit Targets" - "Mach oben die
+# Lichter aus." has no {quantifier} word at all, only {level}) - added here
+# for the same "or this sentence never reaches QuantifierParser" reason.
 _QUANTIFIER_RE = re.compile(
-    r"\b(alle|beide[nr]?|nur|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn)\b", re.IGNORECASE
+    r"\b(alle|beide[nr]?|nur|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|oben|unten)\b", re.IGNORECASE
 )
 
 # Sentences containing a brightness-adjust or colour/colour-temperature
