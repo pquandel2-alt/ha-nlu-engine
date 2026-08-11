@@ -11,7 +11,15 @@ intents:
   HassSetPercentage:
     data:
       - sentences:
-          # Verb before {name}: "stelle/fahre/mach/setze die Rolllade auf 30 Prozent [runter|hoch]"
-          - "[kannst du|bitte] (fahre|mach|stelle|setze) [den|die|das] {name} auf {percent} Prozent [runter|hoch|Helligkeit]"
-          # Verb after: "kannst du die Rolllade auf 30 Prozent fahren/dimmen/einstellen/stellen"
-          - "[kannst du|bitte] [den|die|das] {name} auf {percent} Prozent (dimmen|einstellen|fahren|stellen)"
+          # "Prozent" is optional (HomeIntent plan V4.2, "Number
+          # Normalization": "50" alone must normalize to the same value as
+          # "50 Prozent") - safe to drop here without risking a guess: the
+          # resolved entity's domain (cover/light) is the only thing that
+          # decides the service call, and PERCENT_INTENTS below only knows
+          # those two, so a bare number on any other domain (fan/climate,
+          # which use their own "Stufe"/"Grad" grammars) still falls
+          # through to no-match instead of being silently misinterpreted.
+          # Verb before {name}: "stelle/fahre/mach/setze die Rolllade auf 30 [Prozent] [runter|hoch]"
+          - "[kannst du|bitte] (fahre|mach|stelle|setze) [den|die|das] {name} auf {percent} [Prozent] [runter|hoch|Helligkeit]"
+          # Verb after: "kannst du die Rolllade auf 30 [Prozent] fahren/dimmen/einstellen/stellen"
+          - "[kannst du|bitte] [den|die|das] {name} auf {percent} [Prozent] (dimmen|einstellen|fahren|stellen)"

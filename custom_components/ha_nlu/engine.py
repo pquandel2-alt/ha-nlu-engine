@@ -77,6 +77,17 @@ REFERENCE_DIR = INTENTS_DIR / "reference"
 # "Prozent" - see nlu/normalize.py) is routed correctly too.
 _PERCENT_RE = re.compile(r"\bprozent\b", re.IGNORECASE)
 
+# Bare "auf 50" with no unit word at all (HomeIntent plan V4.2, "Number
+# Normalization" - "50" must mean the same as "50 Prozent") also needs
+# routing here, since without a "Prozent"/"%" anywhere in the sentence
+# _PERCENT_RE above never fires. Checked *after* the climate/fan regexes
+# below (never before this point in _select_parser) so "auf 21 Grad"/"auf
+# Stufe 3" keep going to their own grammars first - this only catches a
+# digit sitting directly after "auf" with nothing else in between, which
+# "auf Stufe 3" and "auf 21 Grad" don't (there's always a word between "auf"
+# and the digit, or a unit word after it, in those two).
+_BARE_PERCENT_RE = re.compile(r"\bauf\s+\d{1,3}\b")
+
 # Sentences containing "alle"/"beide[n/r]"/"nur"/a count word are routed to
 # QuantifierParser's separately-compiled grammar rather than mixed into the
 # {name}-wildcard grammar above - hassil's recognize() would otherwise
@@ -235,7 +246,7 @@ class NluEngine:
             return self._fan_extended_parser
         if _CLIMATE_EXTENDED_RE.search(text):
             return self._climate_extended_parser
-        if _PERCENT_RE.search(text):
+        if _PERCENT_RE.search(text) or _BARE_PERCENT_RE.search(text):
             return self._percentage_parser
         if _QUANTIFIER_RE.search(text):
             return self._quantifier_parser

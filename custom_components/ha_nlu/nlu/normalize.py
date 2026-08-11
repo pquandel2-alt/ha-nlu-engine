@@ -3,9 +3,10 @@ v2 plan Phase 3). Kept intentionally small - hassil's ``recognize()``
 already tolerates mixed case, extra whitespace, trailing punctuation and
 spelled-out German numbers natively (verified empirically against
 hassil==3.11.0), so this module only covers what hassil does *not* handle:
-the "%" symbol, which has no built-in meaning for ``RangeSlotList``, and
-(HomeIntent plan V4.1, "Advanced German Language") most of a fixed set of
-German filler particles that carry no command meaning of their own.
+the "%" and "°" symbols, which have no built-in meaning for
+``RangeSlotList``, and (HomeIntent plan V4.1, "Advanced German Language")
+most of a fixed set of German filler particles that carry no command
+meaning of their own.
 
 Must never make a semantic decision (e.g. never resolve a spoken name like
 "Wohnzimmerlampe" towards an entity_id here) - that is Entity Resolution's
@@ -37,6 +38,12 @@ import re
 # sentence shape.
 _PERCENT_SYMBOL_RE = re.compile(r"(\d)\s*%")
 
+# Same reasoning as the "%" case above (HomeIntent plan V4.2, "Number
+# Normalization": "21 Grad", "21°" must normalize to the same value) -
+# climate_extended/temperature.yaml's grammar only knows the literal word
+# "Grad", never the "°" symbol.
+_DEGREE_SYMBOL_RE = re.compile(r"(\d)\s*°")
+
 # "ein bisschen" listed before the single-word particles only for
 # readability - alternation order doesn't matter here since none of the
 # other words are prefixes of each other's tokens. "bitte" excluded, see
@@ -48,6 +55,7 @@ _WHITESPACE_RE = re.compile(r"\s+")
 
 def normalize(text: str) -> str:
     text = _PERCENT_SYMBOL_RE.sub(r"\1 Prozent", text)
+    text = _DEGREE_SYMBOL_RE.sub(r"\1 Grad", text)
     text = _FILLER_RE.sub(" ", text)
     text = _WHITESPACE_RE.sub(" ", text)
     return text.strip()

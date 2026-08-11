@@ -32,6 +32,23 @@ def test_set_temperature_absolute_target(engine):
     assert "21" in result.response_text
 
 
+def test_set_temperature_degree_symbol(engine):
+    # HomeIntent plan V4.2 ("Number Normalization"): "21°" must normalize
+    # to the same value as "21 Grad" - see nlu/normalize.py's
+    # _DEGREE_SYMBOL_RE.
+    result = engine.match("stelle die Heizung Büro auf 21°", ENTITIES)
+    assert result is not None
+    assert result.plan.data == {"temperature": 21}
+
+
+def test_set_temperature_spelled_out_number(engine):
+    # hassil parses spelled-out German numbers natively - no normalize()
+    # step needed, verified here end-to-end for the plan's own example.
+    result = engine.match("stelle die Heizung Büro auf einundzwanzig Grad", ENTITIES)
+    assert result is not None
+    assert result.plan.data == {"temperature": 21}
+
+
 def test_increase_temperature_computes_target_from_current_attribute(engine):
     result = engine.match("mach die Heizung Büro wärmer", ENTITIES)
     assert result is not None

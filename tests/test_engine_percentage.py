@@ -74,6 +74,29 @@ def test_trailing_verb_phrasing(engine, entities):
     assert result.plan.data == {"position": 60}
 
 
+def test_bare_number_no_unit_word_means_percent(engine, entities):
+    # HomeIntent plan V4.2 ("Number Normalization"): "50" alone must
+    # normalize to the same semantic value as "50 Prozent"/"50%" - safe to
+    # infer here since the resolved entity's domain (cover/light) has no
+    # other numeric parameter this grammar could mean.
+    result = engine.match("Stelle den Rollladen Wohnzimmer auf 50", entities)
+    assert result is not None
+    assert result.plan.data == {"position": 50}
+
+
+def test_bare_number_trailing_verb_phrasing(engine, entities):
+    result = engine.match("kannst du das Treppenlicht auf 30 dimmen", entities)
+    assert result is not None
+    assert result.plan.data == {"brightness_pct": 30}
+
+
+def test_bare_number_on_switch_domain_still_returns_none(engine, entities):
+    # A bare number is only unambiguous for the two percent-capable domains
+    # (cover/light) - switch has no percent semantics at all, same as the
+    # "mach den Garagentor auf 50 Prozent" case below.
+    assert engine.match("mach den Garagentor auf 50", entities) is None
+
+
 @pytest.mark.parametrize(
     "text",
     [

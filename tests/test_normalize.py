@@ -25,6 +25,14 @@ def test_leaves_already_normalized_text_unchanged():
     assert normalize("mach das Licht auf 50 Prozent") == "mach das Licht auf 50 Prozent"
 
 
+def test_degree_symbol_with_space_becomes_word():
+    assert normalize("stelle die Heizung auf 21 °") == "stelle die Heizung auf 21 Grad"
+
+
+def test_degree_symbol_without_space_becomes_word():
+    assert normalize("stelle die Heizung auf 21°") == "stelle die Heizung auf 21 Grad"
+
+
 def test_does_not_touch_entity_names_semantically():
     # normalize() must not make resolution decisions - casing/spelling of a
     # spoken device name is passed through untouched (see module docstring).

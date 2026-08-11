@@ -258,5 +258,31 @@
       }
     },
     "response_text": "Rollladen Büro auf 25 Prozent gefahren."
+  },
+  {
+    "text": "stelle den Rollladen Büro auf 35",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "set_cover_position",
+      "entity_id": "cover.buero",
+      "data": {
+        "position": 35
+      }
+    },
+    "response_text": "Rollladen Büro auf 35 Prozent gefahren."
+  },
+  {
+    "text": "mach das Wohnzimmerlicht auf 65",
+    "expect_match": true,
+    "plan": {
+      "domain": "light",
+      "service": "turn_on",
+      "entity_id": "light.wohnzimmer",
+      "data": {
+        "brightness_pct": 65
+      }
+    },
+    "response_text": "Wohnzimmerlicht auf 65 Prozent Helligkeit gestellt."
   }
 ]

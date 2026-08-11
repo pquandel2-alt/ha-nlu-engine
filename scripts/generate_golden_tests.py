@@ -114,6 +114,11 @@ CATEGORIES: dict[str, list[str]] = {
         "bitte das Wohnzimmerlicht auf 33 Prozent einstellen",
         "stelle das Küchenlicht auf 10 Prozent",
         "setze den Rollladen Büro auf 25 Prozent",
+        # V4.2 "Number Normalization": bare number with no unit word at all
+        # must mean the same as "... Prozent" (see nlu/normalize.py and
+        # percentage/position_brightness.yaml).
+        "stelle den Rollladen Büro auf 35",
+        "mach das Wohnzimmerlicht auf 65",
     ],
     "quantifiers": [
         "fahre alle Rollläden hoch",
@@ -196,6 +201,10 @@ CATEGORIES: dict[str, list[str]] = {
         "bitte die Heizung Wohnzimmer kälter machen",
         "erhöhe die Temperatur an der Heizung Wohnzimmer",
         "senke die Temperatur von der Heizung Wohnzimmer",
+        # V4.2 "Number Normalization": "°" symbol and spelled-out numbers
+        # must normalize to the same value as "21 Grad".
+        "stelle die Heizung Wohnzimmer auf 21°",
+        "mach die Heizung Wohnzimmer auf zwanzig Grad",
     ],
     "queries": [
         "wie hoch ist die Außentemperatur?",
