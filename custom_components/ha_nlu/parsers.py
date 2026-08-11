@@ -572,6 +572,13 @@ class LightExtendedParser:
         return ParseResult(frame=frame, resolved_entities=[resolved.entity])
 
 
+# Custom, non-HA-core intent names for the "die anderen" complement grammar
+# (HomeIntent plan V3.5) -> the real intent whose INTENTS spec/response
+# resolve() should use. Same naming precedent as HassReferenceOther/
+# HassSetPercentage.
+_OTHERS_INTENT_MAP = {"HassTurnOnOthers": "HassTurnOn", "HassTurnOffOthers": "HassTurnOff"}
+
+
 class ReferenceParser:
     """Wraps the reference/pronoun grammar ("Mach es aus.", "Mach die auch
     an.", "Die Rollläden dort runter.", "Die andere.") - the 8th separately-
@@ -610,8 +617,21 @@ class ReferenceParser:
        resolved: returns ``AmbiguousReference`` instead of a ``ParseResult``,
        since there is no candidate list or spatial model to pick from
        without guessing.
+    4. Complement reference ("die anderen auch an" - HomeIntent plan V3.5) -
+       recognized by custom intent names ``HassTurnOnOthers``/
+       ``HassTurnOffOthers`` (same precedent as strategy 3), mapped back to
+       the real ``HassTurnOn``/``HassTurnOff`` intent via
+       ``_OTHERS_INTENT_MAP``. Unlike strategy 3 this *is* resolved, because
+       "the others" has a deterministic candidate universe here: every entity
+       of ``last_entities``' domain within ``last_area`` (same anchor
+       strategy 2 requires - without a remembered area there is no bounded
+       set to take "others" from, so it returns ``None`` rather than
+       guessing at every matching entity in the whole house), minus the
+       entities already in ``last_entities``. Mixed-domain ``last_entities``
+       also returns ``None`` - "the others" is undefined without one target
+       domain to complement against.
 
-    Whenever strategy 1 or 2 resolves to more than one entity,
+    Whenever strategy 1, 2 or 4 resolves to more than one entity,
     ``frame.quantifier`` is set to ``Quantifier(kind="all")`` - required so
     ``validate_command()``'s check #3 (a non-quantifier command resolving to
     2+ entities is treated as an unresolved ambiguity) doesn't misfire on a
@@ -635,6 +655,10 @@ class ReferenceParser:
 
         if result.intent.name == "HassReferenceOther":
             return AmbiguousReference(source_text=text)
+
+        real_intent_name = _OTHERS_INTENT_MAP.get(result.intent.name)
+        if real_intent_name is not None:
+            return self._resolve_others(real_intent_name, entities, last_entities, last_area, text)
 
         domain_slot = result.entities.get("domain")
         if domain_slot is not None:
@@ -702,3 +726,41 @@ class ReferenceParser:
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=matches)
+
+    @staticmethod
+    def _resolve_others(
+        intent_name: str,
+        entities: list[EntitySnapshot],
+        last_entities: tuple[EntitySnapshot, ...],
+        last_area: AreaSnapshot | None,
+        text: str,
+    ) -> ParseResult | None:
+        if not last_entities or last_area is None:
+            return None  # no bounded set ("last domain" x "last area") to take "others" from - never guess
+
+        domains = {e.domain for e in last_entities}
+        if len(domains) != 1:
+            return None  # "the others" is undefined without one target domain to complement against
+        domain = domains.pop()
+
+        spec = INTENTS.get(intent_name)
+        if spec is None or domain not in spec.allowed_domains:
+            return None
+
+        already_mentioned = {e.entity_id for e in last_entities}
+        others = [
+            e
+            for e in resolve_entities_by_domain(domain, entities, area_id=last_area.area_id)
+            if e.entity_id not in already_mentioned
+        ]
+        if not others:
+            return None
+
+        frame = SemanticFrame(
+            intent=intent_name,
+            target=TargetReference(text=domain, domain=domain),
+            area=AreaReference(text=last_area.name, area_id=last_area.area_id),
+            quantifier=Quantifier(kind="all") if len(others) > 1 else None,
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=others)

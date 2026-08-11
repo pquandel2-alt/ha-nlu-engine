@@ -44,3 +44,17 @@ intents:
           - "die daneben"
           - "der daneben"
           - "das daneben"
+  HassTurnOnOthers:
+    data:
+      - sentences:
+          - "mach die anderen an"
+          - "mach die anderen auch an"
+          - "schalte die anderen an"
+          - "schalte die anderen auch an"
+  HassTurnOffOthers:
+    data:
+      - sentences:
+          - "mach die anderen aus"
+          - "mach die anderen auch aus"
+          - "schalte die anderen aus"
+          - "schalte die anderen auch aus"

@@ -9,6 +9,7 @@ how ``conversation.py`` chains the two calls.
 
 from __future__ import annotations
 
+from conftest import POLERAUM_COVERS
 from ha_nlu.areas import AreaSnapshot
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.context import ConversationContext
@@ -35,6 +36,19 @@ SWITCH_B = EntitySnapshot(
 )
 
 POLERAUM = AreaSnapshot(area_id="poleraum", name="Poleraum")
+
+POLERAUM_LIGHT_1 = EntitySnapshot(
+    "light.poleraum_decke", "Poleraum Decke", "light", "off",
+    area_id="poleraum", area_name="Poleraum", capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+)
+POLERAUM_LIGHT_2 = EntitySnapshot(
+    "light.poleraum_wand", "Poleraum Wand", "light", "off",
+    area_id="poleraum", area_name="Poleraum", capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+)
+POLERAUM_LIGHT_3 = EntitySnapshot(
+    "light.poleraum_stehlampe", "Poleraum Stehlampe", "light", "off",
+    area_id="poleraum", area_name="Poleraum", capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+)
 
 
 def _context(
@@ -148,6 +162,49 @@ def test_match_reference_ambiguous_reference_returns_none(engine, entities):
 def test_match_reference_returns_none_for_unrelated_sentence(engine, entities):
     context = _context((SWITCH_A,))
     assert engine.match_reference("Mach das Licht an.", entities, context) is None
+
+
+def test_match_reference_others_turn_on_single_remaining(engine, entities):
+    entities_with_lights = entities + [POLERAUM_LIGHT_1, POLERAUM_LIGHT_2]
+    context = _context((POLERAUM_LIGHT_1,), last_area=POLERAUM)
+    result = engine.match_reference("Mach die anderen an.", entities_with_lights, context)
+    assert result is not None
+    assert result.plan.service == "turn_on"
+    assert result.plan.entity_id == "light.poleraum_wand"
+    assert result.response_text == "Poleraum Wand eingeschaltet."
+
+
+def test_match_reference_others_turn_off_multiple_remaining(engine, entities):
+    entities_with_lights = entities + [POLERAUM_LIGHT_1, POLERAUM_LIGHT_2, POLERAUM_LIGHT_3]
+    context = _context((POLERAUM_LIGHT_1,), last_area=POLERAUM)
+    result = engine.match_reference("Mach die anderen auch aus.", entities_with_lights, context)
+    assert result is not None
+    assert result.plan.service == "turn_off"
+    assert sorted(result.plan.entity_id) == ["light.poleraum_stehlampe", "light.poleraum_wand"]
+    assert result.response_text == "2 Lichter ausgeschaltet."
+
+
+def test_match_reference_others_returns_none_without_last_area(engine, entities):
+    entities_with_lights = entities + [POLERAUM_LIGHT_1, POLERAUM_LIGHT_2]
+    context = _context((POLERAUM_LIGHT_1,))
+    assert engine.match_reference("Mach die anderen an.", entities_with_lights, context) is None
+
+
+def test_match_reference_others_returns_none_without_last_entities(engine, entities):
+    context = _context((), last_area=POLERAUM)
+    assert engine.match_reference("Mach die anderen an.", entities, context) is None
+
+
+def test_match_reference_others_returns_none_when_none_remaining(engine, entities):
+    entities_with_lights = entities + [POLERAUM_LIGHT_1, POLERAUM_LIGHT_2]
+    context = _context((POLERAUM_LIGHT_1, POLERAUM_LIGHT_2), last_area=POLERAUM)
+    assert engine.match_reference("Mach die anderen an.", entities_with_lights, context) is None
+
+
+def test_match_reference_others_returns_none_for_mixed_domain_last_entities(engine, quantifier_entities):
+    entities_with_lights = quantifier_entities + [POLERAUM_LIGHT_1]
+    context = _context((POLERAUM_LIGHT_1, POLERAUM_COVERS[0]), last_area=POLERAUM)
+    assert engine.match_reference("Mach die anderen an.", entities_with_lights, context) is None
 
 
 def test_end_to_end_turn_on_then_pronoun_off(engine, entities):

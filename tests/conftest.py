@@ -114,13 +114,16 @@ POLERAUM_COVERS: list[EntitySnapshot] = [
 QUANTIFIER_ENTITIES: list[EntitySnapshot] = ALL_ENTITIES + POLERAUM_COVERS
 
 SENSORS = {
-    "Außentemperatur": ("sensor.aussentemperatur", "18.4", "°C"),
-    "Luftfeuchtigkeit Bad": ("sensor.luftfeuchtigkeit_bad", "52", "%"),
+    "Außentemperatur": ("sensor.aussentemperatur", "18.4", "°C", "temperature"),
+    "Luftfeuchtigkeit Bad": ("sensor.luftfeuchtigkeit_bad", "52", "%", "humidity"),
+    "Waschmaschine": ("sensor.waschmaschine_leistung", "1200", "W", "power"),
+    "Waschmaschine Verbrauch": ("sensor.waschmaschine_energie", "3.7", "kWh", "energy"),
+    "Fensterkontakt Büro Batterie": ("sensor.fensterkontakt_buero_batterie", "84", "%", "battery"),
 }
 
 SENSOR_ENTITIES: list[EntitySnapshot] = [
-    EntitySnapshot(eid, name, "sensor", state, unit=unit)
-    for name, (eid, state, unit) in SENSORS.items()
+    EntitySnapshot(eid, name, "sensor", state, unit=unit, device_class=device_class)
+    for name, (eid, state, unit, device_class) in SENSORS.items()
 ]
 
 
