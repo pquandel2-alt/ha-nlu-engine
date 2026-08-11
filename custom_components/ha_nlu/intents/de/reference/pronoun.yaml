@@ -8,6 +8,8 @@ intents:
           - "schalte es ein"
           - "mach die auch an"
           - "schalte die auch an"
+          - "dreh es an"
+          - "lass es an"
   HassTurnOff:
     data:
       - sentences:
@@ -15,6 +17,8 @@ intents:
           - "schalte es aus"
           - "mach die auch aus"
           - "schalte die auch aus"
+          - "dreh es aus"
+          - "lass es aus"
   HassLightBrighten:
     data:
       - sentences:

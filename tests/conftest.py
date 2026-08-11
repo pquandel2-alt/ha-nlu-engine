@@ -58,6 +58,8 @@ TURN_ON_PHRASES = [
     "{name} einschalten",
     "Kannst du {name} anmachen?",
     "Bitte {name} an",
+    "Dreh {name} an",
+    "Lass {name} an",
 ]
 TURN_OFF_PHRASES = [
     "Mach {name} aus",
@@ -65,6 +67,8 @@ TURN_OFF_PHRASES = [
     "{name} ausschalten",
     "Kannst du {name} ausmachen?",
     "Bitte {name} aus",
+    "Dreh {name} aus",
+    "Lass {name} aus",
 ]
 COVER_OPEN_PHRASES = [
     "Öffne {name}",

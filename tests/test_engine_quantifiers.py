@@ -35,6 +35,24 @@ def test_alle_lichter_aus_whole_house(engine, entities):
     assert sorted(result.plan.entity_id) == expected
 
 
+def test_dreh_alle_lichter_an(engine, entities):
+    # V4.1 "Advanced German Language": "dreh"/"lass" verbs, base quantifier
+    # form only (see quantifiers/light_switch_all.yaml comment).
+    result = engine.match("dreh alle Lichter an", entities)
+    assert result is not None
+    assert result.plan.service == "turn_on"
+    expected = sorted(e.entity_id for e in entities if e.domain == "light")
+    assert sorted(result.plan.entity_id) == expected
+
+
+def test_lass_alle_lichter_aus(engine, entities):
+    result = engine.match("lass alle Lichter aus", entities)
+    assert result is not None
+    assert result.plan.service == "turn_off"
+    expected = sorted(e.entity_id for e in entities if e.domain == "light")
+    assert sorted(result.plan.entity_id) == expected
+
+
 def test_alle_lichter_im_buro_room_scoped(engine):
     entities = [
         EntitySnapshot("light.a", "Deckenlicht", "light", "off", area_id="buro", area_name="Büro"),

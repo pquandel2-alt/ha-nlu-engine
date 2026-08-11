@@ -3,10 +3,8 @@ intents:
   HassLightBrighten:
     data:
       - sentences:
-          - "etwas heller"
           - "heller"
   HassLightDim:
     data:
       - sentences:
-          - "etwas dunkler"
           - "dunkler"

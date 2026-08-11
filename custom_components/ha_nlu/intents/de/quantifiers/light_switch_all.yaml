@@ -20,6 +20,11 @@ intents:
           - "schalte die {count} {domain} [in der|in dem|im|am|beim] {area} ein"
           - "mach alle {domain} an außer [dem|der|den] {name}"
           - "schalte alle {domain} ein außer [dem|der|den] {name}"
+          # "dreh"/"lass" (V4.1): only the base quantifier form, not every
+          # {level}/{area}/{count} combination - same "no YAML combinatorics"
+          # restraint the plan itself asks for.
+          - "dreh [die] {quantifier} [die] {domain} an"
+          - "lass [die] {quantifier} [die] {domain} an"
   HassTurnOff:
     data:
       - sentences:
@@ -40,6 +45,8 @@ intents:
           - "schalte die {count} {domain} [in der|in dem|im|am|beim] {area} aus"
           - "mach alle {domain} aus außer [dem|der|den] {name}"
           - "schalte alle {domain} aus außer [dem|der|den] {name}"
+          - "dreh [die] {quantifier} [die] {domain} aus"
+          - "lass [die] {quantifier} [die] {domain} aus"
   HassToggle:
     data:
       - sentences:

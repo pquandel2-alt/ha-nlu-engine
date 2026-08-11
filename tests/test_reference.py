@@ -83,6 +83,17 @@ def test_match_reference_pronoun_turn_off(engine, entities):
     assert result.plan.entity_id == "switch.garagentor"
 
 
+def test_match_reference_pronoun_dreh_lass(engine, entities):
+    # V4.1 "Advanced German Language": "dreh"/"lass" verbs on the pronoun form.
+    context = _context((SWITCH_A,))
+    result = engine.match_reference("Dreh es an.", entities, context)
+    assert result is not None
+    assert result.plan.service == "turn_on"
+    result = engine.match_reference("Lass es aus.", entities, context)
+    assert result is not None
+    assert result.plan.service == "turn_off"
+
+
 def test_match_reference_pronoun_turn_on_multiple(engine, entities):
     context = _context((SWITCH_A, SWITCH_B))
     result = engine.match_reference("Mach die auch an.", entities, context)

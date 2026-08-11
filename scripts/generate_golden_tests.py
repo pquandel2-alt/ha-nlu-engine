@@ -59,6 +59,15 @@ CATEGORIES: dict[str, list[str]] = {
         "bitte die Einfache Heizung aus",
         "mach die Steckdose Büro an",
         "schalte das Küchenlicht aus",
+        # V4.1 "Advanced German Language": new verbs ("dreh"/"lass") and
+        # filler-particle tolerance (stripped in normalize(), see
+        # test_normalize.py for the unit-level coverage).
+        "dreh das Wohnzimmerlicht an",
+        "lass das Küchenlicht aus",
+        "mach doch das Flurlicht an",
+        "schalte kurz die Steckdose Büro aus",
+        "mach mal das Küchenlicht an",
+        "lass ein bisschen den Ventilator an",
     ],
     "cover_open_close": [
         "mach den Rollladen Büro ganz auf",
