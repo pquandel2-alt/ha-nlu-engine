@@ -30,6 +30,8 @@ class Capability(Enum):
     TEMPERATURE = auto()
     HUMIDITY = auto()
     FAN_SPEED = auto()
+    POWER = auto()
+    ENERGY = auto()
 
 
 # HA light ColorMode values (homeassistant.components.light.ColorMode) that
@@ -78,6 +80,10 @@ def derive_capabilities(
             caps.add(Capability.TEMPERATURE)
         if device_class == "humidity":
             caps.add(Capability.HUMIDITY)
+        if device_class == "power":
+            caps.add(Capability.POWER)
+        if device_class == "energy":
+            caps.add(Capability.ENERGY)
 
     # A climate entity's "temperature" attribute is its single-setpoint
     # target (climate.set_temperature's own parameter name) - present only

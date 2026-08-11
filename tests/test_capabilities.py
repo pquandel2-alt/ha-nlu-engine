@@ -67,6 +67,16 @@ def test_humidity_sensor_has_humidity_capability():
     assert caps == {Capability.HUMIDITY}
 
 
-def test_sensor_without_relevant_device_class_has_no_capabilities():
+def test_power_sensor_has_power_capability():
     caps = derive_capabilities("sensor", "power", {})
+    assert caps == {Capability.POWER}
+
+
+def test_energy_sensor_has_energy_capability():
+    caps = derive_capabilities("sensor", "energy", {})
+    assert caps == {Capability.ENERGY}
+
+
+def test_sensor_without_relevant_device_class_has_no_capabilities():
+    caps = derive_capabilities("sensor", "battery", {})
     assert caps == frozenset()
