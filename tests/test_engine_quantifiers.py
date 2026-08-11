@@ -176,3 +176,23 @@ def test_nur_quantifier_area_scoped(engine):
     result = engine.match("mach nur die Lampen im Wohnzimmer an", entities)
     assert result is not None
     assert sorted(result.plan.entity_id) == ["light.decke", "light.steh"]
+
+
+def test_die_ersten_beiden_returns_none_no_defined_ordering(engine):
+    # HomeIntent plan V4.5 ("Advanced Quantifiers", "später"-Teil): "die
+    # ersten beiden"/"die letzten zwei" braucht eine Ordnung ueber die
+    # Treffermenge ("erste" wovon?). EntitySnapshot traegt kein Ordnungsfeld
+    # (keine Reihenfolge-/Positionsangabe) - jede gewaehlte Sortierung
+    # (alphabetisch, HA-interne Registrierungsreihenfolge, ...) waere eine
+    # erfundene Bedeutung, kein Fakt aus den Daten - genau die Art Raten, die
+    # der Plan verbietet. "beiden" ist zwar Teil von _QUANTIFIER_SLOT_LIST,
+    # aber "ersten" passt in keine Satzschablone, daher kein Fehltreffer -
+    # der Satz bleibt sauber unverstanden statt eine falsche Teilmenge zu
+    # waehlen.
+    entities = [
+        EntitySnapshot("light.a", "Wohnzimmerlampe", "light", "off"),
+        EntitySnapshot("light.b", "Kuechenlampe", "light", "off"),
+        EntitySnapshot("light.c", "Buerolampe", "light", "off"),
+    ]
+    assert engine.match("mach die ersten beiden Lichter an", entities) is None
+    assert engine.match("mach die letzten zwei Lichter an", entities) is None
