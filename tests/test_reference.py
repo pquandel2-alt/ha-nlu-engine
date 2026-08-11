@@ -188,6 +188,31 @@ def test_match_reference_area_anchored_verb_first_domain_before_dort(engine, qua
     assert sorted(result.plan.entity_id) == ["cover.rolllade_poleraum_links", "cover.rolllade_poleraum_rechts"]
 
 
+def test_match_reference_im_selben_raum_turn_on(engine):
+    # HomeIntent plan V4.4 ("Relative Locations"): "im selben Raum" is the
+    # same last-area-anchored concept "dort" already covers, just different
+    # wording - same _resolve_area_anchored() resolution, now also reachable
+    # for HassTurnOn/HassTurnOff (not just cover open/close).
+    context = _context(last_area=POLERAUM)
+    result = engine.match_reference("Mach die Lichter im selben Raum an.", [POLERAUM_LIGHT_1, POLERAUM_LIGHT_2], context)
+    assert result is not None
+    assert result.plan.service == "turn_on"
+    assert sorted(result.plan.entity_id) == ["light.poleraum_decke", "light.poleraum_wand"]
+
+
+def test_match_reference_im_selben_raum_turn_off(engine):
+    context = _context(last_area=POLERAUM)
+    result = engine.match_reference("Schalte die Lichter im selben Raum aus.", [POLERAUM_LIGHT_1, POLERAUM_LIGHT_2], context)
+    assert result is not None
+    assert result.plan.service == "turn_off"
+    assert sorted(result.plan.entity_id) == ["light.poleraum_decke", "light.poleraum_wand"]
+
+
+def test_match_reference_im_selben_raum_returns_none_without_last_area(engine):
+    context = _context()
+    assert engine.match_reference("Mach die Lichter im selben Raum an.", [POLERAUM_LIGHT_1, POLERAUM_LIGHT_2], context) is None
+
+
 def test_match_reference_ambiguous_reference_returns_none(engine, entities):
     context = _context((SWITCH_A,))
     assert engine.match_reference("Die andere.", entities, context) is None
