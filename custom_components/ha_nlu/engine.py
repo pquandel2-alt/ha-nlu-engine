@@ -159,6 +159,16 @@ _FAN_EXTENDED_RE = re.compile(r"\b(stufe|schneller|langsamer)\b", re.IGNORECASE)
 # between "Außen" and "temperatur".
 _CLIMATE_EXTENDED_RE = re.compile(r"\b(grad|wärmer|kälter|temperatur)\b", re.IGNORECASE)
 
+# "und"-joined sentences ("Mach das Licht an und fahr die Rollläden hoch.")
+# are split into independent sub-commands (HomeIntent plan V4.8, "Multi-Step
+# Commands") *before* any other routing below - each segment is re-fed
+# through the exact same single-command ``match()`` pipeline (own parser
+# selection, own entity resolution, own validation), so a multi-step
+# sentence gets zero bespoke grammar of its own. No existing intent YAML
+# uses the word "und" (grepped empirically before adding this), so this
+# split can never misfire on an existing single-command sentence.
+_AND_SPLIT_RE = re.compile(r"\s+und\s+", re.IGNORECASE)
+
 # Per-domain question word for the clarification round-trip (v2 plan Phase
 # 25). Same kind of small, explicit German-grammar lookup as
 # service_call.py's ``_DOMAIN_PLURAL_DE`` - only covers the domains
@@ -204,6 +214,34 @@ class MatchResult:
     # query-vs-action distinction ``conversation.py`` already made in Phase
     # 19/Query-Engine (see its module docstring).
     clarification: ClarificationRequest | None = None
+
+
+@dataclass(frozen=True)
+class CommandPlan:
+    """An "und"-joined multi-step sentence ("Mach das Licht an und fahr die
+    Rollläden hoch."), split and matched as N independent sub-commands
+    (HomeIntent plan V4.8, "Multi-Step Commands").
+
+    ``commands`` holds one fully-built ``MatchResult`` per segment, each
+    already individually validated through the normal single-command
+    pipeline ("Jeder Command einzeln validieren"). ``NluEngine.match()``
+    only ever returns a ``CommandPlan`` once *every* segment has
+    successfully matched, resolved, and validated - the plan's own
+    "Standardmäßig für sicherheitskritische Aktionen: validate entire plan
+    first -> execute only if complete plan is valid" default, applied by
+    never constructing a partial ``CommandPlan``: one failing/ambiguous/
+    non-actionable segment fails the whole sentence (``match()`` returns
+    ``None``), same "never guess, no partial execution" precedent the rest
+    of this engine already follows.
+
+    Deliberately restricted to actionable segments only (every element's
+    ``plan`` is guaranteed not ``None``) - queries (plan-less results) don't
+    have an "execute" step to sequence, and the plan's own example is
+    action-only ("Mach ... und fahr ..."), so mixing a query into a
+    multi-step chain is out of scope here rather than invented.
+    """
+
+    commands: tuple[MatchResult, ...]
 
 
 class NluEngine:
@@ -302,7 +340,11 @@ class NluEngine:
             return self._quantifier_parser
         return self._single_parser
 
-    def match(self, text: str, entities: list[EntitySnapshot]) -> MatchResult | None:
+    def match(self, text: str, entities: list[EntitySnapshot]) -> MatchResult | CommandPlan | None:
+        segments = [segment for segment in _AND_SPLIT_RE.split(text) if segment.strip()]
+        if len(segments) > 1:
+            return self._match_multi(segments, entities)
+
         text = normalize(text)
         parser = self._select_parser(text)
         result = parser.parse(text, ParseContext(entities=entities))
@@ -313,6 +355,23 @@ class NluEngine:
                 plan=None, response_text=_clarification_question(result), clarification=result,
             )
         return self._build_match_result(result)
+
+    def _match_multi(self, segments: list[str], entities: list[EntitySnapshot]) -> CommandPlan | None:
+        """Match every "und"-joined segment independently, through the exact
+        same ``match()`` entry point (recursive - a segment never contains
+        "und" itself once split, so this always bottoms out in the
+        single-command branch above). See ``CommandPlan``'s docstring for
+        the "validate everything first, execute nothing on any failure"
+        contract this enforces by only ever returning a fully-populated
+        ``CommandPlan`` or ``None``, never something in between.
+        """
+        results: list[MatchResult] = []
+        for segment in segments:
+            result = self.match(segment, entities)
+            if not isinstance(result, MatchResult) or result.clarification is not None or result.plan is None:
+                return None
+            results.append(result)
+        return CommandPlan(commands=tuple(results))
 
     def match_followup(self, text: str, context: ConversationContext | None) -> MatchResult | None:
         """Complete an elliptical follow-up sentence that omits its own

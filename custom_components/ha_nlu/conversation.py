@@ -27,7 +27,7 @@ from homeassistant.helpers import device_registry as dr, intent
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, NOT_UNDERSTOOD_TEXT
-from .engine import NluEngine
+from .engine import CommandPlan, NluEngine
 from .hass_entities import build_entity_snapshots
 from .nlu.context import ConversationContext, ConversationContextStore
 
@@ -121,6 +121,50 @@ class NluConversationEntity(
                 intent.IntentResponseErrorCode.NO_INTENT_MATCH,
                 NOT_UNDERSTOOD_TEXT,
             )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        if isinstance(result, CommandPlan):
+            # V4.8 Multi-Step Commands: every sub-command already validated
+            # together before we got here (see CommandPlan's docstring) -
+            # only a runtime HA-side failure can still interrupt this, in
+            # which case we stop at the first failing sub-command rather
+            # than attempt a rollback of already-executed ones (same
+            # fail-fast-on-error handling as the single-command path below,
+            # just without retroactive undo - HA service calls aren't
+            # transactional). Context isn't carried over for a multi-step
+            # turn: "last entities" would be ambiguous across several
+            # unrelated sub-commands, so follow-ups just start fresh.
+            self._context_store.clear(user_input.conversation_id)
+            response_parts: list[str] = []
+            for sub_result in result.commands:
+                if sub_result.plan is None:
+                    continue  # structurally unreachable - CommandPlan only ever wraps actionable sub-results
+                try:
+                    await self.hass.services.async_call(
+                        sub_result.plan.domain,
+                        sub_result.plan.service,
+                        {"entity_id": sub_result.plan.entity_id, **sub_result.plan.data},
+                        blocking=True,
+                    )
+                except HomeAssistantError as err:
+                    _LOGGER.error(
+                        "Service call %s.%s on %s failed: %s",
+                        sub_result.plan.domain,
+                        sub_result.plan.service,
+                        sub_result.plan.entity_id,
+                        err,
+                    )
+                    response.async_set_error(
+                        intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                        f"Fehler beim Ausführen: {err}",
+                    )
+                    return conversation.ConversationResult(
+                        response=response, conversation_id=user_input.conversation_id
+                    )
+                response_parts.append(sub_result.response_text)
+            response.async_set_speech(" ".join(response_parts))
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
             )
