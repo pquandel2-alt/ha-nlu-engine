@@ -33,6 +33,9 @@ class EntitySnapshot:
     state: str
     area_id: str | None = None
     area_name: str | None = None
+    floor_id: str | None = None
+    floor_name: str | None = None
+    floor_level: int | None = None
     unit: str | None = None
     device_class: str | None = None
     state_class: str | None = None
@@ -258,16 +261,24 @@ def resolve_entity(name: str, entities: list[EntitySnapshot]) -> ResolveResult:
 
 
 def resolve_entities_by_domain(
-    domain: str, entities: list[EntitySnapshot], area_id: str | None = None
+    domain: str,
+    entities: list[EntitySnapshot],
+    area_id: str | None = None,
+    floor_id: str | None = None,
 ) -> list[EntitySnapshot]:
-    """All entities of a domain, optionally filtered to one area.
+    """All entities of a domain, optionally filtered to one area and/or floor.
 
     Unlike ``resolve_entity`` there is no ambiguity concept here - a
     quantifier ("alle"/"beide") is explicitly asking for every matching
     entity, so this returns everything that matches rather than requiring
     a single unambiguous hit. Sorted by entity_id for deterministic output.
     """
-    matches = [e for e in entities if e.domain == domain and (area_id is None or e.area_id == area_id)]
+    matches = [
+        e for e in entities
+        if e.domain == domain
+        and (area_id is None or e.area_id == area_id)
+        and (floor_id is None or e.floor_id == floor_id)
+    ]
     return sorted(matches, key=lambda e: e.entity_id)
 
 

@@ -15,6 +15,7 @@ from hassil import Intents, RangeSlotList, RangeType, TextSlotList, WildcardSlot
 
 from .areas import AreaResolveStatus, AreaSnapshot, resolve_area_name
 from .entities import EntitySnapshot, ResolveStatus, resolve_entities_by_domain, resolve_entity
+from .floors import FloorResolveStatus, resolve_floor_by_level_keyword, resolve_floor_name
 from .nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
 from .nlu.parser import AmbiguousReference, ClarificationRequest, ParseContext, ParseResult
 from .service_call import (
@@ -44,13 +45,22 @@ def _strip_locative_prepositions(name: str) -> str:
 
 # German word -> canonical HA domain, including the "Rolladen" (one l)
 # misspelling seen in real user speech.
+#
+# Plural forms are listed *before* their singular counterpart wherever the
+# singular is a literal text prefix of the plural (Licht/Lichter, Lampe/
+# Lampen, Steckdose/Steckdosen, Rollo/Rollos, Ventilator/Ventilatoren): hassil
+# matches TextSlotList values in declaration order and doesn't require a
+# trailing word boundary, so with the singular listed first "Lichter" would
+# match as "Licht" + a leftover "er" that silently gets swallowed by the
+# {area} wildcard in the same sentence - the bug that broke the {level}
+# ("oben"/"unten") sentences in Phase 28 until this reorder.
 _DOMAIN_SLOT_LIST = TextSlotList.from_tuples(
     [
-        ("Licht", "light"), ("Lichter", "light"), ("Lampe", "light"), ("Lampen", "light"),
-        ("Schalter", "switch"), ("Steckdose", "switch"), ("Steckdosen", "switch"),
+        ("Lichter", "light"), ("Licht", "light"), ("Lampen", "light"), ("Lampe", "light"),
+        ("Schalter", "switch"), ("Steckdosen", "switch"), ("Steckdose", "switch"),
         ("Rollladen", "cover"), ("Rollläden", "cover"), ("Rolladen", "cover"), ("Rolläden", "cover"),
-        ("Rollo", "cover"), ("Rollos", "cover"),
-        ("Ventilator", "fan"), ("Ventilatoren", "fan"),
+        ("Rollos", "cover"), ("Rollo", "cover"),
+        ("Ventilatoren", "fan"), ("Ventilator", "fan"),
     ],
     name="domain",
 )
@@ -60,6 +70,16 @@ _DOMAIN_SLOT_LIST = TextSlotList.from_tuples(
 _QUANTIFIER_SLOT_LIST = TextSlotList.from_tuples(
     [("alle", "all"), ("beide", "both"), ("beiden", "both"), ("beider", "both")],
     name="quantifier",
+)
+
+# "oben"/"unten" (v2 plan Phase 28, "Hierarchische Orte") - a fixed, closed
+# vocabulary like domain/quantifier above, not a {area}-style wildcard: these
+# words never take a preposition ("mach alle Lichter oben an", not "... im
+# oben an"), so they get their own slot/sentence shape rather than being
+# folded into the {area} grammar.
+_LEVEL_SLOT_LIST = TextSlotList.from_tuples(
+    [("oben", "up"), ("unten", "down")],
+    name="level",
 )
 
 # German colour words -> HA's native `color_name` service parameter (CSS
@@ -178,7 +198,21 @@ class ContextFollowupParser:
 
 
 class QuantifierParser:
-    """Wraps the {domain}/{area}/{quantifier} grammar ("alle"/"beide[n/r]")."""
+    """Wraps the {domain}/{area}/{level}/{quantifier} grammar ("alle"/
+    "beide[n/r]"). {level} ("oben"/"unten") is v2 plan Phase 28,
+    "Hierarchische Orte" - the plan's own example, "alle Lichter oben".
+
+    Area resolution has a floor fallback: if the captured {area} text
+    doesn't resolve to a known room (``AreaResolveStatus.NOT_FOUND``), it's
+    tried again as a floor name (e.g. "im Erdgeschoss") before giving up -
+    same grammar slot, no separate {floor} sentence set needed, since a
+    floor name occupies exactly the same "[in der|im|...] X" position a room
+    name does. An *ambiguous* area match is never silently retried as a
+    floor - that would risk masking a real ambiguity the user should be
+    asked about (moot today, since AMBIGUOUS_ENTITY-style clarification
+    isn't wired for quantifier commands, but keeps the fallback narrowly
+    scoped to its one justified case: "this word is not a room").
+    """
 
     def __init__(self, intents: Intents) -> None:
         self._intents = intents
@@ -187,6 +221,7 @@ class QuantifierParser:
         slot_lists = {
             "domain": _DOMAIN_SLOT_LIST,
             "area": WildcardSlotList(name="area"),
+            "level": _LEVEL_SLOT_LIST,
             "quantifier": _QUANTIFIER_SLOT_LIST,
         }
         result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
@@ -211,18 +246,32 @@ class QuantifierParser:
 
         area_id = None
         area_name = None
+        floor_id = None
         area_slot = result.entities.get("area")
         if area_slot is not None:
             area_name = _strip_locative_prepositions(str(area_slot.value))
             if area_name:
                 area_resolved = resolve_area_name(area_name, context.entities)
-                if area_resolved.status is not AreaResolveStatus.OK:
-                    return None  # unknown/ambiguous room - never guess
-                area_id = area_resolved.area_id
+                if area_resolved.status is AreaResolveStatus.OK:
+                    area_id = area_resolved.area_id
+                elif area_resolved.status is AreaResolveStatus.NOT_FOUND:
+                    floor_resolved = resolve_floor_name(area_name, context.entities)
+                    if floor_resolved.status is not FloorResolveStatus.OK:
+                        return None  # neither a known room nor a known floor - never guess
+                    floor_id = floor_resolved.floor_id
+                else:
+                    return None  # ambiguous room name - never guess
             else:
                 area_name = None
 
-        matches = resolve_entities_by_domain(domain, context.entities, area_id=area_id)
+        level_slot = result.entities.get("level")
+        if level_slot is not None:
+            level_resolved = resolve_floor_by_level_keyword(str(level_slot.value), context.entities)
+            if level_resolved.status is not FloorResolveStatus.OK:
+                return None  # no single oben/unten floor among today's entities - never guess
+            floor_id = level_resolved.floor_id
+
+        matches = resolve_entities_by_domain(domain, context.entities, area_id=area_id, floor_id=floor_id)
         if not matches:
             return None
         if quantifier == "both" and len(matches) != 2:

@@ -15,7 +15,12 @@ from homeassistant.components.homeassistant.exposed_entities import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, State
-from homeassistant.helpers import area_registry as ar, device_registry as dr, entity_registry as er
+from homeassistant.helpers import (
+    area_registry as ar,
+    device_registry as dr,
+    entity_registry as er,
+    floor_registry as fr,
+)
 
 from .const import CONF_SELECTED_ENTITIES, SELECTABLE_DOMAINS
 from .entities import EntitySnapshot
@@ -63,6 +68,22 @@ def _area_info(
     return area_id, (area.name if area else None)
 
 
+def _floor_info(
+    hass: HomeAssistant, area_id: str | None
+) -> tuple[str | None, str | None, int | None]:
+    """(floor_id, floor_name, floor_level) via the area's assigned floor
+    (Phase 28, "Hierarchische Orte"), or (None, None, None) if the entity
+    has no area or the area has no floor assigned."""
+    if area_id is None:
+        return None, None, None
+    area = ar.async_get(hass).async_get_area(area_id)
+    floor_id = area.floor_id if area else None
+    if floor_id is None:
+        return None, None, None
+    floor = fr.async_get(hass).async_get_floor(floor_id)
+    return floor_id, (floor.name if floor else None), (floor.level if floor else None)
+
+
 def _entity_aliases(registry_entry: er.RegistryEntry | None) -> tuple[str, ...]:
     """Aliases the user configured in HA's entity registry (Assist feature)."""
     if registry_entry is None or not registry_entry.aliases:
@@ -81,6 +102,7 @@ def build_entity_snapshots(
             continue
         registry_entry = er.async_get(hass).async_get(entity_id)
         area_id, area_name = _area_info(hass, entity_id, registry_entry=registry_entry)
+        floor_id, floor_name, floor_level = _floor_info(hass, area_id)
         domain = entity_id.split(".", 1)[0]
         device_class = state.attributes.get("device_class")
         capabilities = derive_capabilities(domain, device_class, state.attributes)
@@ -92,6 +114,9 @@ def build_entity_snapshots(
                 state=state.state,
                 area_id=area_id,
                 area_name=area_name,
+                floor_id=floor_id,
+                floor_name=floor_name,
+                floor_level=floor_level,
                 unit=state.attributes.get("unit_of_measurement"),
                 device_class=device_class,
                 state_class=state.attributes.get("state_class"),
