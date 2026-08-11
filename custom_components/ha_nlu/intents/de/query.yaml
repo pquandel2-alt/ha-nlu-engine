@@ -9,3 +9,7 @@ intents:
       - sentences:
           - "wie [hoch|warm|kalt|hell] ist [die|der|das] {name}"
           - "wie ist [die|der|das] {name}"
+          # Power/energy queries (V2.14): dispatches through the same
+          # HassGetState -> derive_query_type() -> _speak_query() pipeline,
+          # no new intent/response wiring needed.
+          - "wie viel [strom|energie] verbraucht [die|der|das] {name}"

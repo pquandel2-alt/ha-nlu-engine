@@ -67,3 +67,31 @@ def test_wie_hell_ist_off_light_ignores_stale_brightness_attribute(engine):
     result = engine.match("wie hell ist die Keller", LIGHT_QUERY_ENTITIES)
     assert result is not None
     assert result.response_text == "aus."
+
+
+def test_wie_ist_waschmaschine_speaks_power(engine, sensor_entities):
+    result = engine.match("wie ist die Waschmaschine?", sensor_entities)
+    assert result is not None
+    assert result.plan is None
+    assert result.response_text == "1200 Watt."
+
+
+def test_wie_viel_strom_verbraucht_waschmaschine(engine, sensor_entities):
+    result = engine.match("wie viel Strom verbraucht die Waschmaschine?", sensor_entities)
+    assert result is not None
+    assert result.plan is None
+    assert result.response_text == "1200 Watt."
+
+
+def test_wie_viel_energie_verbraucht_waschmaschine(engine, sensor_entities):
+    result = engine.match("wie viel Energie verbraucht die Waschmaschine Verbrauch?", sensor_entities)
+    assert result is not None
+    assert result.plan is None
+    assert result.response_text == "3.7 Kilowattstunden."
+
+
+def test_wie_ist_fensterkontakt_buero_batterie_speaks_percentage(engine, sensor_entities):
+    result = engine.match("wie ist die Fensterkontakt Büro Batterie?", sensor_entities)
+    assert result is not None
+    assert result.plan is None
+    assert result.response_text == "84 Prozent."

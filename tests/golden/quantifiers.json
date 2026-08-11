@@ -40,11 +40,13 @@
       "entity_id": [
         "light.flur",
         "light.kueche",
+        "light.testlicht_a",
+        "light.testlicht_b",
         "light.wohnzimmer"
       ],
       "data": {}
     },
-    "response_text": "3 Lichter eingeschaltet."
+    "response_text": "5 Lichter eingeschaltet."
   },
   {
     "text": "mach alle Lichter aus",
@@ -55,11 +57,13 @@
       "entity_id": [
         "light.flur",
         "light.kueche",
+        "light.testlicht_a",
+        "light.testlicht_b",
         "light.wohnzimmer"
       ],
       "data": {}
     },
-    "response_text": "3 Lichter ausgeschaltet."
+    "response_text": "5 Lichter ausgeschaltet."
   },
   {
     "text": "schalte alle Schalter aus",
@@ -148,11 +152,13 @@
       "entity_id": [
         "light.flur",
         "light.kueche",
+        "light.testlicht_a",
+        "light.testlicht_b",
         "light.wohnzimmer"
       ],
       "data": {}
     },
-    "response_text": "3 Lichter eingeschaltet."
+    "response_text": "5 Lichter eingeschaltet."
   },
   {
     "text": "bitte alle Lichter aus",
@@ -163,11 +169,13 @@
       "entity_id": [
         "light.flur",
         "light.kueche",
+        "light.testlicht_a",
+        "light.testlicht_b",
         "light.wohnzimmer"
       ],
       "data": {}
     },
-    "response_text": "3 Lichter ausgeschaltet."
+    "response_text": "5 Lichter ausgeschaltet."
   },
   {
     "text": "öffne alle Rollläden",
@@ -242,10 +250,71 @@
       "entity_id": [
         "light.flur",
         "light.kueche",
+        "light.testlicht_a",
+        "light.testlicht_b",
         "light.wohnzimmer"
       ],
       "data": {}
     },
-    "response_text": "3 Lichter umgeschaltet."
+    "response_text": "5 Lichter umgeschaltet."
+  },
+  {
+    "text": "mach alle Lichter an außer dem Wohnzimmerlicht",
+    "expect_match": true,
+    "plan": {
+      "domain": "homeassistant",
+      "service": "turn_on",
+      "entity_id": [
+        "light.flur",
+        "light.kueche",
+        "light.testlicht_a",
+        "light.testlicht_b"
+      ],
+      "data": {}
+    },
+    "response_text": "4 Lichter eingeschaltet."
+  },
+  {
+    "text": "fahre alle Rollläden hoch außer dem Rollladen Büro",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "open_cover",
+      "entity_id": [
+        "cover.poleraum_links",
+        "cover.poleraum_rechts",
+        "cover.schlafzimmer"
+      ],
+      "data": {}
+    },
+    "response_text": "3 Rollläden geöffnet."
+  },
+  {
+    "text": "schließe alle Rollläden außer der Rolllade Poleraum links",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "close_cover",
+      "entity_id": [
+        "cover.poleraum_links",
+        "cover.poleraum_rechts"
+      ],
+      "data": {}
+    },
+    "response_text": "2 Rollläden geschlossen."
+  },
+  {
+    "text": "fahre die beiden Rollläden im Poleraum hoch",
+    "expect_match": true,
+    "plan": {
+      "domain": "cover",
+      "service": "open_cover",
+      "entity_id": [
+        "cover.poleraum_links",
+        "cover.poleraum_rechts"
+      ],
+      "data": {}
+    },
+    "response_text": "2 Rollläden geöffnet."
   }
 ]

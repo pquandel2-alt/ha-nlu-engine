@@ -58,5 +58,29 @@
     "expect_match": true,
     "plan": null,
     "response_text": "an."
+  },
+  {
+    "text": "wie ist die Waschmaschine?",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "1200 Watt."
+  },
+  {
+    "text": "wie viel Strom verbraucht die Waschmaschine?",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "1200 Watt."
+  },
+  {
+    "text": "wie viel Energie verbraucht der Trockner?",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "2.1 Kilowattstunden."
+  },
+  {
+    "text": "wie ist die Fensterkontakt Batterie?",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "84 Prozent."
   }
 ]

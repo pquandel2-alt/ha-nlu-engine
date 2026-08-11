@@ -69,4 +69,27 @@ GOLDEN_ENTITIES: list[EntitySnapshot] = [
     EntitySnapshot(
         "sensor.luftfeuchtigkeit_bad", "Luftfeuchtigkeit Bad", "sensor", "52", unit="%",
     ),
+    EntitySnapshot(
+        "sensor.waschmaschine_leistung", "Waschmaschine", "sensor", "1200", unit="W", device_class="power",
+    ),
+    EntitySnapshot(
+        "sensor.trockner_energie", "Trockner", "sensor", "2.1", unit="kWh", device_class="energy",
+    ),
+    EntitySnapshot(
+        "sensor.fensterkontakt_batterie", "Fensterkontakt Batterie", "sensor", "84", unit="%",
+        device_class="battery",
+    ),
+    # Deliberately tied friendly_name across two areas - only consumer is
+    # the "ambiguity" category (v2 plan Phase 25, "Clarification"); no other
+    # category sentence references "Testlicht", so it can't collide.
+    EntitySnapshot(
+        "light.testlicht_a", "Testlicht", "light", "off",
+        area_id="zimmer_a", area_name="Zimmer A",
+        capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+    ),
+    EntitySnapshot(
+        "light.testlicht_b", "Testlicht", "light", "off",
+        area_id="zimmer_b", area_name="Zimmer B",
+        capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+    ),
 ]

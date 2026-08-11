@@ -1,0 +1,20 @@
+[
+  {
+    "text": "Mach das Testlicht an",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Welches Licht meinst du?"
+  },
+  {
+    "text": "Mach das Testlicht aus",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Welches Licht meinst du?"
+  },
+  {
+    "text": "Schalte das Testlicht ein",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Welches Licht meinst du?"
+  }
+]

@@ -124,6 +124,13 @@ CATEGORIES: dict[str, list[str]] = {
         "mach alle Rollläden auf",
         "mach alle Rollläden zu",
         "schalte alle Lichter um",
+        # "außer {name}" exclusion (v2 plan V2.9 quantifier scope) - not
+        # previously covered by any golden case despite being a distinct
+        # grammar branch in quantifiers/*.yaml.
+        "mach alle Lichter an außer dem Wohnzimmerlicht",
+        "fahre alle Rollläden hoch außer dem Rollladen Büro",
+        "schließe alle Rollläden außer der Rolllade Poleraum links",
+        "fahre die beiden Rollläden im Poleraum hoch",
     ],
     "light_extended": [
         "mach das Wohnzimmerlicht um 20 Prozent heller",
@@ -192,6 +199,19 @@ CATEGORIES: dict[str, list[str]] = {
         "wie hell ist das Küchenlicht",
         "wie ist das Küchenlicht",
         "wie hell ist das Flurlicht",
+        "wie ist die Waschmaschine?",
+        "wie viel Strom verbraucht die Waschmaschine?",
+        "wie viel Energie verbraucht der Trockner?",
+        "wie ist die Fensterkontakt Batterie?",
+    ],
+    # V2.14 gap closure: SingleTargetParser's tied-name outcome (Phase 25,
+    # "Clarification") never had golden coverage even though it's a core
+    # "never guess" behaviour, not an edge case - see test_clarification.py
+    # for the same mechanism covered unit-level.
+    "ambiguity": [
+        "Mach das Testlicht an",
+        "Mach das Testlicht aus",
+        "Schalte das Testlicht ein",
     ],
 }
 
