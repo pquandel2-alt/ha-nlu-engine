@@ -49,6 +49,7 @@ from .parsers import (
     QuantifierParser,
     ReferenceParser,
     SingleTargetParser,
+    TemporalParser,
     _DEFAULT_DIMMING_STEP_PERCENT,
 )
 from .service_call import (
@@ -70,6 +71,20 @@ CLIMATE_EXTENDED_DIR = INTENTS_DIR / "climate_extended"
 CONTEXT_FOLLOWUP_DIR = INTENTS_DIR / "context_followup"
 REFERENCE_DIR = INTENTS_DIR / "reference"
 COMPARISON_QUERY_DIR = INTENTS_DIR / "comparison_query"
+TEMPORAL_DIR = INTENTS_DIR / "temporal"
+
+# Sentences containing a temporal-modifier keyword ("Minute(n)"/"Stunde(n)"/
+# "Uhr"/"morgen früh"/"heute Abend"/...) are routed to TemporalParser's
+# separately-compiled grammar (HomeIntent plan V4.7, "Temporal Expressions")
+# - checked *first*, before _QUANTIFIER_RE below: "mach das Licht in fünf
+# Minuten aus"/"... um acht Uhr an" contain "fünf"/"acht", which
+# _QUANTIFIER_RE also matches (its spelled-out count-word list), and would
+# otherwise misroute these to QuantifierParser's unrelated grammar - same
+# "one keyword, one dedicated grammar, checked before anything it could
+# collide with" reasoning _COMPARISON_QUERY_RE's own comment documents.
+_TEMPORAL_RE = re.compile(
+    r"\b(minuten?|stunden?|uhr)\b|\b(morgen früh|heute abend|morgen abend|heute früh)\b", re.IGNORECASE
+)
 
 # Sentences containing "welche" are routed to ComparisonQueryParser's
 # separately-compiled grammar (HomeIntent plan V4.6, "Comparisons",
@@ -207,6 +222,7 @@ class NluEngine:
         context_followup_dir: Path = CONTEXT_FOLLOWUP_DIR,
         reference_dir: Path = REFERENCE_DIR,
         comparison_query_dir: Path = COMPARISON_QUERY_DIR,
+        temporal_dir: Path = TEMPORAL_DIR,
     ) -> None:
         yaml_files = sorted(intents_dir.glob("*.yaml"))
         if not yaml_files:
@@ -253,6 +269,11 @@ class NluEngine:
             raise FileNotFoundError(f"No intent YAML files found in {comparison_query_dir}")
         comparison_query_intents: Intents = Intents.from_files(comparison_query_yaml_files)
 
+        temporal_yaml_files = sorted(temporal_dir.glob("*.yaml"))
+        if not temporal_yaml_files:
+            raise FileNotFoundError(f"No intent YAML files found in {temporal_dir}")
+        temporal_intents: Intents = Intents.from_files(temporal_yaml_files)
+
         self._single_parser = SingleTargetParser(intents)
         self._quantifier_parser = QuantifierParser(quantifier_intents)
         self._percentage_parser = PercentageParser(percentage_intents)
@@ -262,8 +283,11 @@ class NluEngine:
         self._context_followup_parser = ContextFollowupParser(context_followup_intents)
         self._reference_parser = ReferenceParser(reference_intents)
         self._comparison_query_parser = ComparisonQueryParser(comparison_query_intents)
+        self._temporal_parser = TemporalParser(temporal_intents)
 
     def _select_parser(self, text: str):
+        if _TEMPORAL_RE.search(text):
+            return self._temporal_parser
         if _COMPARISON_QUERY_RE.search(text):
             return self._comparison_query_parser
         if _LIGHT_EXTENDED_RE.search(text):

@@ -17,7 +17,7 @@ from hassil import Intents, RangeSlotList, RangeType, TextSlotList, WildcardSlot
 from .areas import AreaResolveStatus, AreaSnapshot, resolve_area_name
 from .entities import EntitySnapshot, ResolveStatus, resolve_entities_by_domain, resolve_entity
 from .floors import FloorResolveStatus, resolve_floor_by_level_keyword, resolve_floor_name
-from .nlu.frame import AreaReference, Comparison, Quantifier, SemanticFrame, TargetReference
+from .nlu.frame import AreaReference, Comparison, Quantifier, SemanticFrame, TargetReference, TemporalExpression
 from .nlu.parser import AmbiguousReference, ClarificationRequest, ParseContext, ParseResult
 from .service_call import (
     CLIMATE_EXTENDED_INTENTS,
@@ -785,6 +785,124 @@ class ComparisonQueryParser:
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=matches)
+
+
+# "in"/"für" (HomeIntent plan V4.7, "Temporal Expressions") -> which of the
+# two numeric temporal kinds a sentence expresses. Both share the same
+# {amount}/{unit} slots ("in fünf Minuten" vs. "für eine Stunde" only differ
+# in this one preposition), so capturing it as its own closed-vocabulary slot
+# - rather than duplicating the sentence per kind - avoids the YAML
+# combinatorics V4.1's own filler-word decision already argued against.
+_TEMPORAL_KIND_SLOT_LIST = TextSlotList.from_tuples([("in", "delay"), ("für", "duration")], name="temporal_kind")
+
+# "Minute(n)"/"Stunde(n)" -> TemporalParser converts to minutes uniformly
+# (Stunden * 60) rather than storing the raw unit, so every consumer of
+# TemporalExpression.minutes only ever has to deal with one unit.
+_TEMPORAL_UNIT_SLOT_LIST = TextSlotList.from_tuples(
+    [("Minuten", "minutes"), ("Minute", "minutes"), ("Stunden", "hours"), ("Stunde", "hours")],
+    name="unit",
+)
+
+# "morgen früh"/"heute Abend" (the plan's own two examples) plus their
+# "heute früh"/"morgen Abend" mirror images - the 2x2 cross product of the
+# exact two day-words and two day-part-words the plan text gives, nothing
+# beyond that invented. Multi-word TextSlotList keys, same as
+# _COMPARATOR_SLOT_LIST's "nicht höher als" (verified there already).
+_TEMPORAL_RELATIVE_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("morgen früh", "tomorrow_morning"),
+        ("morgen abend", "tomorrow_evening"),
+        ("heute abend", "today_evening"),
+        ("heute früh", "today_morning"),
+    ],
+    name="relative",
+)
+
+
+class TemporalParser:
+    """Wraps the {name}/{temporal_kind}/{amount}/{unit}/{relative}/{hour}
+    grammar ("mach das Licht in fünf Minuten aus", "... für eine Stunde an",
+    "... morgen früh an", "... um 20 Uhr an") - the 10th separately-compiled
+    hassil grammar, HomeIntent plan V4.7, "Temporal Expressions".
+
+    Reuses the existing ``HassTurnOn``/``HassTurnOff`` intent names (not a
+    new intent) so the resulting ``ServiceCallPlan`` is byte-for-byte the
+    same one an equivalent plain "mach {name} an/aus" would produce -
+    ``engine.py``'s ``_build_match_result`` needs zero changes, its existing
+    final ``INTENTS.get(frame.intent)`` branch already handles this. The
+    parsed ``TemporalExpression`` is only stashed in
+    ``frame.parameters["temporal"]`` for a later execution layer to read -
+    per the plan's own scoping ("Zunächst nur parsen und validieren"), this
+    parser never delays/schedules anything itself.
+
+    Single-entity only ("das Licht", matching the plan's own examples) - an
+    ambiguous or unresolved {name} returns ``None`` with no clarification
+    round-trip, same scope-limiting choice ``ComparisonQueryParser``/
+    ``ContextFollowupParser`` already made for their own narrower grammars.
+    """
+
+    def __init__(self, intents: Intents) -> None:
+        self._intents = intents
+
+    def parse(self, text: str, context: ParseContext) -> ParseResult | None:
+        slot_lists = {
+            "name": WildcardSlotList(name="name"),
+            "temporal_kind": _TEMPORAL_KIND_SLOT_LIST,
+            "amount": RangeSlotList(name="amount", start=1, stop=59, step=1, type=RangeType.NUMBER),
+            "unit": _TEMPORAL_UNIT_SLOT_LIST,
+            "relative": _TEMPORAL_RELATIVE_SLOT_LIST,
+            "hour": RangeSlotList(name="hour", start=0, stop=23, step=1, type=RangeType.NUMBER),
+        }
+        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+        if result is None or result.intent is None:
+            return None
+
+        spec = INTENTS.get(result.intent.name)
+        if spec is None:
+            return None
+
+        name_slot = result.entities.get("name")
+        if name_slot is None:
+            return None
+        name = _strip_locative_prepositions(str(name_slot.value))
+        resolved = resolve_entity(name, context.entities)
+        if resolved.status is not ResolveStatus.OK or resolved.entity is None:
+            return None  # not found or ambiguous - never guess, no clarification round-trip here
+        if resolved.entity.domain not in spec.allowed_domains:
+            return None
+
+        temporal = self._build_temporal(result.entities)
+        if temporal is None:
+            return None
+
+        frame = SemanticFrame(
+            intent=result.intent.name,
+            target=TargetReference(text=name, entity_id=resolved.entity.entity_id, domain=resolved.entity.domain),
+            area=None,
+            parameters={"temporal": temporal},
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=[resolved.entity])
+
+    @staticmethod
+    def _build_temporal(slots: dict) -> TemporalExpression | None:
+        kind_slot = slots.get("temporal_kind")
+        amount_slot = slots.get("amount")
+        unit_slot = slots.get("unit")
+        if kind_slot is not None and amount_slot is not None and unit_slot is not None:
+            amount = int(amount_slot.value)
+            minutes = amount * 60 if unit_slot.value == "hours" else amount
+            return TemporalExpression(kind=str(kind_slot.value), minutes=minutes)
+
+        relative_slot = slots.get("relative")
+        if relative_slot is not None:
+            return TemporalExpression(kind="relative_time", relative=str(relative_slot.value))
+
+        hour_slot = slots.get("hour")
+        if hour_slot is not None:
+            return TemporalExpression(kind="absolute_time", hour=int(hour_slot.value))
+
+        return None  # structurally unreachable: one of the three branches above always matched
 
 
 # Custom, non-HA-core intent names for the "die anderen" complement grammar

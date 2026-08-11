@@ -67,6 +67,38 @@ class Comparison:
 
 
 @dataclass(frozen=True)
+class TemporalExpression:
+    """A time-related modifier attached to an otherwise-normal on/off command
+    - HomeIntent plan V4.7, "Temporal Expressions": "in fünf Minuten" (delay),
+    "für eine Stunde" (duration), "morgen früh"/"heute Abend" (relative_time,
+    day + day-part), "um 20 Uhr" (absolute_time).
+
+    Per the plan's own scoping ("Zunächst nur parsen und validieren -
+    tatsächliche HA-Ausführung erst in einer späteren Execution-Schicht"),
+    this is captured for observability only: parsers.py's TemporalParser
+    still builds the exact same HassTurnOn/HassTurnOff ``ServiceCallPlan`` an
+    equivalent plain "mach {name} an/aus" would - this is only stashed in
+    ``SemanticFrame.parameters["temporal"]``, no scheduling/delay is actually
+    performed yet. Same "record but don't act" precedent as ``Comparison``'s
+    setpoint-synonym half (V4.6).
+
+    ``kind`` is one of "delay"/"duration"/"relative_time"/"absolute_time".
+    ``minutes`` carries the delay/duration length (an "X Stunden" phrasing is
+    already converted to minutes here). ``relative`` carries a fixed keyword
+    ("tomorrow_morning"/"today_evening"/"tomorrow_evening"/"today_morning")
+    for relative_time - the 2x2 cross product of the plan's own "morgen"/
+    "heute" x "früh"/"Abend" examples, nothing invented beyond that. ``hour``
+    carries the 0-23 clock hour for absolute_time. Exactly one of
+    minutes/relative/hour is set, matching ``kind``.
+    """
+
+    kind: str
+    minutes: int | None = None
+    relative: str | None = None
+    hour: int | None = None
+
+
+@dataclass(frozen=True)
 class SemanticFrame:
     intent: str
     target: TargetReference | None
