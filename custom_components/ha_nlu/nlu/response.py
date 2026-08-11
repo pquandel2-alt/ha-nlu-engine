@@ -35,6 +35,13 @@ class NluError(Enum):
     MISSING_PARAMETER = auto()
     INVALID_PARAMETER = auto()
     INVALID_QUANTIFIER = auto()
+    # A relative reference the grammar recognized but can't resolve without
+    # guessing ("Die andere.", "Die daneben.") - v2 plan Phase 27,
+    # "Pronomen und Referenzen". No current source: like AMBIGUOUS_ENTITY
+    # before Phase 25, defined ahead of a wiring consumer - match_reference()
+    # (engine.py) collapses it to a plain miss for now, same as
+    # match_followup()'s established Phase 26 scope.
+    AMBIGUOUS_REFERENCE = auto()
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,46 @@
+language: "de"
+intents:
+  HassTurnOn:
+    data:
+      - sentences:
+          - "mach es an"
+          - "schalte es an"
+          - "schalte es ein"
+          - "mach die auch an"
+          - "schalte die auch an"
+  HassTurnOff:
+    data:
+      - sentences:
+          - "mach es aus"
+          - "schalte es aus"
+          - "mach die auch aus"
+          - "schalte die auch aus"
+  HassLightBrighten:
+    data:
+      - sentences:
+          - "mach es heller"
+  HassLightDim:
+    data:
+      - sentences:
+          - "mach es dunkler"
+  HassOpenCover:
+    data:
+      - sentences:
+          - "[die|der|das] {domain} dort hoch"
+          - "fahr [die|der|das] {domain} dort hoch"
+          - "fahre [die|der|das] {domain} dort hoch"
+  HassCloseCover:
+    data:
+      - sentences:
+          - "[die|der|das] {domain} dort runter"
+          - "fahr [die|der|das] {domain} dort runter"
+          - "fahre [die|der|das] {domain} dort runter"
+  HassReferenceOther:
+    data:
+      - sentences:
+          - "die andere"
+          - "der andere"
+          - "das andere"
+          - "die daneben"
+          - "der daneben"
+          - "das daneben"

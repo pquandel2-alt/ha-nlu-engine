@@ -35,7 +35,7 @@ from .nlu.context import ConversationContext
 from .nlu.debug import DebugTrace, format_command
 from .nlu.frame import SemanticFrame, TargetReference
 from .nlu.normalize import normalize
-from .nlu.parser import ClarificationRequest, ParseContext, ParseResult
+from .nlu.parser import AmbiguousReference, ClarificationRequest, ParseContext, ParseResult
 from .nlu.response import NluError, NluResponse
 from .nlu.service_mapper import map_to_service_call
 from .nlu.validator import validate_command
@@ -46,6 +46,7 @@ from .parsers import (
     LightExtendedParser,
     PercentageParser,
     QuantifierParser,
+    ReferenceParser,
     SingleTargetParser,
     _DEFAULT_DIMMING_STEP_PERCENT,
 )
@@ -66,6 +67,7 @@ LIGHT_EXTENDED_DIR = INTENTS_DIR / "light_extended"
 FAN_EXTENDED_DIR = INTENTS_DIR / "fan_extended"
 CLIMATE_EXTENDED_DIR = INTENTS_DIR / "climate_extended"
 CONTEXT_FOLLOWUP_DIR = INTENTS_DIR / "context_followup"
+REFERENCE_DIR = INTENTS_DIR / "reference"
 
 # Sentences containing "Prozent" are routed to PercentageParser's separately-
 # compiled grammar for the same reason as the quantifier routing below: the
@@ -169,6 +171,7 @@ class NluEngine:
         fan_extended_dir: Path = FAN_EXTENDED_DIR,
         climate_extended_dir: Path = CLIMATE_EXTENDED_DIR,
         context_followup_dir: Path = CONTEXT_FOLLOWUP_DIR,
+        reference_dir: Path = REFERENCE_DIR,
     ) -> None:
         yaml_files = sorted(intents_dir.glob("*.yaml"))
         if not yaml_files:
@@ -205,6 +208,11 @@ class NluEngine:
             raise FileNotFoundError(f"No intent YAML files found in {context_followup_dir}")
         context_followup_intents: Intents = Intents.from_files(context_followup_yaml_files)
 
+        reference_yaml_files = sorted(reference_dir.glob("*.yaml"))
+        if not reference_yaml_files:
+            raise FileNotFoundError(f"No intent YAML files found in {reference_dir}")
+        reference_intents: Intents = Intents.from_files(reference_yaml_files)
+
         self._single_parser = SingleTargetParser(intents)
         self._quantifier_parser = QuantifierParser(quantifier_intents)
         self._percentage_parser = PercentageParser(percentage_intents)
@@ -212,6 +220,7 @@ class NluEngine:
         self._fan_extended_parser = FanExtendedParser(fan_extended_intents)
         self._climate_extended_parser = ClimateExtendedParser(climate_extended_intents)
         self._context_followup_parser = ContextFollowupParser(context_followup_intents)
+        self._reference_parser = ReferenceParser(reference_intents)
 
     def _select_parser(self, text: str):
         if _LIGHT_EXTENDED_RE.search(text):
@@ -277,6 +286,33 @@ class NluEngine:
             source_text=text,
         )
         return self._build_match_result(ParseResult(frame=frame, resolved_entities=[entity]))
+
+    def match_reference(self, text: str, entities: list[EntitySnapshot], context: ConversationContext | None) -> MatchResult | None:
+        """Resolve a pronoun or relative reference ("Mach es aus.", "Mach die
+        auch an.", "Die Rollläden dort runter.", "Die andere.") against the
+        stored ``ConversationContext`` (v2 plan Phase 27, "Pronomen und
+        Referenzen"). Tried by ``conversation.py`` alongside
+        ``match_followup()`` - see ``ReferenceParser``'s docstring for why
+        the two grammars can't collide with each other or with any other
+        grammar (disjoint, fixed sentence sets, verified empirically against
+        hassil==3.11.0).
+
+        Both a structural non-match and a recognized-but-unresolvable
+        relative reference (``AmbiguousReference`` - "Die andere.", the
+        plan's own ``AMBIGUOUS_REFERENCE`` case, "nie raten") collapse to
+        ``None`` here, same as the rest of this engine's
+        ``match_followup()``/``match()``/``resolve_clarification()``:
+        ``conversation.py`` shows the same fixed "not understood" text
+        regardless of the specific miss cause.
+        """
+        if context is None:
+            return None
+
+        normalized = normalize(text)
+        result = self._reference_parser.parse(normalized, entities, context.last_entities, context.last_area)
+        if result is None or isinstance(result, AmbiguousReference):
+            return None
+        return self._build_match_result(result)
 
     def resolve_clarification(
         self, reply_text: str, clarification: ClarificationRequest, entities: list[EntitySnapshot]

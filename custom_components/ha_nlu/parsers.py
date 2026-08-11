@@ -13,10 +13,10 @@ import re
 
 from hassil import Intents, RangeSlotList, RangeType, TextSlotList, WildcardSlotList, recognize
 
-from .areas import AreaResolveStatus, resolve_area_name
-from .entities import ResolveStatus, resolve_entities_by_domain, resolve_entity
+from .areas import AreaResolveStatus, AreaSnapshot, resolve_area_name
+from .entities import EntitySnapshot, ResolveStatus, resolve_entities_by_domain, resolve_entity
 from .nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
-from .nlu.parser import ClarificationRequest, ParseContext, ParseResult
+from .nlu.parser import AmbiguousReference, ClarificationRequest, ParseContext, ParseResult
 from .service_call import (
     CLIMATE_EXTENDED_INTENTS,
     FAN_EXTENDED_INTENTS,
@@ -452,3 +452,135 @@ class LightExtendedParser:
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=[resolved.entity])
+
+
+class ReferenceParser:
+    """Wraps the reference/pronoun grammar ("Mach es aus.", "Mach die auch
+    an.", "Die Rollläden dort runter.", "Die andere.") - the 8th separately-
+    compiled hassil grammar (v2 plan Phase 27, "Pronomen und Referenzen").
+
+    Structurally distinct from every other parser here: resolution happens
+    against the previous turn's ``ConversationContext``, not against a freshly
+    spoken name, so this parser takes the context pieces it needs
+    (``last_entities``/``last_area``) as plain parameters rather than folding
+    them into ``ParseContext`` - it takes primitives rather than a
+    ``ConversationContext`` object itself, same reason ``ContextFollowupParser``
+    does: keeps this module decoupled from ``nlu/context.py``. The
+    area-anchored ``{domain}`` sentences ("... dort hoch/runter") still need
+    the *current* turn's full ``entities`` (not ``last_entities``) to find every
+    cover in the remembered area - the previous turn only resolved one.
+
+    Three resolution strategies, one grammar (no keyword router needed in
+    engine.py - like ContextFollowupParser, the caller decides *when* to try
+    this parser via ``NluEngine.match_reference()``, not *whether the text
+    could collide* - verified empirically against hassil==3.11.0: no
+    collision between these fixed pronoun sentences and any other grammar's
+    own sentences):
+
+    1. Plain pronoun ("es"/"die auch") - resolved directly against
+       ``last_entities``. Any count >= 1 is accepted for the 5 basic
+       INTENTS (turn on/off), but "es heller/dunkler" keeps
+       ``match_followup()``'s single-light-only scope (same reason: those
+       response lambdas only ever read ``entities[0]``).
+    2. Area-anchored domain reference ("{domain} dort hoch/runter") -
+       resolved against a *fresh* ``entities`` scan filtered by
+       ``last_area.area_id``, reusing ``resolve_entities_by_domain`` exactly
+       like ``QuantifierParser`` does.
+    3. Unresolvable relative reference ("die andere"/"die daneben") -
+       recognized by a custom, non-HA-core intent name (``HassReferenceOther``,
+       same precedent ``HassSetPercentage`` already established) but never
+       resolved: returns ``AmbiguousReference`` instead of a ``ParseResult``,
+       since there is no candidate list or spatial model to pick from
+       without guessing.
+
+    Whenever strategy 1 or 2 resolves to more than one entity,
+    ``frame.quantifier`` is set to ``Quantifier(kind="all")`` - required so
+    ``validate_command()``'s check #3 (a non-quantifier command resolving to
+    2+ entities is treated as an unresolved ambiguity) doesn't misfire on a
+    deliberate multi-entity reference.
+    """
+
+    def __init__(self, intents: Intents) -> None:
+        self._intents = intents
+
+    def parse(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        last_entities: tuple[EntitySnapshot, ...],
+        last_area: AreaSnapshot | None,
+    ) -> ParseResult | AmbiguousReference | None:
+        slot_lists = {"domain": _DOMAIN_SLOT_LIST}
+        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+        if result is None or result.intent is None:
+            return None
+
+        if result.intent.name == "HassReferenceOther":
+            return AmbiguousReference(source_text=text)
+
+        domain_slot = result.entities.get("domain")
+        if domain_slot is not None:
+            return self._resolve_area_anchored(result.intent.name, str(domain_slot.value), entities, last_area, text)
+
+        return self._resolve_pronoun(result.intent.name, last_entities, text)
+
+    @staticmethod
+    def _resolve_pronoun(intent_name: str, last_entities: tuple[EntitySnapshot, ...], text: str) -> ParseResult | None:
+        if not last_entities:
+            return None
+
+        parameters: dict[str, object] = {}
+        if intent_name in ("HassLightBrighten", "HassLightDim"):
+            # Same single-light scope constraint as match_followup() - the
+            # LIGHT_EXTENDED_INTENTS response lambdas only read entities[0].
+            lights = [e for e in last_entities if e.domain == "light"]
+            if len(lights) != 1:
+                return None
+            matched = lights
+            parameters = {"step_percent": _DEFAULT_DIMMING_STEP_PERCENT}
+        else:
+            if INTENTS.get(intent_name) is None:
+                return None
+            matched = list(last_entities)
+
+        frame = SemanticFrame(
+            intent=intent_name,
+            target=TargetReference(
+                text=text,
+                entity_id=matched[0].entity_id if len(matched) == 1 else None,
+                domain=matched[0].domain,
+            ),
+            area=None,
+            quantifier=Quantifier(kind="all") if len(matched) > 1 else None,
+            parameters=parameters,
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=matched)
+
+    @staticmethod
+    def _resolve_area_anchored(
+        intent_name: str,
+        domain: str,
+        entities: list[EntitySnapshot],
+        last_area: AreaSnapshot | None,
+        text: str,
+    ) -> ParseResult | None:
+        if last_area is None:
+            return None  # no remembered area to resolve "dort" against - never guess
+
+        spec = INTENTS.get(intent_name)
+        if spec is None or domain not in spec.allowed_domains:
+            return None
+
+        matches = resolve_entities_by_domain(domain, entities, area_id=last_area.area_id)
+        if not matches:
+            return None
+
+        frame = SemanticFrame(
+            intent=intent_name,
+            target=TargetReference(text=domain, domain=domain),
+            area=AreaReference(text=last_area.name, area_id=last_area.area_id),
+            quantifier=Quantifier(kind="all") if len(matches) > 1 else None,
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=matches)

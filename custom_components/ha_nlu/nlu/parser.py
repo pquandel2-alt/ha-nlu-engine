@@ -44,6 +44,30 @@ class ClarificationRequest:
     candidates: tuple[EntitySnapshot, ...]
 
 
+@dataclass(frozen=True)
+class AmbiguousReference:
+    """A relative reference recognized by the grammar but not resolvable
+    without guessing (v2 plan Phase 27, "Pronomen und Referenzen") - e.g.
+    "Die andere.", "Die daneben.". The engine keeps no "not-selected sibling
+    candidates" list and no spatial/adjacency model at all, so resolving
+    *which* other entity is meant would require guessing - explicitly
+    forbidden by the plan ("Keine zufällige Auswahl", brain node e2946a55,
+    section 25). Distinct from ``ClarificationRequest``: a clarification has
+    real candidates to ask the user about, this has none at all - it maps to
+    ``NluError.AMBIGUOUS_REFERENCE`` (nlu/response.py) rather than a
+    follow-up question.
+
+    Lives here (not ``ReferenceParser``'s own return type in ``parsers.py``)
+    for the same reason ``ClarificationRequest`` does: kept close to
+    ``ParseResult``, its sibling alternate-outcome type. Not part of the
+    shared ``IntentParser`` Protocol below - like ``ContextFollowupParser``,
+    ``ReferenceParser`` is special-cased directly by ``engine.py``
+    (``match_reference()``), not routed through ``_select_parser()``.
+    """
+
+    source_text: str
+
+
 @runtime_checkable
 class IntentParser(Protocol):
     """Most parsers only ever return ``ParseResult | None`` - only
