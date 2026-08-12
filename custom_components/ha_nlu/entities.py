@@ -40,6 +40,12 @@ class EntitySnapshot:
     device_class: str | None = None
     state_class: str | None = None
     aliases: tuple[str, ...] = ()
+    # HA Area Registry aliases (e.g. "draußen" for area "Garten") - the
+    # area-level counterpart to ``aliases`` above (entity-level). Carried per
+    # entity (not a separate area->aliases map) since EntitySnapshot is
+    # already the only hass-free channel areas.py's resolver reads from - see
+    # hass_entities.py::_area_aliases() for how this is populated live.
+    area_aliases: tuple[str, ...] = ()
     attributes: Mapping[str, Any] = field(default_factory=dict)
     capabilities: frozenset[str] = field(default_factory=frozenset)
 

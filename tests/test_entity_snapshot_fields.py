@@ -14,6 +14,7 @@ def test_new_fields_default_to_empty_when_omitted():
     assert snap.device_class is None
     assert snap.state_class is None
     assert snap.aliases == ()
+    assert snap.area_aliases == ()
     assert snap.attributes == {}
     assert snap.capabilities == frozenset()
 
@@ -27,12 +28,14 @@ def test_new_fields_can_be_set_explicitly():
         device_class="temperature",
         state_class="measurement",
         aliases=("Außentemperatur",),
+        area_aliases=("draußen",),
         attributes={"unit_of_measurement": "°C"},
         capabilities=frozenset({"TEMPERATURE"}),
     )
     assert snap.device_class == "temperature"
     assert snap.state_class == "measurement"
     assert snap.aliases == ("Außentemperatur",)
+    assert snap.area_aliases == ("draußen",)
     assert snap.attributes == {"unit_of_measurement": "°C"}
     assert snap.capabilities == frozenset({"TEMPERATURE"})
 

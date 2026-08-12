@@ -75,3 +75,42 @@ def test_entities_without_area_are_ignored():
     entities = [EntitySnapshot("cover.a", "Rolllade", "cover", "closed")]
     result = resolve_area_scored("Poleraum", entities)
     assert result.status is AreaResolutionStatus.NOT_FOUND
+
+
+# --- Area aliases (HA Area Registry ``aliases``, e.g. "draußen" -> "Garten") --
+
+GARTEN_SENSORS = [
+    EntitySnapshot(
+        "binary_sensor.a", "Gartentür", "binary_sensor", "off",
+        area_id="garten", area_name="Garten", area_aliases=("draußen", "Terrasse"),
+    ),
+    EntitySnapshot(
+        "light.a", "Gartenlicht", "light", "off",
+        area_id="garten", area_name="Garten", area_aliases=("draußen", "Terrasse"),
+    ),
+    EntitySnapshot("cover.a", "Rolllade Büro", "cover", "closed", area_id="buro", area_name="Büro"),
+]
+
+
+def test_exact_alias_match_resolves_area():
+    result = resolve_area_scored("draußen", GARTEN_SENSORS)
+    assert result.status is AreaResolutionStatus.RESOLVED
+    assert result.area.area_id == "garten"
+    assert result.score == 90
+
+
+def test_exact_alias_scores_below_literal_area_name_match():
+    result = resolve_area_scored("Garten", GARTEN_SENSORS)
+    assert result.status is AreaResolutionStatus.RESOLVED
+    assert result.score == 100
+
+
+def test_alias_does_not_match_unrelated_area():
+    result = resolve_area_scored("draußen", POLERAUM_COVERS)
+    assert result.status is AreaResolutionStatus.NOT_FOUND
+
+
+def test_second_alias_also_resolves_same_area():
+    result = resolve_area_scored("Terrasse", GARTEN_SENSORS)
+    assert result.status is AreaResolutionStatus.RESOLVED
+    assert result.area.area_id == "garten"

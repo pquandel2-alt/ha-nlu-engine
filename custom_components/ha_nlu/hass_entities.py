@@ -54,18 +54,23 @@ def _friendly(state: State) -> str:
 
 def _area_info(
     hass: HomeAssistant, entity_id: str, registry_entry: er.RegistryEntry | None = None
-) -> tuple[str | None, str | None]:
-    """(area_id, area_name) via the standard entity -> device -> area
-    fallback chain, or (None, None) if the entity has no area assigned."""
+) -> tuple[str | None, str | None, tuple[str, ...]]:
+    """(area_id, area_name, area_aliases) via the standard entity -> device ->
+    area fallback chain, or (None, None, ()) if the entity has no area
+    assigned. ``area_aliases`` mirrors ``_entity_aliases`` below but reads
+    from the Area Registry's own ``aliases`` field (e.g. "draußen" configured
+    on a "Garten" area) rather than the entity registry."""
     entry = registry_entry if registry_entry is not None else er.async_get(hass).async_get(entity_id)
     area_id = entry.area_id if entry else None
     if area_id is None and entry is not None and entry.device_id:
         device = dr.async_get(hass).async_get(entry.device_id)
         area_id = device.area_id if device else None
     if area_id is None:
-        return None, None
+        return None, None, ()
     area = ar.async_get(hass).async_get_area(area_id)
-    return area_id, (area.name if area else None)
+    if area is None:
+        return area_id, None, ()
+    return area_id, area.name, tuple(sorted(area.aliases))
 
 
 def _floor_info(
@@ -109,7 +114,7 @@ def build_entity_snapshots(
         if state is None:
             continue
         registry_entry = er.async_get(hass).async_get(entity_id)
-        area_id, area_name = _area_info(hass, entity_id, registry_entry=registry_entry)
+        area_id, area_name, area_aliases = _area_info(hass, entity_id, registry_entry=registry_entry)
         floor_id, floor_name, floor_level = _floor_info(hass, area_id)
         domain = entity_id.split(".", 1)[0]
         device_class = state.attributes.get("device_class")
@@ -129,6 +134,7 @@ def build_entity_snapshots(
                 device_class=device_class,
                 state_class=state.attributes.get("state_class"),
                 aliases=_entity_aliases(hass, registry_entry),
+                area_aliases=area_aliases,
                 attributes=state.attributes,
                 capabilities=frozenset(c.name for c in capabilities),
             )
