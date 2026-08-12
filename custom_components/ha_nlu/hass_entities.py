@@ -84,11 +84,19 @@ def _floor_info(
     return floor_id, (floor.name if floor else None), (floor.level if floor else None)
 
 
-def _entity_aliases(registry_entry: er.RegistryEntry | None) -> tuple[str, ...]:
-    """Aliases the user configured in HA's entity registry (Assist feature)."""
-    if registry_entry is None or not registry_entry.aliases:
+def _entity_aliases(
+    hass: HomeAssistant, registry_entry: er.RegistryEntry | None
+) -> tuple[str, ...]:
+    """Aliases the user configured in HA's entity registry (Assist feature).
+
+    ``registry_entry.aliases`` entries can be the ``ComputedNameType``
+    sentinel (meaning "use the entity's computed full name here") rather
+    than a plain string, so raw entries aren't safe to use directly -
+    ``async_get_entity_aliases`` is HA's own resolver for that sentinel.
+    """
+    if registry_entry is None:
         return ()
-    return tuple(sorted(registry_entry.aliases))
+    return tuple(sorted(er.async_get_entity_aliases(hass, registry_entry)))
 
 
 def build_entity_snapshots(
@@ -120,7 +128,7 @@ def build_entity_snapshots(
                 unit=state.attributes.get("unit_of_measurement"),
                 device_class=device_class,
                 state_class=state.attributes.get("state_class"),
-                aliases=_entity_aliases(registry_entry),
+                aliases=_entity_aliases(hass, registry_entry),
                 attributes=state.attributes,
                 capabilities=frozenset(c.name for c in capabilities),
             )
