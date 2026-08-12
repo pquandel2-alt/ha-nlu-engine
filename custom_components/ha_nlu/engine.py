@@ -110,10 +110,17 @@ _TEMPORAL_RE = re.compile(
 # structurally could never match ComparisonQueryParser's comparator+percent/
 # temperature-only grammar, so it fell all the way through to "not
 # understood" - it belongs to _STATE_QUERY_RE below instead. The comparator
-# vocabulary is read from parsers.py's _COMPARATOR_SLOT_LIST (not
-# re-derived here) so the two can never drift apart.
+# vocabulary mirrors parsers.py's _COMPARATOR_SLOT_LIST (kept in sync by
+# hand - not re-derived here, since that list is built at import time from
+# tuples, not a bare word list this regex could read directly). "heller
+# als"/"dunkler als"/"mehr als"/"weniger als" (V4.2 spec gap #5) require the
+# literal "als" alongside "heller"/"dunkler", so this can't collide with
+# _LIGHT_EXTENDED_RE's bare "heller"/"dunkler" keywords below - and this
+# regex is checked first regardless, same precedent already documented.
 _COMPARISON_QUERY_RE = re.compile(
-    r"\bwelche\b.*\b(mindestens|höchstens|nicht höher als|über|unter)\b", re.IGNORECASE
+    r"\bwelche\b.*\b(mindestens|höchstens|nicht höher als|über|unter|"
+    r"heller als|dunkler als|mehr als|weniger als)\b",
+    re.IGNORECASE,
 )
 
 # Sentences combining a query-trigger word ("welche"/"wie viele"/"ist"/
@@ -183,6 +190,18 @@ _BARE_PERCENT_RE = re.compile(r"\bauf\s+\d{1,3}\b")
 _QUANTIFIER_RE = re.compile(
     r"\b(alle|beide[nr]?|nur|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|oben|unten)\b", re.IGNORECASE
 )
+
+# "Welche {attribute} zeigt {name} [Sensor]?" / "Was zeigt {name} [Sensor]
+# an?" (v4.1.2 live gap, screenshot IMG_3105) is plain HassGetState -
+# SingleTargetParser's default grammar (query.yaml) - but "welche Temperatur
+# zeigt der Außentemperatur Sensor" also contains the standalone word
+# "temperatur", which would otherwise match _CLIMATE_EXTENDED_RE below and
+# misroute it to ClimateExtendedParser's unrelated "wärmer/kälter" grammar
+# (that parser has no "zeigt" sentence, so it would return None). "zeigt" is
+# unique to this HassGetState sentence family - grepped empirically, no
+# other intent YAML uses it - so routing on it unconditionally, before
+# _CLIMATE_EXTENDED_RE, can't misroute an existing match.
+_GET_STATE_ZEIGT_RE = re.compile(r"\bzeigt\b", re.IGNORECASE)
 
 # Sentences containing a brightness-adjust or colour/colour-temperature
 # keyword are routed to LightExtendedParser's separately-compiled grammar
@@ -412,6 +431,8 @@ class NluEngine:
             return self._comparison_query_parser
         if _STATE_QUERY_RE.search(text):
             return self._state_query_parser
+        if _GET_STATE_ZEIGT_RE.search(text):
+            return self._single_parser
         if _LIGHT_EXTENDED_RE.search(text):
             return self._light_extended_parser
         if _FAN_EXTENDED_RE.search(text):

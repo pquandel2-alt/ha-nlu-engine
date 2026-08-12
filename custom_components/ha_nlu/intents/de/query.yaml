@@ -13,3 +13,15 @@ intents:
           # HassGetState -> derive_query_type() -> _speak_query() pipeline,
           # no new intent/response wiring needed.
           - "wie viel [strom|energie] verbraucht [die|der|das] {name}"
+          # "Welche {attribute} zeigt {name} [Sensor]?" (v4.1.2 live gap,
+          # screenshot IMG_3105): the attribute word (Temperatur/Wert/...) is
+          # not captured as a slot - HassGetState's response is derived
+          # entirely from the resolved entity's own state/device_class/unit
+          # (see service_call.py's derive_query_type()-based lambda), never
+          # from the input phrasing, so an unnamed required-alternation group
+          # (same "(a|b|c)" pattern percentage/position_brightness.yaml
+          # already uses) is enough to consume the word without a new slot
+          # list.
+          - "welche (temperatur|luftfeuchtigkeit|helligkeit|batterie|leistung|energie) zeigt [die|der|das] {name} [sensor]"
+          - "welchen (wert|stand) zeigt [die|der|das] {name} [sensor]"
+          - "was zeigt [die|der|das] {name} [sensor] [an]"

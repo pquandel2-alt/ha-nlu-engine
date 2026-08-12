@@ -149,6 +149,15 @@ _DEFAULT_DIMMING_STEP_PERCENT = 10
 # same discipline as _COLOR_TEMP_SLOT_LIST/_DOMAIN_SLOT_LIST). Both
 # "höchstens" and "nicht höher als" map to "lte" - two spoken phrasings, one
 # operator, same precedent _QUANTIFIER_SLOT_LIST's "nur"->"all" already set.
+#
+# "heller als"/"dunkler als"/"mehr als"/"weniger als" (V4.2 spec gap #5,
+# "Welche Lampen sind heller als 70 Prozent?") map onto the same "gt"/"lt"
+# operators "über"/"unter" already use - "heller"/"dunkler" are brightness-
+# specific synonyms for "more"/"less" that read naturally in a percent
+# comparison, not a new comparison semantic. engine.py's
+# _COMPARISON_QUERY_RE requires "welche" + one of these literal phrases
+# together, checked before _LIGHT_EXTENDED_RE, so "heller als" here can't
+# collide with the plain "heller" (no "als") LightExtendedParser keyword.
 _COMPARATOR_SLOT_LIST = TextSlotList.from_tuples(
     [
         ("mindestens", "gte"),
@@ -156,6 +165,10 @@ _COMPARATOR_SLOT_LIST = TextSlotList.from_tuples(
         ("nicht höher als", "lte"),
         ("über", "gt"),
         ("unter", "lt"),
+        ("heller als", "gt"),
+        ("mehr als", "gt"),
+        ("dunkler als", "lt"),
+        ("weniger als", "lt"),
     ],
     name="comparator",
 )
@@ -1472,11 +1485,15 @@ class StateQueryParser:
         if domain not in spec.allowed_domains:
             return None
 
-        state_adj_slot = slots.get("state_adj")
+        # {state_adj} is the "gibt es offene Fenster" attributive-word
+        # branch; {state} is the "ist ein Fenster offen" predicate-word
+        # branch (spec gap #4) - only one of the two is ever present for a
+        # given sentence, since they come from disjoint templates.
+        state_slot = slots.get("state_adj") or slots.get("state")
         requested_state = None
         matches = candidates
-        if state_adj_slot is not None:
-            requested_state = _STATE_NAME_TO_SEMANTIC[str(state_adj_slot.value)]
+        if state_slot is not None:
+            requested_state = _STATE_NAME_TO_SEMANTIC[str(state_slot.value)]
             matches = [e for e in candidates if matches_semantic_state(e, requested_state)]
 
         frame = SemanticFrame(

@@ -103,6 +103,48 @@ def test_state_query_unknown_area_returns_none(engine):
     assert engine.match("welche Fenster sind im Bunker offen", WINDOWS) is None
 
 
+def test_state_query_noch_filler_word(engine):
+    # Live incident (v4.2 Milestone 7): "noch" (still/yet) is idiomatic
+    # German and was one of the two originally-reported failing sentences
+    # ("Welche Fenster sind noch geöffnet?") - the grammar had no optional
+    # filler for it and returned NOT_UNDERSTOOD. Carries no semantic weight
+    # (SemanticState unchanged), so this must resolve identically to the
+    # "noch"-less phrasing.
+    result = engine.match("welche Fenster sind noch offen", WINDOWS)
+    assert result is not None
+    assert result.command.entities == (FENSTER_KELLER,)
+
+
+def test_state_query_area_scoped_noch_filler_word(engine):
+    result = engine.match("welche Fenster sind im Keller noch offen", WINDOWS)
+    assert result is not None
+    assert result.command.entities == (FENSTER_KELLER,)
+
+
+def test_state_query_denn_filler_word(engine):
+    # Spec gap #2: "denn" (rhetorical-question filler, "Sind denn Fenster
+    # offen?") carries no semantic weight, same as "noch" above.
+    result = engine.match("welche Fenster sind denn offen", WINDOWS)
+    assert result is not None
+    assert result.command.entities == (FENSTER_KELLER,)
+
+
+def test_state_query_bare_sentence_no_welche_or_wie_viele(engine):
+    # Spec gap #3: "Sind Fenster noch offen?" has neither "welche" nor "wie
+    # viele" - a third, equally natural German phrasing. Routing already
+    # worked ("sind" is an existing _STATE_QUERY_RE trigger word); only the
+    # grammar template itself was missing.
+    result = engine.match("sind Fenster noch offen", WINDOWS)
+    assert result is not None
+    assert result.command.entities == (FENSTER_KELLER,)
+
+
+def test_state_query_bare_sentence_area_scoped(engine):
+    result = engine.match("sind im Keller Fenster offen", WINDOWS)
+    assert result is not None
+    assert result.command.entities == (FENSTER_KELLER,)
+
+
 def test_state_query_motion_binary_sensor_uses_on_off_not_open_closed(engine):
     # SemanticState branching: a motion binary_sensor's "an"/"aus" maps to
     # ON/OFF, not OPEN/CLOSED - a "welche ... sind offen" query must not
@@ -130,6 +172,20 @@ def test_check_state_negative(engine):
 
 def test_check_state_area_scoped(engine):
     result = engine.match("ist die Tür Eingang im Eingang offen", ALL_SENSORS)
+    assert result is not None
+    assert result.response_text == "Ja, Tür Eingang ist offen."
+
+
+def test_check_state_noch_filler_word(engine):
+    # Same "noch" gap as HassStateQuery (see test_state_query_noch_filler_word)
+    # - "Ist das Fenster Keller noch offen?" is equally idiomatic German.
+    result = engine.match("ist das Fenster Keller noch offen", WINDOWS)
+    assert result is not None
+    assert result.response_text == "Ja, Fenster Keller ist offen."
+
+
+def test_check_state_area_scoped_noch_filler_word(engine):
+    result = engine.match("ist die Tür Eingang im Eingang noch offen", ALL_SENSORS)
     assert result is not None
     assert result.response_text == "Ja, Tür Eingang ist offen."
 
@@ -216,6 +272,49 @@ def test_exists_query_area_scoped_false(engine):
     result = engine.match("gibt es offene Fenster im Bad", WINDOWS)
     assert result is not None
     assert result.response_text == "Nein, es gibt keine Fenster."
+
+
+def test_exists_query_noch_filler_word(engine):
+    # Spec gap #1: "gibt es noch offene Fenster?" (still/yet) - HassExistsQuery
+    # had no "[noch]" while HassStateQuery/HassCheckState already did.
+    result = engine.match("gibt es noch offene Fenster", WINDOWS)
+    assert result is not None
+    assert result.response_text == "Ja, es gibt 1 Fenster."
+
+
+def test_exists_query_denn_filler_word(engine):
+    result = engine.match("gibt es denn offene Fenster", WINDOWS)
+    assert result is not None
+    assert result.response_text == "Ja, es gibt 1 Fenster."
+
+
+def test_exists_query_ist_ein_word_order(engine):
+    # Spec gap #4: "Ist ein Fenster offen?" - existence phrased with "ist"/
+    # indefinite article instead of "gibt es". Still EXISTS semantics (no
+    # specific named entity requested), not HassCheckState.
+    result = engine.match("ist ein Fenster offen", WINDOWS)
+    assert result is not None
+    assert result.frame.intent == "HassExistsQuery"
+    assert result.response_text == "Ja, es gibt 1 Fenster."
+
+
+def test_exists_query_ist_ein_area_scoped_word_order(engine):
+    result = engine.match("ist im Bad ein Fenster offen", WINDOWS)
+    assert result is not None
+    assert result.frame.intent == "HassExistsQuery"
+    assert result.response_text == "Nein, es gibt keine Fenster."
+
+
+def test_exists_query_ist_ein_does_not_shadow_check_state(engine):
+    # The "ist ein {device_class} ... {state}" grammar (added for gap #4)
+    # must not swallow a real named-entity HassCheckState question just
+    # because HassExistsQuery is now declared first in the YAML file for
+    # ordering reasons (see state_query.yaml's comment) - a real "die/der/das"
+    # article must still resolve to the named entity.
+    result = engine.match("ist das Fenster Keller offen", WINDOWS)
+    assert result is not None
+    assert result.frame.intent == "HassCheckState"
+    assert result.response_text == "Ja, Fenster Keller ist offen."
 
 
 # --- Routing boundary -------------------------------------------------------

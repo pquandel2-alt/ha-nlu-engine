@@ -31,6 +31,24 @@ def test_wie_ist_luftfeuchtigkeit_bad(engine, sensor_entities):
     assert result.response_text == "52 Prozent."
 
 
+def test_welche_temperatur_zeigt_der_sensor(engine, sensor_entities):
+    # Live gap (v4.1.2, screenshot IMG_3105): "Welche Temperatur zeigt der
+    # {name} Sensor?" - the attribute word ("Temperatur") is not a slot,
+    # HassGetState's response is derived from the resolved entity itself
+    # (see query.yaml's comment), so this must resolve identically to
+    # test_wie_hoch_ist_die_aussentemperatur above.
+    result = engine.match("Welche Temperatur zeigt der Außentemperatur Sensor?", sensor_entities)
+    assert result is not None
+    assert result.plan is None
+    assert result.response_text == "18.4 Grad."
+
+
+def test_was_zeigt_der_sensor_an(engine, sensor_entities):
+    result = engine.match("Was zeigt der Außentemperatur Sensor an?", sensor_entities)
+    assert result is not None
+    assert result.response_text == "18.4 Grad."
+
+
 def test_query_unknown_entity_returns_none(engine, sensor_entities):
     assert engine.match("wie hoch ist die Kellertemperatur", sensor_entities) is None
 

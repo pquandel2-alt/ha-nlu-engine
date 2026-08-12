@@ -134,6 +134,42 @@ def test_query_percent_covers_uber(engine):
     assert result.command.entities == (LIGHTS_AND_COVERS[3],)
 
 
+def test_query_percent_heller_als_filters_lights(engine):
+    # Spec gap #5: "heller als"/"dunkler als"/"mehr als"/"weniger als" are
+    # brightness-flavored synonyms for "über"/"unter" - same "gt"/"lt"
+    # operators, not a new comparison semantic.
+    result = engine.match("welche Lichter sind heller als 50 Prozent", LIGHTS_AND_COVERS)
+    assert result is not None
+    assert result.command.entities == (LIGHTS_AND_COVERS[0],)
+
+
+def test_query_percent_dunkler_als_filters_lights(engine):
+    result = engine.match("welche Lichter sind dunkler als 50 Prozent", LIGHTS_AND_COVERS)
+    assert result is not None
+    assert result.command.entities == (LIGHTS_AND_COVERS[1],)
+
+
+def test_query_percent_mehr_als_filters_lights(engine):
+    result = engine.match("welche Lichter sind mehr als 50 Prozent", LIGHTS_AND_COVERS)
+    assert result is not None
+    assert result.command.entities == (LIGHTS_AND_COVERS[0],)
+
+
+def test_query_percent_weniger_als_filters_lights(engine):
+    result = engine.match("welche Lichter sind weniger als 50 Prozent", LIGHTS_AND_COVERS)
+    assert result is not None
+    assert result.command.entities == (LIGHTS_AND_COVERS[1],)
+
+
+def test_query_percent_heller_als_does_not_misroute_to_light_extended(engine):
+    # "heller als" contains the bare word "heller", which _LIGHT_EXTENDED_RE
+    # also matches (LightExtendedParser's "mach das Licht heller" command) -
+    # _COMPARISON_QUERY_RE must win since it's checked first in engine.py.
+    result = engine.match("welche Lichter sind heller als 50 Prozent", LIGHTS_AND_COVERS)
+    assert result is not None
+    assert result.frame.intent == "HassQueryComparison"
+
+
 def test_query_percent_entity_without_attribute_excluded_not_crashed(engine):
     # Flurlicht reports no "brightness" attribute at all - excluded from the
     # match set rather than treated as 0% or raising.
