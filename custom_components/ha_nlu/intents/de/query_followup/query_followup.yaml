@@ -1,0 +1,27 @@
+language: "de"
+intents:
+  # HomeIntent plan V4.9, "Cross-Sentence References" - follow-up half. The
+  # 12th separately-compiled hassil grammar (see parsers.py's
+  # QueryFollowupParser docstring): "Und in der Küche?"/"Und oben?" after a
+  # previous state query - domain/device_class are carried over from the
+  # previous turn's ConversationContext, never re-spoken here, so this
+  # grammar only needs to capture the *new* room or floor.
+  #
+  # The locative preposition before {area} is a *mandatory* alternation
+  # "(...)" here, not the optional "[...]" every other {area} grammar in
+  # this project uses - empirically verified against hassil==3.11.0 before
+  # writing this file: with an optional/omittable preposition, "und oben"
+  # structurally matches *this* sentence too (the {area} wildcard just
+  # swallows "oben" with zero preceding words), silently shadowing the
+  # dedicated "und {level}" sentence below since hassil tries sentences in
+  # declaration order. Every other {area} grammar in this project is safe
+  # with an optional preposition only because {area} there always sits
+  # between two fixed words (a verb/domain before, "an"/"aus"/"hoch"/...
+  # after) that a bare "oben"/"unten" could never also satisfy - here "und"
+  # is the *only* fixed word either sentence has, so the two shapes would
+  # otherwise be indistinguishable without a required preposition.
+  HassGetState:
+    data:
+      - sentences:
+          - "und (in der|in dem|im|am|beim) {area}"
+          - "und {level}"

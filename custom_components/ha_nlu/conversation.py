@@ -93,11 +93,13 @@ class NluConversationEntity(
         why - a reply like "Das im Wohnzimmer" isn't itself a full command).
 
         Otherwise, an elliptical follow-up without its own target ("Etwas
-        heller.", v2 plan Phase 26) or a pronoun/relative reference ("Mach
-        es aus.", "Die Rollläden dort runter.", v2 plan Phase 27) is tried
-        against the stored context before a fresh ``match()`` - see
-        ``NluEngine.match_followup()``/``match_reference()``'s docstrings
-        for their scope decisions.
+        heller.", v2 plan Phase 26), a pronoun/relative reference ("Mach es
+        aus.", "Die Rollläden dort runter.", v2 plan Phase 27), or a
+        cross-sentence query follow-up ("Und in der Küche?", HomeIntent
+        plan V4.9) is tried against the stored context before a fresh
+        ``match()`` - see ``NluEngine.match_followup()``/
+        ``match_reference()``/``match_query_followup()``'s docstrings for
+        their scope decisions.
         """
         response = intent.IntentResponse(language=user_input.language)
 
@@ -113,6 +115,8 @@ class NluConversationEntity(
             result = self._engine.match_followup(user_input.text, pending)
             if result is None:
                 result = self._engine.match_reference(user_input.text, entities, pending)
+            if result is None:
+                result = self._engine.match_query_followup(user_input.text, entities, pending)
             if result is None:
                 result = self._engine.match(user_input.text, entities)
 

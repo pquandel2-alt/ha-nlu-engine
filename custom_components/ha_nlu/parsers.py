@@ -905,6 +905,156 @@ class TemporalParser:
         return None  # structurally unreachable: one of the three branches above always matched
 
 
+class AreaQueryParser:
+    """Wraps the {area} grammar ("wie warm ist es im Wohnzimmer") - the 11th
+    separately-compiled hassil grammar, HomeIntent plan V4.9, "Cross-
+    Sentence References" (first-turn half: a state query with no entity
+    name at all, only a room).
+
+    "warm"/"kalt" are decorative alternation, not a captured slot - same
+    precedent query.yaml's own "[hoch|warm|kalt|hell]" already established
+    for its {name}-based sentence (grepped empirically before writing this
+    grammar: neither word appears anywhere else, so this can't misroute an
+    existing sentence). Resolution always looks for the one ``sensor``
+    entity in the named room reporting ``device_class == "temperature"`` -
+    asking "wie warm"/"wie kalt" both mean the same thing structurally
+    ("give me the temperature reading"), not a threshold comparison (that's
+    V4.6's separate Comparison mechanism). Reuses the existing
+    ``HassGetState`` intent name so the response phrasing
+    (service_call.py's ``_speak_query``) and ``QUERY_INTENTS`` wiring stay
+    identical to a name-based query - only *how* the target entity is found
+    differs.
+
+    Zero or several temperature sensors in the same room is refused rather
+    than guessed - same "never guess" rule as every other parser here.
+    """
+
+    def __init__(self, intents: Intents) -> None:
+        self._intents = intents
+
+    def parse(self, text: str, context: ParseContext) -> ParseResult | None:
+        slot_lists = {"area": WildcardSlotList(name="area")}
+        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+        if result is None or result.intent is None:
+            return None
+
+        area_slot = result.entities.get("area")
+        if area_slot is None:
+            return None
+        area_name = _strip_locative_prepositions(str(area_slot.value))
+        if not area_name:
+            return None
+
+        area_resolved = resolve_area_name(area_name, context.entities)
+        if area_resolved.status is not AreaResolveStatus.OK:
+            return None  # room not found or ambiguous - never guess
+
+        matches = [
+            e for e in resolve_entities_by_domain("sensor", context.entities, area_id=area_resolved.area_id)
+            if e.device_class == "temperature"
+        ]
+        if len(matches) != 1:
+            return None  # no single unambiguous temperature sensor in that room - never guess
+        entity = matches[0]
+
+        frame = SemanticFrame(
+            intent=result.intent.name,
+            target=TargetReference(text=area_name, entity_id=entity.entity_id, domain=entity.domain),
+            area=AreaReference(text=area_name, area_id=area_resolved.area_id),
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=[entity])
+
+
+class QueryFollowupParser:
+    """Wraps the "und {area}"/"und {level}" grammar ("Und in der Küche?",
+    "Und oben?") - the 12th separately-compiled hassil grammar, HomeIntent
+    plan V4.9, "Cross-Sentence References" (follow-up half).
+
+    Structurally distinct from every other parser here, same reason
+    ``ReferenceParser`` already documents for itself: resolution happens
+    against the previous turn's resolved query target, not a freshly spoken
+    name, so this parser takes ``last_entities`` as a plain parameter rather
+    than folding it into ``ParseContext``.
+
+    *What* to look for (domain + device_class) is never re-spoken - it's
+    carried over from ``last_entities[0]`` (the previous turn's single
+    resolved query target; the caller, ``NluEngine.match_query_followup()``,
+    already gates on the previous intent being a plain ``HassGetState``
+    before this parser is even tried). Mirrors ``derive_query_type``'s own
+    domain-first/device_class-second precedence (nlu/query.py): a light
+    carries over by domain alone (lights don't report a device_class),
+    everything else carries over by domain *and* device_class - so "Und in
+    der Küche?" after a temperature query only matches a temperature sensor
+    in the new room, never some other sensor there.
+
+    {area} resolves against a fresh room lookup (this turn's ``entities``,
+    not the remembered one - the whole point is a *new* room); {level}
+    ("oben"/"unten") resolves a floor the same way ``QuantifierParser``'s
+    own {level} slot does (v2 plan Phase 28 precedent,
+    ``resolve_floor_by_level_keyword``). Either way, zero or several
+    matching entities in the new area/floor is refused rather than guessed.
+    """
+
+    def __init__(self, intents: Intents) -> None:
+        self._intents = intents
+
+    def parse(
+        self, text: str, entities: list[EntitySnapshot], last_entities: tuple[EntitySnapshot, ...]
+    ) -> ParseResult | None:
+        if not last_entities:
+            return None
+        reference = last_entities[0]
+        domain = reference.domain
+        device_class = None if domain == "light" else reference.device_class
+        if domain != "light" and device_class is None:
+            return None  # nothing meaningful to carry over - never guess
+
+        slot_lists = {"area": WildcardSlotList(name="area"), "level": _LEVEL_SLOT_LIST}
+        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+        if result is None or result.intent is None:
+            return None
+
+        area_id = None
+        area_name = None
+        floor_id = None
+        target_text = None
+        area_slot = result.entities.get("area")
+        if area_slot is not None:
+            area_name = _strip_locative_prepositions(str(area_slot.value))
+            if not area_name:
+                return None
+            area_resolved = resolve_area_name(area_name, entities)
+            if area_resolved.status is not AreaResolveStatus.OK:
+                return None  # room not found or ambiguous - never guess
+            area_id = area_resolved.area_id
+            target_text = area_name
+        else:
+            level_slot = result.entities.get("level")
+            if level_slot is None:
+                return None
+            level_resolved = resolve_floor_by_level_keyword(str(level_slot.value), entities)
+            if level_resolved.status is not FloorResolveStatus.OK:
+                return None  # no single oben/unten floor among today's entities - never guess
+            floor_id = level_resolved.floor_id
+            target_text = str(level_slot.value)
+
+        candidates = resolve_entities_by_domain(domain, entities, area_id=area_id, floor_id=floor_id)
+        if device_class is not None:
+            candidates = [e for e in candidates if e.device_class == device_class]
+        if len(candidates) != 1:
+            return None  # no single unambiguous match in the new area/floor - never guess
+        entity = candidates[0]
+
+        frame = SemanticFrame(
+            intent="HassGetState",
+            target=TargetReference(text=target_text, entity_id=entity.entity_id, domain=entity.domain),
+            area=AreaReference(text=area_name, area_id=area_id) if area_id is not None else None,
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=[entity])
+
+
 # Custom, non-HA-core intent names for the "die anderen" complement grammar
 # (HomeIntent plan V3.5) -> the real intent whose INTENTS spec/response
 # resolve() should use. Same naming precedent as HassReferenceOther/

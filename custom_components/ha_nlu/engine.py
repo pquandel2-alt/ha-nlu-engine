@@ -40,6 +40,7 @@ from .nlu.response import NluError, NluResponse
 from .nlu.service_mapper import map_to_service_call
 from .nlu.validator import validate_command
 from .parsers import (
+    AreaQueryParser,
     ClimateExtendedParser,
     ComparisonQueryParser,
     ContextFollowupParser,
@@ -47,6 +48,7 @@ from .parsers import (
     LightExtendedParser,
     PercentageParser,
     QuantifierParser,
+    QueryFollowupParser,
     ReferenceParser,
     SingleTargetParser,
     TemporalParser,
@@ -72,6 +74,8 @@ CONTEXT_FOLLOWUP_DIR = INTENTS_DIR / "context_followup"
 REFERENCE_DIR = INTENTS_DIR / "reference"
 COMPARISON_QUERY_DIR = INTENTS_DIR / "comparison_query"
 TEMPORAL_DIR = INTENTS_DIR / "temporal"
+AREA_QUERY_DIR = INTENTS_DIR / "area_query"
+QUERY_FOLLOWUP_DIR = INTENTS_DIR / "query_followup"
 
 # Sentences containing a temporal-modifier keyword ("Minute(n)"/"Stunde(n)"/
 # "Uhr"/"morgen früh"/"heute Abend"/...) are routed to TemporalParser's
@@ -169,6 +173,16 @@ _CLIMATE_EXTENDED_RE = re.compile(r"\b(grad|wärmer|kälter|temperatur)\b", re.I
 # split can never misfire on an existing single-command sentence.
 _AND_SPLIT_RE = re.compile(r"\s+und\s+", re.IGNORECASE)
 
+# "ist es" (a state query with no {name} at all, only a room - "wie warm
+# ist es im Wohnzimmer") routes to AreaQueryParser's separately-compiled
+# grammar (HomeIntent plan V4.9, "Cross-Sentence References", first-turn
+# half) instead of falling through to SingleTargetParser's default below -
+# query.yaml's own name-based sentence never contains the literal "ist es"
+# (it's "ist [die|der|das] {name}"), grepped empirically before adding this,
+# same "one keyword, one dedicated grammar" precedent every regex above
+# already follows.
+_AREA_QUERY_RE = re.compile(r"\bist\s+es\b", re.IGNORECASE)
+
 # Per-domain question word for the clarification round-trip (v2 plan Phase
 # 25). Same kind of small, explicit German-grammar lookup as
 # service_call.py's ``_DOMAIN_PLURAL_DE`` - only covers the domains
@@ -261,6 +275,8 @@ class NluEngine:
         reference_dir: Path = REFERENCE_DIR,
         comparison_query_dir: Path = COMPARISON_QUERY_DIR,
         temporal_dir: Path = TEMPORAL_DIR,
+        area_query_dir: Path = AREA_QUERY_DIR,
+        query_followup_dir: Path = QUERY_FOLLOWUP_DIR,
     ) -> None:
         yaml_files = sorted(intents_dir.glob("*.yaml"))
         if not yaml_files:
@@ -312,6 +328,16 @@ class NluEngine:
             raise FileNotFoundError(f"No intent YAML files found in {temporal_dir}")
         temporal_intents: Intents = Intents.from_files(temporal_yaml_files)
 
+        area_query_yaml_files = sorted(area_query_dir.glob("*.yaml"))
+        if not area_query_yaml_files:
+            raise FileNotFoundError(f"No intent YAML files found in {area_query_dir}")
+        area_query_intents: Intents = Intents.from_files(area_query_yaml_files)
+
+        query_followup_yaml_files = sorted(query_followup_dir.glob("*.yaml"))
+        if not query_followup_yaml_files:
+            raise FileNotFoundError(f"No intent YAML files found in {query_followup_dir}")
+        query_followup_intents: Intents = Intents.from_files(query_followup_yaml_files)
+
         self._single_parser = SingleTargetParser(intents)
         self._quantifier_parser = QuantifierParser(quantifier_intents)
         self._percentage_parser = PercentageParser(percentage_intents)
@@ -322,6 +348,8 @@ class NluEngine:
         self._reference_parser = ReferenceParser(reference_intents)
         self._comparison_query_parser = ComparisonQueryParser(comparison_query_intents)
         self._temporal_parser = TemporalParser(temporal_intents)
+        self._area_query_parser = AreaQueryParser(area_query_intents)
+        self._query_followup_parser = QueryFollowupParser(query_followup_intents)
 
     def _select_parser(self, text: str):
         if _TEMPORAL_RE.search(text):
@@ -338,6 +366,8 @@ class NluEngine:
             return self._percentage_parser
         if _QUANTIFIER_RE.search(text):
             return self._quantifier_parser
+        if _AREA_QUERY_RE.search(text):
+            return self._area_query_parser
         return self._single_parser
 
     def match(self, text: str, entities: list[EntitySnapshot]) -> MatchResult | CommandPlan | None:
@@ -437,6 +467,44 @@ class NluEngine:
         normalized = normalize(text)
         result = self._reference_parser.parse(normalized, entities, context.last_entities, context.last_area)
         if result is None or isinstance(result, AmbiguousReference):
+            return None
+        return self._build_match_result(result)
+
+    def match_query_followup(
+        self, text: str, entities: list[EntitySnapshot], context: ConversationContext | None
+    ) -> MatchResult | None:
+        """Continue a previous state query with a new room/floor ("Und in
+        der Küche?", "Und oben?" after "Wie warm ist es im Wohnzimmer?") -
+        HomeIntent plan V4.9, "Cross-Sentence References". Tried by
+        ``conversation.py`` alongside ``match_followup()``/
+        ``match_reference()``, before the normal ``match()``: a leading
+        "Und ..." is never touched by ``match()``'s own multi-step
+        ``_AND_SPLIT_RE`` (that pattern requires whitespace on *both* sides
+        of "und", so it never fires on a sentence that only *starts* with
+        the word - see its own comment), and no existing grammar has a
+        sentence shape for a bare "und {area}"/"und {level}" anyway, so
+        without this method such a follow-up would just fail to match
+        anything and fall through to "not understood".
+
+        Only continues a plain ``HassGetState`` query - gated here (not in
+        ``QueryFollowupParser`` itself) for the same reason
+        ``match_followup()`` does its own light-only filtering before
+        calling into ``ContextFollowupParser``: keeps the parser itself
+        free of ``ConversationContext``/``SemanticCommand`` knowledge.
+        ``HassQueryComparison`` (``QUERY_INTENTS``' other entry, its own
+        multi-entity "welche..." shape) is out of scope - same narrow-
+        scoping precedent ``TemporalParser``/``ComparisonQueryParser``
+        already set for themselves. A missing/non-query previous turn, or a
+        structural/resolution miss in the parser itself, both collapse to
+        ``None`` here, same as every other "never guess" miss in this
+        engine.
+        """
+        if context is None or context.last_command is None or context.last_command.intent != "HassGetState":
+            return None
+
+        normalized = normalize(text)
+        result = self._query_followup_parser.parse(normalized, entities, context.last_entities)
+        if result is None:
             return None
         return self._build_match_result(result)
 
