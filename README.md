@@ -72,28 +72,27 @@ No LLM is required.
 
 Current Status
 
-HomeIntent is currently in the v1 – Deterministic NLU stage.
-
-The current implementation already provides a foundation for deterministic natural-language control using hassil grammars and Home Assistant entity information.
+HomeIntent has completed v1 (Deterministic NLU), v2 (Semantic NLU), v3 (Conversational NLU) and v4 (Advanced Natural Language) as defined in the roadmap below. v5 (Natural-Language Automation) has not been started.
 
 Current functionality includes:
 
 * Home Assistant Conversation Agent integration
-* German language grammars
+* German language grammars (hassil-based, 12 separately compiled intent groups)
 * deterministic intent matching
-* Home Assistant entity resolution
-* area resolution
+* Semantic Frame / Semantic Command pipeline with entity, area and capability resolution
+* alias-based entity resolution with deterministic candidate ranking
 * domain validation
-* percentage values
-* quantifiers such as alle and beide
-* ambiguity detection
-* Light control
-* Cover / blind control
-* Fan-related functionality
-* query handling
-* extensive regression tests
+* percentage values, quantifiers (alle, beide, counted, "nur", "außer"-exclusion)
+* ambiguity detection (never guesses on an unresolved match)
+* Light, Cover, Fan and Climate control
+* query handling, including comparison filters ("heller als 50%") and area-scoped queries ("wie warm ist es im Wohnzimmer")
+* conversation context: follow-up commands, clarification questions, pronoun/relative references, cross-sentence query follow-ups
+* implicit/relative targets ("oben"/"unten", "im selben Raum")
+* temporal expressions (delay, duration, relative/absolute time) - parsed and validated, execution deferred to a later layer
+* multi-step commands ("... und ...")
+* extensive regression tests (800+ tests, including a generated golden test suite)
 
-The project is actively evolving toward a more general semantic NLU architecture.
+The project is actively evolving toward v5 (natural-language automation understanding).
 
 ⸻
 
@@ -302,7 +301,7 @@ Roadmap
 
 v1 – Deterministic NLU
 
-Current stage
+Completed
 
 The foundation for deterministic natural-language understanding.
 
@@ -322,7 +321,7 @@ Includes:
 
 v2 – Semantic NLU
 
-The next major architectural step.
+Completed
 
 Goals:
 
@@ -370,7 +369,9 @@ Service
 
 v3 – Conversational NLU
 
-The engine begins to understand conversations rather than isolated commands.
+Completed
+
+The engine understands conversations rather than isolated commands.
 
 Goals:
 
@@ -398,9 +399,11 @@ The second command can refer to the previously selected entity.
 
 v4 – Advanced Natural Language
 
-The focus shifts toward more natural German language without introducing an LLM requirement.
+Completed
 
-Planned capabilities include:
+The focus shifted toward more natural German language without introducing an LLM requirement. See docs/architecture-v4.md for implementation details of each sub-section (V4.1-V4.9) and the deliberately deferred items (e.g. "hier", "nebenan", ordinal selection) that would have required guessing without a real data source.
+
+Implemented capabilities:
 
 Implicit Targets
 
