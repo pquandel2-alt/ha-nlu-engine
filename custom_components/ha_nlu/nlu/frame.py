@@ -30,6 +30,13 @@ class AreaReference:
 
     text: str
     area_id: str | None = None
+    # The resolved area's display name (mirrors TargetReference.device_class:
+    # unused by existing parsers, populated by StateQueryParser (V4.2) so
+    # nlu/command.py::_resolve_area_snapshot() can still build an
+    # AreaSnapshot when a query legitimately resolves zero entities in an
+    # otherwise-valid area - resolving the area itself doesn't depend on any
+    # entity matching (see areas.py::resolve_area_scored()'s docstring).
+    area_name: str | None = None
 
 
 @dataclass(frozen=True)

@@ -92,4 +92,32 @@ GOLDEN_ENTITIES: list[EntitySnapshot] = [
         area_id="zimmer_b", area_name="Zimmer B",
         capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
     ),
+    # HomeIntent V4.2 ("Semantic Query & State Resolution") - the
+    # "state_query" golden category's binary_sensor fixtures. Deliberately
+    # mixes an open and a closed window across two areas (so area-scoped
+    # AND unscoped list/count/exists cases both have a real positive and a
+    # real empty-result case), a door (distinct device_class, same
+    # OPEN/CLOSED semantic as window), and a motion sensor (device_class
+    # that stays ON/OFF rather than mapping to OPEN/CLOSED - see
+    # nlu/semantic_state.py).
+    EntitySnapshot(
+        "binary_sensor.fenster_wohnzimmer", "Fenster Wohnzimmer", "binary_sensor", "on",
+        area_id="wohnzimmer_bs", area_name="Wohnzimmer", device_class="window",
+    ),
+    EntitySnapshot(
+        "binary_sensor.fenster_kueche", "Fenster Küche", "binary_sensor", "off",
+        area_id="kueche_bs", area_name="Küche", device_class="window",
+    ),
+    EntitySnapshot(
+        "binary_sensor.fenster_schlafzimmer", "Fenster Schlafzimmer", "binary_sensor", "on",
+        area_id="schlafzimmer_bs", area_name="Schlafzimmer", device_class="window",
+    ),
+    EntitySnapshot(
+        "binary_sensor.tuer_eingang", "Tür Eingang", "binary_sensor", "on",
+        area_id="eingang", area_name="Eingang", device_class="door",
+    ),
+    EntitySnapshot(
+        "binary_sensor.bewegung_flur", "Bewegung Flur", "binary_sensor", "on",
+        area_id="flur_bs", area_name="Flur", device_class="motion",
+    ),
 ]

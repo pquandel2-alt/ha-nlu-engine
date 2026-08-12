@@ -14,11 +14,19 @@ from typing import Callable
 
 from hassil import Intents, RangeSlotList, RangeType, TextSlotList, WildcardSlotList, recognize
 
-from .areas import AreaResolveStatus, AreaSnapshot, resolve_area_name
-from .entities import EntitySnapshot, ResolveStatus, resolve_entities_by_domain, resolve_entity
+from .areas import AreaResolutionStatus, AreaResolveStatus, AreaSnapshot, resolve_area_name, resolve_area_scored
+from .entities import (
+    EntitySnapshot,
+    ResolutionStatus,
+    ResolveStatus,
+    resolve_entities_by_domain,
+    resolve_entity,
+    resolve_entity_scored,
+)
 from .floors import FloorResolveStatus, resolve_floor_by_level_keyword, resolve_floor_name
 from .nlu.frame import AreaReference, Comparison, Quantifier, SemanticFrame, TargetReference, TemporalExpression
 from .nlu.parser import AmbiguousReference, ClarificationRequest, ParseContext, ParseResult
+from .nlu.semantic_state import SemanticState, matches_semantic_state
 from .service_call import (
     CLIMATE_EXTENDED_INTENTS,
     FAN_EXTENDED_INTENTS,
@@ -1247,3 +1255,264 @@ class ReferenceParser:
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=others)
+
+
+# {device_class} vocabulary for StateQueryParser's grammar (HomeIntent V4.2)
+# - values are "domain:device_class" composite strings, not a plain domain or
+# device_class alone: resolving "welche Fenster" needs both together
+# (binary_sensor + window), and hassil TextSlotList values must be plain
+# strings, so a second, separate {device_class}-only slot can't be cross-
+# referenced against {domain} the way _COMPARISON_DOMAIN_SLOT_LIST's
+# domain-only vocabulary can get away with. The literal string "None" means
+# "no device_class filter, the domain alone is the target" (light/switch/
+# cover) - StateQueryParser splits on ":" and treats that literal as "no
+# filter", never as HA's real ``device_class is None`` case (already covered
+# structurally: an entity with no device_class simply never matches a filter
+# that isn't "None"). Plural before singular wherever the singular is a
+# literal prefix of the plural, same reordering reason _DOMAIN_SLOT_LIST's
+# own docstring documents (Tür/Türen, Garagentor/Garagentore) - "Fenster" is
+# identical in singular and plural German, so no ordering concern there.
+_DEVICE_CLASS_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("Fenster", "binary_sensor:window"),
+        ("Türen", "binary_sensor:door"), ("Tür", "binary_sensor:door"),
+        ("Garagentore", "binary_sensor:garage_door"), ("Garagentor", "binary_sensor:garage_door"),
+        ("Lichter", "light:None"), ("Licht", "light:None"), ("Lampen", "light:None"), ("Lampe", "light:None"),
+        ("Schalter", "switch:None"), ("Steckdosen", "switch:None"), ("Steckdose", "switch:None"),
+        ("Rollläden", "cover:None"), ("Rollladen", "cover:None"), ("Rolladen", "cover:None"), ("Rolläden", "cover:None"),
+        ("Rollos", "cover:None"), ("Rollo", "cover:None"),
+        ("Bewegungsmelder", "binary_sensor:motion"), ("Bewegungssensoren", "binary_sensor:motion"),
+        ("Bewegungssensor", "binary_sensor:motion"),
+    ],
+    name="device_class",
+)
+
+# Predicate-position state words ("die Fenster sind {state}") -> the
+# SemanticState member *name* (a plain string, cast back to the enum member
+# via _STATE_NAME_TO_SEMANTIC below - hassil TextSlotList values must be
+# strings, same constraint _COMPARATOR_SLOT_LIST's operator strings work
+# around).
+_STATE_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("geöffnet", "OPEN"), ("offen", "OPEN"),
+        ("geschlossen", "CLOSED"), ("zu", "CLOSED"),
+        ("eingeschaltet", "ON"), ("angeschaltet", "ON"), ("an", "ON"),
+        ("ausgeschaltet", "OFF"), ("aus", "OFF"),
+    ],
+    name="state",
+)
+
+# Attributive-position state words ("gibt es {state_adj} Fenster") - German
+# inflects the adjective here (offen -> offene), a different word than the
+# predicate form above, so this is its own slot rather than reusing {state}.
+_STATE_ADJ_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("geöffnete", "OPEN"), ("offene", "OPEN"),
+        ("geschlossene", "CLOSED"),
+        ("eingeschaltete", "ON"), ("angeschaltete", "ON"),
+        ("ausgeschaltete", "OFF"),
+    ],
+    name="state_adj",
+)
+
+_STATE_NAME_TO_SEMANTIC: dict[str, SemanticState] = {
+    "OPEN": SemanticState.OPEN,
+    "CLOSED": SemanticState.CLOSED,
+    "ON": SemanticState.ON,
+    "OFF": SemanticState.OFF,
+}
+
+
+class StateQueryParser:
+    """Wraps the {device_class}/{state}/{state_adj}/{name}/{area} grammar
+    ("welche Fenster sind offen", "ist das Fenster im Schlafzimmer
+    geöffnet", "gibt es offene Fenster") - the 13th separately-compiled
+    hassil grammar, HomeIntent V4.2, "Semantic Query & State Resolution".
+
+    Handles all three of its grammar's intents (``HassStateQuery`` - plural
+    list/count, ``HassCheckState`` - singular boolean, ``HassExistsQuery`` -
+    existence) in one class, dispatching on ``result.intent.name`` - same
+    "one parser per grammar file" shape ``ComparisonQueryParser`` already
+    established for its own single-grammar/multi-branch domain split.
+
+    Reuses ``resolve_area_scored``/``resolve_entities_by_domain``/
+    ``resolve_entity_scored`` verbatim (Regel 6 - no parallel search system)
+    and ``matches_semantic_state`` (nlu/semantic_state.py) to filter by the
+    requested state - live ``EntitySnapshot.state``, never cached (Regel 5).
+
+    This is the **one deliberate exception** to the codebase-wide "a multi-
+    entity parser never returns an empty ``resolved_entities`` list" rule
+    every other parser here follows: ``HassStateQuery``/``HassExistsQuery``
+    with zero matches ("0 Fenster offen") is itself a valid, correct answer
+    (V4.2's core requirement), not a miss - unlike ``ComparisonQueryParser``
+    (which returns ``None`` on an empty match set), these two always return
+    a ``ParseResult``, with ``frame.quantifier`` set to
+    ``Quantifier(kind="all")`` even when ``resolved_entities`` is empty, so
+    ``validate_command()``'s check #3 doesn't misfire. Do not "fix" this
+    back to returning ``None`` on empty - see ``QueryIntentSpec.allows_empty``'s
+    docstring (service_call.py) for the validator-side half of this design.
+
+    ``HassCheckState`` (singular expectation) is the exception to the
+    exception: an unresolved or ambiguous {name} is refused (``None``, no
+    clarification round-trip) - same "never guess" scope-limiting precedent
+    ``ComparisonQueryParser``/``AreaQueryParser`` already set for their own
+    ambiguity cases, rather than extending ``resolve_clarification()``'s
+    scope to cover query intents too.
+    """
+
+    def __init__(self, intents: Intents) -> None:
+        self._intents = intents
+
+    def parse(self, text: str, context: ParseContext) -> ParseResult | None:
+        slot_lists = {
+            "device_class": _DEVICE_CLASS_SLOT_LIST,
+            "state": _STATE_SLOT_LIST,
+            "state_adj": _STATE_ADJ_SLOT_LIST,
+            "name": WildcardSlotList(name="name"),
+            "area": WildcardSlotList(name="area"),
+        }
+        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+        if result is None or result.intent is None:
+            return None
+
+        spec = QUERY_INTENTS.get(result.intent.name)
+        if spec is None:
+            return None
+
+        if result.intent.name == "HassCheckState":
+            return self._parse_check_state(text, result.entities, context, spec)
+        if result.intent.name == "HassExistsQuery":
+            return self._parse_exists_query(text, result.entities, context, spec)
+        if result.intent.name == "HassStateQuery":
+            return self._parse_state_query(text, result.entities, context, spec)
+        return None
+
+    @staticmethod
+    def _resolve_area(slots: dict, entities: list[EntitySnapshot]) -> tuple[str | None, str | None] | None:
+        """(area_id, area_name) from the {area} slot, or (None, None) if no
+        {area} word was captured at all. Returns ``None`` (not a tuple, so
+        callers can distinguish "no area mentioned" from "area mentioned but
+        unresolvable") when an {area} word *was* captured but doesn't
+        resolve to exactly one known room - never guess.
+        """
+        area_slot = slots.get("area")
+        if area_slot is None:
+            return None, None
+        area_text = _strip_locative_prepositions(str(area_slot.value))
+        if not area_text:
+            return None, None
+        area_resolved = resolve_area_scored(area_text, entities)
+        if area_resolved.status is not AreaResolutionStatus.RESOLVED or area_resolved.area is None:
+            return None  # named but not a known/unambiguous room - never guess
+        return area_resolved.area.area_id, area_resolved.area.name
+
+    @staticmethod
+    def _device_class_candidates(
+        device_class_value: str, entities: list[EntitySnapshot], area_id: str | None
+    ) -> tuple[str, str | None, list[EntitySnapshot]]:
+        """Splits the "domain:device_class" composite slot value and returns
+        the matching entities alongside the parsed (domain, device_class) -
+        the caller needs those two separately for ``TargetReference``/
+        ``frame.parameters`` regardless of the candidate list itself."""
+        domain, _, device_class = device_class_value.partition(":")
+        candidates = resolve_entities_by_domain(domain, entities, area_id=area_id)
+        if device_class != "None":
+            candidates = [e for e in candidates if e.device_class == device_class]
+        else:
+            device_class = None
+        return domain, device_class, candidates
+
+    def _parse_state_query(self, text: str, slots: dict, context: ParseContext, spec) -> ParseResult | None:
+        device_class_slot = slots.get("device_class")
+        state_slot = slots.get("state")
+        if device_class_slot is None or state_slot is None:
+            return None
+
+        resolved_area = self._resolve_area(slots, context.entities)
+        if resolved_area is None:
+            return None
+        area_id, area_name = resolved_area
+
+        device_class_value = str(device_class_slot.value)
+        domain, device_class, candidates = self._device_class_candidates(device_class_value, context.entities, area_id)
+        if domain not in spec.allowed_domains:
+            return None
+
+        requested_state = _STATE_NAME_TO_SEMANTIC[str(state_slot.value)]
+        matches = [e for e in candidates if matches_semantic_state(e, requested_state)]
+        count_only = bool(re.search(r"\bwie viele\b", text, re.IGNORECASE))
+
+        frame = SemanticFrame(
+            intent="HassStateQuery",
+            target=TargetReference(text=device_class_value, domain=domain, device_class=device_class),
+            area=AreaReference(text=area_name, area_id=area_id, area_name=area_name) if area_id is not None else None,
+            quantifier=Quantifier(kind="all"),
+            parameters={
+                "semantic_state": requested_state,
+                "count_only": count_only,
+                "device_class": device_class,
+                "domain": domain,
+            },
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=matches)
+
+    def _parse_exists_query(self, text: str, slots: dict, context: ParseContext, spec) -> ParseResult | None:
+        device_class_slot = slots.get("device_class")
+        if device_class_slot is None:
+            return None
+
+        resolved_area = self._resolve_area(slots, context.entities)
+        if resolved_area is None:
+            return None
+        area_id, area_name = resolved_area
+
+        device_class_value = str(device_class_slot.value)
+        domain, device_class, candidates = self._device_class_candidates(device_class_value, context.entities, area_id)
+        if domain not in spec.allowed_domains:
+            return None
+
+        state_adj_slot = slots.get("state_adj")
+        requested_state = None
+        matches = candidates
+        if state_adj_slot is not None:
+            requested_state = _STATE_NAME_TO_SEMANTIC[str(state_adj_slot.value)]
+            matches = [e for e in candidates if matches_semantic_state(e, requested_state)]
+
+        frame = SemanticFrame(
+            intent="HassExistsQuery",
+            target=TargetReference(text=device_class_value, domain=domain, device_class=device_class),
+            area=AreaReference(text=area_name, area_id=area_id, area_name=area_name) if area_id is not None else None,
+            quantifier=Quantifier(kind="all"),
+            parameters={"semantic_state": requested_state, "device_class": device_class, "domain": domain},
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=matches)
+
+    def _parse_check_state(self, text: str, slots: dict, context: ParseContext, spec) -> ParseResult | None:
+        name_slot = slots.get("name")
+        state_slot = slots.get("state")
+        if name_slot is None or state_slot is None:
+            return None
+
+        resolved_area = self._resolve_area(slots, context.entities)
+        if resolved_area is None:
+            return None
+        area_id, area_name = resolved_area
+
+        name = _strip_locative_prepositions(str(name_slot.value))
+        resolved = resolve_entity_scored(name, context.entities, area_id=area_id)
+        if resolved.status is not ResolutionStatus.RESOLVED or resolved.entity is None:
+            return None  # not found or ambiguous - never guess, no clarification round-trip (see class docstring)
+        if resolved.entity.domain not in spec.allowed_domains:
+            return None
+
+        requested_state = _STATE_NAME_TO_SEMANTIC[str(state_slot.value)]
+        frame = SemanticFrame(
+            intent="HassCheckState",
+            target=TargetReference(text=name, entity_id=resolved.entity.entity_id, domain=resolved.entity.domain),
+            area=AreaReference(text=area_name, area_id=area_id, area_name=area_name) if area_id is not None else None,
+            parameters={"semantic_state": requested_state},
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=[resolved.entity])

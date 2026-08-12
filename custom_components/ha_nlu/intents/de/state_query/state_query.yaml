@@ -1,0 +1,41 @@
+language: "de"
+intents:
+  # HomeIntent V4.2, "Semantic Query & State Resolution" - the 13th
+  # separately-compiled hassil grammar (see parsers.py's StateQueryParser
+  # docstring). Three intents, not one merged intent: cardinality/response
+  # shape differs fundamentally between them (plural list/count vs. singular
+  # boolean vs. existence), same "one intent per distinct response shape"
+  # precedent HassGetState/HassQueryComparison already set.
+  #
+  # {state}/{state_adj} are two separate slots (not one) because German
+  # inflects the same semantic word differently in predicate vs. attributive
+  # position: "die Fenster sind offen" (predicate, {state}) vs. "gibt es
+  # offene Fenster" (attributive, {state_adj}) - both resolve to the same
+  # SemanticState member name via parsers.py's StateQueryParser, just via two
+  # different TextSlotLists.
+  HassStateQuery:
+    data:
+      - sentences:
+          - "welche {device_class} sind {state}"
+          - "welche {device_class} sind [in der|in dem|im|am|beim] {area} {state}"
+          - "wie viele {device_class} sind {state}"
+          - "wie viele {device_class} sind [in der|in dem|im|am|beim] {area} {state}"
+  HassCheckState:
+    data:
+      - sentences:
+          - "ist [die|der|das] {name} {state}"
+          - "ist [die|der|das] {name} [in der|in dem|im|am|beim] {area} {state}"
+  # Both German word orders are natural here ("gibt es im Keller Fenster"
+  # and "gibt es Fenster im Keller" are equally idiomatic), unlike
+  # HassStateQuery/HassCheckState above where only the area-before-state
+  # order reads naturally - so both area-first and device_class-first
+  # variants are listed explicitly rather than picking just one.
+  HassExistsQuery:
+    data:
+      - sentences:
+          - "gibt es {state_adj} {device_class}"
+          - "gibt es [in der|in dem|im|am|beim] {area} {state_adj} {device_class}"
+          - "gibt es {state_adj} {device_class} [in der|in dem|im|am|beim] {area}"
+          - "gibt es {device_class}"
+          - "gibt es [in der|in dem|im|am|beim] {area} {device_class}"
+          - "gibt es {device_class} [in der|in dem|im|am|beim] {area}"

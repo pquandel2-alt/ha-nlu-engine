@@ -52,6 +52,18 @@ class DebugTrace:
     validation: str
     service: str | None
     data: Mapping[str, Any] | None
+    # HomeIntent V4.2 ("Semantic Query & State Resolution"): a query intent
+    # (HassStateQuery/HassCheckState/HassExistsQuery) never sets SERVICE/DATA
+    # (queries never call hass.services.async_call() - Regel 3), so without
+    # this field a query's debug trace would show nothing about its actual
+    # outcome. result_kind gives an at-a-glance triage category that's cheap
+    # to derive from information debug() already computes - in particular it
+    # makes a deliberate "0 matches is a valid answer" empty result
+    # (VALIDATION: OK, CANDIDATES: -) visually distinct from a genuine
+    # NO_MATCH, without requiring the per-parser return-type restructuring
+    # this module's own docstring above says not to do speculatively.
+    result_kind: str = "matched"
+    response_text: str | None = None
 
     def format(self) -> str:
         lines = [
@@ -68,5 +80,7 @@ class DebugTrace:
             f"VALIDATION: {self.validation}",
             f"SERVICE: {self.service or '-'}",
             f"DATA: {dict(self.data) if self.data is not None else '-'}",
+            f"RESULT_KIND: {self.result_kind}",
+            f"RESPONSE: {self.response_text or '-'}",
         ]
         return "\n".join(lines)

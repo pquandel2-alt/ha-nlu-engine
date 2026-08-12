@@ -87,9 +87,14 @@ def validate_command(command: SemanticCommand) -> ValidationError | None:
     ):
         return ValidationError.UNKNOWN_INTENT
 
-    # 2. Target vorhanden?
+    # 2. Target vorhanden? (skipped for query intents that explicitly allow
+    # an empty result set, e.g. "0 Fenster offen" - see
+    # QueryIntentSpec.allows_empty's docstring for why that's a valid
+    # answer, not ENTITY_NOT_FOUND)
     if not command.entities:
-        return ValidationError.ENTITY_NOT_FOUND
+        query_spec = QUERY_INTENTS.get(command.intent)
+        if query_spec is None or not query_spec.allows_empty:
+            return ValidationError.ENTITY_NOT_FOUND
 
     # 3. Target eindeutig auflösbar? (a non-quantifier command resolving to
     # more than one entity is a detectable invariant violation - true

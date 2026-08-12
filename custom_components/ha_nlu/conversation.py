@@ -22,7 +22,6 @@ from homeassistant.components import conversation
 from homeassistant.components.conversation import ConversationEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr, intent
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -30,8 +29,14 @@ from .const import DOMAIN, NOT_UNDERSTOOD_TEXT
 from .engine import CommandPlan, NluEngine
 from .hass_entities import build_entity_snapshots
 from .nlu.context import ConversationContext, ConversationContextStore
+from .service_call import QUERY_INTENTS
 
 _LOGGER = logging.getLogger(__name__)
+
+# Single source of truth for "which intents are queries" (V4.2) - read state
+# and speak, never call a service - so Assist shows them as a QUERY_ANSWER
+# rather than the default ACTION_DONE.
+QUERY_INTENT_NAMES = frozenset(QUERY_INTENTS)
 
 
 async def async_setup_entry(
@@ -152,7 +157,7 @@ class NluConversationEntity(
                         {"entity_id": sub_result.plan.entity_id, **sub_result.plan.data},
                         blocking=True,
                     )
-                except HomeAssistantError as err:
+                except Exception as err:  # noqa: BLE001 - HA 2025.x service calls can raise beyond HomeAssistantError (vol.Invalid, TimeoutError, ...); must not propagate as "Unexpected error during intent recognition"
                     _LOGGER.error(
                         "Service call %s.%s on %s failed: %s",
                         sub_result.plan.domain,
@@ -209,7 +214,7 @@ class NluConversationEntity(
                     {"entity_id": result.plan.entity_id, **result.plan.data},
                     blocking=True,
                 )
-            except HomeAssistantError as err:
+            except Exception as err:  # noqa: BLE001 - HA 2025.x service calls can raise beyond HomeAssistantError (vol.Invalid, TimeoutError, ...); must not propagate as "Unexpected error during intent recognition"
                 _LOGGER.error(
                     "Service call %s.%s on %s failed: %s",
                     result.plan.domain,
@@ -225,6 +230,8 @@ class NluConversationEntity(
                     response=response, conversation_id=user_input.conversation_id
                 )
 
+        if result.command is not None and result.command.intent in QUERY_INTENT_NAMES:
+            response.response_type = intent.IntentResponseType.QUERY_ANSWER
         response.async_set_speech(result.response_text)
         return conversation.ConversationResult(
             response=response, conversation_id=user_input.conversation_id

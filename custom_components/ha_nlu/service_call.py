@@ -14,6 +14,7 @@ from typing import Any, Callable, Mapping
 from .entities import EntitySnapshot
 from .nlu.capabilities import Capability
 from .nlu.query import QueryType, derive_query_type
+from .nlu.semantic_state import SemanticState, matches_semantic_state
 
 
 @dataclass(frozen=True)
@@ -113,10 +114,28 @@ PERCENT_INTENTS: dict[str, PercentIntentSpec] = {
 @dataclass(frozen=True)
 class QueryIntentSpec:
     """A query never produces a ServiceCallPlan - it only speaks the
-    current state (see MatchResult.plan: ServiceCallPlan | None)."""
+    current state (see MatchResult.plan: ServiceCallPlan | None).
+
+    ``allows_empty``: most queries expect at least one resolved entity (an
+    empty result means "not understood", same as any other parser miss).
+    The state-query operations (V4.2, LIST_ENTITIES/COUNT_ENTITIES/
+    EXISTS) are a deliberate exception - "0 Fenster offen" is itself a
+    valid, correct answer, not an error - so they set this ``True`` to
+    skip nlu/validator.py's check #2 (ENTITY_NOT_FOUND). Defaults ``False``
+    so every pre-existing query intent (HassGetState/HassQueryComparison)
+    keeps its current "empty = not understood" behaviour unchanged.
+    """
 
     allowed_domains: frozenset[str]
-    response: Callable[[list[EntitySnapshot]], str]
+    # Widened to also take ``frame.parameters`` (mirrors the exact widening
+    # already used for LightExtendedIntentSpec/FanExtendedIntentSpec/
+    # ClimateExtendedIntentSpec) - the V4.2 state-query responses need to
+    # read the resolved SemanticState/count_only/device_class the parser
+    # stashed there (StateQueryParser doesn't fit its result into a single
+    # entity attribute the way HassGetState/HassQueryComparison could).
+    # HassGetState/HassQueryComparison's existing lambdas just ignore it.
+    response: Callable[[list[EntitySnapshot], Mapping[str, Any]], str]
+    allows_empty: bool = False
 
 
 # Starter set of commonly seen HA units; unknown units are still spoken
@@ -183,14 +202,106 @@ def _speak_comparison_matches(entities: list[EntitySnapshot]) -> str:
     return ", ".join(f"{e.friendly_name} ({_speak_comparison_value(e)})" for e in entities) + "."
 
 
+# German phrasing for a SemanticState, used by the two multi-entity V4.2
+# response builders below (_speak_state_query/_speak_exists) and the
+# singular _speak_check_state.
+_SEMANTIC_STATE_SPOKEN_DE = {
+    SemanticState.OPEN: "offen",
+    SemanticState.CLOSED: "geschlossen",
+    SemanticState.ON: "eingeschaltet",
+    SemanticState.OFF: "ausgeschaltet",
+}
+
+# German plural noun per binary_sensor device_class (V4.2) - "Fenster" is
+# identical in singular/plural German, same as _DOMAIN_PLURAL_DE's own
+# per-domain nouns this dict sits alongside.
+_DEVICE_CLASS_PLURAL_DE = {
+    "window": "Fenster", "door": "Türen", "garage_door": "Garagentore", "motion": "Bewegungsmelder",
+}
+
+
+def _state_query_noun(params: Mapping[str, Any]) -> str:
+    """The plural noun to speak for a state-query/exists-query result -
+    device_class-specific if StateQueryParser resolved one (a binary_sensor
+    target), otherwise the domain's own generic plural (light/switch/cover)."""
+    device_class = params.get("device_class")
+    if device_class is not None:
+        return _DEVICE_CLASS_PLURAL_DE.get(device_class, "Geräte")
+    return _DOMAIN_PLURAL_DE.get(params.get("domain"), "Geräte")
+
+
+def _speak_state_query(entities: list[EntitySnapshot], params: Mapping[str, Any]) -> str:
+    """StateQueryParser's HassStateQuery response (V4.2, "welche
+    {device_class} sind [im {area}] {state}"/"wie viele ..."). 0 results is
+    a normal, correct sentence ("Keine Fenster sind offen.") - not an error,
+    see QueryIntentSpec.allows_empty's docstring for why StateQueryParser is
+    allowed to reach here with an empty ``entities``. ``count_only``
+    (params, set by StateQueryParser from which sentence variant matched -
+    "wie viele" vs "welche") picks a count phrasing over a name list for 2+
+    results.
+    """
+    state_word = _SEMANTIC_STATE_SPOKEN_DE[params["semantic_state"]]
+    noun = _state_query_noun(params)
+    if not entities:
+        return f"Keine {noun} sind {state_word}."
+    if len(entities) == 1:
+        return f"{entities[0].friendly_name} ist {state_word}."
+    if params.get("count_only"):
+        return f"{len(entities)} {noun} sind {state_word}."
+    return ", ".join(e.friendly_name for e in entities) + f" sind {state_word}."
+
+
+def _speak_check_state(entities: list[EntitySnapshot], params: Mapping[str, Any]) -> str:
+    """StateQueryParser's HassCheckState response (V4.2, "ist [der|die|das]
+    {name} [im {area}] {state}") - always exactly 1 entity by construction
+    (see StateQueryParser's docstring: ambiguous/unresolved names never
+    reach here). Reads the entity's *current* live state via
+    ``matches_semantic_state`` rather than trusting the parser's match
+    (which only decided routing/domain, not this exact yes/no) - Regel 5,
+    state is never cached as truth between resolution and response.
+    """
+    entity = entities[0]
+    requested = params["semantic_state"]
+    state_word = _SEMANTIC_STATE_SPOKEN_DE[requested]
+    if matches_semantic_state(entity, requested):
+        return f"Ja, {entity.friendly_name} ist {state_word}."
+    return f"Nein, {entity.friendly_name} ist nicht {state_word}."
+
+
+def _speak_exists(entities: list[EntitySnapshot], params: Mapping[str, Any]) -> str:
+    """StateQueryParser's HassExistsQuery response (V4.2, "gibt es [im
+    {area}] [{state_adj}] {device_class}") - 0 results is a normal "Nein"
+    answer, not an error (same allows_empty reasoning as
+    _speak_state_query)."""
+    noun = _state_query_noun(params)
+    if not entities:
+        return f"Nein, es gibt keine {noun}."
+    return f"Ja, es gibt {len(entities)} {noun}."
+
+
 QUERY_INTENTS: dict[str, QueryIntentSpec] = {
     "HassGetState": QueryIntentSpec(
         allowed_domains=frozenset({"sensor", "light"}),
-        response=lambda es: _speak_query(es[0]),
+        response=lambda es, params: _speak_query(es[0]),
     ),
     "HassQueryComparison": QueryIntentSpec(
         allowed_domains=frozenset({"light", "cover", "climate"}),
-        response=_speak_comparison_matches,
+        response=lambda es, params: _speak_comparison_matches(es),
+    ),
+    "HassStateQuery": QueryIntentSpec(
+        allowed_domains=frozenset({"binary_sensor", "cover", "light", "switch"}),
+        response=_speak_state_query,
+        allows_empty=True,
+    ),
+    "HassCheckState": QueryIntentSpec(
+        allowed_domains=frozenset({"binary_sensor", "cover", "light", "switch"}),
+        response=_speak_check_state,
+        allows_empty=False,
+    ),
+    "HassExistsQuery": QueryIntentSpec(
+        allowed_domains=frozenset({"binary_sensor", "cover", "light", "switch"}),
+        response=_speak_exists,
+        allows_empty=True,
     ),
 }
 
@@ -278,7 +389,7 @@ class ClimateExtendedIntentSpec:
     17, "Climate-NLU")."""
 
     capability: Capability
-    build: Callable[[list[EntitySnapshot], Mapping[str, Any]], ServiceCallPlan]
+    build: Callable[[list[EntitySnapshot], Mapping[str, Any]], ServiceCallPlan | None]
     response: Callable[[list[EntitySnapshot], Mapping[str, Any]], str]
 
 
@@ -289,11 +400,23 @@ class ClimateExtendedIntentSpec:
 _CLIMATE_TEMPERATURE_STEP = 1
 
 
-def _climate_step_plan(es: list[EntitySnapshot], step: int) -> ServiceCallPlan:
+def _climate_step_plan(es: list[EntitySnapshot], step: int) -> ServiceCallPlan | None:
     """New absolute target = the resolved entity's current setpoint (its
     ``temperature`` attribute - the same signal nlu/capabilities.py already
-    reads to derive Capability.TEMPERATURE) plus/minus the fixed step."""
-    current = es[0].attributes["temperature"]
+    reads to derive Capability.TEMPERATURE) plus/minus the fixed step.
+
+    The Validator already requires Capability.TEMPERATURE (derived from
+    ``"temperature" in attributes`` at snapshot time) before this runs, so
+    the attribute should always be present - but the snapshot is a single
+    point-in-time read, so this stays defensive rather than trusting that
+    invariant with a raw ``[...]`` access (KeyError would otherwise
+    propagate as HA's generic "Unexpected error during intent
+    recognition"). ``None`` here means "fall through to not understood",
+    same as any other unsupported-capability case.
+    """
+    current = es[0].attributes.get("temperature")
+    if current is None:
+        return None
     return ServiceCallPlan("climate", "set_temperature", _entity_id_field(es), {"temperature": current + step})
 
 

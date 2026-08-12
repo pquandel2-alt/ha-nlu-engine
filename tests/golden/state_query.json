@@ -1,0 +1,164 @@
+[
+  {
+    "text": "welche Fenster sind offen",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Fenster Schlafzimmer, Fenster Wohnzimmer sind offen."
+  },
+  {
+    "text": "welche Fenster sind geschlossen",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Fenster Küche ist geschlossen."
+  },
+  {
+    "text": "welche Fenster sind im Wohnzimmer offen",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Fenster Wohnzimmer ist offen."
+  },
+  {
+    "text": "welche Fenster sind im Eingang offen",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Keine Fenster sind offen."
+  },
+  {
+    "text": "welche Türen sind offen",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Tür Eingang ist offen."
+  },
+  {
+    "text": "welche Bewegungsmelder sind eingeschaltet",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Bewegung Flur ist eingeschaltet."
+  },
+  {
+    "text": "welche Bewegungsmelder sind ausgeschaltet",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Keine Bewegungsmelder sind ausgeschaltet."
+  },
+  {
+    "text": "welche Schalter sind ausgeschaltet",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Steckdose Büro ist ausgeschaltet."
+  },
+  {
+    "text": "welche Schalter sind eingeschaltet",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Keine Schalter sind eingeschaltet."
+  },
+  {
+    "text": "welche Rollläden sind offen",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Keine Rollläden sind offen."
+  },
+  {
+    "text": "wie viele Fenster sind offen",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "2 Fenster sind offen."
+  },
+  {
+    "text": "wie viele Fenster sind geschlossen",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Fenster Küche ist geschlossen."
+  },
+  {
+    "text": "wie viele Türen sind offen",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Tür Eingang ist offen."
+  },
+  {
+    "text": "wie viele Lichter sind eingeschaltet",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Flurlicht ist eingeschaltet."
+  },
+  {
+    "text": "wie viele Rollläden sind geschlossen",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "4 Rollläden sind geschlossen."
+  },
+  {
+    "text": "ist das Fenster Wohnzimmer offen",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Ja, Fenster Wohnzimmer ist offen."
+  },
+  {
+    "text": "ist das Fenster Küche offen",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Nein, Fenster Küche ist nicht offen."
+  },
+  {
+    "text": "ist die Tür Eingang offen",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Ja, Tür Eingang ist offen."
+  },
+  {
+    "text": "ist das Wohnzimmerlicht eingeschaltet",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Nein, Wohnzimmerlicht ist nicht eingeschaltet."
+  },
+  {
+    "text": "ist das Flurlicht eingeschaltet",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Ja, Flurlicht ist eingeschaltet."
+  },
+  {
+    "text": "ist die Steckdose Büro ausgeschaltet",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Ja, Steckdose Büro ist ausgeschaltet."
+  },
+  {
+    "text": "ist die Bewegung Flur eingeschaltet",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Ja, Bewegung Flur ist eingeschaltet."
+  },
+  {
+    "text": "gibt es offene Fenster",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Ja, es gibt 2 Fenster."
+  },
+  {
+    "text": "gibt es offene Fenster im Eingang",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Nein, es gibt keine Fenster."
+  },
+  {
+    "text": "gibt es Fenster im Wohnzimmer",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Ja, es gibt 1 Fenster."
+  },
+  {
+    "text": "gibt es geschlossene Türen",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Nein, es gibt keine Türen."
+  },
+  {
+    "text": "gibt es Bewegungsmelder im Flur",
+    "expect_match": true,
+    "plan": null,
+    "response_text": "Ja, es gibt 1 Bewegungsmelder."
+  }
+]

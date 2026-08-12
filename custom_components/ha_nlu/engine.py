@@ -51,6 +51,7 @@ from .parsers import (
     QueryFollowupParser,
     ReferenceParser,
     SingleTargetParser,
+    StateQueryParser,
     TemporalParser,
     _DEFAULT_DIMMING_STEP_PERCENT,
 )
@@ -76,6 +77,7 @@ COMPARISON_QUERY_DIR = INTENTS_DIR / "comparison_query"
 TEMPORAL_DIR = INTENTS_DIR / "temporal"
 AREA_QUERY_DIR = INTENTS_DIR / "area_query"
 QUERY_FOLLOWUP_DIR = INTENTS_DIR / "query_followup"
+STATE_QUERY_DIR = INTENTS_DIR / "state_query"
 
 # Sentences containing a temporal-modifier keyword ("Minute(n)"/"Stunde(n)"/
 # "Uhr"/"morgen früh"/"heute Abend"/...) are routed to TemporalParser's
@@ -90,17 +92,62 @@ _TEMPORAL_RE = re.compile(
     r"\b(minuten?|stunden?|uhr)\b|\b(morgen früh|heute abend|morgen abend|heute früh)\b", re.IGNORECASE
 )
 
-# Sentences containing "welche" are routed to ComparisonQueryParser's
-# separately-compiled grammar (HomeIntent plan V4.6, "Comparisons",
-# query-filter half) - checked *first*, before every other regex below: a
-# sentence like "welche Heizungen sind unter 20 Grad" also contains "Grad"
-# (would otherwise match _CLIMATE_EXTENDED_RE) and "welche Lichter sind
-# mindestens 50 Prozent" also contains "Prozent" (would otherwise match
-# _PERCENT_RE) - both would be structurally swallowed by the wrong grammar
-# if checked after those, same "one keyword, one dedicated grammar, checked
-# before anything it could collide with" reasoning _LIGHT_EXTENDED_RE's own
-# comment documents for its position ahead of _PERCENT_RE.
-_COMPARISON_QUERY_RE = re.compile(r"\bwelche\b", re.IGNORECASE)
+# Sentences containing "welche" *and* an actual comparator word are routed
+# to ComparisonQueryParser's separately-compiled grammar (HomeIntent plan
+# V4.6, "Comparisons", query-filter half) - checked *first*, before every
+# other regex below: a sentence like "welche Heizungen sind unter 20 Grad"
+# also contains "Grad" (would otherwise match _CLIMATE_EXTENDED_RE) and
+# "welche Lichter sind mindestens 50 Prozent" also contains "Prozent" (would
+# otherwise match _PERCENT_RE) - both would be structurally swallowed by the
+# wrong grammar if checked after those, same "one keyword, one dedicated
+# grammar, checked before anything it could collide with" reasoning
+# _LIGHT_EXTENDED_RE's own comment documents for its position ahead of
+# _PERCENT_RE.
+#
+# Requiring a comparator word (not just "welche" alone) is V4.2's fix for a
+# real misroute: a bare "welche" sentence with no comparator (e.g. "Welche
+# Fenster sind noch geöffnet?") was being swallowed here too and then
+# structurally could never match ComparisonQueryParser's comparator+percent/
+# temperature-only grammar, so it fell all the way through to "not
+# understood" - it belongs to _STATE_QUERY_RE below instead. The comparator
+# vocabulary is read from parsers.py's _COMPARATOR_SLOT_LIST (not
+# re-derived here) so the two can never drift apart.
+_COMPARISON_QUERY_RE = re.compile(
+    r"\bwelche\b.*\b(mindestens|höchstens|nicht höher als|über|unter)\b", re.IGNORECASE
+)
+
+# Sentences combining a query-trigger word ("welche"/"wie viele"/"ist"/
+# "sind") *and* a state word (predicate form: offen/geöffnet/zu/geschlossen/
+# an/aus/eingeschaltet/ausgeschaltet - or attributive/adjective form:
+# offene/geöffnete/geschlossene/eingeschaltete/angeschaltete/ausgeschaltete,
+# since German inflects the same word differently in "die Fenster sind
+# offen" vs. "gibt es offene Fenster") are routed to StateQueryParser's
+# separately-compiled grammar (HomeIntent V4.2, "Semantic Query & State
+# Resolution") - checked immediately after _COMPARISON_QUERY_RE, since a
+# "welche"-sentence without a comparator word (e.g. "Welche Fenster sind
+# noch geöffnet?") falls through the now-narrowed regex above and needs
+# somewhere else to land. Requiring *both* words (not just the state word
+# alone) keeps this from swallowing plain on/off commands ("Schalte das
+# Licht aus" has "aus" but none of the trigger words). Verified empirically
+# (this session) against every existing intent YAML: no sentence combines a
+# trigger word with a state word today, so this can't misroute an existing
+# match.
+#
+# "gibt es" is handled as its own unconditional alternative (no state word
+# required): HassExistsQuery's grammar explicitly supports a bare existence
+# question with no state word at all ("gibt es Fenster im Keller?"), so
+# requiring a state word here would make that sentence structurally
+# unreachable by any parser. Safe to route "gibt es" unconditionally -
+# grepped empirically (this session): no other intent YAML uses the phrase
+# "gibt es" anywhere, so this can't misroute an existing match.
+_STATE_QUERY_RE = re.compile(
+    r"\bgibt es\b"
+    r"|\b(welche|wie viele|ist|sind)\b.*"
+    r"\b(offen|geöffnet|offene|geöffnete|zu|geschlossen|geschlossene|"
+    r"an|aus|eingeschaltet|angeschaltet|ausgeschaltet|"
+    r"eingeschaltete|angeschaltete|ausgeschaltete)\b",
+    re.IGNORECASE,
+)
 
 # Sentences containing "Prozent" are routed to PercentageParser's separately-
 # compiled grammar for the same reason as the quantifier routing below: the
@@ -277,6 +324,7 @@ class NluEngine:
         temporal_dir: Path = TEMPORAL_DIR,
         area_query_dir: Path = AREA_QUERY_DIR,
         query_followup_dir: Path = QUERY_FOLLOWUP_DIR,
+        state_query_dir: Path = STATE_QUERY_DIR,
     ) -> None:
         yaml_files = sorted(intents_dir.glob("*.yaml"))
         if not yaml_files:
@@ -338,6 +386,11 @@ class NluEngine:
             raise FileNotFoundError(f"No intent YAML files found in {query_followup_dir}")
         query_followup_intents: Intents = Intents.from_files(query_followup_yaml_files)
 
+        state_query_yaml_files = sorted(state_query_dir.glob("*.yaml"))
+        if not state_query_yaml_files:
+            raise FileNotFoundError(f"No intent YAML files found in {state_query_dir}")
+        state_query_intents: Intents = Intents.from_files(state_query_yaml_files)
+
         self._single_parser = SingleTargetParser(intents)
         self._quantifier_parser = QuantifierParser(quantifier_intents)
         self._percentage_parser = PercentageParser(percentage_intents)
@@ -350,12 +403,15 @@ class NluEngine:
         self._temporal_parser = TemporalParser(temporal_intents)
         self._area_query_parser = AreaQueryParser(area_query_intents)
         self._query_followup_parser = QueryFollowupParser(query_followup_intents)
+        self._state_query_parser = StateQueryParser(state_query_intents)
 
     def _select_parser(self, text: str):
         if _TEMPORAL_RE.search(text):
             return self._temporal_parser
         if _COMPARISON_QUERY_RE.search(text):
             return self._comparison_query_parser
+        if _STATE_QUERY_RE.search(text):
+            return self._state_query_parser
         if _LIGHT_EXTENDED_RE.search(text):
             return self._light_extended_parser
         if _FAN_EXTENDED_RE.search(text):
@@ -633,6 +689,7 @@ class NluEngine:
                 validation="NO_MATCH",
                 service=None,
                 data=None,
+                result_kind="no_match",
             )
         if isinstance(result, ClarificationRequest):
             return DebugTrace(
@@ -649,6 +706,7 @@ class NluEngine:
                 validation="AMBIGUOUS_ENTITY",
                 service=None,
                 data=None,
+                result_kind="ambiguous",
             )
 
         frame = result.frame
@@ -660,14 +718,19 @@ class NluEngine:
 
         service = None
         data = None
+        response_text = None
         validation = "OK"
         if validation_error is not None:
             validation = validation_error.name
         else:
             match_result = self._build_match_result(result)
-            if match_result is not None and match_result.plan is not None:
-                service = f"{match_result.plan.domain}.{match_result.plan.service}"
-                data = match_result.plan.data
+            if match_result is not None:
+                response_text = match_result.response_text
+                if match_result.plan is not None:
+                    service = f"{match_result.plan.domain}.{match_result.plan.service}"
+                    data = match_result.plan.data
+
+        result_kind = "matched" if candidates else "empty"
 
         return DebugTrace(
             input=text,
@@ -683,6 +746,8 @@ class NluEngine:
             validation=validation,
             service=service,
             data=data,
+            result_kind=result_kind,
+            response_text=response_text,
         )
 
     @staticmethod
@@ -733,8 +798,14 @@ class NluEngine:
 
         climate_extended_spec = CLIMATE_EXTENDED_INTENTS.get(frame.intent)
         if climate_extended_spec is not None:
+            climate_plan = map_to_service_call(command)
+            if climate_plan is None:
+                # build() declined (e.g. missing "temperature" attribute) -
+                # fall through to "not understood" rather than speaking a
+                # success response with nothing actually executed.
+                return None
             return MatchResult(
-                plan=map_to_service_call(command),
+                plan=climate_plan,
                 response_text=climate_extended_spec.response(matched, frame.parameters),
                 frame=frame,
                 command=command,
@@ -742,7 +813,9 @@ class NluEngine:
 
         query_spec = QUERY_INTENTS.get(frame.intent)
         if query_spec is not None:
-            return MatchResult(plan=None, response_text=query_spec.response(matched), frame=frame, command=command)
+            return MatchResult(
+                plan=None, response_text=query_spec.response(matched, frame.parameters), frame=frame, command=command
+            )
 
         spec = INTENTS.get(frame.intent)
         if spec is None:

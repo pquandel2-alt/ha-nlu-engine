@@ -66,5 +66,13 @@
   {
     "text": "schalte beide Schalter aus",
     "expect_match": false
+  },
+  {
+    "text": "gibt es Fenster im Bunker",
+    "expect_match": false
+  },
+  {
+    "text": "ist das Fenster Garage offen",
+    "expect_match": false
   }
 ]

@@ -231,6 +231,45 @@ CATEGORIES: dict[str, list[str]] = {
         "Mach das Testlicht aus",
         "Schalte das Testlicht ein",
     ],
+    # HomeIntent V4.2, "Semantic Query & State Resolution" - HassStateQuery
+    # (list/count), HassCheckState (singular boolean), HassExistsQuery
+    # (existence), each exercised at 0/1/N result cardinality and with/
+    # without an area filter (golden_fixtures.py's binary_sensor entities -
+    # user decision, 2026-08-11: ~25-35 cases, not a literal hand-written
+    # 100+).
+    "state_query": [
+        # HassStateQuery - list ("welche")
+        "welche Fenster sind offen",
+        "welche Fenster sind geschlossen",
+        "welche Fenster sind im Wohnzimmer offen",
+        "welche Fenster sind im Eingang offen",  # 0 matches - empty success
+        "welche Türen sind offen",
+        "welche Bewegungsmelder sind eingeschaltet",
+        "welche Bewegungsmelder sind ausgeschaltet",  # 0 matches - empty success
+        "welche Schalter sind ausgeschaltet",
+        "welche Schalter sind eingeschaltet",  # 0 matches - empty success
+        "welche Rollläden sind offen",  # 0 matches - empty success
+        # HassStateQuery - count ("wie viele")
+        "wie viele Fenster sind offen",
+        "wie viele Fenster sind geschlossen",
+        "wie viele Türen sind offen",
+        "wie viele Lichter sind eingeschaltet",
+        "wie viele Rollläden sind geschlossen",
+        # HassCheckState
+        "ist das Fenster Wohnzimmer offen",
+        "ist das Fenster Küche offen",
+        "ist die Tür Eingang offen",
+        "ist das Wohnzimmerlicht eingeschaltet",
+        "ist das Flurlicht eingeschaltet",
+        "ist die Steckdose Büro ausgeschaltet",
+        "ist die Bewegung Flur eingeschaltet",
+        # HassExistsQuery
+        "gibt es offene Fenster",
+        "gibt es offene Fenster im Eingang",  # 0 matches - empty success
+        "gibt es Fenster im Wohnzimmer",
+        "gibt es geschlossene Türen",  # 0 matches - empty success
+        "gibt es Bewegungsmelder im Flur",
+    ],
 }
 
 # Sentences that must NOT match (kein ServiceCall, "nicht verstanden").
@@ -252,6 +291,11 @@ NEGATIVE_SENTENCES: list[str] = [
     "stelle die Steckdose Büro auf 50 Prozent",  # switch has no PERCENT-capable domain mapping
     "mach beide Ventilatoren an",  # v2 plan Phase 21 example: "beide" but only 1 fan exists
     "schalte beide Schalter aus",  # same rule, switch domain (only 1 switch entity)
+    # HomeIntent V4.2, "Semantic Query & State Resolution" - never guess
+    # (Regel 4): an unresolvable area/name returns no match at all, not a
+    # guessed or empty-but-successful answer.
+    "gibt es Fenster im Bunker",  # "Bunker" isn't a registered area_name
+    "ist das Fenster Garage offen",  # unknown entity name
 ]
 
 
