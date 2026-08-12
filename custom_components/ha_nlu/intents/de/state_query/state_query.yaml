@@ -20,11 +20,19 @@ intents:
           - "welche {device_class} sind [in der|in dem|im|am|beim] {area} {state}"
           - "wie viele {device_class} sind {state}"
           - "wie viele {device_class} sind [in der|in dem|im|am|beim] {area} {state}"
+  # The area-scoped sentence MUST be listed before the bare one: {name} is
+  # an open-ended WildcardSlotList (unlike {device_class} above, which is a
+  # closed vocabulary), so when both templates are candidates hassil prefers
+  # whichever one it tries first - listed second, the area-scoped template
+  # would never be reached, since the bare template's unconstrained {name}
+  # always succeeds first by swallowing "{name} im {area}" whole (confirmed
+  # live: silently resolved to the wrong entity - Regel 4 violation - see
+  # git history for the live incident this ordering fixes).
   HassCheckState:
     data:
       - sentences:
-          - "ist [die|der|das] {name} {state}"
           - "ist [die|der|das] {name} [in der|in dem|im|am|beim] {area} {state}"
+          - "ist [die|der|das] {name} {state}"
   # Both German word orders are natural here ("gibt es im Keller Fenster"
   # and "gibt es Fenster im Keller" are equally idiomatic), unlike
   # HassStateQuery/HassCheckState above where only the area-before-state

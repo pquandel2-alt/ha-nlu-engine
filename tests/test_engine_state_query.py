@@ -134,6 +134,36 @@ def test_check_state_area_scoped(engine):
     assert result.response_text == "Ja, Tür Eingang ist offen."
 
 
+def test_check_state_area_scoped_word_order_does_not_pick_decoy_entity(engine):
+    # Live incident (v4.2 Milestone 7): the area-scoped HassCheckState
+    # sentence must be tried before the bare one in state_query.yaml, or
+    # {name} (an open wildcard) swallows "{name} im {area}" whole and never
+    # resolves {area} at all. That alone is silent - the real danger is a
+    # second entity whose friendly_name equals just the area word ("Fenster
+    # im Schlafzimmer" spoken text still fuzzy-matches an entity literally
+    # named "Schlafzimmer" via the resolver's substring scoring), which then
+    # gets answered instead of the actually-asked-about entity - a Regel 4
+    # violation (never guess) that a "does this return a result at all"
+    # check wouldn't catch. Names are in "item area" spoken order but
+    # "area item" friendly_name order specifically because that mismatch is
+    # what made the decoy win before the grammar fix.
+    schlafzimmer_fenster = EntitySnapshot(
+        "binary_sensor.schlafzimmer_fenster", "Schlafzimmer Fenster", "binary_sensor", "off",
+        area_id="schlafzimmer", area_name="Schlafzimmer", device_class="window",
+    )
+    schlafzimmer_rollladen_decoy = EntitySnapshot(
+        "cover.schlafzimmer_decoy", "Schlafzimmer", "cover", "open",
+        area_id="schlafzimmer", area_name="Schlafzimmer",
+    )
+    result = engine.match(
+        "ist das Fenster im Schlafzimmer geöffnet",
+        [schlafzimmer_fenster, schlafzimmer_rollladen_decoy],
+    )
+    assert result is not None
+    assert result.command.entities == (schlafzimmer_fenster,)
+    assert result.response_text == "Nein, Schlafzimmer Fenster ist nicht offen."
+
+
 def test_check_state_unresolved_name_returns_none(engine):
     # Never guess (Regel 4): an unknown/ambiguous singular name never falls
     # back to a clarification round-trip here, unlike SingleTargetParser.
