@@ -29,7 +29,7 @@ from pathlib import Path
 from hassil import Intents
 
 from .areas import AreaResolveStatus, resolve_area_name
-from .entities import EntitySnapshot, ResolveStatus, resolve_entity
+from .entities import EntitySnapshot, ResolveStatus, build_entity_index, resolve_entity
 from .nlu.command import SemanticCommand, build_semantic_command
 from .nlu.context import ConversationContext
 from .nlu.debug import DebugTrace, format_command
@@ -155,6 +155,13 @@ _STATE_QUERY_RE = re.compile(
     r"eingeschaltete|angeschaltete|ausgeschaltete)\b",
     re.IGNORECASE,
 )
+
+# Intents NluEngine.match_query_followup() will continue with a fresh
+# area/floor ("Und in der Küche?", "Und oben?") - HassGetState (original,
+# v4.9) plus the three StateQueryParser intents (HomeIntent v4.2.1 plan,
+# Phase 8). Deliberately excludes HassQueryComparison - see that method's
+# docstring.
+_QUERY_FOLLOWUP_INTENTS = frozenset({"HassGetState", "HassStateQuery", "HassCheckState", "HassExistsQuery"})
 
 # Sentences containing "Prozent" are routed to PercentageParser's separately-
 # compiled grammar for the same reason as the quantifier routing below: the
@@ -454,7 +461,7 @@ class NluEngine:
 
         text = normalize(text)
         parser = self._select_parser(text)
-        result = parser.parse(text, ParseContext(entities=entities))
+        result = parser.parse(text, ParseContext(entities=entities, index=build_entity_index(entities)))
         if result is None:
             return None
         if isinstance(result, ClarificationRequest):
@@ -563,24 +570,35 @@ class NluEngine:
         without this method such a follow-up would just fail to match
         anything and fall through to "not understood".
 
-        Only continues a plain ``HassGetState`` query - gated here (not in
-        ``QueryFollowupParser`` itself) for the same reason
+        Continues a plain ``HassGetState`` query, or (HomeIntent v4.2.1
+        plan, Phase 8) one of the three ``StateQueryParser`` intents -
+        ``HassStateQuery``/``HassCheckState``/``HassExistsQuery`` - gated
+        here (not in ``QueryFollowupParser`` itself) for the same reason
         ``match_followup()`` does its own light-only filtering before
         calling into ``ContextFollowupParser``: keeps the parser itself
-        free of ``ConversationContext``/``SemanticCommand`` knowledge.
-        ``HassQueryComparison`` (``QUERY_INTENTS``' other entry, its own
-        multi-entity "welche..." shape) is out of scope - same narrow-
-        scoping precedent ``TemporalParser``/``ComparisonQueryParser``
-        already set for themselves. A missing/non-query previous turn, or a
-        structural/resolution miss in the parser itself, both collapse to
-        ``None`` here, same as every other "never guess" miss in this
-        engine.
+        free of ``ConversationContext``/``SemanticCommand`` knowledge, it
+        only sees the plain ``QueryCommand`` this method extracts from
+        ``context.last_command.parameters["query_command"]`` (populated by
+        ``StateQueryParser`` since Phase 7). ``HassQueryComparison``
+        (``QUERY_INTENTS``' other entry, its own multi-entity "welche..."
+        shape) is out of scope - same narrow-scoping precedent
+        ``TemporalParser``/``ComparisonQueryParser`` already set for
+        themselves. A missing/non-query previous turn, or a structural/
+        resolution miss in the parser itself, both collapse to ``None``
+        here, same as every other "never guess" miss in this engine.
         """
-        if context is None or context.last_command is None or context.last_command.intent != "HassGetState":
+        if (
+            context is None
+            or context.last_command is None
+            or context.last_command.intent not in _QUERY_FOLLOWUP_INTENTS
+        ):
             return None
 
         normalized = normalize(text)
-        result = self._query_followup_parser.parse(normalized, entities, context.last_entities)
+        previous_query_command = context.last_command.parameters.get("query_command")
+        result = self._query_followup_parser.parse(
+            normalized, entities, context.last_entities, previous_query_command
+        )
         if result is None:
             return None
         return self._build_match_result(result)
@@ -645,7 +663,7 @@ class NluEngine:
         """
         normalized = normalize(text)
         parser = self._select_parser(normalized)
-        result = parser.parse(normalized, ParseContext(entities=entities))
+        result = parser.parse(normalized, ParseContext(entities=entities, index=build_entity_index(entities)))
         if result is None:
             return NluResponse(success=False, speech=None, command=None, error=NluError.NO_MATCH)
         if isinstance(result, ClarificationRequest):
@@ -694,7 +712,7 @@ class NluEngine:
         normalized = normalize(text)
         parser = self._select_parser(normalized)
         parser_name = type(parser).__name__
-        result = parser.parse(normalized, ParseContext(entities=entities))
+        result = parser.parse(normalized, ParseContext(entities=entities, index=build_entity_index(entities)))
         if result is None:
             return DebugTrace(
                 input=text,

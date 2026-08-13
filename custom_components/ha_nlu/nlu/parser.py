@@ -10,13 +10,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from ..entities import EntitySnapshot
+from ..entities import EntityIndex, EntitySnapshot
 from .frame import SemanticFrame
 
 
 @dataclass(frozen=True)
 class ParseContext:
     entities: list[EntitySnapshot]
+    # World Model Wave 1's EntityIndex, built once per turn by engine.py and
+    # reused across parsers (see Wave 1 report: without this, the cost of
+    # resolve_entity_scored()'s per-entity generate_aliases() scan
+    # multiplies with every additional pipeline stage Wave 3+ introduces).
+    # None keeps every parser's behaviour byte-for-byte unchanged (full scan).
+    index: EntityIndex | None = None
 
 
 @dataclass(frozen=True)

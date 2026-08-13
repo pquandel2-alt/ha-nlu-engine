@@ -42,7 +42,9 @@ from .nlu.lexicon import (
     _TEMPORAL_UNIT_SLOT_LIST,
 )
 from .nlu.parser import AmbiguousReference, ClarificationRequest, ParseContext, ParseResult
-from .nlu.semantic_state import SemanticState, matches_semantic_state
+from .nlu.query_command import QueryCommand, QueryFilter, QueryResultStatus, QueryScope, QueryTarget
+from .nlu.query_executor import QueryExecutor
+from .nlu.semantic_state import SemanticState
 from .service_call import (
     CLIMATE_EXTENDED_INTENTS,
     FAN_EXTENDED_INTENTS,
@@ -853,32 +855,93 @@ class QueryFollowupParser:
     Structurally distinct from every other parser here, same reason
     ``ReferenceParser`` already documents for itself: resolution happens
     against the previous turn's resolved query target, not a freshly spoken
-    name, so this parser takes ``last_entities`` as a plain parameter rather
-    than folding it into ``ParseContext``.
+    name, so this parser takes ``last_entities``/``previous_query_command``
+    as plain parameters rather than folding them into ``ParseContext``.
 
-    *What* to look for (domain + device_class) is never re-spoken - it's
-    carried over from ``last_entities[0]`` (the previous turn's single
-    resolved query target; the caller, ``NluEngine.match_query_followup()``,
-    already gates on the previous intent being a plain ``HassGetState``
-    before this parser is even tried). Mirrors ``derive_query_type``'s own
-    domain-first/device_class-second precedence (nlu/query.py): a light
-    carries over by domain alone (lights don't report a device_class),
-    everything else carries over by domain *and* device_class - so "Und in
-    der Küche?" after a temperature query only matches a temperature sensor
-    in the new room, never some other sensor there.
+    Two branches, dispatched in ``parse()`` on whether the caller
+    (``NluEngine.match_query_followup()``) found a ``QueryCommand`` on the
+    previous turn (HomeIntent v4.2.1 plan, Phase 8):
+
+    **``HassGetState`` branch** (original, unchanged) - *what* to look for
+    (domain + device_class) is never re-spoken, it's carried over from
+    ``last_entities[0]`` (the previous turn's single resolved query target).
+    Mirrors ``derive_query_type``'s own domain-first/device_class-second
+    precedence (nlu/query.py): a light carries over by domain alone (lights
+    don't report a device_class), everything else carries over by domain
+    *and* device_class - so "Und in der Küche?" after a temperature query
+    only matches a temperature sensor in the new room, never some other
+    sensor there. Refuses (``None``) unless the new area/floor yields
+    *exactly* one candidate - no cardinality concept here, mirrors
+    ``HassGetState``'s own always-singular shape.
+
+    **State-query branch** (Phase 8, new) - continues ``HassStateQuery``/
+    ``HassCheckState``/``HassExistsQuery`` using the previous turn's
+    ``QueryCommand`` (``frame.parameters["query_command"]``, populated by
+    ``StateQueryParser`` since Phase 7) instead of ``last_entities[0]``:
+    domain/device_class/state-filter/scope/intent all carry over verbatim,
+    only ``target.area``/``target.entity_id`` are replaced by the freshly
+    resolved area/floor - then re-run through the same ``_QUERY_EXECUTOR``
+    ``StateQueryParser`` itself uses (Regel 6, one shared classifier).
+    Unlike the ``HassGetState`` branch, a LIST/COUNT/EXISTS follow-up keeps
+    the "empty is a normal answer" rule ("Und im Bad?" -> "Keine Fenster
+    sind offen." is a real answer, not a miss) - only ``HassCheckState``
+    (``QueryScope.SINGLE``) refuses on 0 or 2+ matches, same "never guess"
+    precedent the ``HassGetState`` branch already set.
 
     {area} resolves against a fresh room lookup (this turn's ``entities``,
     not the remembered one - the whole point is a *new* room); {level}
     ("oben"/"unten") resolves a floor the same way ``QuantifierParser``'s
     own {level} slot does (v2 plan Phase 28 precedent,
-    ``resolve_floor_by_level_keyword``). Either way, zero or several
-    matching entities in the new area/floor is refused rather than guessed.
+    ``resolve_floor_by_level_keyword``). Shared by both branches via
+    ``_resolve_area_or_level()``.
     """
 
     def __init__(self, intents: Intents) -> None:
         self._intents = intents
 
     def parse(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        last_entities: tuple[EntitySnapshot, ...],
+        previous_query_command: QueryCommand | None = None,
+    ) -> ParseResult | None:
+        if previous_query_command is not None:
+            return self._parse_state_query_followup(text, entities, previous_query_command)
+        return self._parse_get_state_followup(text, entities, last_entities)
+
+    def _resolve_area_or_level(
+        self, text: str, entities: list[EntitySnapshot]
+    ) -> tuple[str | None, str | None, str | None, str] | None:
+        """(area_id, area_name, floor_id, target_text) from the "und
+        {area}"/"und {level}" grammar, or ``None`` on any structural or
+        resolution miss (unknown/ambiguous room, no single oben/unten
+        floor) - never guess. Exactly one of area_id/floor_id is set.
+        """
+        slot_lists = {"area": WildcardSlotList(name="area"), "level": _LEVEL_SLOT_LIST}
+        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+        if result is None or result.intent is None:
+            return None
+
+        area_slot = result.entities.get("area")
+        if area_slot is not None:
+            area_name = _strip_locative_prepositions(str(area_slot.value))
+            if not area_name:
+                return None
+            area_resolved = resolve_area_name(area_name, entities)
+            if area_resolved.status is not AreaResolveStatus.OK:
+                return None  # room not found or ambiguous - never guess
+            return area_resolved.area_id, area_name, None, area_name
+
+        level_slot = result.entities.get("level")
+        if level_slot is None:
+            return None
+        level_resolved = resolve_floor_by_level_keyword(str(level_slot.value), entities)
+        if level_resolved.status is not FloorResolveStatus.OK:
+            return None  # no single oben/unten floor among today's entities - never guess
+        return None, None, level_resolved.floor_id, str(level_slot.value)
+
+    def _parse_get_state_followup(
         self, text: str, entities: list[EntitySnapshot], last_entities: tuple[EntitySnapshot, ...]
     ) -> ParseResult | None:
         if not last_entities:
@@ -889,34 +952,10 @@ class QueryFollowupParser:
         if domain != "light" and device_class is None:
             return None  # nothing meaningful to carry over - never guess
 
-        slot_lists = {"area": WildcardSlotList(name="area"), "level": _LEVEL_SLOT_LIST}
-        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
-        if result is None or result.intent is None:
+        resolved_location = self._resolve_area_or_level(text, entities)
+        if resolved_location is None:
             return None
-
-        area_id = None
-        area_name = None
-        floor_id = None
-        target_text = None
-        area_slot = result.entities.get("area")
-        if area_slot is not None:
-            area_name = _strip_locative_prepositions(str(area_slot.value))
-            if not area_name:
-                return None
-            area_resolved = resolve_area_name(area_name, entities)
-            if area_resolved.status is not AreaResolveStatus.OK:
-                return None  # room not found or ambiguous - never guess
-            area_id = area_resolved.area_id
-            target_text = area_name
-        else:
-            level_slot = result.entities.get("level")
-            if level_slot is None:
-                return None
-            level_resolved = resolve_floor_by_level_keyword(str(level_slot.value), entities)
-            if level_resolved.status is not FloorResolveStatus.OK:
-                return None  # no single oben/unten floor among today's entities - never guess
-            floor_id = level_resolved.floor_id
-            target_text = str(level_slot.value)
+        area_id, area_name, floor_id, target_text = resolved_location
 
         candidates = resolve_entities_by_domain(domain, entities, area_id=area_id, floor_id=floor_id)
         if device_class is not None:
@@ -932,6 +971,55 @@ class QueryFollowupParser:
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=[entity])
+
+    def _parse_state_query_followup(
+        self, text: str, entities: list[EntitySnapshot], previous: QueryCommand
+    ) -> ParseResult | None:
+        resolved_location = self._resolve_area_or_level(text, entities)
+        if resolved_location is None:
+            return None
+        area_id, area_name, floor_id, target_text = resolved_location
+
+        domain = previous.target.domain
+        device_class = previous.target.device_class
+        candidates = resolve_entities_by_domain(domain, entities, area_id=area_id, floor_id=floor_id)
+        if device_class is not None:
+            candidates = [e for e in candidates if e.device_class == device_class]
+
+        area_snapshot = AreaSnapshot(area_id=area_id, name=area_name) if area_id is not None else None
+        new_command = QueryCommand(
+            intent=previous.intent,
+            scope=previous.scope,
+            target=QueryTarget(domain=domain, device_class=device_class, area=area_snapshot),
+            filter=previous.filter,
+        )
+        query_result = _QUERY_EXECUTOR.execute(new_command, candidates)
+        if query_result.status in (QueryResultStatus.TARGET_NOT_FOUND, QueryResultStatus.AMBIGUOUS):
+            return None  # never guess - same refusal precedent as the HassGetState branch above
+
+        matches = list(query_result.entities)
+        # SINGLE (HassCheckState) stays a plain singular match, like the
+        # HassGetState branch; LIST/COUNT/EXISTS keep StateQueryParser's own
+        # "quantifier=all even when empty" precedent so an intentional
+        # "Keine Fenster sind offen." doesn't misfire validate_command()'s
+        # ambiguity check (see StateQueryParser's class docstring).
+        quantifier = None if previous.scope is QueryScope.SINGLE else Quantifier(kind="all")
+
+        frame = SemanticFrame(
+            intent=previous.intent,
+            target=TargetReference(text=target_text, domain=domain, device_class=device_class),
+            area=AreaReference(text=area_name, area_id=area_id, area_name=area_name) if area_id is not None else None,
+            quantifier=quantifier,
+            parameters={
+                "semantic_state": previous.filter.state,
+                "count_only": previous.scope is QueryScope.COUNT,
+                "device_class": device_class,
+                "domain": domain,
+                "query_command": new_command,
+            },
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=matches)
 
 
 # Custom, non-HA-core intent names for the "die anderen" complement grammar
@@ -1139,6 +1227,13 @@ _STATE_NAME_TO_SEMANTIC: dict[str, SemanticState] = {
     "OFF": SemanticState.OFF,
 }
 
+# Shared, stateless (HomeIntent v4.2.1 plan, Phase 7): StateQueryParser now
+# runs its own candidate filtering/ambiguity classification through the same
+# QueryExecutor a future V5 consumer would use, instead of a private ad hoc
+# list comprehension - see StateQueryParser's own docstring for the "why now,
+# but response text unchanged" scope decision.
+_QUERY_EXECUTOR = QueryExecutor()
+
 
 class StateQueryParser:
     """Wraps the {device_class}/{state}/{state_adj}/{name}/{area} grammar
@@ -1175,6 +1270,22 @@ class StateQueryParser:
     ``ComparisonQueryParser``/``AreaQueryParser`` already set for their own
     ambiguity cases, rather than extending ``resolve_clarification()``'s
     scope to cover query intents too.
+
+    HomeIntent v4.2.1 plan, Phase 7 ("non-destructive migration"): each
+    ``_parse_*`` method below now builds a ``nlu.query_command.QueryCommand``
+    and runs its candidate list through the shared ``QueryExecutor``
+    (``_QUERY_EXECUTOR``) instead of a private ad hoc
+    ``matches_semantic_state`` list comprehension - the exact same filtering
+    rule, just consolidated into the one class a future V5 caller would also
+    use (Section 12). The resulting ``QueryCommand`` is stashed in
+    ``frame.parameters["query_command"]`` for that future caller (and
+    Phase 8's query-followup extension) to read back. Response text
+    generation is deliberately **not** touched here: it still goes through
+    ``service_call.py``'s ``QUERY_INTENTS`` response lambdas, proven
+    byte-identical to ``nlu.response_generator.ResponseGenerator``'s output
+    by that module's own dedicated unit tests - swapping the live response
+    call site over would touch ``engine.py``'s shared dispatch for zero
+    behavioral gain, which Section 13 explicitly asks to avoid.
     """
 
     def __init__(self, intents: Intents) -> None:
@@ -1256,8 +1367,15 @@ class StateQueryParser:
             return None
 
         requested_state = _STATE_NAME_TO_SEMANTIC[str(state_slot.value)]
-        matches = [e for e in candidates if matches_semantic_state(e, requested_state)]
         count_only = bool(re.search(r"\bwie viele\b", text, re.IGNORECASE))
+        area_snapshot = AreaSnapshot(area_id=area_id, name=area_name) if area_id is not None else None
+        query_command = QueryCommand(
+            intent="HassStateQuery",
+            scope=QueryScope.COUNT if count_only else QueryScope.LIST,
+            target=QueryTarget(domain=domain, device_class=device_class, area=area_snapshot),
+            filter=QueryFilter(state=requested_state),
+        )
+        matches = list(_QUERY_EXECUTOR.execute(query_command, candidates).entities)
 
         frame = SemanticFrame(
             intent="HassStateQuery",
@@ -1269,6 +1387,7 @@ class StateQueryParser:
                 "count_only": count_only,
                 "device_class": device_class,
                 "domain": domain,
+                "query_command": query_command,
             },
             source_text=text,
         )
@@ -1295,17 +1414,29 @@ class StateQueryParser:
         # given sentence, since they come from disjoint templates.
         state_slot = slots.get("state_adj") or slots.get("state")
         requested_state = None
-        matches = candidates
         if state_slot is not None:
             requested_state = _STATE_NAME_TO_SEMANTIC[str(state_slot.value)]
-            matches = [e for e in candidates if matches_semantic_state(e, requested_state)]
+
+        area_snapshot = AreaSnapshot(area_id=area_id, name=area_name) if area_id is not None else None
+        query_command = QueryCommand(
+            intent="HassExistsQuery",
+            scope=QueryScope.EXISTS,
+            target=QueryTarget(domain=domain, device_class=device_class, area=area_snapshot),
+            filter=QueryFilter(state=requested_state),
+        )
+        matches = list(_QUERY_EXECUTOR.execute(query_command, candidates).entities)
 
         frame = SemanticFrame(
             intent="HassExistsQuery",
             target=TargetReference(text=device_class_value, domain=domain, device_class=device_class),
             area=AreaReference(text=area_name, area_id=area_id, area_name=area_name) if area_id is not None else None,
             quantifier=Quantifier(kind="all"),
-            parameters={"semantic_state": requested_state, "device_class": device_class, "domain": domain},
+            parameters={
+                "semantic_state": requested_state,
+                "device_class": device_class,
+                "domain": domain,
+                "query_command": query_command,
+            },
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=matches)
@@ -1322,18 +1453,41 @@ class StateQueryParser:
         area_id, area_name = resolved_area
 
         name = _strip_locative_prepositions(str(name_slot.value))
-        resolved = resolve_entity_scored(name, context.entities, area_id=area_id)
+        resolved = resolve_entity_scored(name, context.entities, area_id=area_id, index=context.index)
         if resolved.status is not ResolutionStatus.RESOLVED or resolved.entity is None:
             return None  # not found or ambiguous - never guess, no clarification round-trip (see class docstring)
         if resolved.entity.domain not in spec.allowed_domains:
             return None
 
         requested_state = _STATE_NAME_TO_SEMANTIC[str(state_slot.value)]
+        area_snapshot = AreaSnapshot(area_id=area_id, name=area_name) if area_id is not None else None
+        # device_class is inert here (QueryExecutor.SINGLE with a pre-resolved
+        # entity_id never looks at it - only entity_id decides membership),
+        # but carrying it over gives Phase 8's QueryFollowupParser something
+        # to re-scope by when a later "Und im Bad?" continues this exact
+        # HassCheckState with a new area (this entity's own device_class,
+        # e.g. "window", not just its bare domain, e.g. "binary_sensor").
+        query_command = QueryCommand(
+            intent="HassCheckState",
+            scope=QueryScope.SINGLE,
+            target=QueryTarget(
+                domain=resolved.entity.domain,
+                device_class=resolved.entity.device_class,
+                area=area_snapshot,
+                entity_id=resolved.entity.entity_id,
+            ),
+            filter=QueryFilter(state=requested_state),
+        )
+        # resolve_entity_scored already did the ambiguity check (Regel 6) -
+        # QueryExecutor.SINGLE with a pre-resolved entity_id only confirms
+        # membership, it never re-decides cardinality here.
+        matches = list(_QUERY_EXECUTOR.execute(query_command, [resolved.entity]).entities)
+
         frame = SemanticFrame(
             intent="HassCheckState",
             target=TargetReference(text=name, entity_id=resolved.entity.entity_id, domain=resolved.entity.domain),
             area=AreaReference(text=area_name, area_id=area_id, area_name=area_name) if area_id is not None else None,
-            parameters={"semantic_state": requested_state},
+            parameters={"semantic_state": requested_state, "query_command": query_command},
             source_text=text,
         )
-        return ParseResult(frame=frame, resolved_entities=[resolved.entity])
+        return ParseResult(frame=frame, resolved_entities=matches)
