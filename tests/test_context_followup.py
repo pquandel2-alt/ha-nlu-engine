@@ -4,6 +4,13 @@ their own target ("Etwas heller.") are resolved against the previous turn's
 ``NluEngine.match_followup()`` directly, plus one end-to-end round-trip
 (``match()`` -> build context -> ``match_followup()``) mirroring exactly how
 ``conversation.py`` chains the two calls.
+
+V6.23 ("Natural Context", HomeIntent plan V6 Teil 5/7) extended
+``match_followup()`` beyond brightness-only: bare "wärmer"/"kälter" now
+resolves against a single climate entity in context, reusing
+``climate_extended/temperature.yaml``'s already-established
+HassClimateIncreaseTemperature/HassClimateDecreaseTemperature vocabulary
+(see engine.py's match_followup() docstring for why - "niemals raten").
 """
 
 from __future__ import annotations
@@ -22,6 +29,11 @@ NON_DIMMABLE_LIGHT = EntitySnapshot(
 SWITCH = EntitySnapshot(
     "switch.garagentor", "Garagentor", "switch", "off",
     capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+)
+CLIMATE = EntitySnapshot(
+    "climate.heizung_buero", "Heizung Büro", "climate", "heat",
+    capabilities=frozenset({"TURN_ON", "TURN_OFF", "TEMPERATURE"}),
+    attributes={"temperature": 20},
 )
 
 
@@ -85,6 +97,36 @@ def test_match_followup_returns_none_for_unsupported_capability(engine):
 def test_match_followup_returns_none_for_unrelated_sentence(engine):
     context = _context((DIMMABLE_LIGHT,))
     assert engine.match_followup("Mach das Licht an.", context) is None
+
+
+def test_match_followup_climate_warmer(engine):
+    context = _context((CLIMATE,))
+    result = engine.match_followup("Wärmer.", context)
+    assert result is not None
+    assert result.plan is not None
+    assert result.plan.domain == "climate"
+    assert result.plan.service == "set_temperature"
+    assert result.plan.entity_id == "climate.heizung_buero"
+    assert result.plan.data == {"temperature": 21}
+    assert result.response_text == "Heizung Büro wärmer gestellt."
+
+
+def test_match_followup_climate_kaelter(engine):
+    context = _context((CLIMATE,))
+    result = engine.match_followup("Kälter.", context)
+    assert result is not None
+    assert result.plan.data == {"temperature": 19}
+    assert result.response_text == "Heizung Büro kälter gestellt."
+
+
+def test_match_followup_warmer_returns_none_for_light_domain(engine):
+    context = _context((DIMMABLE_LIGHT,))
+    assert engine.match_followup("Wärmer.", context) is None
+
+
+def test_match_followup_heller_returns_none_for_climate_domain(engine):
+    context = _context((CLIMATE,))
+    assert engine.match_followup("Etwas heller.", context) is None
 
 
 def test_end_to_end_turn_on_then_brighten(engine):

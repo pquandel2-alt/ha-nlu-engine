@@ -489,27 +489,33 @@ class NluEngine:
 
     def match_followup(self, text: str, context: ConversationContext | None) -> MatchResult | None:
         """Complete an elliptical follow-up sentence that omits its own
-        target (v2 plan Phase 26, "Context") - e.g. "Etwas heller." right
-        after "Mach das Wohnzimmerlicht an.". Tried by ``conversation.py``
-        *before* a fresh ``match()``, since these sentences have no {name}
-        of their own for any other parser to resolve.
+        target (v2 plan Phase 26, "Context"; cross-property extension
+        HomeIntent plan V6.23, "Natural Context") - e.g. "Etwas heller."
+        right after "Mach das Wohnzimmerlicht an.", or "Wärmer." right after
+        a climate command. Tried by ``conversation.py`` *before* a fresh
+        ``match()``, since these sentences have no {name} of their own for
+        any other parser to resolve.
 
-        Scope deliberately narrowed to exactly one light in
-        ``context.last_entities``: ``LIGHT_EXTENDED_INTENTS``'
-        ``HassLightBrighten``/``HassLightDim`` responses only ever read
-        ``entities[0].friendly_name`` (see service_call.py), so passing
-        through 2+ entities would silently name only one of several lights
-        actually changed. 0 or 2+ matching lights therefore both return
+        The target domain (light vs climate) is derived from which spec
+        dict the parsed intent name falls into - ``LIGHT_EXTENDED_INTENTS``'
+        ``HassLightBrighten``/``HassLightDim`` for brightness,
+        ``CLIMATE_EXTENDED_INTENTS``' ``HassClimateIncreaseTemperature``/
+        ``HassClimateDecreaseTemperature`` for "wärmer"/"kälter" (V6.23:
+        reuses that already-established vocabulary and those already-wired
+        intents rather than inventing a color-temperature equivalent for
+        which no grammar/lexicon vocabulary exists yet - "niemals raten").
+
+        Scope deliberately narrowed to exactly one matching entity in
+        ``context.last_entities``: both spec dicts' response lambdas only
+        ever read ``entities[0].friendly_name`` (see service_call.py), so
+        passing through 2+ entities would silently name only one of several
+        entities actually changed. 0 or 2+ matches therefore both return
         ``None`` here - same "never guess" rule as the rest of the engine,
-        not a bug: the plan's own example is single-light anyway. Falls
+        not a bug: the plan's own example is single-entity anyway. Falls
         through to the normal "not understood" response, same as any other
         non-match.
         """
         if context is None:
-            return None
-
-        matched = [entity for entity in context.last_entities if entity.domain == "light"]
-        if len(matched) != 1:
             return None
 
         normalized = normalize(text)
@@ -517,12 +523,25 @@ class NluEngine:
         if intent is None:
             return None
 
+        if intent in LIGHT_EXTENDED_INTENTS:
+            domain = "light"
+            parameters = {"step_percent": _DEFAULT_DIMMING_STEP_PERCENT}
+        elif intent in CLIMATE_EXTENDED_INTENTS:
+            domain = "climate"
+            parameters = {}
+        else:
+            return None
+
+        matched = [entity for entity in context.last_entities if entity.domain == domain]
+        if len(matched) != 1:
+            return None
+
         entity = matched[0]
         frame = SemanticFrame(
             intent=intent,
             target=TargetReference(text=text, entity_id=entity.entity_id, domain=entity.domain),
             area=None,
-            parameters={"step_percent": _DEFAULT_DIMMING_STEP_PERCENT},
+            parameters=parameters,
             source_text=text,
         )
         return self._build_match_result(ParseResult(frame=frame, resolved_entities=[entity]))
