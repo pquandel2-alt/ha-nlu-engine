@@ -80,3 +80,37 @@ def test_store_keeps_separate_conversation_ids_independent():
     store.set("conv-b", context_b)
     assert store.get("conv-a") == context_a
     assert store.get("conv-b") == context_b
+
+
+def test_v6_context_fields_default_to_none_for_existing_call_sites():
+    # V6.12 ("Semantic Context"): last_floor/last_property/last_value/
+    # last_state/pending_reference are additive - every pre-V6 construction
+    # (like EMPTY_CONTEXT above) must keep working unchanged.
+    assert EMPTY_CONTEXT.last_floor is None
+    assert EMPTY_CONTEXT.last_property is None
+    assert EMPTY_CONTEXT.last_value is None
+    assert EMPTY_CONTEXT.last_state is None
+    assert EMPTY_CONTEXT.pending_reference is None
+
+
+def test_conversation_context_accepts_v6_fields_directly():
+    from ha_nlu.floors import FloorSnapshot
+    from ha_nlu.nlu.primitives import SemanticProperty
+    from ha_nlu.nlu.semantic_state import SemanticState
+
+    context = ConversationContext(
+        last_command=None,
+        last_entities=(),
+        last_area=None,
+        pending_clarification=None,
+        last_floor=FloorSnapshot(floor_id="og", name="Obergeschoss", level=1),
+        last_property=SemanticProperty.BRIGHTNESS,
+        last_value=42.0,
+        last_state=SemanticState.OPEN,
+        pending_reference="die andere",
+    )
+    assert context.last_floor.floor_id == "og"
+    assert context.last_property is SemanticProperty.BRIGHTNESS
+    assert context.last_value == 42.0
+    assert context.last_state is SemanticState.OPEN
+    assert context.pending_reference == "die andere"

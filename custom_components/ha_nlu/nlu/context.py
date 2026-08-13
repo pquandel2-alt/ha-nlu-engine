@@ -23,8 +23,11 @@ from typing import Callable
 
 from ..areas import AreaSnapshot
 from ..entities import EntitySnapshot
+from ..floors import FloorSnapshot
 from .command import SemanticCommand
 from .parser import ClarificationRequest
+from .primitives import SemanticProperty
+from .semantic_state import SemanticState
 
 __all__ = [
     "ClarificationRequest",
@@ -43,12 +46,44 @@ DEFAULT_CONTEXT_TTL_SECONDS = 30.0
 
 @dataclass(frozen=True)
 class ConversationContext:
-    """Per plan brain node e2946a55, section 24 - field names match exactly."""
+    """Per plan brain node e2946a55, section 24 - field names match exactly
+    for the original four fields.
+
+    V6 architecture plan, V6.12 ("Semantic Context", Brain node
+    2a0871f8-05a4-4e0d-8cb6-80a8ff939480): the plan's minimum field list adds
+    last_intent/last_action/last_target/last_query on top of the four fields
+    above - deliberately **not** added here as separate fields, since all
+    four are already fully recoverable from ``last_command`` (``.intent``,
+    ``.parameters`` for query_command, etc. - see ``engine.py``'s
+    ``match_query_followup()`` reading ``last_command.parameters.get(
+    "query_command")`` today) and duplicating them here would be a second,
+    driftable copy of the same state (Regel 6, "no parallel search/state
+    system"). Only genuinely new, not-yet-tracked-anywhere information is
+    added: ``last_floor``/``last_property``/``last_value``/``last_state``
+    (the plan's remaining minimum-list fields) and ``pending_reference``
+    (an unresolved *reference*, e.g. an ambiguous "die andere" with no
+    matching candidate - distinct from ``pending_clarification``, which is
+    entity-candidate ambiguity from Phase 25's ``ClarificationRequest``).
+
+    All five are ``None``-defaulted and, same as ``SemanticFrame``'s V6.2
+    primitive fields, not populated by any pipeline step yet - populating
+    them is the Reasoning Engine's job (V6.25, later Wave), which is the
+    first component that will actually compute a resolved property/value/
+    state per turn. Every existing ``ConversationContext(...)`` call site
+    uses keyword args (verified across conversation.py and all context/
+    reference/query-followup tests), so this stays fully backward
+    compatible.
+    """
 
     last_command: SemanticCommand | None
     last_entities: tuple[EntitySnapshot, ...]
     last_area: AreaSnapshot | None
     pending_clarification: ClarificationRequest | None
+    last_floor: FloorSnapshot | None = None
+    last_property: SemanticProperty | None = None
+    last_value: float | None = None
+    last_state: SemanticState | None = None
+    pending_reference: str | None = None
 
 
 class ConversationContextStore:

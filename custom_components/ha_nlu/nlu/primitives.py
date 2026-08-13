@@ -222,3 +222,56 @@ class SemanticQuantity:
     @classmethod
     def exclude(cls, *excluded: str) -> "SemanticQuantity":
         return cls(SemanticQuantityKind.EXCLUDE, excluded=tuple(excluded))
+
+
+class NumericUnit(Enum):
+    """The unit a ``NumericValue`` (V6 architecture plan, V6.16, "Number
+    Normalization") is expressed in - grounded 1:1 in the three real
+    ``RangeType``/unit contexts ``parsers.py`` already uses for property
+    values: PERCENT <- ``PercentageParser``/``LightExtendedParser``'s/
+    ``ComparisonQueryParser``'s ``RangeType.PERCENTAGE`` "percent" slots;
+    CELSIUS <- ``ClimateExtendedParser``'s "temperature" slot (a plain
+    ``RangeType.NUMBER`` whose unit is Celsius by the sentence's own
+    grammar, e.g. "X Grad"); LEVEL <- ``FanExtendedParser``'s "level" slot
+    ("Stufe X", ``RangeType.NUMBER`` 1-10). ``RangeType.NUMBER`` slots that
+    are not property values at all (``TemporalParser``'s "amount"/"hour",
+    minutes/clock-hour rather than a settable property) are deliberately
+    excluded - those stay ``TemporalExpression``'s job (frame.py), not this
+    primitive's.
+    """
+
+    PERCENT = auto()
+    CELSIUS = auto()
+    LEVEL = auto()
+
+
+@dataclass(frozen=True)
+class NumericValue:
+    """A number together with its unit - the plan's own worked examples
+    ("50"/"50%"/"50 Prozent"/"fünfzig Prozent" -> ``NumericValue(50,
+    PERCENT)``; "21 Grad"/"21°"/"einundzwanzig Grad" -> ``NumericValue(21,
+    CELSIUS)``; "Stufe 3"/"Stufe drei" -> ``NumericValue(3, LEVEL)``).
+
+    The surface-form normalization these examples describe (symbol vs. word,
+    digit vs. spelled-out number) is already fully handled *before* this
+    type would ever be constructed: ``nlu/normalize.py`` converts "50%"/"21°"
+    to their word form up front, and hassil's ``RangeSlotList`` itself
+    natively matches both digit and spelled-out German numbers to the same
+    integer (verified empirically, see ``normalize.py``'s own docstring) -
+    every existing ``RangeSlotList``-backed slot (percent/temperature/level)
+    already produces one canonical int regardless of which surface form was
+    spoken. What's been missing is a single typed value+unit pair to carry
+    that already-canonical number, instead of three separate ad-hoc ints
+    scattered across ``SemanticFrame.parameters`` ("percent"/"temperature"/
+    "step_percent" keys) with the unit only implicit from which dict key was
+    used.
+
+    Preparatory, like ``SemanticDegree``/this module's other primitives -
+    not yet wired into ``frame.py``/``parsers.py`` (replacing the
+    ``parameters`` dict keys is a later, separate step so it doesn't risk
+    the existing percent/temperature parsing paths; see the Wave 4 results
+    for the explicit scoping decision).
+    """
+
+    value: float
+    unit: NumericUnit

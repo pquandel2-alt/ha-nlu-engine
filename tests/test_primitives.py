@@ -8,6 +8,8 @@ from __future__ import annotations
 import pytest
 
 from ha_nlu.nlu.primitives import (
+    NumericUnit,
+    NumericValue,
     SemanticAction,
     SemanticDegree,
     SemanticDirection,
@@ -94,3 +96,35 @@ def test_semantic_quantity_equality_by_value():
     assert SemanticQuantity.exactly(3) == SemanticQuantity.exactly(3)
     assert SemanticQuantity.exactly(3) != SemanticQuantity.exactly(2)
     assert SemanticQuantity.all() != SemanticQuantity.some()
+
+
+def test_numeric_unit_has_expected_members():
+    assert {member.name for member in NumericUnit} == {"PERCENT", "CELSIUS", "LEVEL"}
+
+
+def test_numeric_value_percent():
+    value = NumericValue(50, NumericUnit.PERCENT)
+    assert value.value == 50
+    assert value.unit is NumericUnit.PERCENT
+
+
+def test_numeric_value_celsius():
+    value = NumericValue(21, NumericUnit.CELSIUS)
+    assert value.unit is NumericUnit.CELSIUS
+
+
+def test_numeric_value_level():
+    value = NumericValue(3, NumericUnit.LEVEL)
+    assert value.unit is NumericUnit.LEVEL
+
+
+def test_numeric_value_is_frozen():
+    value = NumericValue(50, NumericUnit.PERCENT)
+    with pytest.raises(AttributeError):
+        value.value = 10  # type: ignore[misc]
+
+
+def test_numeric_value_equality_by_value():
+    assert NumericValue(50, NumericUnit.PERCENT) == NumericValue(50, NumericUnit.PERCENT)
+    assert NumericValue(50, NumericUnit.PERCENT) != NumericValue(50, NumericUnit.CELSIUS)
+    assert NumericValue(50, NumericUnit.PERCENT) != NumericValue(21, NumericUnit.PERCENT)

@@ -213,6 +213,30 @@ def test_match_reference_im_selben_raum_returns_none_without_last_area(engine):
     assert engine.match_reference("Mach die Lichter im selben Raum an.", [POLERAUM_LIGHT_1, POLERAUM_LIGHT_2], context) is None
 
 
+def test_match_reference_hier_turn_on(engine):
+    # V6 architecture plan, V6.13 ("Relative Locations"): "hier" is the same
+    # last-area-anchored concept "dort"/"im selben Raum" already cover, just
+    # different wording - same _resolve_area_anchored() resolution.
+    context = _context(last_area=POLERAUM)
+    result = engine.match_reference("Mach die Lichter hier an.", [POLERAUM_LIGHT_1, POLERAUM_LIGHT_2], context)
+    assert result is not None
+    assert result.plan.service == "turn_on"
+    assert sorted(result.plan.entity_id) == ["light.poleraum_decke", "light.poleraum_wand"]
+
+
+def test_match_reference_hier_cover_hoch(engine, quantifier_entities):
+    context = _context(last_area=POLERAUM)
+    result = engine.match_reference("Die Rollläden hier hoch.", quantifier_entities, context)
+    assert result is not None
+    assert result.plan.service == "open_cover"
+    assert sorted(result.plan.entity_id) == ["cover.rolllade_poleraum_links", "cover.rolllade_poleraum_rechts"]
+
+
+def test_match_reference_hier_returns_none_without_last_area(engine):
+    context = _context()
+    assert engine.match_reference("Mach die Lichter hier an.", [POLERAUM_LIGHT_1, POLERAUM_LIGHT_2], context) is None
+
+
 def test_match_reference_ambiguous_reference_returns_none(engine, entities):
     context = _context((SWITCH_A,))
     assert engine.match_reference("Die andere.", entities, context) is None

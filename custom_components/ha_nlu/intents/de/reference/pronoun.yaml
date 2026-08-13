@@ -17,6 +17,17 @@ intents:
           # HassCloseCover's {domain} dort sentences below.
           - "mach [die|der|das] {domain} im selben Raum an"
           - "schalte [die|der|das] {domain} im selben Raum ein"
+          # "hier" (V6 architecture plan, V6.13 "Relative Locations", Brain
+          # node 2a0871f8-05a4-4e0d-8cb6-80a8ff939480 - plan's own example
+          # "Mach hier das Licht aus." + Context current_area=Wohnzimmer ->
+          # hier=Wohnzimmer). Resolved by the exact same
+          # _resolve_area_anchored() function as "dort"/"im selben Raum"
+          # above - "hier" and "dort" both mean "the area from context",
+          # neither is spatially distinguished from the other by this
+          # codebase (no adjacency model exists, see V6.13's own deferred
+          # nebenan/drüben note in the Wave 4 results).
+          - "mach [die|der|das] {domain} hier an"
+          - "schalte [die|der|das] {domain} hier ein"
   HassTurnOff:
     data:
       - sentences:
@@ -28,6 +39,8 @@ intents:
           - "lass es aus"
           - "mach [die|der|das] {domain} im selben Raum aus"
           - "schalte [die|der|das] {domain} im selben Raum aus"
+          - "mach [die|der|das] {domain} hier aus"
+          - "schalte [die|der|das] {domain} hier aus"
   HassLightBrighten:
     data:
       - sentences:
@@ -49,6 +62,11 @@ intents:
           # only the wording differs, not the resolution logic.
           - "mach dort [die|der|das] {domain} hoch"
           - "mach [die|der|das] {domain} dort hoch"
+          - "[die|der|das] {domain} hier hoch"
+          - "fahr [die|der|das] {domain} hier hoch"
+          - "fahre [die|der|das] {domain} hier hoch"
+          - "mach hier [die|der|das] {domain} hoch"
+          - "mach [die|der|das] {domain} hier hoch"
   HassCloseCover:
     data:
       - sentences:
@@ -57,6 +75,11 @@ intents:
           - "fahre [die|der|das] {domain} dort runter"
           - "mach dort [die|der|das] {domain} runter"
           - "mach [die|der|das] {domain} dort runter"
+          - "[die|der|das] {domain} hier runter"
+          - "fahr [die|der|das] {domain} hier runter"
+          - "fahre [die|der|das] {domain} hier runter"
+          - "mach hier [die|der|das] {domain} runter"
+          - "mach [die|der|das] {domain} hier runter"
   HassReferenceOther:
     data:
       - sentences:
