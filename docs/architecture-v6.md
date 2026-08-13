@@ -6,7 +6,8 @@ V6) sowie `15884008-4107-4f8b-8227-e0de518c745c` (Wave-0-Bestandsaufnahme,
 2026-08-13). Dieses Dokument ist die **Kurzfassung/Landkarte** für den
 V6-Umbau im Repo – die vollständigen Begründungen, Beispiele und
 Detail-Spezifikationen pro Phase liegen im Brain-Knowledge-Graph (siehe
-Abschnitt 8). Stand: Wave 7-8 (Integration + Validation), HEAD `843f380`.
+Abschnitt 8). Stand: V6.6 (Home World Model, Parser-Migration), HEAD
+`932444d`.
 
 Vorstufe: `docs/architecture-v4.md` (v4 – Advanced Natural Language,
 abgeschlossen). v5 (Automation Engine) wurde als Plan (V5.1-V5.53) im
@@ -280,6 +281,61 @@ Aufruf von `engine.match()`/`match_followup()`/etc. ist unverändert.
   zusätzliche separate Dateien wären Doku-Duplikation ohne neuen Inhalt.
   `README.md` bewusst nicht angefasst (aktives, unkommittiertes
   Nutzer-WIP).
+
+⸻
+
+## 6c. V6.6 – Home World Model vereinheitlichen (Ergebnis, 2026-08-13)
+
+In Wave 3 zurückgestellt, in Wave 7 als der eigentliche Integrationsschritt
+für ReasoningEngine/SemanticComposer identifiziert (siehe 6a) – hier als
+eigenständiger, klar abgegrenzter Migrationsschritt umgesetzt (Commit
+`932444d`).
+
+**Konkreter Befund:** `constraint_resolver.resolve_candidates()` (V6.9) war
+bereits ein Superset von `entities.resolve_entities_by_domain()` – identische
+Domain/Area/Floor-Filterung, zusätzlich `device_class`/Capability-Filter.
+`parsers.py` rief `resolve_entities_by_domain()` trotzdem an 8 Stellen direkt
+auf, 4 davon mit einer zusätzlichen manuellen `device_class`-Listcomprehension
+danach – dieselbe Filterlogik existierte damit an zwei Stellen parallel
+(Regel-6-Verstoß im Kleinen).
+
+**Umsetzung:** alle 8 Call-Sites (`QuantifierParser`, `ComparisonQueryParser`,
+`AreaQueryParser`, `QueryFollowupParser` ×2, `ReferenceParser` ×2,
+`StateQueryParser._device_class_candidates`) auf
+`constraint_resolver.resolve_candidates()` umgestellt; die 4 Stellen mit
+manuellem `device_class`-Filter nutzen jetzt `Constraints.device_class` statt
+der eigenen Listcomprehension. Reiner Verhaltens-Erhalt (kein neuer Filter,
+keine neue Semantik) – 1059 Tests unverändert grün, keine neuen Tests nötig
+(Refactor, keine mockbaren Call-Sites in der Testsuite gefunden, die die
+Änderung hätten maskieren können).
+
+**Bewusst NICHT Teil dieser Migration:** Namensbasierte Auflösung
+(`resolve_entity`/`resolve_entity_scored`) – laut `constraint_resolver.py`'s
+eigenem Docstring explizit nicht dessen Aufgabe ("Deliberately out of scope
+here ... name-based candidate scoring/ambiguity detection stays
+`resolve_entity_scored()`'s job"). Das ist der Grund, warum Wave 7s
+Regel-6-Befund weiterhin gilt: Entity-Resolution für den Regelfall ("mach die
+Lampe an") läuft nach wie vor über `resolve_entity`/`resolve_entity_scored`
+*innerhalb* des jeweiligen Parsers, bevor ein `SemanticFrame` existiert –
+`ReasoningEngine.resolve()` an der geplanten Stelle in `engine.py` einzuhängen
+würde also weiterhin eine zweite, parallele Resolution einführen. Diese
+Migration schließt nur die Domain/Area/Floor/device_class-Lücke (strukturelle
+Filterung), nicht die Namensauflösung – eine Migration von
+`resolve_entity_scored()` auf einen konsistenten World-Model-Pfad wäre ein
+eigener, deutlich größerer und riskanterer Schritt (ändert das Verhalten bei
+mehrdeutigen/unscharfen Namen, nicht nur die interne Implementierung), der
+hier nicht mitgemacht wurde.
+
+**DoD-Update:** "World Model semantisch nutzbar" ist damit für die
+strukturelle Filterung (domain/area/floor/device_class/capability) erfüllt –
+`constraint_resolver.resolve_candidates()` ist jetzt der tatsächlich von den
+Parsern genutzte Resolutionsweg dafür, nicht mehr nur eine ungenutzte
+Parallel-Implementierung. "Queries und Commands nutzen dieselben Bausteine"
+bleibt weiterhin nur teilweise erfüllt (Namensauflösung ist weiterhin pro
+Parser dupliziert, wenn auch selbst schon Regel-6-konform über
+`resolve_entity_scored()` zentralisiert). Volle ReasoningEngine-Verdrahtung
+bleibt zurückgestellt, bis (falls gewünscht) auch die Namensauflösung
+vereinheitlicht ist.
 
 ⸻
 
