@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from hassil import TextSlotList
 
+from .primitives import SemanticProperty, SemanticQuantity
+
 # German word -> canonical HA domain, including the "Rolladen" (one l)
 # misspelling seen in real user speech.
 #
@@ -245,3 +247,50 @@ _STATE_ADJ_SLOT_LIST = TextSlotList.from_tuples(
     ],
     name="state_adj",
 )
+
+
+# --- Semantic candidate mapping (V6.3, second half) -------------------------
+#
+# The slot lists above are hassil's raw grammar vocabulary (word -> match
+# value). The mappings below add a second, semantic layer on top: normalized
+# German word -> semantic PRIMITIVE CANDIDATE (see nlu/primitives.py). They
+# are candidates only, not decisions - final interpretation still requires
+# the Semantic Composer + Reasoning Engine (V6.4+) combining these with
+# context/World Model/capabilities, per the plan's own "liefert Kandidaten,
+# entscheidet nicht allein" rule (V6.3, Brain node
+# 52ae9a3a-c380-4a26-9a49-ce8b1db94367).
+#
+# Deliberately incomplete: only two of SemanticAction/SemanticProperty/
+# SemanticDirection/SemanticQuantity/SemanticDegree have real, already-listed
+# vocabulary in this module to derive candidates from without guessing.
+# SemanticAction ("mach"/"schalte"/"an"/"aus") and SemanticDirection
+# ("heller"/"dunkler") are carried today as literal words in the hassil YAML
+# sentence templates (custom_components/ha_nlu/intents/de/**/*.yaml) and in
+# parsers.py's own regexes (e.g. _LIGHT_EXTENDED_RE), not as a TextSlotList
+# vocabulary constant here - building their candidate mapping means first
+# inventorying those YAML/regex literals, which is real, separate work left
+# for Wave 2b (Semantic Composer) rather than invented here ahead of it.
+# SemanticDegree has no lexicon entry at all yet (see primitives.py's own
+# docstring - "etwas"/"ein bisschen" are stripped as filler before any parser
+# sees them), so no candidate mapping is possible for it today.
+
+# _COLOR_SLOT_LIST's keys all indicate the same property regardless of which
+# colour word was said; _COLOR_TEMP_SLOT_LIST's keys indicate the sibling
+# property. Every value is the SAME candidate per list on purpose - the word
+# only tells you *that* a colour/colour-temperature is being set, not which
+# property-free reading would make sense otherwise.
+SEMANTIC_PROPERTY_CANDIDATES: dict[str, SemanticProperty] = {
+    **{v.text_in.text: SemanticProperty.COLOR for v in _COLOR_SLOT_LIST.values},
+    **{v.text_in.text: SemanticProperty.COLOR_TEMPERATURE for v in _COLOR_TEMP_SLOT_LIST.values},
+}
+
+# _QUANTIFIER_SLOT_LIST's "all"/"both" and _COUNT_SLOT_LIST's "2".."10"
+# already carry the exact values SemanticQuantity's classmethods take -
+# reuse them 1:1 instead of re-encoding the same words differently here.
+SEMANTIC_QUANTITY_CANDIDATES: dict[str, SemanticQuantity] = {
+    **{
+        v.text_in.text: (SemanticQuantity.all() if v.value_out == "all" else SemanticQuantity.exactly(2))
+        for v in _QUANTIFIER_SLOT_LIST.values
+    },
+    **{v.text_in.text: SemanticQuantity.exactly(int(v.value_out)) for v in _COUNT_SLOT_LIST.values},
+}

@@ -151,3 +151,23 @@ def test_parsers_reexports_same_slot_list_objects_from_lexicon():
     ]
     for name in names:
         assert getattr(parsers, name) is getattr(lexicon, name), name
+
+
+def test_semantic_property_candidates_cover_every_color_and_color_temp_word():
+    from ha_nlu.nlu.primitives import SemanticProperty
+
+    for word, _ in _values(lexicon._COLOR_SLOT_LIST):
+        assert lexicon.SEMANTIC_PROPERTY_CANDIDATES[word] is SemanticProperty.COLOR
+    for word, _ in _values(lexicon._COLOR_TEMP_SLOT_LIST):
+        assert lexicon.SEMANTIC_PROPERTY_CANDIDATES[word] is SemanticProperty.COLOR_TEMPERATURE
+
+
+def test_semantic_quantity_candidates_all_and_both():
+    from ha_nlu.nlu.primitives import SemanticQuantity, SemanticQuantityKind
+
+    assert lexicon.SEMANTIC_QUANTITY_CANDIDATES["alle"] == SemanticQuantity.all()
+    assert lexicon.SEMANTIC_QUANTITY_CANDIDATES["nur"] == SemanticQuantity.all()
+    for word in ("beide", "beiden", "beider"):
+        assert lexicon.SEMANTIC_QUANTITY_CANDIDATES[word] == SemanticQuantity.exactly(2)
+    assert lexicon.SEMANTIC_QUANTITY_CANDIDATES["fünf"] == SemanticQuantity.exactly(5)
+    assert lexicon.SEMANTIC_QUANTITY_CANDIDATES["zehn"].kind is SemanticQuantityKind.EXACTLY
