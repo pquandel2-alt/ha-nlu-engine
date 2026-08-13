@@ -19,6 +19,8 @@ from __future__ import annotations
 from enum import Enum, auto
 from typing import Any, Mapping
 
+from .primitives import SemanticProperty
+
 
 class Capability(Enum):
     TURN_ON = auto()
@@ -93,3 +95,32 @@ def derive_capabilities(
         caps.add(Capability.TEMPERATURE)
 
     return frozenset(caps)
+
+
+# Capability Reasoning (V6 architecture plan, V6.8): which Capability a
+# SemanticProperty (nlu/primitives.py, V6.1) requires on a candidate entity -
+# the generic, semantics-driven counterpart to validator.py's existing
+# per-intent capability lookups (_PERCENT_CAPABILITY_BY_DOMAIN,
+# LIGHT_EXTENDED_INTENTS[...].capability etc.), reusing the exact same
+# Capability enum rather than a second one. 1:1 by name for every property
+# that has a real Capability counterpart. SemanticProperty.BATTERY is
+# deliberately absent - see its own docstring in primitives.py: query-only,
+# always readable off a sensor's device_class="battery", never gated by a
+# capability check.
+_PROPERTY_TO_CAPABILITY: dict[SemanticProperty, Capability] = {
+    SemanticProperty.BRIGHTNESS: Capability.BRIGHTNESS,
+    SemanticProperty.COLOR: Capability.COLOR,
+    SemanticProperty.COLOR_TEMPERATURE: Capability.COLOR_TEMPERATURE,
+    SemanticProperty.TEMPERATURE: Capability.TEMPERATURE,
+    SemanticProperty.POSITION: Capability.POSITION,
+    SemanticProperty.POWER: Capability.POWER,
+    SemanticProperty.ENERGY: Capability.ENERGY,
+    SemanticProperty.HUMIDITY: Capability.HUMIDITY,
+    SemanticProperty.FAN_SPEED: Capability.FAN_SPEED,
+}
+
+
+def required_capability_for_property(property: SemanticProperty) -> Capability | None:
+    """The Capability a candidate entity must have to support ``property`` -
+    ``None`` for properties with no capability-gating concept (BATTERY)."""
+    return _PROPERTY_TO_CAPABILITY.get(property)

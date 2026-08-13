@@ -4,7 +4,8 @@ signal don't get the capability guessed."""
 
 from __future__ import annotations
 
-from ha_nlu.nlu.capabilities import Capability, derive_capabilities
+from ha_nlu.nlu.capabilities import Capability, derive_capabilities, required_capability_for_property
+from ha_nlu.nlu.primitives import SemanticProperty
 
 
 def test_light_without_color_modes_has_only_on_off():
@@ -80,3 +81,21 @@ def test_energy_sensor_has_energy_capability():
 def test_sensor_without_relevant_device_class_has_no_capabilities():
     caps = derive_capabilities("sensor", "battery", {})
     assert caps == frozenset()
+
+
+def test_required_capability_for_property_covers_every_property_with_a_capability_counterpart():
+    assert required_capability_for_property(SemanticProperty.BRIGHTNESS) is Capability.BRIGHTNESS
+    assert required_capability_for_property(SemanticProperty.COLOR) is Capability.COLOR
+    assert required_capability_for_property(SemanticProperty.COLOR_TEMPERATURE) is Capability.COLOR_TEMPERATURE
+    assert required_capability_for_property(SemanticProperty.TEMPERATURE) is Capability.TEMPERATURE
+    assert required_capability_for_property(SemanticProperty.POSITION) is Capability.POSITION
+    assert required_capability_for_property(SemanticProperty.POWER) is Capability.POWER
+    assert required_capability_for_property(SemanticProperty.ENERGY) is Capability.ENERGY
+    assert required_capability_for_property(SemanticProperty.HUMIDITY) is Capability.HUMIDITY
+    assert required_capability_for_property(SemanticProperty.FAN_SPEED) is Capability.FAN_SPEED
+
+
+def test_required_capability_for_battery_property_is_none():
+    """BATTERY is query-only (always readable off device_class="battery"),
+    never gated by a capability check - see primitives.py's own docstring."""
+    assert required_capability_for_property(SemanticProperty.BATTERY) is None
