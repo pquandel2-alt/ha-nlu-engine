@@ -6,7 +6,7 @@ V6) sowie `15884008-4107-4f8b-8227-e0de518c745c` (Wave-0-Bestandsaufnahme,
 2026-08-13). Dieses Dokument ist die **Kurzfassung/Landkarte** für den
 V6-Umbau im Repo – die vollständigen Begründungen, Beispiele und
 Detail-Spezifikationen pro Phase liegen im Brain-Knowledge-Graph (siehe
-Abschnitt 8). Stand: Wave 2b abgeschlossen (Semantic Frame + Composer), HEAD `c11e0ad`.
+Abschnitt 8). Stand: Wave 3 (Capability Reasoning + Constraint Resolver), HEAD `2d3a9e7`.
 
 Vorstufe: `docs/architecture-v4.md` (v4 – Advanced Natural Language,
 abgeschlossen). v5 (Automation Engine) läuft parallel und ist nicht
@@ -184,9 +184,9 @@ Phasenabschluss aktualisieren.
 | V6.5 | Semantische Unvollständigkeit | `SemanticFrame` darf unvollständig sein; Auflösung über Context → explizites Target → Area → World Model → Capability → Default Scope, sonst AMBIGUOUS/MISSING_TARGET | nicht begonnen |
 | V6.6 | Home World Model | Entity-Modell zu semantischer HA-Sicht erweitern (Entities, Devices, Areas, Floors, Domains, Device Classes, Capabilities, States, Attributes, Aliases, Relationships); HA bleibt Quelle der Wahrheit | nicht begonnen |
 | V6.7 | World Model Indexes | Performance-Indizes (domain, device_class, area, floor, capability, alias); States nicht unkontrolliert dauerhaft cachen | nicht begonnen |
-| V6.8 | Capability Reasoning | Benötigte Capability aus Semantik ableiten, inkompatible Entities ausschließen | nicht begonnen |
-| V6.9 | Constraint Resolver | Neue Komponente: sucht Entities, die ALLE Constraints erfüllen, bevor Quantity angewendet wird | nicht begonnen |
-| V6.10 | Ambiguity Reasoning | Bei mehreren gleichwertigen Kandidaten: `AMBIGUOUS_ENTITY` + konkrete Rückfrage statt zufälliger Auswahl | nicht begonnen |
+| V6.8 | Capability Reasoning | Benötigte Capability aus Semantik ableiten, inkompatible Entities ausschließen | **abgeschlossen** (`nlu/capabilities.py::required_capability_for_property`) |
+| V6.9 | Constraint Resolver | Neue Komponente: sucht Entities, die ALLE Constraints erfüllen, bevor Quantity angewendet wird | **abgeschlossen** (`nlu/constraint_resolver.py`, domain/area/floor/device_class/property) |
+| V6.10 | Ambiguity Reasoning | Bei mehreren gleichwertigen Kandidaten: `AMBIGUOUS_ENTITY` + konkrete Rückfrage statt zufälliger Auswahl | bereits vorhanden vor V6 (`entities.py::resolve_entity_scored` Margin=5 + `ClarificationRequest`), von Constraint Resolver bewusst wiederverwendet statt dupliziert |
 | V6.11 | Reference Resolution | Pronomen/Referenzen ("es/sie/das/dort/hier/wieder/die anderen/das gleiche") semantisch über Context auflösen | nicht begonnen |
 | V6.12 | Semantic Context | `ConversationContext` über Text-History hinaus erweitern (last_intent, last_action, last_target, last_property, last_value, pending_reference, ...); nicht global mutable | nicht begonnen |
 | V6.13 | Relative Locations | "hier/dort/oben/unten/nebenan/drüben/im selben Raum"; ohne eindeutige Interpretation Rückfrage statt erfundener Position | nicht begonnen |
