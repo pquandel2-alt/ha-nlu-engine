@@ -6,11 +6,12 @@ V6) sowie `15884008-4107-4f8b-8227-e0de518c745c` (Wave-0-Bestandsaufnahme,
 2026-08-13). Dieses Dokument ist die **Kurzfassung/Landkarte** für den
 V6-Umbau im Repo – die vollständigen Begründungen, Beispiele und
 Detail-Spezifikationen pro Phase liegen im Brain-Knowledge-Graph (siehe
-Abschnitt 8). Stand: Wave 5 (Commands: Natural Command/Query Language, Multi-Command, Explainability, Query Result, Natural Context, Reasoning Engine), HEAD `4567a14`.
+Abschnitt 8). Stand: Wave 7-8 (Integration + Validation), HEAD `843f380`.
 
 Vorstufe: `docs/architecture-v4.md` (v4 – Advanced Natural Language,
-abgeschlossen). v5 (Automation Engine) läuft parallel und ist nicht
-Gegenstand dieses Dokuments.
+abgeschlossen). v5 (Automation Engine) wurde als Plan (V5.1-V5.53) im
+Brain hinterlegt, aber nie implementiert (siehe V6.28-Zeile in Abschnitt
+6) – nicht Gegenstand dieses Dokuments.
 
 ⸻
 
@@ -206,6 +207,79 @@ Phasenabschluss aktualisieren.
 | V6.27 | Query Result | Strukturierte Query-Ergebnisse (operation, status, entities, count); 0 Treffer = SUCCESS+EMPTY, nicht NO_INTENT_MATCH | bereits vollständig vorhanden (V4.2 "Semantic Query & State Resolution") – `StateQueryParser` (parsers.py, Zeile 1238) ist laut eigenem Docstring "the one deliberate exception to the codebase-wide 'a multi-entity parser never returns an empty resolved_entities list' rule": `HassStateQuery`/`HassExistsQuery` liefern bei 0 Treffern bewusst ein volles `ParseResult` statt `None`. Durchgesetzt über `QueryIntentSpec.allows_empty` (service_call.py, Zeile 138), das für `HassStateQuery`/`HassExistsQuery` `True` ist (umgeht `nlu/validator.py`-Check #2 ENTITY_NOT_FOUND) und für `HassCheckState` `False` bleibt (dort ist ein leeres Ergebnis ein echter Nicht-Treffer, kein leeres Query-Resultat). Die Response-Lambdas `_speak_state_query`/`_speak_exists` (service_call.py) produzieren für 0 Treffer explizit einen SUCCESS-Satz ("Keine Fenster sind offen."/"Nein, es gibt keine Fenster."), keinen Fehler. Durch Tests belegt: `tests/test_engine_state_query.py::test_state_query_list_empty_is_success_not_error` und `::test_state_query_area_scoped_no_matches_still_empty_success` assertieren genau `result is not None` mit `entities == ()` |
 | V6.28 | Automation Foundation | V5-Automationen nutzen dieselben Semantic Frames/Resolver, keine eigene parallele Sprachlogik | zurückgestellt (Nutzerentscheidung 2026-08-13) – setzt eine bereits laufende V5 Automation Engine voraus, auf die die Semantic Engine nur aufgesetzt wird. Recherche ergab: V5 (V5.1-V5.53) existiert nirgends im Code (kein Commit, keine Datei, keine Tests unter diesem Namen) – nur als Brain-Planungsnotizen. V6.28 ist damit ohne vorherigen vollständigen V5-Build nicht sinnvoll umsetzbar; ein Vollbau von V5 jetzt wäre eine eigene Multi-Wave-Anstrengung außerhalb dieser Wave. Weiter mit Wave 7-8 |
 | V6.29 | Natural-Language Automation | Automation Engine arbeitet vollständig auf semantischer Ebene (Trigger + Action + Property + Value aus natürlicher Sprache) | zurückgestellt – hängt direkt von V6.28 ab, siehe dort |
+
+⸻
+
+## 6a. Wave 7 – Integration (Ergebnis, 2026-08-13)
+
+**Regressionen behoben:** keine – 1051 bestehende Tests liefen vor Wave 7
+bereits grün (Wave 5 letzter Stand), unverändert.
+
+**Interfaces/Datenfluss geprüft:** `engine.py::match()`/`_build_match_result()`
+im Detail gelesen (nicht nur der Wave-5-Docstrings vertraut). Ergebnis:
+Entity-Resolution passiert bereits **innerhalb der einzelnen Parser**
+(`parsers.py`, über `resolve_entity_scored()`/`resolve_entities_by_domain()`),
+bevor ein `SemanticFrame` überhaupt existiert – nicht danach, wie die
+Zielarchitektur (Abschnitt 3, `Constraint Resolver → Capability Resolver →
+Reasoning Engine`) es vorsieht. `ReasoningEngine.resolve()` (V6.25) an der im
+Plan vorgesehenen Stelle (nach dem Command Validator, vor dem
+Intent→Service-Dispatch in `_build_match_result()`) einzuhängen, würde daher
+keine bestehende Stufe *ersetzen*, sondern eine **zweite, parallele
+Entity-Resolution** neben der schon vorhandenen in `parsers.py` einführen –
+Regel 6 ("no parallel search system") verletzt genau das. Eine echte
+Integration bräuchte eine Umstellung der Entity-Resolution in **jedem**
+Parser auf `constraint_resolver.resolve_candidates()` statt
+`resolve_entity_scored()`/`resolve_entities_by_domain()` – ein eigener,
+mehrschichtiger Migrationsschritt (deckungsgleich mit dem in Wave 3 bereits
+bewusst zurückgestellten V6.6 "Home World Model vereinheitlichen"), keine
+Wave-7-„Integration" im engeren Sinn. `SemanticComposer` (V6.4) liegt genauso:
+er würde nur `frame.property`/`frame.quantity` befüllen, die aktuell von
+keinem Konsumenten gelesen werden – reines Verdrahten ohne Verhaltensänderung
+wäre Integrations-Theater.
+
+**Entscheidung (Architect):** volles Verdrahten von `ReasoningEngine`/
+`SemanticComposer` in die Produktionspipeline bleibt zurückgestellt, bis die
+Parser-für-Parser-Migration der Entity-Resolution auf
+`constraint_resolver.resolve_candidates()` als eigener Effort ansteht (deckt
+sich mit Wave 0's Entscheidung "hassil schrittweise ablösen" – ein
+Multi-Wave-Vorhaben, kein Einzelschritt). Legacy-Pfad vollständig intakt und
+weiter alleiniger Produktionspfad; kein Fallback-Kaskaden-Code nötig, da
+nichts umgeschaltet wurde. Kein HA-Integrationsrisiko: `conversation.py`s
+Aufruf von `engine.match()`/`match_followup()`/etc. ist unverändert.
+
+## 6b. Wave 8 – Validation (Ergebnis, 2026-08-13)
+
+- **Regression:** 1059 Tests grün (`pytest -q`, venv
+  `ha-nlu-engine-venv`), keine Fehlschläge.
+- **Golden-Benchmark (§35-39/46):** 221 Fälle über 12 Kategorien (vorher
+  213 über 11) – neu `multi_step.json` (8 reale "und"-Sätze), die einzige
+  im Plan benannte Kategorie ohne bisherige Golden-Abdeckung
+  (`engine.match()` liefert für diese Sätze ein `CommandPlan`, nicht ein
+  einzelnes `MatchResult` – Generator (`scripts/generate_golden_tests.py`)
+  und Replay (`tests/test_golden.py`) dafür erweitert). "Kontext"/
+  "Pronomen"/"Vergleiche" bleiben ohne eigene Golden-JSON-Fälle – der
+  JSON-Replay-Harness ist bewusst auf Einzelsatz-`match()` zugeschnitten,
+  mehrstufige Szenarien (Context/Reference brauchen einen vorherigen Turn)
+  hätten eine Harness-Erweiterung eigenen Umfangs gebraucht; diese drei
+  Features haben stattdessen bereits dedizierte, grüne Unit-Testdateien
+  (`test_context_followup.py`, `test_reference.py`,
+  `test_engine_comparisons.py`) – bewusste Abgrenzung, keine Lücke ohne
+  Netz. "Automation" entfällt (Wave 6 zurückgestellt).
+- **Performance-Benchmark (§46, 100/500/1000/5000 Entities):** bereits
+  vollständig von Wave 1 geliefert (`docs/perf/v6-baseline.md`,
+  `scripts/benchmark_v6_baseline.py`) – da Wave 7 keine neue Pipeline-Stufe
+  produktiv verdrahtet hat, bleibt diese Baseline weiterhin der aktuelle
+  Stand; keine neue Messung nötig. Offene Empfehlung aus Wave 1 bleibt
+  bestehen: `EntityIndex`/`build_entity_index()` ist gebaut, aber von
+  keinem Parser genutzt – größter Hebel für eine künftige
+  Entity-Resolution-Vereinheitlichung (s. Wave 7 oben).
+- **Doku:** dieses Dokument aktualisiert (Abschnitte 6a/6b, Kopfzeile,
+  V5-Korrektur). Keine neuen `docs/semantic-model.md`/`world-model.md`/
+  `reasoning.md` angelegt – §44 nennt sie als mögliche Ziele, aber
+  `architecture-v6.md` deckt denselben Inhalt bereits konsolidiert ab;
+  zusätzliche separate Dateien wären Doku-Duplikation ohne neuen Inhalt.
+  `README.md` bewusst nicht angefasst (aktives, unkommittiertes
+  Nutzer-WIP).
 
 ⸻
 
