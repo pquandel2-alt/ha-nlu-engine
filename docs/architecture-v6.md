@@ -6,7 +6,7 @@ V6) sowie `15884008-4107-4f8b-8227-e0de518c745c` (Wave-0-Bestandsaufnahme,
 2026-08-13). Dieses Dokument ist die **Kurzfassung/Landkarte** für den
 V6-Umbau im Repo – die vollständigen Begründungen, Beispiele und
 Detail-Spezifikationen pro Phase liegen im Brain-Knowledge-Graph (siehe
-Abschnitt 8). Stand: Wave 1 (Independent Foundations), HEAD `b188cab`.
+Abschnitt 8). Stand: Wave 2b abgeschlossen (Semantic Frame + Composer), HEAD `c11e0ad`.
 
 Vorstufe: `docs/architecture-v4.md` (v4 – Advanced Natural Language,
 abgeschlossen). v5 (Automation Engine) läuft parallel und ist nicht
@@ -177,10 +177,10 @@ Phasenabschluss aktualisieren.
 
 | Phase | Titel | Kurzbeschreibung | Status |
 |---|---|---|---|
-| V6.1 | Semantic Primitives | Gemeinsames semantisches Vokabular (Entity, Target, Action, Property, State, Location, Area, Floor, Quantity, Comparison, Direction, Degree, Reference, Condition, TemporalExpression, Capability, Query, Command), klein/immutable/typsicher | nicht begonnen |
-| V6.2 | Semantic Frame erweitern | Bestehendes `SemanticFrame` für komplexere Bedeutungen, beschreibt ausschließlich Bedeutung, noch kein HA-Service | nicht begonnen |
-| V6.3 | Semantic Lexicon | Neue Komponente: Wort/Ausdruck → semantische Kandidaten (liefert Kandidaten, entscheidet nicht allein) | nicht begonnen |
-| V6.4 | Semantic Composer | Neue Komponente: setzt sprachliche Bausteine zu semantischer Struktur zusammen statt Satzlisten | nicht begonnen |
+| V6.1 | Semantic Primitives | Gemeinsames semantisches Vokabular (Entity, Target, Action, Property, State, Location, Area, Floor, Quantity, Comparison, Direction, Degree, Reference, Condition, TemporalExpression, Capability, Query, Command), klein/immutable/typsicher | **abgeschlossen** (`nlu/primitives.py`) |
+| V6.2 | Semantic Frame erweitern | Bestehendes `SemanticFrame` für komplexere Bedeutungen, beschreibt ausschließlich Bedeutung, noch kein HA-Service | **abgeschlossen** (`nlu/frame.py`, additiv: action/property/direction/degree/quantity) |
+| V6.3 | Semantic Lexicon | Neue Komponente: Wort/Ausdruck → semantische Kandidaten (liefert Kandidaten, entscheidet nicht allein) | **abgeschlossen** (`nlu/lexicon.py`) |
+| V6.4 | Semantic Composer | Neue Komponente: setzt sprachliche Bausteine zu semantischer Struktur zusammen statt Satzlisten | **abgeschlossen** (`nlu/composer.py`, bislang nur property+quantity; action/direction/degree fehlt Lexicon-Kandidatentabelle) |
 | V6.5 | Semantische Unvollständigkeit | `SemanticFrame` darf unvollständig sein; Auflösung über Context → explizites Target → Area → World Model → Capability → Default Scope, sonst AMBIGUOUS/MISSING_TARGET | nicht begonnen |
 | V6.6 | Home World Model | Entity-Modell zu semantischer HA-Sicht erweitern (Entities, Devices, Areas, Floors, Domains, Device Classes, Capabilities, States, Attributes, Aliases, Relationships); HA bleibt Quelle der Wahrheit | nicht begonnen |
 | V6.7 | World Model Indexes | Performance-Indizes (domain, device_class, area, floor, capability, alias); States nicht unkontrolliert dauerhaft cachen | nicht begonnen |
