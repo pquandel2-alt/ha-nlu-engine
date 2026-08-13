@@ -19,11 +19,11 @@ from .entities import (
     EntitySnapshot,
     ResolutionStatus,
     ResolveStatus,
-    resolve_entities_by_domain,
     resolve_entity,
     resolve_entity_scored,
 )
 from .floors import FloorResolveStatus, resolve_floor_by_level_keyword, resolve_floor_name
+from .nlu.constraint_resolver import Constraints, resolve_candidates
 from .nlu.frame import AreaReference, Comparison, Quantifier, SemanticFrame, TargetReference, TemporalExpression
 from .nlu.lexicon import (
     _COLOR_SLOT_LIST,
@@ -314,7 +314,9 @@ class QuantifierParser:
                 return None  # no single oben/unten floor among today's entities - never guess
             floor_id = level_resolved.floor_id
 
-        matches = resolve_entities_by_domain(domain, context.entities, area_id=area_id, floor_id=floor_id)
+        matches = resolve_candidates(
+            context.entities, Constraints(domain=domain, area_id=area_id, floor_id=floor_id)
+        )
 
         name_slot = result.entities.get("name")
         if name_slot is not None:
@@ -679,7 +681,9 @@ class ComparisonQueryParser:
             else:
                 area_name = None
 
-        candidates = resolve_entities_by_domain(domain, context.entities, area_id=area_id, floor_id=floor_id)
+        candidates = resolve_candidates(
+            context.entities, Constraints(domain=domain, area_id=area_id, floor_id=floor_id)
+        )
         compare = _COMPARATORS[comparator]
         matches = [e for e in candidates if (v := current_value(e)) is not None and compare(v, threshold)]
         if not matches:
@@ -830,10 +834,10 @@ class AreaQueryParser:
         if area_resolved.status is not AreaResolveStatus.OK:
             return None  # room not found or ambiguous - never guess
 
-        matches = [
-            e for e in resolve_entities_by_domain("sensor", context.entities, area_id=area_resolved.area_id)
-            if e.device_class == "temperature"
-        ]
+        matches = resolve_candidates(
+            context.entities,
+            Constraints(domain="sensor", area_id=area_resolved.area_id, device_class="temperature"),
+        )
         if len(matches) != 1:
             return None  # no single unambiguous temperature sensor in that room - never guess
         entity = matches[0]
@@ -957,9 +961,9 @@ class QueryFollowupParser:
             return None
         area_id, area_name, floor_id, target_text = resolved_location
 
-        candidates = resolve_entities_by_domain(domain, entities, area_id=area_id, floor_id=floor_id)
-        if device_class is not None:
-            candidates = [e for e in candidates if e.device_class == device_class]
+        candidates = resolve_candidates(
+            entities, Constraints(domain=domain, area_id=area_id, floor_id=floor_id, device_class=device_class)
+        )
         if len(candidates) != 1:
             return None  # no single unambiguous match in the new area/floor - never guess
         entity = candidates[0]
@@ -982,9 +986,9 @@ class QueryFollowupParser:
 
         domain = previous.target.domain
         device_class = previous.target.device_class
-        candidates = resolve_entities_by_domain(domain, entities, area_id=area_id, floor_id=floor_id)
-        if device_class is not None:
-            candidates = [e for e in candidates if e.device_class == device_class]
+        candidates = resolve_candidates(
+            entities, Constraints(domain=domain, area_id=area_id, floor_id=floor_id, device_class=device_class)
+        )
 
         area_snapshot = AreaSnapshot(area_id=area_id, name=area_name) if area_id is not None else None
         new_command = QueryCommand(
@@ -1059,8 +1063,8 @@ class ReferenceParser:
        response lambdas only ever read ``entities[0]``).
     2. Area-anchored domain reference ("{domain} dort hoch/runter") -
        resolved against a *fresh* ``entities`` scan filtered by
-       ``last_area.area_id``, reusing ``resolve_entities_by_domain`` exactly
-       like ``QuantifierParser`` does.
+       ``last_area.area_id``, reusing ``constraint_resolver.resolve_candidates()``
+       exactly like ``QuantifierParser`` does.
     3. Unresolvable relative reference ("die andere"/"die daneben") -
        recognized by a custom, non-HA-core intent name (``HassReferenceOther``,
        same precedent ``HassSetPercentage`` already established) but never
@@ -1164,7 +1168,7 @@ class ReferenceParser:
         if spec is None or domain not in spec.allowed_domains:
             return None
 
-        matches = resolve_entities_by_domain(domain, entities, area_id=last_area.area_id)
+        matches = resolve_candidates(entities, Constraints(domain=domain, area_id=last_area.area_id))
         if not matches:
             return None
 
@@ -1200,7 +1204,7 @@ class ReferenceParser:
         already_mentioned = {e.entity_id for e in last_entities}
         others = [
             e
-            for e in resolve_entities_by_domain(domain, entities, area_id=last_area.area_id)
+            for e in resolve_candidates(entities, Constraints(domain=domain, area_id=last_area.area_id))
             if e.entity_id not in already_mentioned
         ]
         if not others:
@@ -1247,7 +1251,7 @@ class StateQueryParser:
     "one parser per grammar file" shape ``ComparisonQueryParser`` already
     established for its own single-grammar/multi-branch domain split.
 
-    Reuses ``resolve_area_scored``/``resolve_entities_by_domain``/
+    Reuses ``resolve_area_scored``/``constraint_resolver.resolve_candidates()``/
     ``resolve_entity_scored`` verbatim (Regel 6 - no parallel search system)
     and ``matches_semantic_state`` (nlu/semantic_state.py) to filter by the
     requested state - live ``EntitySnapshot.state``, never cached (Regel 5).
@@ -1342,12 +1346,9 @@ class StateQueryParser:
         the matching entities alongside the parsed (domain, device_class) -
         the caller needs those two separately for ``TargetReference``/
         ``frame.parameters`` regardless of the candidate list itself."""
-        domain, _, device_class = device_class_value.partition(":")
-        candidates = resolve_entities_by_domain(domain, entities, area_id=area_id)
-        if device_class != "None":
-            candidates = [e for e in candidates if e.device_class == device_class]
-        else:
-            device_class = None
+        domain, _, device_class_raw = device_class_value.partition(":")
+        device_class = device_class_raw if device_class_raw != "None" else None
+        candidates = resolve_candidates(entities, Constraints(domain=domain, area_id=area_id, device_class=device_class))
         return domain, device_class, candidates
 
     def _parse_state_query(self, text: str, slots: dict, context: ParseContext, spec) -> ParseResult | None:
