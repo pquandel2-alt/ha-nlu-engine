@@ -6,7 +6,7 @@ V6) sowie `15884008-4107-4f8b-8227-e0de518c745c` (Wave-0-Bestandsaufnahme,
 2026-08-13). Dieses Dokument ist die **Kurzfassung/Landkarte** für den
 V6-Umbau im Repo – die vollständigen Begründungen, Beispiele und
 Detail-Spezifikationen pro Phase liegen im Brain-Knowledge-Graph (siehe
-Abschnitt 8). Stand: Wave 3 (Capability Reasoning + Constraint Resolver), HEAD `2d3a9e7`.
+Abschnitt 8). Stand: Wave 4 Teil 1 (Semantic Context, Relative Locations, Number Normalization), HEAD `187a05b`.
 
 Vorstufe: `docs/architecture-v4.md` (v4 – Advanced Natural Language,
 abgeschlossen). v5 (Automation Engine) läuft parallel und ist nicht
@@ -187,14 +187,14 @@ Phasenabschluss aktualisieren.
 | V6.8 | Capability Reasoning | Benötigte Capability aus Semantik ableiten, inkompatible Entities ausschließen | **abgeschlossen** (`nlu/capabilities.py::required_capability_for_property`) |
 | V6.9 | Constraint Resolver | Neue Komponente: sucht Entities, die ALLE Constraints erfüllen, bevor Quantity angewendet wird | **abgeschlossen** (`nlu/constraint_resolver.py`, domain/area/floor/device_class/property) |
 | V6.10 | Ambiguity Reasoning | Bei mehreren gleichwertigen Kandidaten: `AMBIGUOUS_ENTITY` + konkrete Rückfrage statt zufälliger Auswahl | bereits vorhanden vor V6 (`entities.py::resolve_entity_scored` Margin=5 + `ClarificationRequest`), von Constraint Resolver bewusst wiederverwendet statt dupliziert |
-| V6.11 | Reference Resolution | Pronomen/Referenzen ("es/sie/das/dort/hier/wieder/die anderen/das gleiche") semantisch über Context auflösen | nicht begonnen |
-| V6.12 | Semantic Context | `ConversationContext` über Text-History hinaus erweitern (last_intent, last_action, last_target, last_property, last_value, pending_reference, ...); nicht global mutable | nicht begonnen |
-| V6.13 | Relative Locations | "hier/dort/oben/unten/nebenan/drüben/im selben Raum"; ohne eindeutige Interpretation Rückfrage statt erfundener Position | nicht begonnen |
-| V6.14 | Quantity Semantics | Internes `QuantityConstraint`-Modell (alle/beide/drei/ein paar/alle außer...) statt Satzregeln | nicht begonnen |
-| V6.15 | Degree Semantics | "etwas/leicht/deutlich/viel/komplett" → SLIGHT/MODERATE/STRONG/MAXIMUM/MINIMUM | nicht begonnen |
-| V6.16 | Number Normalization | "50/50%/fünfzig Prozent" etc. → einheitliches `NumericValue` | nicht begonnen |
-| V6.17 | Comparison Semantics | "mehr als/mindestens/höchstens" → `Comparison(operator, value)`, generisch statt an Prozent/Temperatur gekoppelt | nicht begonnen |
-| V6.18 | Query Semantics | Queries und Commands nutzen dieselben Bausteine, Unterschied nur in der Operation | nicht begonnen |
+| V6.11 | Reference Resolution | Pronomen/Referenzen ("es/sie/das/dort/hier/wieder/die anderen/das gleiche") semantisch über Context auflösen | größtenteils bereits vorhanden (V3.4/V3.5: Pronomen, Komplement-Referenz, area-anchored dort/im selben Raum/hier) – nur "nebenan/drüben" (räumliche Adjazenz) fehlt, siehe V6.13 |
+| V6.12 | Semantic Context | `ConversationContext` über Text-History hinaus erweitern (last_intent, last_action, last_target, last_property, last_value, pending_reference, ...); nicht global mutable | Teil abgeschlossen: last_floor/last_property/last_value/last_state/pending_reference additiv ergänzt (`nlu/context.py`). last_intent/last_action/last_target/last_query bewusst NICHT dupliziert (Regel 6) – bereits über last_command abrufbar |
+| V6.13 | Relative Locations | "hier/dort/oben/unten/nebenan/drüben/im selben Raum"; ohne eindeutige Interpretation Rückfrage statt erfundener Position | oben/unten/dort/im selben Raum bereits vorhanden; "hier" jetzt als Synonym ergänzt (pronoun.yaml, gleiche `_resolve_area_anchored()`-Auflösung). "nebenan/drüben" bewusst zurückgestellt – erfordert Area-Adjazenzmodell, das im World Model nicht existiert (niemals raten) |
+| V6.14 | Quantity Semantics | Internes `QuantityConstraint`-Modell (alle/beide/drei/ein paar/alle außer...) statt Satzregeln | ALL/EXACTLY(n) bereits vollständig (Quantifier + SemanticQuantity, Wave 2a). SOME/EXCLUDE bewusst zurückgestellt – kein Lexikon-Beleg für "einige"/"ein paar"/"außer" in der Grammatik, würde Vokabular erfinden statt extrahieren |
+| V6.15 | Degree Semantics | "etwas/leicht/deutlich/viel/komplett" → SLIGHT/MODERATE/STRONG/MAXIMUM/MINIMUM | zurückgestellt – "etwas"/"ein bisschen" werden in `normalize.py` global als Filler gestrichen, bevor irgendein Parser sie sieht; Degree wiring erfordert Änderung an dieser zentralen, von allen 8 Grammatikgruppen genutzten Funktion (hohes Blast-Radius-Risiko), separate Folgearbeit |
+| V6.16 | Number Normalization | "50/50%/fünfzig Prozent" etc. → einheitliches `NumericValue` | `NumericValue`/`NumericUnit` (PERCENT/CELSIUS/LEVEL) ergänzt (`nlu/primitives.py`), gegründet auf den 3 realen RangeType-Unit-Kontexten. Symbolnormalisierung + Zahlwort-Matching liefen bereits vorher über normalize.py + hassil RangeSlotList. Noch nicht in frame.py/parsers.py verdrahtet (vorbereitend, wie SemanticDegree) |
+| V6.17 | Comparison Semantics | "mehr als/mindestens/höchstens" → `Comparison(operator, value)`, generisch statt an Prozent/Temperatur gekoppelt | bereits vollständig vorhanden (`nlu/frame.py::Comparison`, `ComparisonQueryParser`, `_COMPARATOR_SLOT_LIST`) – deckt alle Plan-Beispiele (mindestens/höchstens/über/unter/mehr als/weniger als) über gte/lte/gt/lt ab |
+| V6.18 | Query Semantics | Queries und Commands nutzen dieselben Bausteine, Unterschied nur in der Operation | zurückgestellt – berührt aktives, unkommittiertes Nutzer-WIP (`query_command.py`, `query_executor.py`, `response_generator.py`, `docs/architecture-v4-query.md`), das bewusst nicht angefasst wird ohne Rücksprache |
 | V6.19 | State Reasoning | HA-Zustände semantisch normalisieren UNTER Berücksichtigung der device_class (nicht pauschal on=OPEN) | nicht begonnen |
 | V6.20 | Natural Query Language | Verschiedene Frageformen ("sind offen?"/"noch offen?"/"gibt es offene...?") auf dieselbe Semantik abbilden | nicht begonnen |
 | V6.21 | Natural Command Language | Analog für Commands: viele Formulierungen → dieselbe Action/Target/Property-Kombination | nicht begonnen |
