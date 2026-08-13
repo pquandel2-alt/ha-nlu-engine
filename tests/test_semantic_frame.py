@@ -55,3 +55,42 @@ def test_quantifier_match_without_area_has_no_area_reference(engine, quantifier_
 
 def test_no_match_returns_none_not_a_frame(engine, entities):
     assert engine.match("Das ergibt keinen Sinn", entities) is None
+
+
+def test_v6_primitive_fields_default_to_none_for_existing_parsers(engine, entities):
+    """V6.2 ("Semantic Frame erweitern"): action/property/direction/degree/
+    quantity are additive-only - every existing parser still leaves them at
+    their None default, nothing regresses."""
+    result = engine.match("Mach Treppenlicht an", entities)
+    assert result is not None
+    assert result.frame.action is None
+    assert result.frame.property is None
+    assert result.frame.direction is None
+    assert result.frame.degree is None
+    assert result.frame.quantity is None
+
+
+def test_semantic_frame_accepts_v6_primitive_fields_directly():
+    from ha_nlu.nlu.primitives import (
+        SemanticAction,
+        SemanticDegree,
+        SemanticDirection,
+        SemanticProperty,
+        SemanticQuantity,
+    )
+
+    frame = SemanticFrame(
+        intent="HassLightSetColor",
+        target=TargetReference(text="Lampe", domain="light"),
+        area=None,
+        action=SemanticAction.ADJUST,
+        property=SemanticProperty.BRIGHTNESS,
+        direction=SemanticDirection.DECREASE,
+        degree=SemanticDegree.SLIGHT,
+        quantity=SemanticQuantity.exactly(2),
+    )
+    assert frame.action is SemanticAction.ADJUST
+    assert frame.property is SemanticProperty.BRIGHTNESS
+    assert frame.direction is SemanticDirection.DECREASE
+    assert frame.degree is SemanticDegree.SLIGHT
+    assert frame.quantity == SemanticQuantity.exactly(2)

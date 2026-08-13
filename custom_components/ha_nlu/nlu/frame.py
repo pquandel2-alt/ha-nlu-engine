@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .primitives import SemanticAction, SemanticDegree, SemanticDirection, SemanticProperty, SemanticQuantity
+
 
 @dataclass(frozen=True)
 class TargetReference:
@@ -113,3 +115,20 @@ class SemanticFrame:
     quantifier: Quantifier | None = None
     parameters: dict[str, Any] = field(default_factory=dict)
     source_text: str = ""
+
+    # V6.2 ("Semantic Frame erweitern"): additive-only primitive fields
+    # composed by the Semantic Composer (V6.4) from nlu/lexicon.py candidates
+    # - see docs/architecture-v6.md section 6. None of the fields above are
+    # touched or renamed; every existing SemanticFrame(...) call site keeps
+    # working unchanged with these left at their None default (R7, "bestehende
+    # Funktionalitaet bleibt erhalten"). action/property/direction/degree
+    # mirror nlu/primitives.py's SemanticAction/SemanticProperty/
+    # SemanticDirection/SemanticDegree; quantity is primitives.py's
+    # SemanticQuantity, the richer ALL/EXACTLY/SOME/EXCLUDE successor to
+    # ``quantifier`` above (see primitives.py's own docstring for why
+    # ``quantifier`` isn't replaced yet - both coexist during the migration).
+    action: SemanticAction | None = None
+    property: SemanticProperty | None = None
+    direction: SemanticDirection | None = None
+    degree: SemanticDegree | None = None
+    quantity: SemanticQuantity | None = None
