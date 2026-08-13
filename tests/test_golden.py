@@ -37,6 +37,25 @@ def test_golden_case(engine, category, case):
         assert result is None
         return
 
+    # "multi_step" cases (V6 plan, Golden-Benchmark) hold a CommandPlan - one
+    # MatchResult per "und"-joined segment - instead of a single MatchResult,
+    # so they're replayed against ``result.commands`` rather than the plain
+    # ``result.plan``/``result.response_text`` shape below.
+    if category == "multi_step":
+        assert result is not None
+        assert len(result.commands) == len(case["commands"])
+        for command, expected in zip(result.commands, case["commands"]):
+            assert command.response_text == expected["response_text"]
+            if expected["plan"] is None:
+                assert command.plan is None
+            else:
+                assert command.plan is not None
+                assert command.plan.domain == expected["plan"]["domain"]
+                assert command.plan.service == expected["plan"]["service"]
+                assert command.plan.entity_id == expected["plan"]["entity_id"]
+                assert command.plan.data == expected["plan"]["data"]
+        return
+
     assert result is not None
     assert result.response_text == case["response_text"]
 

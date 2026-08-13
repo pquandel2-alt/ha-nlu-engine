@@ -1,0 +1,209 @@
+[
+  {
+    "text": "Mach das Wohnzimmerlicht an und schalte das Küchenlicht aus",
+    "expect_match": true,
+    "commands": [
+      {
+        "plan": {
+          "domain": "homeassistant",
+          "service": "turn_on",
+          "entity_id": "light.wohnzimmer",
+          "data": {}
+        },
+        "response_text": "Wohnzimmerlicht eingeschaltet."
+      },
+      {
+        "plan": {
+          "domain": "homeassistant",
+          "service": "turn_off",
+          "entity_id": "light.kueche",
+          "data": {}
+        },
+        "response_text": "Küchenlicht ausgeschaltet."
+      }
+    ]
+  },
+  {
+    "text": "Schalte das Flurlicht ein und mach die Steckdose Büro aus",
+    "expect_match": true,
+    "commands": [
+      {
+        "plan": {
+          "domain": "homeassistant",
+          "service": "turn_on",
+          "entity_id": "light.flur",
+          "data": {}
+        },
+        "response_text": "Flurlicht eingeschaltet."
+      },
+      {
+        "plan": {
+          "domain": "homeassistant",
+          "service": "turn_off",
+          "entity_id": "switch.steckdose_buero",
+          "data": {}
+        },
+        "response_text": "Steckdose Büro ausgeschaltet."
+      }
+    ]
+  },
+  {
+    "text": "Öffne den Rollladen Büro und mach das Wohnzimmerlicht an",
+    "expect_match": true,
+    "commands": [
+      {
+        "plan": {
+          "domain": "cover",
+          "service": "open_cover",
+          "entity_id": "cover.buero",
+          "data": {}
+        },
+        "response_text": "Rollladen Büro wird geöffnet."
+      },
+      {
+        "plan": {
+          "domain": "homeassistant",
+          "service": "turn_on",
+          "entity_id": "light.wohnzimmer",
+          "data": {}
+        },
+        "response_text": "Wohnzimmerlicht eingeschaltet."
+      }
+    ]
+  },
+  {
+    "text": "Mach das Küchenlicht an und stelle die Heizung Wohnzimmer auf 21 Grad",
+    "expect_match": true,
+    "commands": [
+      {
+        "plan": {
+          "domain": "homeassistant",
+          "service": "turn_on",
+          "entity_id": "light.kueche",
+          "data": {}
+        },
+        "response_text": "Küchenlicht eingeschaltet."
+      },
+      {
+        "plan": {
+          "domain": "climate",
+          "service": "set_temperature",
+          "entity_id": "climate.heizung",
+          "data": {
+            "temperature": 21
+          }
+        },
+        "response_text": "Heizung Wohnzimmer auf 21 Grad gestellt."
+      }
+    ]
+  },
+  {
+    "text": "Schließe den Rollladen Schlafzimmer und schalte den Ventilator aus",
+    "expect_match": true,
+    "commands": [
+      {
+        "plan": {
+          "domain": "cover",
+          "service": "close_cover",
+          "entity_id": "cover.schlafzimmer",
+          "data": {}
+        },
+        "response_text": "Rollladen Schlafzimmer wird geschlossen."
+      },
+      {
+        "plan": {
+          "domain": "homeassistant",
+          "service": "turn_off",
+          "entity_id": "fan.venti",
+          "data": {}
+        },
+        "response_text": "Ventilator ausgeschaltet."
+      }
+    ]
+  },
+  {
+    "text": "Mach das Flurlicht an und schließe den Rollladen Büro",
+    "expect_match": true,
+    "commands": [
+      {
+        "plan": {
+          "domain": "homeassistant",
+          "service": "turn_on",
+          "entity_id": "light.flur",
+          "data": {}
+        },
+        "response_text": "Flurlicht eingeschaltet."
+      },
+      {
+        "plan": {
+          "domain": "cover",
+          "service": "close_cover",
+          "entity_id": "cover.buero",
+          "data": {}
+        },
+        "response_text": "Rollladen Büro wird geschlossen."
+      }
+    ]
+  },
+  {
+    "text": "Mach alle Lichter an und fahre alle Rollläden runter",
+    "expect_match": true,
+    "commands": [
+      {
+        "plan": {
+          "domain": "homeassistant",
+          "service": "turn_on",
+          "entity_id": [
+            "light.flur",
+            "light.kueche",
+            "light.testlicht_a",
+            "light.testlicht_b",
+            "light.wohnzimmer"
+          ],
+          "data": {}
+        },
+        "response_text": "5 Lichter eingeschaltet."
+      },
+      {
+        "plan": {
+          "domain": "cover",
+          "service": "close_cover",
+          "entity_id": [
+            "cover.buero",
+            "cover.poleraum_links",
+            "cover.poleraum_rechts",
+            "cover.schlafzimmer"
+          ],
+          "data": {}
+        },
+        "response_text": "4 Rollläden geschlossen."
+      }
+    ]
+  },
+  {
+    "text": "Schalte den Ventilator aus und mach die Heizung Wohnzimmer wärmer",
+    "expect_match": true,
+    "commands": [
+      {
+        "plan": {
+          "domain": "homeassistant",
+          "service": "turn_off",
+          "entity_id": "fan.venti",
+          "data": {}
+        },
+        "response_text": "Ventilator ausgeschaltet."
+      },
+      {
+        "plan": {
+          "domain": "climate",
+          "service": "set_temperature",
+          "entity_id": "climate.heizung",
+          "data": {
+            "temperature": 21
+          }
+        },
+        "response_text": "Heizung Wohnzimmer wärmer gestellt."
+      }
+    ]
+  }
+]

@@ -21,7 +21,7 @@ REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT / "custom_components"))
 sys.path.insert(0, str(REPO_ROOT / "tests"))
 
-from ha_nlu.engine import NluEngine  # noqa: E402
+from ha_nlu.engine import CommandPlan, NluEngine  # noqa: E402
 from ha_nlu.service_call import ServiceCallPlan  # noqa: E402
 from golden_fixtures import GOLDEN_ENTITIES  # noqa: E402
 
@@ -272,6 +272,22 @@ CATEGORIES: dict[str, list[str]] = {
     ],
 }
 
+# HomeIntent V6 plan, Teil 6/7 (§35-39/46, "Golden-Benchmark" categories) -
+# "Multi-Step" was the one plan-named category with no golden coverage at
+# all: engine.match() returns a CommandPlan (tuple of MatchResult, one per
+# "und"-joined segment) for these, not a single MatchResult, so they need
+# their own serialization shape - see generate()/test_golden.py below.
+MULTI_STEP_SENTENCES: list[str] = [
+    "Mach das Wohnzimmerlicht an und schalte das Küchenlicht aus",
+    "Schalte das Flurlicht ein und mach die Steckdose Büro aus",
+    "Öffne den Rollladen Büro und mach das Wohnzimmerlicht an",
+    "Mach das Küchenlicht an und stelle die Heizung Wohnzimmer auf 21 Grad",
+    "Schließe den Rollladen Schlafzimmer und schalte den Ventilator aus",
+    "Mach das Flurlicht an und schließe den Rollladen Büro",
+    "Mach alle Lichter an und fahre alle Rollläden runter",
+    "Schalte den Ventilator aus und mach die Heizung Wohnzimmer wärmer",
+]
+
 # Sentences that must NOT match (kein ServiceCall, "nicht verstanden").
 NEGATIVE_SENTENCES: list[str] = [
     "blubb schnarch wuppdi",
@@ -325,6 +341,23 @@ def generate() -> None:
         out_path.write_text(json.dumps(cases, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         total += len(cases)
         print(f"{category}: {len(cases)} cases -> {out_path.relative_to(REPO_ROOT)}")
+
+    multi_step_cases = []
+    for text in MULTI_STEP_SENTENCES:
+        result = engine.match(text, GOLDEN_ENTITIES)
+        assert isinstance(result, CommandPlan), f"[multi_step] expected a CommandPlan for: {text!r}, got {result!r}"
+        multi_step_cases.append({
+            "text": text,
+            "expect_match": True,
+            "commands": [
+                {"plan": _plan_to_dict(command.plan), "response_text": command.response_text}
+                for command in result.commands
+            ],
+        })
+    out_path = GOLDEN_DIR / "multi_step.json"
+    out_path.write_text(json.dumps(multi_step_cases, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    total += len(multi_step_cases)
+    print(f"multi_step: {len(multi_step_cases)} cases -> {out_path.relative_to(REPO_ROOT)}")
 
     negative_cases = []
     for text in NEGATIVE_SENTENCES:
