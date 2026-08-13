@@ -210,6 +210,7 @@ def resolve_entity_scored(
     area_id: str | None = None,
     domain: str | None = None,
     device_class: str | None = None,
+    index: EntityIndex | None = None,
 ) -> ResolutionResult:
     """Multi-stage scored entity resolution (v2 plan Phase 6, "Entity
     Resolver 2.0"): candidate generation + scoring across friendly_name/
@@ -217,14 +218,45 @@ def resolve_entity_scored(
     Filtering - only applied when the caller actually knows the area/domain/
     device_class it's looking for), then ambiguity detection (Schritt 4) on
     the final ranking.
+
+    ``index`` (World Model Wave 1, building on Phase 23's ``EntityIndex``):
+    an optional prebuilt index (see ``build_entity_index()``) used to narrow
+    the candidate list scanned below via ``by_domain``/``by_area`` *before*
+    scoring runs, for callers that already know the ``domain``/``area_id``
+    they're resolving within and can build one index per conversation turn
+    instead of paying an O(n) scan per resolution call. Omitted (the
+    default): behaves exactly as before, scanning the full ``entities``
+    list - fully backward compatible for every existing caller.
+
+    Caveat: unlike the ``area_id``/``domain`` *bonuses* applied below (which
+    only nudge a candidate's score, never exclude it), the ``index``-based
+    prefilter is a hard filter - an entity outside the requested domain/area
+    is dropped before scoring even runs, so it can never be picked no matter
+    how well its name matches. Every current caller that passes both
+    ``index`` and ``domain``/``area_id`` already only wants matches within
+    that domain/area (see test_entity_index.py's
+    ``test_index_prefilter_matches_full_scan_result`` for a worked example
+    where prefiltering and full-scan agree), but this is a real, documented
+    semantic narrowing versus the index-less path for the pathological case
+    of a strong name match sitting entirely outside the given domain/area -
+    flagged here rather than silently accepted.
     """
     spoken = (name or "").strip()
     if not spoken:
         return ResolutionResult(status=ResolutionStatus.NOT_FOUND)
     spoken_norm = normalize_for_compare(spoken)
 
+    candidates: list[EntitySnapshot] = entities
+    if index is not None and (domain is not None or area_id is not None):
+        if domain is not None:
+            candidates = list(index.by_domain.get(domain, ()))
+            if area_id is not None:
+                candidates = [e for e in candidates if e.area_id == area_id]
+        else:
+            candidates = list(index.by_area.get(area_id, ()))
+
     ranked: list[tuple[EntitySnapshot, float]] = []
-    for entity in entities:
+    for entity in candidates:
         name_score = _best_name_score(spoken, spoken_norm, entity)
         if name_score is None:
             continue
