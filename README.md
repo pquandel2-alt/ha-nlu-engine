@@ -77,7 +77,7 @@ HomeIntent has completed v1 (Deterministic NLU), v2 (Semantic NLU), v3 (Conversa
 Current functionality includes:
 
 * Home Assistant Conversation Agent integration
-* German language grammars (hassil-based, 12 separately compiled intent groups)
+* German language grammars (hassil-based, 13 separately compiled intent groups)
 * deterministic intent matching
 * Semantic Frame / Semantic Command pipeline with entity, area and capability resolution
 * alias-based entity resolution with deterministic candidate ranking
@@ -85,12 +85,12 @@ Current functionality includes:
 * percentage values, quantifiers (alle, beide, counted, "nur", "außer"-exclusion)
 * ambiguity detection (never guesses on an unresolved match)
 * Light, Cover, Fan and Climate control
-* query handling, including comparison filters ("heller als 50%") and area-scoped queries ("wie warm ist es im Wohnzimmer")
+* query handling, including comparison filters ("heller als 50%"), area-scoped queries ("wie warm ist es im Wohnzimmer"), and state queries over binary_sensor/cover/light/switch ("welche Fenster sind offen", "gibt es offene Fenster", "ist das Fenster im Schlafzimmer geöffnet") - read-only by construction, never calls a service
 * conversation context: follow-up commands, clarification questions, pronoun/relative references, cross-sentence query follow-ups
 * implicit/relative targets ("oben"/"unten", "im selben Raum")
 * temporal expressions (delay, duration, relative/absolute time) - parsed and validated, execution deferred to a later layer
 * multi-step commands ("... und ...")
-* extensive regression tests (800+ tests, including a generated golden test suite)
+* extensive regression tests (950+ tests, including a generated golden test suite)
 
 The project is actively evolving toward v5 (natural-language automation understanding).
 
@@ -401,7 +401,7 @@ v4 – Advanced Natural Language
 
 Completed
 
-The focus shifted toward more natural German language without introducing an LLM requirement. See docs/architecture-v4.md for implementation details of each sub-section (V4.1-V4.9) and the deliberately deferred items (e.g. "hier", "nebenan", ordinal selection) that would have required guessing without a real data source.
+The focus shifted toward more natural German language without introducing an LLM requirement. See docs/architecture-v4.md for implementation details of each sub-section (V4.1-V4.9) and the deliberately deferred items (e.g. "hier", "nebenan", ordinal selection) that would have required guessing without a real data source. A later addition within v4, the Semantic Query Engine (state queries over binary_sensor/cover/light/switch, read-only by construction), is documented separately in docs/architecture-v4-query.md.
 
 Implemented capabilities:
 
@@ -444,6 +444,13 @@ Cross-Sentence References
 Wie warm ist es im Wohnzimmer?
 Und in der Küche?
 Und oben?
+
+Semantic Query Engine (State Queries)
+
+Welche Fenster sind offen?
+Gibt es offene Fenster im Keller?
+Ist das Fenster im Schlafzimmer geöffnet?
+Und im Bad? (cross-sentence follow-up, same as above)
 
 ⸻
 

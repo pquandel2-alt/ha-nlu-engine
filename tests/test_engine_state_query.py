@@ -14,6 +14,8 @@ boundary that motivated this session's regex changes.
 from __future__ import annotations
 
 from ha_nlu.entities import EntitySnapshot
+from ha_nlu.nlu.query_command import QueryCommand, QueryScope
+from ha_nlu.nlu.semantic_state import SemanticState
 
 FENSTER_KELLER = EntitySnapshot(
     "binary_sensor.fenster_keller", "Fenster Keller", "binary_sensor", "on",
@@ -346,3 +348,134 @@ def test_comparison_query_still_routes_to_comparison_parser_not_state_query(engi
     result = engine.match("welche Lichter sind mindestens 50 Prozent", [bright_light])
     assert result is not None
     assert result.frame.intent == "HassQueryComparison"
+
+
+# --- Negative tests (v4.2.1 plan Section 35) --------------------------------
+#
+# StateQueryParser must not swallow sentences it structurally shouldn't
+# answer, and plain commands must not be misread as queries just because
+# they happen to share a state word with _STATE_QUERY_RE's trigger list.
+
+
+def test_wie_lange_noch_offen_not_misread_as_simple_state_query(engine):
+    # "Wie lange ist das Fenster noch offen?" asks for a *duration*, not a
+    # yes/no state - it contains the trigger word "ist" and the state word
+    # "offen", so it does reach _STATE_QUERY_RE/StateQueryParser, but no
+    # HassCheckState/HassStateQuery/HassExistsQuery sentence template
+    # accounts for a leading "wie lange" (none of them have a wildcard slot
+    # to absorb it) - so it must fall through to "not understood" rather
+    # than be silently misanswered as "Ja, Fenster ist offen."
+    result = engine.match("wie lange ist das Fenster noch offen", WINDOWS)
+    assert result is None
+
+
+def test_wie_viel_ist_auf_dem_stromzaehler_not_misread_as_open_query(engine):
+    # "Wie viel ist noch auf dem Stromzähler?" has the trigger word "ist"
+    # but no state word from _STATE_QUERY_RE's vocabulary ("auf" is not
+    # "offen"/"an"/...) - must never be routed to StateQueryParser (which
+    # would have no way to interpret a sensor reading as OPEN/CLOSED).
+    stromzaehler = EntitySnapshot(
+        "sensor.stromzaehler", "Stromzähler", "sensor", "4321", unit="kWh",
+    )
+    result = engine.match("wie viel ist noch auf dem Stromzähler", [stromzaehler])
+    assert result is None or result.frame is None or result.frame.intent != "HassCheckState"
+
+
+def test_mach_das_fenster_auf_remains_a_command(engine):
+    # "Mach das Fenster auf." must stay a COMMAND (HassOpenCover) - it has
+    # neither of _STATE_QUERY_RE's trigger words ("welche"/"wie viele"/
+    # "ist"/"sind"), so it can't be misrouted to StateQueryParser in the
+    # first place; pinned here as an explicit regression guard anyway.
+    fenster_cover = EntitySnapshot(
+        "cover.fenster", "Fenster", "cover", "closed", capabilities=frozenset({"OPEN_CLOSE"}),
+    )
+    result = engine.match("mach das Fenster auf", [fenster_cover])
+    assert result is not None
+    assert result.plan is not None
+    assert result.plan.service == "open_cover"
+
+
+def test_mach_das_licht_aus_remains_a_command(engine):
+    # "Mach das Licht aus." contains the state word "aus" but no trigger
+    # word - must stay a COMMAND (HassTurnOff), not a QUERY.
+    result = engine.match("mach das Küchenlicht aus", LIGHTS)
+    assert result is not None
+    assert result.plan is not None
+    assert result.plan.service == "turn_off"
+
+
+def test_mach_das_licht_noch_heller_remains_a_command(engine):
+    # "Mach das Licht noch heller." contains "noch" (a StateQueryParser
+    # filler word elsewhere) but no _STATE_QUERY_RE trigger word - must
+    # stay a COMMAND (HassLightBrighten), not be damaged by any "noch"
+    # handling (Section 5: "noch" must never be globally stripped).
+    dimmable_light = EntitySnapshot(
+        "light.wohnzimmer", "Wohnzimmerlicht", "light", "on",
+        capabilities=frozenset({"TURN_ON", "TURN_OFF", "BRIGHTNESS"}),
+    )
+    result = engine.match("mach das Licht noch heller", [dimmable_light])
+    assert result is not None
+    assert result.frame.intent == "HassLightBrighten"
+    assert result.plan is not None
+
+
+# --- Phase 7 (HomeIntent v4.2.1 plan): frame.parameters["query_command"] --
+#
+# The new, additive observable surface Phase 7's non-destructive migration
+# introduces: every StateQueryParser._parse_* now also stashes the exact
+# QueryCommand it built (and ran through QueryExecutor internally) into
+# frame.parameters, reachable here via result.command.parameters - a future
+# V5/Phase 8 caller can read it back without re-deriving anything from the
+# frame's raw text references. response_text/plan stay driven by the old
+# service_call.py path (unaffected, see StateQueryParser's class docstring).
+
+
+def test_state_query_list_populates_query_command_parameter(engine):
+    result = engine.match("welche Fenster sind offen", WINDOWS)
+    assert result is not None
+    query_command = result.command.parameters["query_command"]
+    assert isinstance(query_command, QueryCommand)
+    assert query_command.intent == "HassStateQuery"
+    assert query_command.scope is QueryScope.LIST
+    assert query_command.target.domain == "binary_sensor"
+    assert query_command.target.device_class == "window"
+    assert query_command.filter.state is SemanticState.OPEN
+
+
+def test_state_query_count_populates_count_scope(engine):
+    result = engine.match(
+        "wie viele Fenster sind offen",
+        [FENSTER_KELLER, EntitySnapshot(
+            "binary_sensor.fenster_buero", "Fenster Büro", "binary_sensor", "on",
+            area_id="buero", area_name="Büro", device_class="window",
+        )],
+    )
+    assert result is not None
+    query_command = result.command.parameters["query_command"]
+    assert query_command.scope is QueryScope.COUNT
+
+
+def test_state_query_area_scoped_populates_target_area(engine):
+    result = engine.match("welche Fenster sind im Keller offen", WINDOWS)
+    assert result is not None
+    query_command = result.command.parameters["query_command"]
+    assert query_command.target.area is not None
+    assert query_command.target.area.area_id == "keller"
+
+
+def test_exists_query_populates_exists_scope(engine):
+    result = engine.match("gibt es offene Fenster", WINDOWS)
+    assert result is not None
+    query_command = result.command.parameters["query_command"]
+    assert query_command.intent == "HassExistsQuery"
+    assert query_command.scope is QueryScope.EXISTS
+
+
+def test_check_state_populates_single_scope_with_resolved_entity_id(engine):
+    result = engine.match("ist das Fenster Keller offen", WINDOWS)
+    assert result is not None
+    query_command = result.command.parameters["query_command"]
+    assert query_command.intent == "HassCheckState"
+    assert query_command.scope is QueryScope.SINGLE
+    assert query_command.target.entity_id == "binary_sensor.fenster_keller"
+    assert query_command.filter.state is SemanticState.OPEN

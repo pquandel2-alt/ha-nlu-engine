@@ -151,6 +151,97 @@ def test_query_followup_returns_none_for_ambiguous_match_in_new_area(engine):
     assert engine.match_query_followup("Und in der Küche?", entities, context) is None
 
 
+# --- Phase 8 (HomeIntent v4.2.1 plan): state-query follow-ups -------------
+#
+# "Und im Bad?" etc. after a HassStateQuery/HassCheckState/HassExistsQuery
+# turn - continues using the previous turn's QueryCommand
+# (frame.parameters["query_command"], Phase 7) rather than last_entities[0],
+# so domain/device_class/filter.state/scope all carry over exactly, only
+# the area changes. Mirrors the HassGetState tests above in style.
+
+FENSTER_KELLER = EntitySnapshot(
+    "binary_sensor.fenster_keller", "Fenster Keller", "binary_sensor", "on",
+    area_id="keller", area_name="Keller", device_class="window",
+)
+FENSTER_BAD = EntitySnapshot(
+    "binary_sensor.fenster_bad", "Fenster Bad", "binary_sensor", "off",
+    area_id="bad", area_name="Bad", device_class="window",
+)
+FENSTER_BAD_2 = EntitySnapshot(
+    "binary_sensor.fenster_bad_2", "Fenster Bad 2", "binary_sensor", "on",
+    area_id="bad", area_name="Bad", device_class="window",
+)
+FENSTER_BUERO = EntitySnapshot(
+    "binary_sensor.fenster_buero", "Fenster Büro", "binary_sensor", "on",
+    area_id="buero", area_name="Büro", device_class="window",
+)
+
+STATE_QUERY_ENTITIES = [FENSTER_KELLER, FENSTER_BAD]
+
+
+def test_query_followup_continues_state_query_list(engine):
+    context = _context(engine, "welche Fenster sind offen", STATE_QUERY_ENTITIES)
+    assert context.last_command.entities == (FENSTER_KELLER,)
+    result = engine.match_query_followup("Und im Bad?", STATE_QUERY_ENTITIES, context)
+    assert result is not None
+    assert result.command.intent == "HassStateQuery"
+    # FENSTER_BAD is closed - the new area legitimately has zero open
+    # windows, a normal EMPTY answer, not a "not understood" miss.
+    assert result.command.entities == ()
+    assert result.response_text == "Keine Fenster sind offen."
+
+
+def test_query_followup_continues_state_query_list_with_a_match(engine):
+    context = _context(engine, "welche Fenster sind offen", STATE_QUERY_ENTITIES)
+    result = engine.match_query_followup("Und im Büro?", STATE_QUERY_ENTITIES + [FENSTER_BUERO], context)
+    assert result is not None
+    assert result.command.entities == (FENSTER_BUERO,)
+    assert result.response_text == "Fenster Büro ist offen."
+
+
+def test_query_followup_continues_state_query_count_scope(engine):
+    context = _context(engine, "wie viele Fenster sind offen", STATE_QUERY_ENTITIES)
+    result = engine.match_query_followup(
+        "Und im Bad?", STATE_QUERY_ENTITIES + [FENSTER_BAD_2], context
+    )
+    assert result is not None
+    # count_only must carry over too, not just the entity set.
+    assert result.command.entities == (FENSTER_BAD_2,)
+    assert result.response_text == "Fenster Bad 2 ist offen."
+
+
+def test_query_followup_continues_exists_query(engine):
+    context = _context(engine, "gibt es offene Fenster", STATE_QUERY_ENTITIES)
+    result = engine.match_query_followup("Und im Bad?", STATE_QUERY_ENTITIES, context)
+    assert result is not None
+    assert result.command.intent == "HassExistsQuery"
+    assert result.command.entities == ()
+    assert result.response_text == "Nein, es gibt keine Fenster."
+
+
+def test_query_followup_continues_check_state(engine):
+    context = _context(engine, "ist das Fenster Keller offen", STATE_QUERY_ENTITIES)
+    assert context.last_command.intent == "HassCheckState"
+    result = engine.match_query_followup("Und im Bad?", STATE_QUERY_ENTITIES, context)
+    assert result is not None
+    assert result.command.intent == "HassCheckState"
+    assert result.command.entities == (FENSTER_BAD,)
+    assert result.response_text == "Nein, Fenster Bad ist nicht offen."
+
+
+def test_query_followup_check_state_returns_none_for_ambiguous_new_area(engine):
+    context = _context(engine, "ist das Fenster Keller offen", STATE_QUERY_ENTITIES)
+    entities = STATE_QUERY_ENTITIES + [FENSTER_BAD_2]
+    result = engine.match_query_followup("Und im Bad?", entities, context)
+    assert result is None  # two windows in Bad now - never guess which one
+
+
+def test_query_followup_check_state_returns_none_for_no_match_in_new_area(engine):
+    context = _context(engine, "ist das Fenster Keller offen", STATE_QUERY_ENTITIES)
+    result = engine.match_query_followup("Und im Büro?", STATE_QUERY_ENTITIES, context)
+    assert result is None  # no window in Büro at all - TARGET_NOT_FOUND, never guess
+
+
 def test_query_followup_returns_none_for_switch_domain_without_device_class(engine):
     # "Mach die Kaffeemaschine an" isn't a query turn at all, so this is
     # already covered by test_query_followup_returns_none_after_non_query_command_turn;

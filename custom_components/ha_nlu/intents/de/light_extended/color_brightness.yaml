@@ -21,20 +21,28 @@ intents:
   # order (same "recognize_all() file/sentence order" behaviour engine.py's
   # module docstring already documents for the quantifier/single-target
   # grammar split), so the more specific sentence must come first.
+  # "[noch]" (still/yet, e.g. "Mach das Licht noch heller.") is an optional,
+  # semantically-inert filler word - same precedent state_query.yaml's own
+  # "[noch]" already established (HomeIntent V4.2.1, Section 5: "noch" must
+  # never be globally stripped by normalize(), only added as a grammar
+  # filler exactly where German permits it). Discovered missing here during
+  # the v4.2.1 audit: "Mach das Licht noch heller." previously fell through
+  # to NO_MATCH entirely (LightExtendedParser's grammar had no slot for the
+  # word "noch" at all), not just a routing miss.
   HassLightBrighten:
     data:
       - sentences:
-          - "[kannst du] mach [den|die|das] {name} um {percent} Prozent heller"
-          - "[kannst du|bitte] [den|die|das] {name} um {percent} Prozent heller machen"
-          - "[kannst du] mach [den|die|das] {name} heller"
-          - "[kannst du|bitte] [den|die|das] {name} heller machen"
+          - "[kannst du] mach [den|die|das] {name} [noch] um {percent} Prozent heller"
+          - "[kannst du|bitte] [den|die|das] {name} [noch] um {percent} Prozent heller machen"
+          - "[kannst du] mach [den|die|das] {name} [noch] heller"
+          - "[kannst du|bitte] [den|die|das] {name} [noch] heller machen"
   HassLightDim:
     data:
       - sentences:
-          - "[kannst du] mach [den|die|das] {name} um {percent} Prozent dunkler"
-          - "[kannst du|bitte] [den|die|das] {name} um {percent} Prozent dunkler machen"
-          - "[kannst du] mach [den|die|das] {name} dunkler"
-          - "[kannst du|bitte] [den|die|das] {name} dunkler machen"
+          - "[kannst du] mach [den|die|das] {name} [noch] um {percent} Prozent dunkler"
+          - "[kannst du|bitte] [den|die|das] {name} [noch] um {percent} Prozent dunkler machen"
+          - "[kannst du] mach [den|die|das] {name} [noch] dunkler"
+          - "[kannst du|bitte] [den|die|das] {name} [noch] dunkler machen"
   # {name} directly adjacent to {color}/{color_temp}, no anchor word between
   # them - verified empirically against hassil==3.11.0 not to collide with
   # the {name}-wildcard turn-on/off sentences (light_switch.yaml).

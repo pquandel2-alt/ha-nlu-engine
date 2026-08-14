@@ -1,0 +1,90 @@
+"""QueryExecutor (HomeIntent v4.2.1 plan, Section 12/Phase 5): the second
+stage of the Query pipeline - ``QueryCommand`` -> ``QueryResult``.
+
+Read-only by construction: this module has no Home Assistant import and
+never calls (nor could call) ``hass.services.async_call()`` - Regel 3/
+Sections 16+46 ("Queries never execute a service call"). It only filters an
+already-resolved candidate list by live entity state
+(``matches_semantic_state``, Regel 5 - never cached) and classifies the
+outcome into a ``QueryResultStatus``.
+
+Candidate resolution itself (name/area/domain/device_class -> a list of
+``EntitySnapshot``) stays where it already lives (``areas.py``/
+``entities.py``, Regel 6 - no parallel search system) and is the caller's
+job, same division of labor ``StateQueryParser`` already follows internally
+today. Phase 7 wires a caller onto this class non-destructively; until then
+nothing in ``engine.py``/``parsers.py`` constructs a ``QueryExecutor``.
+"""
+
+from __future__ import annotations
+
+from ..entities import EntitySnapshot
+from .query_command import QueryCommand, QueryResult, QueryResultStatus, QueryScope
+from .semantic_state import matches_semantic_state
+
+
+class QueryExecutor:
+    """Stateless - one shared instance is fine, same as ``NluEngine``'s other
+    parser-adjacent helpers. ``execute()`` takes the caller's already-scoped
+    candidate list (domain/device_class/area already applied) and applies
+    only the state filter plus cardinality classification.
+    """
+
+    def execute(
+        self, command: QueryCommand, candidates: list[EntitySnapshot]
+    ) -> QueryResult:
+        if command.scope is QueryScope.SINGLE:
+            return self._execute_single(command, candidates)
+        return self._execute_plural(command, candidates)
+
+    @staticmethod
+    def _execute_single(command: QueryCommand, candidates: list[EntitySnapshot]) -> QueryResult:
+        """SINGLE queries (HassCheckState) always resolve to exactly one
+        entity - whether or not its *current* state satisfies the requested
+        filter is the answer itself (``Nein, ... ist nicht offen.`` is a
+        MATCHED result, not EMPTY), so no state filtering happens here.
+
+        Two calling shapes are supported: the target already carries a
+        resolved ``entity_id`` (today's ``StateQueryParser`` - it already
+        did the ambiguity check itself via ``resolve_entity_scored``, Regel
+        4), or it doesn't, in which case this method does that cardinality
+        check itself directly against ``candidates`` - lets a future caller
+        skip duplicating that logic and gives ``AMBIGUOUS``/``TARGET_NOT_FOUND``
+        real, independently testable code paths.
+        """
+        if command.target.entity_id is not None:
+            match = next(
+                (e for e in candidates if e.entity_id == command.target.entity_id), None
+            )
+            if match is None:
+                return QueryResult(status=QueryResultStatus.TARGET_NOT_FOUND, command=command)
+            return QueryResult(status=QueryResultStatus.MATCHED, entities=(match,), command=command)
+
+        if not candidates:
+            return QueryResult(status=QueryResultStatus.TARGET_NOT_FOUND, command=command)
+        if len(candidates) > 1:
+            return QueryResult(
+                status=QueryResultStatus.AMBIGUOUS, entities=tuple(candidates), command=command
+            )
+        return QueryResult(status=QueryResultStatus.MATCHED, entities=(candidates[0],), command=command)
+
+    @staticmethod
+    def _execute_plural(command: QueryCommand, candidates: list[EntitySnapshot]) -> QueryResult:
+        """LIST/COUNT/EXISTS all share one filtering rule: keep candidates
+        whose live state matches the requested filter (or every candidate,
+        for EXISTS's bare-existence form with no {state}/{state_adj} word -
+        ``filter.state is None``). COUNT differs from LIST only in how
+        ``ResponseGenerator`` (Phase 6) phrases the same matched set, not in
+        which entities match - so both take this one branch.
+
+        Zero matches is EMPTY, not an error - HomeIntent v4.2.1 Section 19,
+        "Keine Fenster sind offen." is a normal answer.
+        """
+        state = command.filter.state
+        matched = (
+            candidates
+            if state is None
+            else [e for e in candidates if matches_semantic_state(e, state)]
+        )
+        status = QueryResultStatus.MATCHED if matched else QueryResultStatus.EMPTY
+        return QueryResult(status=status, entities=tuple(matched), command=command)
