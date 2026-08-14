@@ -27,9 +27,10 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, NOT_UNDERSTOOD_TEXT
 from .engine import CommandPlan, NluEngine
-from .hass_entities import build_entity_snapshots
+from .hass_entities import build_device_snapshots, build_entity_snapshots
 from .nlu.context import ConversationContext, ConversationContextStore
 from .service_call import QUERY_INTENTS
+from .world_model import WorldModel, build_world_model as assemble_world_model
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -70,6 +71,9 @@ class NluConversationEntity(
         )
         self._engine = NluEngine()
         self._context_store = ConversationContextStore()
+        # Rebuilt every turn in _async_handle_message() (World Model Wave,
+        # 2026-08-14); None only until the first turn.
+        self._world_model: WorldModel | None = None
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -108,7 +112,16 @@ class NluConversationEntity(
         """
         response = intent.IntentResponse(language=user_input.language)
 
+        # entities stays the exact list every match()/match_followup()/etc.
+        # call below already took before the World Model Wave - devices are
+        # fetched and bundled alongside it (World Model Wave, 2026-08-14) so
+        # a real WorldModel is now built every live turn, not just in tests,
+        # but no parser reads self._world_model yet (no grammar asks for
+        # device-level data today - see docs/architecture-v6.md 6d), so this
+        # is additive and changes no existing behavior.
         entities = build_entity_snapshots(self.hass, self.entry)
+        devices = build_device_snapshots(self.hass, self.entry)
+        self._world_model = assemble_world_model(entities, devices)
         pending = self._context_store.get(user_input.conversation_id)
 
         if pending is not None and pending.pending_clarification is not None:

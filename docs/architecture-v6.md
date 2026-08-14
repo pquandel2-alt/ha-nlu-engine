@@ -380,15 +380,28 @@ Geräte-zu-Entities-Beziehung.
   (Entities + Devices holen, über `world_model.build_world_model()`
   bündeln).
 
-**Bewusst NICHT Teil dieser Wave:**
-- `WorldModel` wird **nicht** in `conversation.py` verdrahtet – dieselbe
-  Begründung wie bei `ReasoningEngine` (V6.25/6a): kein Parser/keine
-  Grammatik liest heute Device-Daten, eine Verdrahtung ohne Konsumenten
-  wäre Integrations-Theater. Zusätzlicher Grund diese Wave: die
-  Verdrahtung hätte `tests/test_conversation_integration.py` (aktives,
-  unkommittiertes Nutzer-WIP zum Query-Feature) anfassen müssen, um dessen
-  `monkeypatch.setattr(ha_conversation, "build_entity_snapshots", ...)`
-  umzuhängen – wird nicht angetastet ohne Rücksprache.
+**Nachtrag (2026-08-14, gleicher Tag):** Erste Fassung dieser Wave hatte
+`WorldModel` bewusst nicht in `conversation.py` verdrahtet (Begründung
+unten, ursprünglich identisch zu `ReasoningEngine`s Status). Nutzer hat das
+zurecht zurückgewiesen: "es soll für HA fertig verdrahtet werden". Nachgezogen
+in `conversation.py::_async_handle_message()` – `build_device_snapshots()`
+wird jetzt bei jedem echten Conversation-Turn zusätzlich zu
+`build_entity_snapshots()` aufgerufen und über `world_model.build_world_model()`
+zu `self._world_model` gebündelt. `entities` (die tatsächlich an
+`match()`/`match_followup()`/etc. übergebene Liste) bleibt exakt der
+vorherige Aufruf, unverändert – `tests/test_conversation_integration.py`s
+`monkeypatch.setattr(ha_conversation, "build_entity_snapshots", ...)` greift
+weiterhin unverändert, keine Anpassung an dieser WIP-Datei nötig
+(`build_device_snapshots()` liefert dort mangels ausgewählter Entities
+einfach `[]`, kein Crash). `WorldModel` läuft damit ab sofort real in jedem
+HA-Turn, nicht mehr nur in Tests – **aber** noch immer ohne Konsumenten:
+kein Parser liest `self._world_model`, weil keine deutsche Grammatik heute
+nach Geräte-Ebene fragt. Das ist kein technisches Defizit, sondern die
+Grenze von "niemals raten" – eine neue Sprachfähigkeit dafür zu erfinden
+wäre Scope, den niemand beauftragt hat. 1072 Tests weiterhin grün
+(inkl. `test_conversation_integration.py`, unverändert).
+
+**Weiterhin bewusst NICHT Teil dieser Wave:**
 - `parsers.py`/`engine.py` auf Device-Daten migrieren – keine
   Satzvorlage fragt heute nach Geräte-Ebene; würde jeden Parser-Call-Site
   anfassen, ohne dass etwas Testbares dabei gewonnen wird.
