@@ -23,8 +23,10 @@ from homeassistant.helpers import (
 )
 
 from .const import CONF_SELECTED_ENTITIES, SELECTABLE_DOMAINS
+from .devices import DeviceSnapshot
 from .entities import EntitySnapshot
 from .nlu.capabilities import derive_capabilities
+from .world_model import WorldModel, build_world_model as _build_world_model
 
 
 def default_exposed_entities(hass: HomeAssistant) -> list[str]:
@@ -140,3 +142,81 @@ def build_entity_snapshots(
             )
         )
     return snapshots
+
+
+def build_device_snapshots(hass: HomeAssistant, entry: ConfigEntry) -> list[DeviceSnapshot]:
+    """Devices that own at least one selected/exposed entity (World Model
+    Wave, 2026-08-13). A device with zero selected entities is invisible
+    here on purpose - same "only what's actually reachable this turn"
+    scoping ``build_entity_snapshots()`` already applies.
+
+    ``DeviceSnapshot.area_id`` is the device's own Area Registry area, which
+    can legitimately differ from the effective area of an individual entity
+    under it (per-entity area overrides exist - see ``_area_info()`` above);
+    that's real HA behaviour, not something to reconcile here.
+    """
+    selected = set(get_selected_entity_ids(hass, entry))
+    entity_registry = er.async_get(hass)
+    device_registry = dr.async_get(hass)
+    area_registry = ar.async_get(hass)
+    floor_registry = fr.async_get(hass)
+
+    entity_ids_by_device: dict[str, list[str]] = {}
+    for entity_id in selected:
+        registry_entry = entity_registry.async_get(entity_id)
+        if registry_entry is None or registry_entry.device_id is None:
+            continue
+        entity_ids_by_device.setdefault(registry_entry.device_id, []).append(entity_id)
+
+    snapshots: list[DeviceSnapshot] = []
+    for device_id, entity_ids in entity_ids_by_device.items():
+        device = device_registry.async_get(device_id)
+        if device is None:
+            continue
+        area_id = device.area_id
+        area_name: str | None = None
+        floor_id: str | None = None
+        floor_name: str | None = None
+        floor_level: int | None = None
+        if area_id is not None:
+            area = area_registry.async_get_area(area_id)
+            if area is not None:
+                area_name = area.name
+                floor_id = area.floor_id
+                if floor_id is not None:
+                    floor = floor_registry.async_get_floor(floor_id)
+                    if floor is not None:
+                        floor_name = floor.name
+                        floor_level = floor.level
+        snapshots.append(
+            DeviceSnapshot(
+                device_id=device_id,
+                name=device.name_by_user or device.name or device_id,
+                manufacturer=device.manufacturer,
+                model=device.model,
+                area_id=area_id,
+                area_name=area_name,
+                floor_id=floor_id,
+                floor_name=floor_name,
+                floor_level=floor_level,
+                entity_ids=tuple(sorted(entity_ids)),
+            )
+        )
+    return snapshots
+
+
+def build_world_model(hass: HomeAssistant, entry: ConfigEntry) -> WorldModel:
+    """Single per-turn World Model constructor (World Model Wave, 2026-08-13):
+    bundles ``build_entity_snapshots()`` + ``build_device_snapshots()`` via
+    ``world_model.build_world_model()``.
+
+    Not called from ``conversation.py`` yet - see docs/architecture-v6.md's
+    World Model Wave section for why (mirrors ``nlu/reasoning.py``'s
+    ``ReasoningEngine`` sitting built-and-tested before being wired into the
+    live pipeline, to avoid a second parallel entity list flowing through
+    the engine next to the one ``build_entity_snapshots()`` already
+    provides).
+    """
+    entities = build_entity_snapshots(hass, entry)
+    devices = build_device_snapshots(hass, entry)
+    return _build_world_model(entities, devices)

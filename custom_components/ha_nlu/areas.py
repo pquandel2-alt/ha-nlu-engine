@@ -73,7 +73,7 @@ _SCORE_REVERSE_CONTAINS = 40
 _AMBIGUITY_MARGIN = 5
 
 
-def _area_snapshots(entities: list[EntitySnapshot]) -> tuple[AreaSnapshot, ...]:
+def area_snapshots(entities: list[EntitySnapshot]) -> tuple[AreaSnapshot, ...]:
     """Distinct areas referenced by the given entities, deduplicated by
     area_id. Aliases are unioned across every entity in the area (all
     entities sharing an area_id carry the same ``area_aliases``, sourced
@@ -133,7 +133,7 @@ def resolve_area_scored(name: str, entities: list[EntitySnapshot]) -> AreaResolu
     spoken_norm = normalize_for_compare(spoken)
 
     ranked: list[tuple[AreaSnapshot, float]] = []
-    for area in _area_snapshots(entities):
+    for area in area_snapshots(entities):
         score = _score_area(spoken, spoken_norm, area)
         if score is not None:
             ranked.append((area, score))

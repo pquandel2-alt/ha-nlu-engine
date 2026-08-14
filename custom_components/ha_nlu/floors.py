@@ -63,7 +63,7 @@ _SCORE_REVERSE_CONTAINS = 40
 _AMBIGUITY_MARGIN = 5
 
 
-def _floor_snapshots(entities: list[EntitySnapshot]) -> tuple[FloorSnapshot, ...]:
+def floor_snapshots(entities: list[EntitySnapshot]) -> tuple[FloorSnapshot, ...]:
     """Distinct floors referenced by the given entities, deduplicated by floor_id."""
     seen: dict[str, FloorSnapshot] = {}
     for e in entities:
@@ -101,7 +101,7 @@ def resolve_floor_scored(name: str, entities: list[EntitySnapshot]) -> FloorReso
     spoken_norm = normalize_for_compare(spoken)
 
     ranked: list[tuple[FloorSnapshot, float]] = []
-    for floor in _floor_snapshots(entities):
+    for floor in floor_snapshots(entities):
         score = _score_floor_name(spoken, spoken_norm, floor.name)
         if score is not None:
             ranked.append((floor, score))
@@ -147,7 +147,7 @@ def resolve_floor_by_level_keyword(keyword: str, entities: list[EntitySnapshot])
     extreme level, or any floor missing a ``level`` value) are AMBIGUOUS/
     NOT_FOUND rather than picking one arbitrarily.
     """
-    floors = [f for f in _floor_snapshots(entities) if f.level is not None]
+    floors = [f for f in floor_snapshots(entities) if f.level is not None]
     if not floors:
         return FloorResolveResult(status=FloorResolveStatus.NOT_FOUND)
 
