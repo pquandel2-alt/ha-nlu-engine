@@ -184,7 +184,7 @@ Phasenabschluss aktualisieren.
 | V6.3 | Semantic Lexicon | Neue Komponente: Wort/Ausdruck → semantische Kandidaten (liefert Kandidaten, entscheidet nicht allein) | **abgeschlossen** (`nlu/lexicon.py`) |
 | V6.4 | Semantic Composer | Neue Komponente: setzt sprachliche Bausteine zu semantischer Struktur zusammen statt Satzlisten | **abgeschlossen** (`nlu/composer.py`, bislang nur property+quantity; action/direction/degree fehlt Lexicon-Kandidatentabelle) |
 | V6.5 | Semantische Unvollständigkeit | `SemanticFrame` darf unvollständig sein; Auflösung über Context → explizites Target → Area → World Model → Capability → Default Scope, sonst AMBIGUOUS/MISSING_TARGET | nicht begonnen |
-| V6.6 | Home World Model | Entity-Modell zu semantischer HA-Sicht erweitern (Entities, Devices, Areas, Floors, Domains, Device Classes, Capabilities, States, Attributes, Aliases, Relationships); HA bleibt Quelle der Wahrheit | nicht begonnen |
+| V6.6 | Home World Model | Entity-Modell zu semantischer HA-Sicht erweitern (Entities, Devices, Areas, Floors, Domains, Device Classes, Capabilities, States, Attributes, Aliases, Relationships); HA bleibt Quelle der Wahrheit | **abgeschlossen** (strukturelle Filterung: 6c; echtes `WorldModel`-Objekt inkl. `DeviceSnapshot`: 6d) – nicht in `conversation.py` verdrahtet, siehe 6d |
 | V6.7 | World Model Indexes | Performance-Indizes (domain, device_class, area, floor, capability, alias); States nicht unkontrolliert dauerhaft cachen | nicht begonnen |
 | V6.8 | Capability Reasoning | Benötigte Capability aus Semantik ableiten, inkompatible Entities ausschließen | **abgeschlossen** (`nlu/capabilities.py::required_capability_for_property`) |
 | V6.9 | Constraint Resolver | Neue Komponente: sucht Entities, die ALLE Constraints erfüllen, bevor Quantity angewendet wird | **abgeschlossen** (`nlu/constraint_resolver.py`, domain/area/floor/device_class/property) |
@@ -336,6 +336,83 @@ Parser dupliziert, wenn auch selbst schon Regel-6-konform über
 `resolve_entity_scored()` zentralisiert). Volle ReasoningEngine-Verdrahtung
 bleibt zurückgestellt, bis (falls gewünscht) auch die Namensauflösung
 vereinheitlicht ist.
+
+⸻
+
+## 6d. World Model Wave – echtes `WorldModel`-Objekt (Ergebnis, 2026-08-14)
+
+**Befund:** 6c hat nur die *strukturelle Filterung* (domain/area/floor/
+device_class) vereinheitlicht, wie dort explizit vermerkt. Der Nutzer hat
+zurecht eingeordnet, dass das kein "World Model" im Sinne der Vision war –
+es gab kein Datenmodell, das Entities/Devices/Areas/Floors als *ein*
+Objekt mit Beziehungen bündelt. Insbesondere fehlte **Devices** komplett
+als eigenständiges Konzept: `hass_entities.py` griff auf den Device
+Registry nur transient für den Area-Fallback einer einzelnen Entity zu
+(`_area_info()`), es gab keine `DeviceSnapshot`, keine
+Geräte-zu-Entities-Beziehung.
+
+**Umsetzung:**
+- `areas.py::_area_snapshots`/`floors.py::_floor_snapshots` → öffentlich
+  (`area_snapshots`/`floor_snapshots`, identischer Body) – nötig, damit
+  `world_model.py` sie wiederverwendet statt "Areas/Floors dieser
+  Entities" ein drittes Mal abzuleiten (Regel 6).
+- Neu: `devices.py::DeviceSnapshot` – hass-freies Dataclass, Peer von
+  `EntitySnapshot`/`AreaSnapshot`/`FloorSnapshot` (device_id, name,
+  manufacturer, model, area/floor-Felder, `entity_ids`). Bewusst kein
+  `resolve_*` für gesprochene Gerätenamen – dafür existiert nirgends im
+  Lexikon/in der Grammatik ein Beleg (niemals raten).
+- Neu: `world_model.py::WorldModel` – bündelt `entities`/`devices`/
+  `areas`/`floors` + `entity_index` + drei `Mapping`-Felder
+  (`entities_by_id`, `devices_by_id`, `devices_by_area_id`,
+  `device_id_by_entity_id`) sowie drei Beziehungs-Methoden
+  (`device_for_entity`, `entities_for_device`, `devices_in_area`).
+  `entities_for_device()` filtert `device.entity_ids` gegen die
+  tatsächlich übergebene `entities`-Liste – ein Gerät kann Entities
+  besitzen, die diesen Turn nicht ausgewählt/exponiert sind; die werden
+  nie stillschweigend mit ausgeliefert. `build_world_model()` ruft nur
+  `build_entity_index()`/`area_snapshots()`/`floor_snapshots()` auf, keine
+  Neuimplementierung.
+- `hass_entities.py`: zwei neue Bridge-Funktionen,
+  `build_device_snapshots()` (Geräte mit ≥1 ausgewählter Entity, gleiche
+  "nur was diesen Turn erreichbar ist"-Begrenzung wie
+  `build_entity_snapshots()`; Namensvorrang `name_by_user or name or
+  device_id`, dieselbe Präzedenz wie HA selbst) und `build_world_model()`
+  (Entities + Devices holen, über `world_model.build_world_model()`
+  bündeln).
+
+**Bewusst NICHT Teil dieser Wave:**
+- `WorldModel` wird **nicht** in `conversation.py` verdrahtet – dieselbe
+  Begründung wie bei `ReasoningEngine` (V6.25/6a): kein Parser/keine
+  Grammatik liest heute Device-Daten, eine Verdrahtung ohne Konsumenten
+  wäre Integrations-Theater. Zusätzlicher Grund diese Wave: die
+  Verdrahtung hätte `tests/test_conversation_integration.py` (aktives,
+  unkommittiertes Nutzer-WIP zum Query-Feature) anfassen müssen, um dessen
+  `monkeypatch.setattr(ha_conversation, "build_entity_snapshots", ...)`
+  umzuhängen – wird nicht angetastet ohne Rücksprache.
+- `parsers.py`/`engine.py` auf Device-Daten migrieren – keine
+  Satzvorlage fragt heute nach Geräte-Ebene; würde jeden Parser-Call-Site
+  anfassen, ohne dass etwas Testbares dabei gewonnen wird.
+- `AreaIndex`/`FloorIndex` (separates, bereits verzeichnetes V6.7-Item).
+- Gesprochene Geräte-Namensauflösung ("welches Gerät") – keine
+  Lexikon-Evidenz vorhanden.
+
+**Tests:** `tests/test_devices.py` (3, hass-frei),
+`tests/test_world_model.py` (5, hass-frei, handgebaute
+Entity/Device-Fixtures), `tests/test_hass_entities_devices.py` (5,
+Hass-Bridge-Ebene – nutzt `tests/_ha_stub.py::install()` read-only wieder,
+da dessen Registry-Fakes fest auf `None` stehen; per-Test-Registry-Daten
+über `monkeypatch` auf `hass_entities.er/dr/ar/fr` statt den geteilten
+WIP-Stub selbst anzufassen). Gesamtsuite: 1059 → **1072 grün**
+(`pytest -q`, venv `ha-nlu-engine-venv`), keine bestehende Testdatei
+verändert.
+
+**DoD-Update:** "World Model semantisch nutzbar" gilt jetzt sowohl für
+die strukturelle Filterung (6c) als auch für ein echtes, bündelndes
+Datenmodell mit Devices und Beziehungen (6d) – die Vision "500 Konzepte,
+nicht 50.000 Sätze" hat damit erstmals ein reales Objekt, nicht nur einen
+vereinheitlichten Filterpfad. Volle Pipeline-Verdrahtung (`conversation.py`,
+Parser-Migration) bleibt offen für eine künftige Wave, sobald eine
+Grammatik/ein Feature tatsächlich Device-Daten braucht.
 
 ⸻
 
