@@ -37,6 +37,7 @@ from .nlu.frame import SemanticFrame, TargetReference
 from .nlu.normalize import normalize
 from .nlu.parser import AmbiguousReference, ClarificationRequest, ParseContext, ParseResult
 from .nlu.response import NluError, NluResponse
+from .nlu.response_generator import ResponseGenerator
 from .nlu.service_mapper import map_to_service_call
 from .nlu.validator import validate_command
 from .parsers import (
@@ -64,6 +65,9 @@ from .service_call import (
     QUERY_INTENTS,
     ServiceCallPlan,
 )
+from .world_model import WorldModel
+
+_RESPONSE_GENERATOR = ResponseGenerator()
 
 INTENTS_DIR = Path(__file__).parent / "intents" / "de"
 QUANTIFIERS_DIR = INTENTS_DIR / "quantifiers"
@@ -149,6 +153,7 @@ _COMPARISON_QUERY_RE = re.compile(
 # "gibt es" anywhere, so this can't misroute an existing match.
 _STATE_QUERY_RE = re.compile(
     r"\bgibt es\b"
+    r"|\bwelche\b.*\bsind\b"
     r"|\b(welche|wie viele|ist|sind)\b.*"
     r"\b(offen|geöffnet|offene|geöffnete|zu|geschlossen|geschlossene|"
     r"an|aus|eingeschaltet|angeschaltet|ausgeschaltet|"
@@ -454,14 +459,18 @@ class NluEngine:
             return self._area_query_parser
         return self._single_parser
 
-    def match(self, text: str, entities: list[EntitySnapshot]) -> MatchResult | CommandPlan | None:
+    def match(
+        self, text: str, entities: list[EntitySnapshot], world_model: WorldModel | None = None
+    ) -> MatchResult | CommandPlan | None:
         segments = [segment for segment in _AND_SPLIT_RE.split(text) if segment.strip()]
         if len(segments) > 1:
-            return self._match_multi(segments, entities)
+            return self._match_multi(segments, entities, world_model)
 
         text = normalize(text)
         parser = self._select_parser(text)
-        result = parser.parse(text, ParseContext(entities=entities, index=build_entity_index(entities)))
+        result = parser.parse(
+            text, ParseContext(entities=entities, index=build_entity_index(entities), world_model=world_model)
+        )
         if result is None:
             return None
         if isinstance(result, ClarificationRequest):
@@ -470,7 +479,9 @@ class NluEngine:
             )
         return self._build_match_result(result)
 
-    def _match_multi(self, segments: list[str], entities: list[EntitySnapshot]) -> CommandPlan | None:
+    def _match_multi(
+        self, segments: list[str], entities: list[EntitySnapshot], world_model: WorldModel | None = None
+    ) -> CommandPlan | None:
         """Match every "und"-joined segment independently, through the exact
         same ``match()`` entry point (recursive - a segment never contains
         "und" itself once split, so this always bottoms out in the
@@ -481,7 +492,7 @@ class NluEngine:
         """
         results: list[MatchResult] = []
         for segment in segments:
-            result = self.match(segment, entities)
+            result = self.match(segment, entities, world_model)
             if not isinstance(result, MatchResult) or result.clarification is not None or result.plan is None:
                 return None
             results.append(result)
@@ -867,6 +878,17 @@ class NluEngine:
                 response_text=climate_extended_spec.response(matched, frame.parameters),
                 frame=frame,
                 command=command,
+            )
+
+        # WorldModelQuery wave: StateQueryParser's four intents (HassStateQuery/
+        # HassCheckState/HassExistsQuery/HassDeviceQuery) now stash the full
+        # QueryResult (status included, not just the matched entities) - when
+        # present, ResponseGenerator speaks it directly instead of the
+        # QUERY_INTENTS response lambda below, which loses QueryResultStatus.
+        query_result = frame.parameters.get("query_result")
+        if query_result is not None:
+            return MatchResult(
+                plan=None, response_text=_RESPONSE_GENERATOR.respond(query_result), frame=frame, command=command,
             )
 
         query_spec = QUERY_INTENTS.get(frame.intent)

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from ..entities import EntityIndex, EntitySnapshot
+from ..world_model import WorldModel
 from .frame import SemanticFrame
 
 
@@ -23,6 +24,10 @@ class ParseContext:
     # multiplies with every additional pipeline stage Wave 3+ introduces).
     # None keeps every parser's behaviour byte-for-byte unchanged (full scan).
     index: EntityIndex | None = None
+    # The per-turn WorldModel (conversation.py builds it every turn already) -
+    # None keeps every existing caller unchanged; only query parsers that need
+    # device/area-level lookups read this.
+    world_model: WorldModel | None = None
 
 
 @dataclass(frozen=True)

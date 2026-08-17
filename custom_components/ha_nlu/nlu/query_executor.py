@@ -19,7 +19,8 @@ nothing in ``engine.py``/``parsers.py`` constructs a ``QueryExecutor``.
 from __future__ import annotations
 
 from ..entities import EntitySnapshot
-from .query_command import QueryCommand, QueryResult, QueryResultStatus, QueryScope
+from ..world_model import WorldModel
+from .query_command import QueryCommand, QueryResult, QueryResultStatus, QueryScope, QueryTargetKind
 from .semantic_state import matches_semantic_state
 
 
@@ -31,11 +32,29 @@ class QueryExecutor:
     """
 
     def execute(
-        self, command: QueryCommand, candidates: list[EntitySnapshot]
+        self,
+        command: QueryCommand,
+        candidates: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
     ) -> QueryResult:
+        if command.target.kind is QueryTargetKind.DEVICE:
+            return self._execute_device(command, world_model)
         if command.scope is QueryScope.SINGLE:
             return self._execute_single(command, candidates)
         return self._execute_plural(command, candidates)
+
+    @staticmethod
+    def _execute_device(command: QueryCommand, world_model: WorldModel | None) -> QueryResult:
+        """DEVICE-scope queries (HassDeviceQuery, "welche Geräte sind im
+        Büro?") answer from the WorldModel's device list, not an entity/state
+        filter - no world_model or no resolved area means no answer, never a
+        crash or an invented "all devices" fallback (Regel: niemals raten).
+        """
+        if world_model is None or command.target.area is None:
+            return QueryResult(status=QueryResultStatus.EMPTY, command=command)
+        devices = world_model.devices_in_area(command.target.area.area_id)
+        status = QueryResultStatus.MATCHED if devices else QueryResultStatus.EMPTY
+        return QueryResult(status=status, devices=tuple(devices), command=command)
 
     @staticmethod
     def _execute_single(command: QueryCommand, candidates: list[EntitySnapshot]) -> QueryResult:

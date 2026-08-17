@@ -42,7 +42,7 @@ from .nlu.lexicon import (
     _TEMPORAL_UNIT_SLOT_LIST,
 )
 from .nlu.parser import AmbiguousReference, ClarificationRequest, ParseContext, ParseResult
-from .nlu.query_command import QueryCommand, QueryFilter, QueryResultStatus, QueryScope, QueryTarget
+from .nlu.query_command import QueryCommand, QueryFilter, QueryResultStatus, QueryScope, QueryTarget, QueryTargetKind
 from .nlu.query_executor import QueryExecutor
 from .nlu.semantic_state import SemanticState
 from .service_call import (
@@ -1281,15 +1281,15 @@ class StateQueryParser:
     (``_QUERY_EXECUTOR``) instead of a private ad hoc
     ``matches_semantic_state`` list comprehension - the exact same filtering
     rule, just consolidated into the one class a future V5 caller would also
-    use (Section 12). The resulting ``QueryCommand`` is stashed in
-    ``frame.parameters["query_command"]`` for that future caller (and
-    Phase 8's query-followup extension) to read back. Response text
-    generation is deliberately **not** touched here: it still goes through
-    ``service_call.py``'s ``QUERY_INTENTS`` response lambdas, proven
-    byte-identical to ``nlu.response_generator.ResponseGenerator``'s output
-    by that module's own dedicated unit tests - swapping the live response
-    call site over would touch ``engine.py``'s shared dispatch for zero
-    behavioral gain, which Section 13 explicitly asks to avoid.
+    use (Section 12). The resulting ``QueryCommand`` **and** the full
+    ``QueryResult`` (status included, not just ``.entities``) are stashed in
+    ``frame.parameters["query_command"]``/``frame.parameters["query_result"]``
+    (WorldModelQuery wave) - ``engine.py::_build_match_result`` reads
+    ``"query_result"`` and, when present, generates the response via
+    ``nlu.response_generator.ResponseGenerator`` instead of
+    ``service_call.py``'s ``QUERY_INTENTS`` response lambdas (which are now
+    unreachable dead code for these three intents, kept only because
+    ``QueryIntentSpec.response`` is a required field).
     """
 
     def __init__(self, intents: Intents) -> None:
@@ -1317,6 +1317,8 @@ class StateQueryParser:
             return self._parse_exists_query(text, result.entities, context, spec)
         if result.intent.name == "HassStateQuery":
             return self._parse_state_query(text, result.entities, context, spec)
+        if result.intent.name == "HassDeviceQuery":
+            return self._parse_device_query(text, result.entities, context)
         return None
 
     @staticmethod
@@ -1354,7 +1356,7 @@ class StateQueryParser:
     def _parse_state_query(self, text: str, slots: dict, context: ParseContext, spec) -> ParseResult | None:
         device_class_slot = slots.get("device_class")
         state_slot = slots.get("state")
-        if device_class_slot is None or state_slot is None:
+        if device_class_slot is None:
             return None
 
         resolved_area = self._resolve_area(slots, context.entities)
@@ -1367,7 +1369,7 @@ class StateQueryParser:
         if domain not in spec.allowed_domains:
             return None
 
-        requested_state = _STATE_NAME_TO_SEMANTIC[str(state_slot.value)]
+        requested_state = _STATE_NAME_TO_SEMANTIC[str(state_slot.value)] if state_slot is not None else None
         count_only = bool(re.search(r"\bwie viele\b", text, re.IGNORECASE))
         area_snapshot = AreaSnapshot(area_id=area_id, name=area_name) if area_id is not None else None
         query_command = QueryCommand(
@@ -1376,7 +1378,8 @@ class StateQueryParser:
             target=QueryTarget(domain=domain, device_class=device_class, area=area_snapshot),
             filter=QueryFilter(state=requested_state),
         )
-        matches = list(_QUERY_EXECUTOR.execute(query_command, candidates).entities)
+        query_result = _QUERY_EXECUTOR.execute(query_command, candidates)
+        matches = list(query_result.entities)
 
         frame = SemanticFrame(
             intent="HassStateQuery",
@@ -1389,6 +1392,7 @@ class StateQueryParser:
                 "device_class": device_class,
                 "domain": domain,
                 "query_command": query_command,
+                "query_result": query_result,
             },
             source_text=text,
         )
@@ -1425,7 +1429,8 @@ class StateQueryParser:
             target=QueryTarget(domain=domain, device_class=device_class, area=area_snapshot),
             filter=QueryFilter(state=requested_state),
         )
-        matches = list(_QUERY_EXECUTOR.execute(query_command, candidates).entities)
+        query_result = _QUERY_EXECUTOR.execute(query_command, candidates)
+        matches = list(query_result.entities)
 
         frame = SemanticFrame(
             intent="HassExistsQuery",
@@ -1437,6 +1442,7 @@ class StateQueryParser:
                 "device_class": device_class,
                 "domain": domain,
                 "query_command": query_command,
+                "query_result": query_result,
             },
             source_text=text,
         )
@@ -1482,13 +1488,55 @@ class StateQueryParser:
         # resolve_entity_scored already did the ambiguity check (Regel 6) -
         # QueryExecutor.SINGLE with a pre-resolved entity_id only confirms
         # membership, it never re-decides cardinality here.
-        matches = list(_QUERY_EXECUTOR.execute(query_command, [resolved.entity]).entities)
+        query_result = _QUERY_EXECUTOR.execute(query_command, [resolved.entity])
+        matches = list(query_result.entities)
 
         frame = SemanticFrame(
             intent="HassCheckState",
             target=TargetReference(text=name, entity_id=resolved.entity.entity_id, domain=resolved.entity.domain),
             area=AreaReference(text=area_name, area_id=area_id, area_name=area_name) if area_id is not None else None,
-            parameters={"semantic_state": requested_state, "query_command": query_command},
+            parameters={
+                "semantic_state": requested_state,
+                "query_command": query_command,
+                "query_result": query_result,
+            },
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=matches)
+
+    def _parse_device_query(self, text: str, slots: dict, context: ParseContext) -> ParseResult | None:
+        """HassDeviceQuery ("welche Geräte sind im Büro?") - devices are
+        cross-domain, so this answers from the WorldModel's device list
+        (``QueryExecutor._execute_device``) instead of an entity/state
+        filter. No {area} resolving to exactly one known room -> ``None``,
+        same "never guess" precedent every other ``_parse_*`` method here
+        follows (no "alle Geräte im Haus" fallback).
+        """
+        resolved_area = self._resolve_area(slots, context.entities)
+        if resolved_area is None:
+            return None
+        area_id, area_name = resolved_area
+        if area_id is None:
+            return None
+
+        area_snapshot = AreaSnapshot(area_id=area_id, name=area_name)
+        query_command = QueryCommand(
+            intent="HassDeviceQuery",
+            scope=QueryScope.LIST,
+            target=QueryTarget(kind=QueryTargetKind.DEVICE, area=area_snapshot),
+            filter=QueryFilter(),
+        )
+        query_result = _QUERY_EXECUTOR.execute(query_command, candidates=[], world_model=context.world_model)
+
+        frame = SemanticFrame(
+            intent="HassDeviceQuery",
+            target=None,
+            area=AreaReference(text=area_name, area_id=area_id, area_name=area_name),
+            quantifier=Quantifier(kind="all"),
+            parameters={
+                "query_command": query_command,
+                "query_result": query_result,
+            },
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=[])

@@ -38,6 +38,14 @@ intents:
           - "wie viele {device_class} sind [in der|in dem|im|am|beim] {area} [denn] [noch] {state}"
           - "sind [denn] {device_class} [noch] {state}"
           - "sind [in der|in dem|im|am|beim] {area} [denn] {device_class} [noch] {state}"
+          # WorldModelQuery wave: stateless listing ("Welche Lampen sind im
+          # Wohnzimmer?") - no {state} slot at all, area-scoped only. Reuses
+          # the exact same {device_class}/{area} slots as the sentences
+          # above - no new vocabulary. Requires {area} (unlike the {state}
+          # variants) since a bare "welche Lampen sind" has no verb
+          # complement to anchor on - "niemals raten" a scope that wasn't
+          # spoken.
+          - "welche {device_class} sind [in der|in dem|im|am|beim] {area}"
   # HassExistsQuery MUST be listed before HassCheckState: "ist ein {device_class}
   # ... {state}" (the new word-order variant below, spec gap #4 - "Ist im
   # Wohnzimmer ein Fenster offen?") structurally also matches HassCheckState's
@@ -82,3 +90,13 @@ intents:
       - sentences:
           - "ist [die|der|das] {name} [in der|in dem|im|am|beim] {area} [denn] [noch] {state}"
           - "ist [die|der|das] {name} [denn] [noch] {state}"
+  # WorldModelQuery wave: device-level query ("Welche Geräte sind im Büro?")
+  # - no {device_class}/{state} slot, devices are cross-domain and answered
+  # from the WorldModel's device list, not an entity/state filter (see
+  # StateQueryParser._parse_device_query).
+  HassDeviceQuery:
+    data:
+      - sentences:
+          - "welche geräte sind [in der|in dem|im|am|beim] {area}"
+          - "welche geräte befinden sich [in der|in dem|im|am|beim] {area}"
+          - "was für geräte sind [in der|in dem|im|am|beim] {area}"

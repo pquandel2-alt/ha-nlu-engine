@@ -228,3 +228,118 @@ für `frame.parameters["query_command"]`), `tests/test_engine_query_followup.py`
 (20, inkl. 7 neue Phase-8-Tests), `tests/test_semantic_state.py` (12) - plus
 27 golden Testfälle (`tests/golden/state_query.json`). Volle Suite: 975
 Tests grün.
+
+## WorldModelQuery – generische Semantic-Query-Integration (2026-08-17)
+
+Ausgangsbefund: `StateQueryParser` + die drei v4.2-Query-Intents bauten
+zwar bei jedem Turn einen vollen `QueryCommand`/`QueryResult`
+(`_QUERY_EXECUTOR.execute(...)`), warfen davon aber sofort alles außer
+`.entities` weg, und die Antwort kam weiterhin aus `service_call.py`s
+`_speak_state_query`/`_speak_check_state`/`_speak_exists`-Lambdas statt
+aus dem bereits fertigen, aber noch nie live aufgerufenen
+`ResponseGenerator`. `ParseContext` trug außerdem nie ein `WorldModel`,
+obwohl `conversation.py` es längst jeden Turn baute - Geräte-Ebene
+("Welche Geräte sind im Büro?") war dadurch strukturell unerreichbar
+(keine Grammatik, kein `DeviceSnapshot`-Pfad in `QueryTarget`/
+`QueryExecutor`), und zustandslose Auflistung ("Welche Lampen sind im
+Wohnzimmer?") scheiterte am zwingenden `{state}`-Slot in
+`_parse_state_query`. Plandatei: `validated-shimmying-star.md`.
+
+**Phase A** - `WorldModel` in `ParseContext` verdrahtet: `NluEngine.match()`
+bekommt einen optionalen `world_model`-Parameter, `conversation.py` reicht
+sein pro-Turn gebautes `self._world_model` durch. Nur der frische
+Erstsatz-Pfad (`match()`); `match_followup()`/`match_reference()`/
+`match_query_followup()` bleiben unverändert.
+
+**Phase B** - `QueryTarget`/`QueryExecutor` um Device-Scope erweitert:
+neuer `QueryTargetKind`-Enum (`ENTITY`/`DEVICE`), `QueryTarget.domain`
+optional, `QueryResult.devices`-Feld. `QueryExecutor._execute_device()`
+liest `world_model.devices_in_area(...)` (Methode existierte bereits) -
+kein `world_model`/keine `area` → `EMPTY`, nie ein Crash.
+
+**Phase C** - neue Grammatik: `HassDeviceQuery`-Intent ("welche Geräte
+sind im Büro", "welche Geräte befinden sich im Büro", "was für Geräte
+sind im Büro") sowie eine zustandslose `HassStateQuery`-Satzvariante
+("welche {device_class} sind im {area}", ohne `{state}`-Slot). Neue
+`StateQueryParser._parse_device_query`-Methode; bestehende
+`_resolve_area()` wiederverwendet (Regel 6), kein auflösbares Gebiet →
+`None` (kein "alle Geräte im Haus"-Fallback - "niemals raten").
+
+**Phase D** - `ResponseGenerator` live geschaltet: alle vier
+`_parse_*`-Methoden stashen jetzt den vollen `QueryResult` (nicht nur
+`.entities`) in `frame.parameters["query_result"]`;
+`engine.py::_build_match_result()` fängt das vor dem alten
+`QUERY_INTENTS`-Lambda-Pfad ab und ruft `ResponseGenerator.respond()`.
+`_SEMANTIC_STATE_SPOKEN_DE[OPEN]` von `"offen"` auf `"geöffnet"`
+umgestellt (reines Eingabe-Synonym wird jetzt auch Ausgabewort), neue
+`_join_names()`-Hilfsfunktion für natürliche deutsche Aufzählungen ("A und
+B" / "A, B und C" statt Komma-Join), `TARGET_NOT_FOUND`/`AMBIGUOUS` jetzt
+noun-bewusst. Die drei alten `service_call.py`-Lambdas
+(`_speak_state_query`/`_speak_check_state`/`_speak_exists`) und ihre
+Helfer (`_SEMANTIC_STATE_SPOKEN_DE`/`_DEVICE_CLASS_PLURAL_DE`/
+`_state_query_noun`) werden dadurch nie mehr erreicht, bleiben aber
+bewusst stehen (dead, aber harmlos) - `QueryIntentSpec.response` ist ein
+Pflichtfeld ohne Default, `allows_empty`/`QUERY_INTENTS`-Mitgliedschaft
+selbst werden weiterhin von `validate_command()` und
+`conversation.py::QUERY_INTENT_NAMES` gelesen. Separates, risikoarmes
+Aufräumen, nicht Teil dieser Welle.
+
+**Phase E** - keine neue Struktur nötig: `QueryTarget`/`QueryFilter`/
+`QueryCommand` (Phase B) waren bereits die generische, kombinierbare
+Struktur, die der Plan verlangte. `state=ANY` entspricht
+`QueryFilter.state=None` (bereits vorhanden), kein neues `quantifier`-Feld
+(kollidiert sonst mit `SemanticFrame.quantifier`). "unten"/"oben" als
+Rollladen-Zustand und "aktiv" als Sensor-Zustand blieben bewusst
+draußen - kein Vokabular-Beleg in `_STATE_SLOT_LIST`.
+
+**Phase F** - Live-Validierung gegen die echte HA-Instanz (per
+`mcp__home-assistant__*`, kontrollierte Reproduktion statt Sensor-Toggle,
+siehe unten): alle 5 DoD-Sätze liefern mit echten Entity-/Geräte-/
+Area-Daten korrekte, zustandsabhängige Antworten.
+
+### DoD-Abgleich (Live, echte Daten dieses Hauses)
+
+| Satz | Antwort |
+|---|---|
+| Welche Fenster sind geöffnet? | "Badezimmer Fenster klein und Schlafzimmer Fenster sind geöffnet." |
+| Welche Lichter sind an? | "Abstellraum Lampe, Spiegel Licht, Segment 3, WLED-Ess-Wandpaneel Segment 1, WLED-Ess-Wandpaneel Segment 2 und WLED-Ess-Wandpaneel Segment 3 sind eingeschaltet." |
+| Welche Geräte sind im Büro? | "Dachgeschoss Licht, Treppe/Büro, Treppe/Büro, Rauchwarnmelder Büro, Rolllade Büro und Büro sind im Büro." |
+| Wie viele Fenster sind geöffnet? | "2 Fenster sind geöffnet." |
+| Welche Lampen sind im Wohnzimmer? | "Wohnzimmer Regal ist im Wohnzimmer." |
+
+Vorher/Nachher-Beweis (kontrollierte Reproduktion - reine Python-
+Objektkopie der beiden zuvor offenen Fenster-Entities auf
+`state="off"`, **keine Schreiboperation gegen HA**, siehe
+`feedback_no_invasive_verification`): dieselbe Frage "Welche Fenster sind
+geöffnet?" liefert danach "Es sind keine Fenster geöffnet." - die Antwort
+hängt nachweislich vom `state`-Feld ab, nicht von einer gecachten
+Formulierung. Kein Teil der committeten pytest-Suite (CI hat keinen
+Zugriff auf die echte HA-Instanz) - einmaliger, manueller Nachweis dieser
+Welle.
+
+### Bewusst nicht Teil dieser Welle
+
+- Zustands-gefilterte Geräte-Queries ("Welche Geräte sind gerade
+  eingeschaltet?") - ein Gerät hat keinen einzelnen Zustand, nur seine
+  Entities; bräuchte eine unbelegte Aggregationsregel.
+- "unten"/"oben"/"aktiv" als neue Zustands-Vokabeln (siehe Phase E).
+- `floor`/`capability`/`attributes` als `QueryTarget`-Felder - kein
+  treibender Satz in dieser Welle.
+- Geräte-/WorldModel-Queries als Folgefrage/Referenz
+  (`match_followup`/`match_reference`/`match_query_followup`) - nur der
+  frische Erstsatz-Pfad ist verdrahtet (Phase A).
+- Löschen der drei toten `service_call.py`-Lambdas + ihrer Helfer (siehe
+  Phase D) - separates, risikoarmes Aufräumen.
+- `AMBIGUOUS`/`TARGET_NOT_FOUND` sind in dieser Welle nur über direkte
+  `QueryExecutor`/`ResponseGenerator`-Unit-Tests real erreichbar, nicht
+  über einen gesprochenen `engine.match()`-Satz (siehe Phase D).
+- `ReasoningEngine`/`Constraints`-Vollintegration in `engine.py` bleibt
+  weiterhin unverdrahtet (bereits vor dieser Welle bewusst zurückgestellt).
+
+### Tests (dieser Welle)
+
+`tests/test_response_generator.py` (+6: `_respond_device_list` 0/1/N,
+`_respond_list_no_state` 0/1/N), `tests/test_engine_state_query.py` (+3
+Wording-Regressionen, +3 neue Device-/zustandslose End-to-End-Tests, diverse
+Wording-Updates offen→geöffnet), `tests/golden/state_query.json` (13
+Wording-Updates). Volle Suite: 1084 Tests grün (vorher 1072).

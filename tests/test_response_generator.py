@@ -1,17 +1,28 @@
 """HomeIntent v4.2.1 plan, Phase 6 (Section 12): nlu/response_generator.py's
 ResponseGenerator - QueryResult -> German text. Hass-free (mirrors
-tests/test_query_executor.py's style). Not yet wired into engine.py/
-parsers.py (Phase 7 does that) - exercised directly here.
+tests/test_query_executor.py's style).
 
-Wording pinned to match service_call.py's existing _speak_state_query/
-_speak_check_state/_speak_exists lambdas exactly - these are the same
-sentences today's production pipeline already speaks.
+WorldModelQuery wave: ResponseGenerator is now the live response source for
+StateQueryParser's intents (engine.py::_build_match_result calls respond()
+whenever frame.parameters["query_result"] is set) - the wording here is no
+longer required to mirror service_call.py's old lambdas, it is the primary
+source.
 """
 
 from __future__ import annotations
 
+from ha_nlu.areas import AreaSnapshot
+from ha_nlu.devices import DeviceSnapshot
 from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.query_command import QueryCommand, QueryFilter, QueryResult, QueryResultStatus, QueryScope, QueryTarget
+from ha_nlu.nlu.query_command import (
+    QueryCommand,
+    QueryFilter,
+    QueryResult,
+    QueryResultStatus,
+    QueryScope,
+    QueryTarget,
+    QueryTargetKind,
+)
 from ha_nlu.nlu.response_generator import ResponseGenerator
 from ha_nlu.nlu.semantic_state import SemanticState
 
@@ -35,15 +46,17 @@ def _list_command(scope: QueryScope, device_class: str = "window") -> QueryComma
 
 
 def test_target_not_found_gets_its_own_text():
-    result = QueryResult(status=QueryResultStatus.TARGET_NOT_FOUND)
-    assert respond(result) == "Das habe ich nicht gefunden."
+    command = _list_command(QueryScope.LIST)
+    result = QueryResult(status=QueryResultStatus.TARGET_NOT_FOUND, command=command)
+    assert respond(result) == "Ich konnte keine passenden Fenster finden."
 
 
 def test_ambiguous_gets_its_own_text():
+    command = _list_command(QueryScope.LIST)
     a = _window("binary_sensor.a", "A", "on")
     b = _window("binary_sensor.b", "B", "off")
-    result = QueryResult(status=QueryResultStatus.AMBIGUOUS, entities=(a, b))
-    assert respond(result) == "Das ist nicht eindeutig - mehrere Geräte passen darauf."
+    result = QueryResult(status=QueryResultStatus.AMBIGUOUS, entities=(a, b), command=command)
+    assert respond(result) == "Ich habe mehrere passende Fenster gefunden."
 
 
 # --- LIST -----------------------------------------------------------------
@@ -52,14 +65,14 @@ def test_ambiguous_gets_its_own_text():
 def test_list_empty_is_a_normal_sentence_not_an_error():
     command = _list_command(QueryScope.LIST)
     result = QueryResult(status=QueryResultStatus.EMPTY, entities=(), command=command)
-    assert respond(result) == "Keine Fenster sind offen."
+    assert respond(result) == "Es sind keine Fenster geöffnet."
 
 
 def test_list_single_match_names_the_entity():
     command = _list_command(QueryScope.LIST)
     entity = _window("binary_sensor.a", "Küchenfenster", "on")
     result = QueryResult(status=QueryResultStatus.MATCHED, entities=(entity,), command=command)
-    assert respond(result) == "Küchenfenster ist offen."
+    assert respond(result) == "Küchenfenster ist geöffnet."
 
 
 def test_list_multiple_matches_lists_names():
@@ -67,7 +80,7 @@ def test_list_multiple_matches_lists_names():
     a = _window("binary_sensor.a", "Küchenfenster", "on")
     b = _window("binary_sensor.b", "Badfenster", "on")
     result = QueryResult(status=QueryResultStatus.MATCHED, entities=(a, b), command=command)
-    assert respond(result) == "Küchenfenster, Badfenster sind offen."
+    assert respond(result) == "Küchenfenster und Badfenster sind geöffnet."
 
 
 # --- COUNT ------------------------------------------------------------------
@@ -77,7 +90,7 @@ def test_count_single_match_still_names_the_entity():
     command = _list_command(QueryScope.COUNT)
     entity = _window("binary_sensor.a", "Küchenfenster", "on")
     result = QueryResult(status=QueryResultStatus.MATCHED, entities=(entity,), command=command)
-    assert respond(result) == "Küchenfenster ist offen."
+    assert respond(result) == "Küchenfenster ist geöffnet."
 
 
 def test_count_multiple_matches_speaks_a_count_not_names():
@@ -85,7 +98,7 @@ def test_count_multiple_matches_speaks_a_count_not_names():
     a = _window("binary_sensor.a", "Küchenfenster", "on")
     b = _window("binary_sensor.b", "Badfenster", "on")
     result = QueryResult(status=QueryResultStatus.MATCHED, entities=(a, b), command=command)
-    assert respond(result) == "2 Fenster sind offen."
+    assert respond(result) == "2 Fenster sind geöffnet."
 
 
 # --- EXISTS -------------------------------------------------------------
@@ -127,7 +140,7 @@ def test_single_matched_entity_currently_satisfying_filter_says_ja():
     )
     entity = _window("binary_sensor.a", "Küchenfenster", "on")
     result = QueryResult(status=QueryResultStatus.MATCHED, entities=(entity,), command=command)
-    assert respond(result) == "Ja, Küchenfenster ist offen."
+    assert respond(result) == "Ja, Küchenfenster ist geöffnet."
 
 
 def test_single_matched_entity_not_currently_satisfying_filter_says_nein():
@@ -139,7 +152,7 @@ def test_single_matched_entity_not_currently_satisfying_filter_says_nein():
     )
     entity = _window("binary_sensor.a", "Küchenfenster", "off")
     result = QueryResult(status=QueryResultStatus.MATCHED, entities=(entity,), command=command)
-    assert respond(result) == "Nein, Küchenfenster ist nicht offen."
+    assert respond(result) == "Nein, Küchenfenster ist nicht geöffnet."
 
 
 # --- device_class-less domain falls back to the generic domain noun ------
@@ -153,4 +166,81 @@ def test_list_falls_back_to_domain_plural_noun_when_no_device_class():
         filter=QueryFilter(state=SemanticState.ON),
     )
     result = QueryResult(status=QueryResultStatus.EMPTY, entities=(), command=command)
-    assert respond(result) == "Keine Lichter sind eingeschaltet."
+    assert respond(result) == "Es sind keine Lichter eingeschaltet."
+
+
+# --- DEVICE scope (HassDeviceQuery, "welche Geräte sind im Büro?") -------
+
+
+_BUERO = AreaSnapshot(area_id="area.buero", name="Büro")
+
+
+def _device_command() -> QueryCommand:
+    return QueryCommand(
+        intent="HassDeviceQuery",
+        scope=QueryScope.LIST,
+        target=QueryTarget(kind=QueryTargetKind.DEVICE, area=_BUERO),
+        filter=QueryFilter(),
+    )
+
+
+def test_device_list_empty_names_the_area():
+    command = _device_command()
+    result = QueryResult(status=QueryResultStatus.EMPTY, devices=(), command=command)
+    assert respond(result) == "Im Büro sind keine Geräte bekannt."
+
+
+def test_device_list_single_device():
+    command = _device_command()
+    device = DeviceSnapshot(device_id="device.a", name="Schreibtischlampe")
+    result = QueryResult(status=QueryResultStatus.MATCHED, devices=(device,), command=command)
+    assert respond(result) == "Schreibtischlampe ist im Büro."
+
+
+def test_device_list_multiple_devices():
+    command = _device_command()
+    a = DeviceSnapshot(device_id="device.a", name="Schreibtischlampe")
+    b = DeviceSnapshot(device_id="device.b", name="Drucker")
+    result = QueryResult(status=QueryResultStatus.MATCHED, devices=(a, b), command=command)
+    assert respond(result) == "Schreibtischlampe und Drucker sind im Büro."
+
+
+# --- stateless listing (HassStateQuery without a {state} slot) -----------
+
+
+def test_list_no_state_empty_without_area():
+    command = QueryCommand(
+        intent="HassStateQuery",
+        scope=QueryScope.LIST,
+        target=QueryTarget(domain="light"),
+        filter=QueryFilter(state=None),
+    )
+    result = QueryResult(status=QueryResultStatus.EMPTY, entities=(), command=command)
+    assert respond(result) == "Keine Lichter gefunden."
+
+
+def test_list_no_state_single_match_with_area():
+    wohnzimmer = AreaSnapshot(area_id="area.wohnzimmer", name="Wohnzimmer")
+    command = QueryCommand(
+        intent="HassStateQuery",
+        scope=QueryScope.LIST,
+        target=QueryTarget(domain="light", area=wohnzimmer),
+        filter=QueryFilter(state=None),
+    )
+    entity = EntitySnapshot("light.a", "Stehlampe", "light", "on")
+    result = QueryResult(status=QueryResultStatus.MATCHED, entities=(entity,), command=command)
+    assert respond(result) == "Stehlampe ist im Wohnzimmer."
+
+
+def test_list_no_state_multiple_matches_with_area():
+    wohnzimmer = AreaSnapshot(area_id="area.wohnzimmer", name="Wohnzimmer")
+    command = QueryCommand(
+        intent="HassStateQuery",
+        scope=QueryScope.LIST,
+        target=QueryTarget(domain="light", area=wohnzimmer),
+        filter=QueryFilter(state=None),
+    )
+    a = EntitySnapshot("light.a", "Stehlampe", "light", "on")
+    b = EntitySnapshot("light.b", "Deckenlampe", "light", "off")
+    result = QueryResult(status=QueryResultStatus.MATCHED, entities=(a, b), command=command)
+    assert respond(result) == "Stehlampe und Deckenlampe sind im Wohnzimmer."

@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from ..areas import AreaSnapshot
+from ..devices import DeviceSnapshot
 from ..entities import EntitySnapshot
 from .semantic_state import SemanticState
 
@@ -41,6 +42,18 @@ class QueryScope(Enum):
     EXISTS = auto()  # HassExistsQuery - existence only, no per-entity detail
 
 
+class QueryTargetKind(Enum):
+    """What kind of object a query searches over - ``ENTITY`` (the only kind
+    before the WorldModelQuery wave) vs. ``DEVICE`` (HassDeviceQuery, "welche
+    Geräte sind im Büro?" - answered from the WorldModel's device list, not
+    an entity/state filter). Cut so a future third value (e.g. ``AREA``)
+    could be added without restructuring ``QueryExecutor``/``ResponseGenerator``.
+    """
+
+    ENTITY = auto()
+    DEVICE = auto()
+
+
 @dataclass(frozen=True)
 class QueryTarget:
     """What a query searches over, before any state filter is applied.
@@ -48,13 +61,15 @@ class QueryTarget:
     ``entity_id`` is only set for ``QueryScope.SINGLE`` (HassCheckState's
     resolved ``{name}``); ``device_class`` narrows ``domain`` further, same
     "domain:device_class" split ``StateQueryParser._device_class_candidates``
-    already performs.
+    already performs. ``domain`` is ``None`` for ``QueryTargetKind.DEVICE``
+    targets - devices are cross-domain, there is no single domain to name.
     """
 
-    domain: str
+    domain: str | None = None
     device_class: str | None = None
     area: AreaSnapshot | None = None
     entity_id: str | None = None
+    kind: QueryTargetKind = QueryTargetKind.ENTITY
 
 
 @dataclass(frozen=True)
@@ -95,4 +110,5 @@ class QueryResultStatus(Enum):
 class QueryResult:
     status: QueryResultStatus
     entities: tuple[EntitySnapshot, ...] = ()
+    devices: tuple[DeviceSnapshot, ...] = ()
     command: QueryCommand | None = None

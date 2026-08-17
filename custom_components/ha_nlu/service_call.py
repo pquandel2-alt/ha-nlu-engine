@@ -303,6 +303,17 @@ QUERY_INTENTS: dict[str, QueryIntentSpec] = {
         response=_speak_exists,
         allows_empty=True,
     ),
+    # WorldModelQuery wave: dead-code response (engine.py::_build_match_result's
+    # "query_result" branch intercepts HassDeviceQuery before this lambda is
+    # ever reached, same as the three lambdas above post-Phase-D). Kept only
+    # because QueryIntentSpec.response has no default and allows_empty/dict
+    # membership are still load-bearing for validate_command() and
+    # conversation.py's QUERY_INTENT_NAMES.
+    "HassDeviceQuery": QueryIntentSpec(
+        allowed_domains=frozenset(),
+        response=lambda es, params: "Das habe ich nicht verstanden.",
+        allows_empty=True,
+    ),
 }
 
 

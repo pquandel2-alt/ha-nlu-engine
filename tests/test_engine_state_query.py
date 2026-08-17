@@ -55,7 +55,7 @@ def test_state_query_list_single_match(engine):
     assert result is not None
     assert result.plan is None  # query, never calls a service (Regel 3)
     assert result.command.entities == (FENSTER_KELLER,)
-    assert result.response_text == "Fenster Keller ist offen."
+    assert result.response_text == "Fenster Keller ist geöffnet."
 
 
 def test_state_query_list_multiple_matches(engine):
@@ -70,7 +70,7 @@ def test_state_query_list_empty_is_success_not_error(engine):
     result = engine.match("welche Fenster sind geschlossen", [FENSTER_KELLER])
     assert result is not None
     assert result.command.entities == ()
-    assert result.response_text == "Keine Fenster sind geschlossen."
+    assert result.response_text == "Es sind keine Fenster geschlossen."
 
 
 def test_state_query_count_only_phrasing(engine):
@@ -83,7 +83,7 @@ def test_state_query_count_only_phrasing(engine):
     )
     assert result is not None
     assert len(result.command.entities) == 2
-    assert result.response_text == "2 Fenster sind offen."
+    assert result.response_text == "2 Fenster sind geöffnet."
 
 
 def test_state_query_area_scoped(engine):
@@ -163,19 +163,19 @@ def test_check_state_positive(engine):
     result = engine.match("ist das Fenster Keller offen", WINDOWS)
     assert result is not None
     assert result.plan is None
-    assert result.response_text == "Ja, Fenster Keller ist offen."
+    assert result.response_text == "Ja, Fenster Keller ist geöffnet."
 
 
 def test_check_state_negative(engine):
     result = engine.match("ist das Fenster Bad offen", WINDOWS)
     assert result is not None
-    assert result.response_text == "Nein, Fenster Bad ist nicht offen."
+    assert result.response_text == "Nein, Fenster Bad ist nicht geöffnet."
 
 
 def test_check_state_area_scoped(engine):
     result = engine.match("ist die Tür Eingang im Eingang offen", ALL_SENSORS)
     assert result is not None
-    assert result.response_text == "Ja, Tür Eingang ist offen."
+    assert result.response_text == "Ja, Tür Eingang ist geöffnet."
 
 
 def test_check_state_noch_filler_word(engine):
@@ -183,13 +183,13 @@ def test_check_state_noch_filler_word(engine):
     # - "Ist das Fenster Keller noch offen?" is equally idiomatic German.
     result = engine.match("ist das Fenster Keller noch offen", WINDOWS)
     assert result is not None
-    assert result.response_text == "Ja, Fenster Keller ist offen."
+    assert result.response_text == "Ja, Fenster Keller ist geöffnet."
 
 
 def test_check_state_area_scoped_noch_filler_word(engine):
     result = engine.match("ist die Tür Eingang im Eingang noch offen", ALL_SENSORS)
     assert result is not None
-    assert result.response_text == "Ja, Tür Eingang ist offen."
+    assert result.response_text == "Ja, Tür Eingang ist geöffnet."
 
 
 def test_check_state_area_scoped_word_order_does_not_pick_decoy_entity(engine):
@@ -219,7 +219,7 @@ def test_check_state_area_scoped_word_order_does_not_pick_decoy_entity(engine):
     )
     assert result is not None
     assert result.command.entities == (schlafzimmer_fenster,)
-    assert result.response_text == "Nein, Schlafzimmer Fenster ist nicht offen."
+    assert result.response_text == "Nein, Schlafzimmer Fenster ist nicht geöffnet."
 
 
 def test_check_state_unresolved_name_returns_none(engine):
@@ -316,7 +316,7 @@ def test_exists_query_ist_ein_does_not_shadow_check_state(engine):
     result = engine.match("ist das Fenster Keller offen", WINDOWS)
     assert result is not None
     assert result.frame.intent == "HassCheckState"
-    assert result.response_text == "Ja, Fenster Keller ist offen."
+    assert result.response_text == "Ja, Fenster Keller ist geöffnet."
 
 
 # --- Routing boundary -------------------------------------------------------
@@ -419,6 +419,32 @@ def test_mach_das_licht_noch_heller_remains_a_command(engine):
     assert result.plan is not None
 
 
+# --- WorldModelQuery wave: ResponseGenerator is the live response source -
+#
+# engine.match()'s response_text for these three intents now flows through
+# frame.parameters["query_result"] -> ResponseGenerator.respond() (Phase D),
+# not through service_call.py's old per-intent lambdas - verified here
+# end-to-end (not just against QueryExecutor/ResponseGenerator in isolation).
+
+
+def test_state_query_end_to_end_response_comes_from_response_generator(engine):
+    result = engine.match("welche Fenster sind offen", WINDOWS)
+    assert result is not None
+    assert result.response_text == "Fenster Keller ist geöffnet."
+
+
+def test_check_state_end_to_end_response_comes_from_response_generator(engine):
+    result = engine.match("ist das Fenster Keller offen", WINDOWS)
+    assert result is not None
+    assert result.response_text == "Ja, Fenster Keller ist geöffnet."
+
+
+def test_exists_query_end_to_end_response_comes_from_response_generator(engine):
+    result = engine.match("gibt es offene Fenster", WINDOWS)
+    assert result is not None
+    assert result.response_text == "Ja, es gibt 1 Fenster."
+
+
 # --- Phase 7 (HomeIntent v4.2.1 plan): frame.parameters["query_command"] --
 #
 # The new, additive observable surface Phase 7's non-destructive migration
@@ -426,8 +452,9 @@ def test_mach_das_licht_noch_heller_remains_a_command(engine):
 # QueryCommand it built (and ran through QueryExecutor internally) into
 # frame.parameters, reachable here via result.command.parameters - a future
 # V5/Phase 8 caller can read it back without re-deriving anything from the
-# frame's raw text references. response_text/plan stay driven by the old
-# service_call.py path (unaffected, see StateQueryParser's class docstring).
+# frame's raw text references. plan stays None (queries never call a
+# service); response_text is now driven by ResponseGenerator (WorldModelQuery
+# wave), not asserted by the tests in this block.
 
 
 def test_state_query_list_populates_query_command_parameter(engine):
@@ -479,3 +506,49 @@ def test_check_state_populates_single_scope_with_resolved_entity_id(engine):
     assert query_command.scope is QueryScope.SINGLE
     assert query_command.target.entity_id == "binary_sensor.fenster_keller"
     assert query_command.filter.state is SemanticState.OPEN
+
+
+# --- WorldModelQuery wave, Phase C: device query + stateless listing -----
+#
+# Both new sentences only resolve to a match with a WorldModel passed
+# (Phase A) - devices come from WorldModel.devices_in_area, never from the
+# entities list directly. Few targeted end-to-end tests only, per the "no
+# big new test suite" constraint - unit coverage for the 0/1/N cardinality
+# split already lives in test_response_generator.py/test_query_executor.py.
+
+SCHREIBTISCHLAMPE_BUERO = EntitySnapshot(
+    "light.schreibtischlampe", "Schreibtischlampe", "light", "on",
+    area_id="buero", area_name="Büro",
+)
+
+
+def _world_model_with_buero_device():
+    from ha_nlu.devices import DeviceSnapshot
+    from ha_nlu.world_model import build_world_model
+
+    device = DeviceSnapshot(
+        device_id="device.schreibtischlampe", name="Schreibtischlampe",
+        area_id="buero", area_name="Büro", entity_ids=("light.schreibtischlampe",),
+    )
+    return build_world_model([SCHREIBTISCHLAMPE_BUERO], [device])
+
+
+def test_device_query_end_to_end_lists_devices_in_area(engine):
+    world_model = _world_model_with_buero_device()
+    result = engine.match("welche Geräte sind im Büro", [SCHREIBTISCHLAMPE_BUERO], world_model=world_model)
+    assert result is not None
+    assert result.plan is None
+    assert result.response_text == "Schreibtischlampe ist im Büro."
+
+
+def test_device_query_without_world_model_does_not_crash(engine):
+    result = engine.match("welche Geräte sind im Büro", [SCHREIBTISCHLAMPE_BUERO])
+    assert result is not None
+    assert result.response_text == "Im Büro sind keine Geräte bekannt."
+
+
+def test_stateless_state_query_end_to_end_lists_area_scoped_matches(engine):
+    result = engine.match("welche Lichter sind im Büro", [SCHREIBTISCHLAMPE_BUERO])
+    assert result is not None
+    assert result.plan is None
+    assert result.response_text == "Schreibtischlampe ist im Büro."

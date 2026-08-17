@@ -115,10 +115,9 @@ class NluConversationEntity(
         # entities stays the exact list every match()/match_followup()/etc.
         # call below already took before the World Model Wave - devices are
         # fetched and bundled alongside it (World Model Wave, 2026-08-14) so
-        # a real WorldModel is now built every live turn, not just in tests,
-        # but no parser reads self._world_model yet (no grammar asks for
-        # device-level data today - see docs/architecture-v6.md 6d), so this
-        # is additive and changes no existing behavior.
+        # a real WorldModel is now built every live turn, not just in tests.
+        # Threaded into match() below (WorldModelQuery wave) so query parsers
+        # can resolve device-/area-level data - see docs/architecture-v6.md 6d.
         entities = build_entity_snapshots(self.hass, self.entry)
         devices = build_device_snapshots(self.hass, self.entry)
         self._world_model = assemble_world_model(entities, devices)
@@ -136,7 +135,7 @@ class NluConversationEntity(
             if result is None:
                 result = self._engine.match_query_followup(user_input.text, entities, pending)
             if result is None:
-                result = self._engine.match(user_input.text, entities)
+                result = self._engine.match(user_input.text, entities, self._world_model)
 
         if result is None:
             response.async_set_error(

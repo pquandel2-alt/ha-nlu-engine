@@ -3,7 +3,7 @@
     "text": "welche Fenster sind offen",
     "expect_match": true,
     "plan": null,
-    "response_text": "Fenster Schlafzimmer, Fenster Wohnzimmer sind offen."
+    "response_text": "Fenster Schlafzimmer und Fenster Wohnzimmer sind geöffnet."
   },
   {
     "text": "welche Fenster sind geschlossen",
@@ -15,19 +15,19 @@
     "text": "welche Fenster sind im Wohnzimmer offen",
     "expect_match": true,
     "plan": null,
-    "response_text": "Fenster Wohnzimmer ist offen."
+    "response_text": "Fenster Wohnzimmer ist geöffnet."
   },
   {
     "text": "welche Fenster sind im Eingang offen",
     "expect_match": true,
     "plan": null,
-    "response_text": "Keine Fenster sind offen."
+    "response_text": "Es sind keine Fenster geöffnet."
   },
   {
     "text": "welche Türen sind offen",
     "expect_match": true,
     "plan": null,
-    "response_text": "Tür Eingang ist offen."
+    "response_text": "Tür Eingang ist geöffnet."
   },
   {
     "text": "welche Bewegungsmelder sind eingeschaltet",
@@ -39,7 +39,7 @@
     "text": "welche Bewegungsmelder sind ausgeschaltet",
     "expect_match": true,
     "plan": null,
-    "response_text": "Keine Bewegungsmelder sind ausgeschaltet."
+    "response_text": "Es sind keine Bewegungsmelder ausgeschaltet."
   },
   {
     "text": "welche Schalter sind ausgeschaltet",
@@ -51,19 +51,19 @@
     "text": "welche Schalter sind eingeschaltet",
     "expect_match": true,
     "plan": null,
-    "response_text": "Keine Schalter sind eingeschaltet."
+    "response_text": "Es sind keine Schalter eingeschaltet."
   },
   {
     "text": "welche Rollläden sind offen",
     "expect_match": true,
     "plan": null,
-    "response_text": "Keine Rollläden sind offen."
+    "response_text": "Es sind keine Rollläden geöffnet."
   },
   {
     "text": "wie viele Fenster sind offen",
     "expect_match": true,
     "plan": null,
-    "response_text": "2 Fenster sind offen."
+    "response_text": "2 Fenster sind geöffnet."
   },
   {
     "text": "wie viele Fenster sind geschlossen",
@@ -75,7 +75,7 @@
     "text": "wie viele Türen sind offen",
     "expect_match": true,
     "plan": null,
-    "response_text": "Tür Eingang ist offen."
+    "response_text": "Tür Eingang ist geöffnet."
   },
   {
     "text": "wie viele Lichter sind eingeschaltet",
@@ -93,19 +93,19 @@
     "text": "ist das Fenster Wohnzimmer offen",
     "expect_match": true,
     "plan": null,
-    "response_text": "Ja, Fenster Wohnzimmer ist offen."
+    "response_text": "Ja, Fenster Wohnzimmer ist geöffnet."
   },
   {
     "text": "ist das Fenster Küche offen",
     "expect_match": true,
     "plan": null,
-    "response_text": "Nein, Fenster Küche ist nicht offen."
+    "response_text": "Nein, Fenster Küche ist nicht geöffnet."
   },
   {
     "text": "ist die Tür Eingang offen",
     "expect_match": true,
     "plan": null,
-    "response_text": "Ja, Tür Eingang ist offen."
+    "response_text": "Ja, Tür Eingang ist geöffnet."
   },
   {
     "text": "ist das Wohnzimmerlicht eingeschaltet",
