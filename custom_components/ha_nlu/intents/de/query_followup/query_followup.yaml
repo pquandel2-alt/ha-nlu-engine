@@ -25,3 +25,16 @@ intents:
       - sentences:
           - "und (in der|in dem|im|am|beim) {area}"
           - "und {level}"
+          # Delta follow-ups (live-bug fix, 2026-08-18): a state-query
+          # follow-up doesn't have to repeat the room - it can instead
+          # change *what*/*which state* is asked about ("Und welche Türen
+          # sind offen?", "Und welche sind geschlossen?"), or combine a
+          # target/state change with a fresh room in one sentence. These
+          # four sentences are the generic delta grammar QueryFollowupParser
+          # merges against the previous turn's QueryCommand (see its
+          # docstring) - whichever of {device_class}/{state}/{area} is
+          # *absent* here is carried over from the previous turn, never
+          # re-derived by a per-sentence special case.
+          - "und welche {device_class} sind {state}"
+          - "und welche sind {state}"
+          - "und welche {device_class} sind {state} (in der|in dem|im|am|beim) {area}"

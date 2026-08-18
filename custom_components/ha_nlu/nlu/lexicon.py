@@ -249,6 +249,124 @@ _STATE_ADJ_SLOT_LIST = TextSlotList.from_tuples(
 )
 
 
+# --- Automation Trigger Engine vocabulary (V5 Wave 1, V5.3) -----------------
+#
+# Numeric Trigger comparators ("über"/"unter"/"mehr als"/"weniger als")
+# deliberately reuse _COMPARATOR_SLOT_LIST above verbatim (Regel 6, checked
+# before adding a second list) rather than building a narrower duplicate -
+# automation_trigger_parser.py maps "gt"/"lt" onto NumericComparator.ABOVE/
+# BELOW; "gte"/"lte" ("mindestens"/"höchstens"/"nicht höher als") still
+# match the {comparator} slot grammatically (same shared list), but the
+# parser itself refuses them (returns None) rather than guessing an
+# above/below approximation - HA's own numeric_state trigger has no
+# inclusive comparator to map them onto.
+
+# {weekday} vocabulary for the Weekday Trigger - values are HA's own
+# weekday abbreviations (mon/tue/.../sun, matching the `weekday` condition's
+# vocabulary) so a later HA generator (separate future wave) can pass them
+# through unchanged. "Wochenende"/"Werktag(s)" are composite comma-joined
+# values (same trick _DEVICE_CLASS_SLOT_LIST's "domain:device_class" already
+# established) rather than a second slot - "am Wochenende" is one spoken
+# concept, not two separately-spoken days.
+_WEEKDAY_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("Montags", "mon"), ("Montag", "mon"),
+        ("Dienstags", "tue"), ("Dienstag", "tue"),
+        ("Mittwochs", "wed"), ("Mittwoch", "wed"),
+        ("Donnerstags", "thu"), ("Donnerstag", "thu"),
+        ("Freitags", "fri"), ("Freitag", "fri"),
+        ("Samstags", "sat"), ("Samstag", "sat"), ("Sonnabends", "sat"), ("Sonnabend", "sat"),
+        ("Sonntags", "sun"), ("Sonntag", "sun"),
+        ("Wochenende", "sat,sun"),
+        ("Werktags", "mon,tue,wed,thu,fri"), ("Werktag", "mon,tue,wed,thu,fri"),
+    ],
+    name="weekday",
+)
+
+# {sun_event} vocabulary for the Sun Trigger - values match HA's own `sun`
+# trigger `event` parameter (`sunrise`/`sunset`) directly, no translation
+# layer needed downstream.
+_SUN_EVENT_SLOT_LIST = TextSlotList.from_tuples(
+    [("Sonnenaufgang", "sunrise"), ("Sonnenuntergang", "sunset")],
+    name="sun_event",
+)
+
+# {presence_event} vocabulary for the Presence Trigger - "kommt nach Hause"/
+# "kommt heim" (arrival) vs. "verlässt das Haus"/"geht weg" (departure), the
+# two person-level events HomeIntent V5 Teil 2/10's examples name. Deliberately
+# only these two outcomes in this wave - "niemand mehr zuhause" (all-persons-
+# away) is a structurally different, zone-count-based sentence handled as its
+# own literal YAML sentence, not a third {presence_event} value, since it has
+# no verb phrase of its own to slot in here.
+_PRESENCE_EVENT_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("nach Hause kommt", "arrive"), ("nach Hause komme", "arrive"),
+        ("heimkommt", "arrive"), ("heimkomme", "arrive"),
+        ("das Haus verlässt", "leave"), ("das Haus verlasse", "leave"),
+        ("weggeht", "leave"), ("weggehe", "leave"),
+    ],
+    name="presence_event",
+)
+
+# {state_verb} vocabulary for the State Trigger - addendum point 2 names
+# "offen"/"geöffnet"/"geht auf"/"aufgeht" explicitly as word variants that
+# must normalize onto the same SemanticState value. _STATE_SLOT_LIST above
+# already covers the adjective form used after "wird" ("wird geöffnet");
+# this is the genuinely new piece - one-word/verb-phrase forms that don't
+# fit the "wird {state}" template at all ("das Fenster geht auf", not "das
+# Fenster wird geht auf"). Same OPEN/CLOSED/ON/OFF string values as
+# _STATE_SLOT_LIST so automation_trigger_parser.py can cast both back via
+# the same _STATE_NAME_TO_SEMANTIC dict (parsers.py) - no second mapping.
+_STATE_VERB_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("aufgeht", "OPEN"), ("geht auf", "OPEN"), ("gehen auf", "OPEN"),
+        ("zugeht", "CLOSED"), ("geht zu", "CLOSED"), ("gehen zu", "CLOSED"),
+        ("angeht", "ON"), ("geht an", "ON"), ("gehen an", "ON"),
+        ("ausgeht", "OFF"), ("geht aus", "OFF"), ("gehen aus", "OFF"),
+    ],
+    name="state_verb",
+)
+
+# {device_press_type} vocabulary for the Device Trigger - Home Assistant's
+# own `device` trigger platform (distinct from `state`: it fires on a
+# device-level event like a Zigbee/Z-Wave button press, addressed via
+# device_id + type, not entity_id + to). Values are a small, generation-
+# friendly canonical set ("pressed"/"double_pressed"/"long_pressed") -
+# mapping these onto a specific integration's real subtype vocabulary (e.g.
+# zha's "remote_button_short_press") is HA-generator work, a separate future
+# wave (see automation_model.py's TriggerModel.device_trigger_type comment).
+# Includes the trailing "wird" so the grammar sentence needs no separate
+# literal for it (same one-slot-carries-the-whole-verb-phrase trick
+# _PRESENCE_EVENT_SLOT_LIST above already uses).
+#
+# Ordering matters here (confirmed live): the sentence template is
+# "{name} {device_press_type}" with {name} an open-ended WildcardSlotList
+# immediately before this slot - same trap state_query.yaml's HassCheckState
+# comment documents for *sentences*, but here it bites *within one slot
+# list*. With "gedrückt wird" listed first, hassil accepts it as soon as
+# it's found (matching only the tail of "doppelt gedrückt wird") and lets
+# {name} swallow the leading "doppelt"/"zweimal"/"lange" as if it were part
+# of the entity name - "double_pressed"/"long_pressed" would then be
+# unreachable. Longer/more-specific entries must come first so hassil tries
+# them before the short suffix that's contained in all of them.
+_DEVICE_PRESS_TYPE_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("doppelt gedrückt wird", "double_pressed"), ("zweimal gedrückt wird", "double_pressed"),
+        ("lange gedrückt wird", "long_pressed"), ("gehalten wird", "long_pressed"),
+        ("gedrückt wird", "pressed"),
+    ],
+    name="device_press_type",
+)
+
+# {offset_direction} vocabulary for the Sun Trigger's offset phrasing ("20
+# Minuten vor Sonnenuntergang"/"... nach Sonnenaufgang") - no existing
+# before/after slot anywhere else in this codebase to reuse.
+_TIME_OFFSET_DIRECTION_SLOT_LIST = TextSlotList.from_tuples(
+    [("vor", "before"), ("nach", "after")],
+    name="offset_direction",
+)
+
+
 # --- Semantic candidate mapping (V6.3, second half) -------------------------
 #
 # The slot lists above are hassil's raw grammar vocabulary (word -> match

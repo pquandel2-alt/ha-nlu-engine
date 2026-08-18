@@ -340,3 +340,99 @@ def test_query_followup_device_query_floor_only_returns_none(engine):
     context = _context_with_world_model(engine, "welche Geräte sind im Büro", DEVICE_QUERY_ENTITIES, world_model)
     result = engine.match_query_followup("Und oben?", DEVICE_QUERY_ENTITIES, context, world_model)
     assert result is None
+
+
+# --- Live-bug regression (2026-08-18): generic delta merge -----------------
+#
+# The follow-up grammar used to only capture a *new room* ("und {area}"/"und
+# {level}") - domain/device_class/state always carried over verbatim. Real
+# conversations also change *what*/*which state* without repeating the room
+# ("Und welche Türen sind offen?", "Und welche sind geschlossen?") - these
+# fell through to a fresh match() and failed structurally (StateQueryParser
+# requires an explicit {device_class} word). QueryFollowupParser now merges
+# a generic delta (area/floor, device_class, state - each independently
+# optional) against the previous turn's QueryCommand instead of a per-
+# sentence special case - see _resolve_state_query_delta()'s docstring.
+
+ESSZIMMER_FENSTER_OFFEN = EntitySnapshot(
+    "binary_sensor.fenster_esszimmer", "Fenster Esszimmer", "binary_sensor", "on",
+    area_id="esszimmer", area_name="Esszimmer", device_class="window",
+)
+WOHNZIMMER_FENSTER_ZU = EntitySnapshot(
+    "binary_sensor.fenster_wohnzimmer", "Fenster Wohnzimmer", "binary_sensor", "off",
+    area_id="wohnzimmer", area_name="Wohnzimmer", device_class="window",
+)
+KELLER_TUER_OFFEN = EntitySnapshot(
+    "binary_sensor.tuer_keller", "Tür Keller", "binary_sensor", "on",
+    area_id="keller", area_name="Keller", device_class="door",
+)
+
+DELTA_ENTITIES = [FENSTER_KELLER, FENSTER_BAD, ESSZIMMER_FENSTER_OFFEN, WOHNZIMMER_FENSTER_ZU, KELLER_TUER_OFFEN]
+
+
+def test_query_followup_area_supplement_esszimmer(engine):
+    # Turn1 "Welche Fenster sind offen?" -> Turn2 "Und im Esszimmer?":
+    # device_class/state carry over (window/OPEN), only the area is new.
+    context = _context(engine, "welche Fenster sind offen", DELTA_ENTITIES)
+    result = engine.match_query_followup("Und im Esszimmer?", DELTA_ENTITIES, context)
+    assert result is not None
+    assert result.command.intent == "HassStateQuery"
+    query_command = result.command.parameters["query_command"]
+    assert query_command.target.device_class == "window"
+    assert query_command.filter.state.name == "OPEN"
+    assert query_command.target.area.area_id == "esszimmer"
+    assert result.command.entities == (ESSZIMMER_FENSTER_OFFEN,)
+
+
+def test_query_followup_area_supplement_wohnzimmer(engine):
+    context = _context(engine, "welche Fenster sind offen", DELTA_ENTITIES)
+    result = engine.match_query_followup("Und im Wohnzimmer?", DELTA_ENTITIES, context)
+    assert result is not None
+    query_command = result.command.parameters["query_command"]
+    assert query_command.target.device_class == "window"
+    assert query_command.target.area.area_id == "wohnzimmer"
+    # Wohnzimmer's window is closed - a normal empty answer, not a miss.
+    assert result.command.entities == ()
+
+
+def test_query_followup_state_change_only(engine):
+    # "Und welche sind geschlossen?" - state changes (OPEN -> CLOSED), no
+    # device_class/area spoken at all - both carry over from the previous
+    # turn's QueryCommand (window / no area, i.e. every room).
+    context = _context(engine, "welche Fenster sind offen", DELTA_ENTITIES)
+    result = engine.match_query_followup("Und welche sind geschlossen?", DELTA_ENTITIES, context)
+    assert result is not None
+    query_command = result.command.parameters["query_command"]
+    assert query_command.target.domain == "binary_sensor"
+    assert query_command.target.device_class == "window"
+    assert query_command.filter.state.name == "CLOSED"
+    assert query_command.target.area is None
+    assert result.command.entities == (FENSTER_BAD, WOHNZIMMER_FENSTER_ZU)
+
+
+def test_query_followup_target_change_only(engine):
+    # "Und welche Türen sind offen?" - device_class changes (window -> door),
+    # state stays OPEN (re-spoken, not carried, but same value either way),
+    # no area spoken - carries over the previous turn's (absent) area.
+    context = _context(engine, "welche Fenster sind offen", DELTA_ENTITIES)
+    result = engine.match_query_followup("Und welche Türen sind offen?", DELTA_ENTITIES, context)
+    assert result is not None
+    query_command = result.command.parameters["query_command"]
+    assert query_command.target.domain == "binary_sensor"
+    assert query_command.target.device_class == "door"
+    assert query_command.filter.state.name == "OPEN"
+    assert result.command.entities == (KELLER_TUER_OFFEN,)
+
+
+def test_query_followup_target_change_carries_over_previous_area(engine):
+    # A device_class-only delta after an area-scoped first turn keeps that
+    # area - only the explicitly-changed field (device_class) is replaced,
+    # everything else (including the room, and the LIST scope) stays.
+    context = _context(engine, "welche Fenster sind im Keller offen", DELTA_ENTITIES)
+    assert context.last_command.parameters["query_command"].target.area.area_id == "keller"
+    result = engine.match_query_followup("Und welche Türen sind offen?", DELTA_ENTITIES, context)
+    assert result is not None
+    query_command = result.command.parameters["query_command"]
+    assert query_command.target.device_class == "door"
+    assert query_command.target.area.area_id == "keller"
+    assert result.command.entities == (KELLER_TUER_OFFEN,)

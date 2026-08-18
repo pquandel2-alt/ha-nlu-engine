@@ -879,26 +879,46 @@ class QueryFollowupParser:
     *exactly* one candidate - no cardinality concept here, mirrors
     ``HassGetState``'s own always-singular shape.
 
-    **State-query branch** (Phase 8, new) - continues ``HassStateQuery``/
-    ``HassCheckState``/``HassExistsQuery`` using the previous turn's
-    ``QueryCommand`` (``frame.parameters["query_command"]``, populated by
-    ``StateQueryParser`` since Phase 7) instead of ``last_entities[0]``:
-    domain/device_class/state-filter/scope/intent all carry over verbatim,
-    only ``target.area``/``target.entity_id`` are replaced by the freshly
-    resolved area/floor - then re-run through the same ``_QUERY_EXECUTOR``
-    ``StateQueryParser`` itself uses (Regel 6, one shared classifier).
-    Unlike the ``HassGetState`` branch, a LIST/COUNT/EXISTS follow-up keeps
-    the "empty is a normal answer" rule ("Und im Bad?" -> "Keine Fenster
-    sind offen." is a real answer, not a miss) - only ``HassCheckState``
-    (``QueryScope.SINGLE``) refuses on 0 or 2+ matches, same "never guess"
-    precedent the ``HassGetState`` branch already set.
+    **State-query branch** (Phase 8, extended live-bug fix 2026-08-18) -
+    continues ``HassStateQuery``/``HassCheckState``/``HassExistsQuery``
+    using the previous turn's ``QueryCommand`` (``frame.parameters[
+    "query_command"]``, populated by ``StateQueryParser`` since Phase 7)
+    instead of ``last_entities[0]``. Generic **delta merge**, not per-
+    sentence special cases: each of area/floor, device_class, and state is
+    independently optional in this turn's utterance - whichever *is*
+    spoken (``_resolve_state_query_delta()``) overrides the matching field,
+    whichever is *absent* is carried over verbatim from ``previous``. This
+    is what makes "Und im Esszimmer?" (area only), "Und welche Türen sind
+    offen?" (device_class only, area carries over), "Und welche sind
+    geschlossen?" (state only, domain/device_class/area all carry over),
+    and a combined "Und welche Türen sind offen im Esszimmer?" all resolve
+    through the same code path instead of three separate ones - see
+    ``_resolve_state_query_delta()``'s docstring for the grammar side of
+    this. Domain/device_class changes are validated against
+    ``QUERY_INTENTS[previous.intent].allowed_domains`` (same check
+    ``StateQueryParser`` itself applies) - a device_class that doesn't fit
+    the previous intent's domain set is refused, not guessed.
+
+    Re-run through the same ``_QUERY_EXECUTOR`` ``StateQueryParser`` itself
+    uses (Regel 6, one shared classifier). Unlike the ``HassGetState``
+    branch, a LIST/COUNT/EXISTS follow-up keeps the "empty is a normal
+    answer" rule ("Und im Bad?" -> "Keine Fenster sind offen." is a real
+    answer, not a miss) - only ``HassCheckState`` (``QueryScope.SINGLE``)
+    refuses on 0 or 2+ matches, same "never guess" precedent the
+    ``HassGetState`` branch already set.
 
     {area} resolves against a fresh room lookup (this turn's ``entities``,
     not the remembered one - the whole point is a *new* room); {level}
     ("oben"/"unten") resolves a floor the same way ``QuantifierParser``'s
     own {level} slot does (v2 plan Phase 28 precedent,
-    ``resolve_floor_by_level_keyword``). Shared by both branches via
-    ``_resolve_area_or_level()``.
+    ``resolve_floor_by_level_keyword``) - same as before, a floor-only
+    follow-up is never written back into the merged ``QueryTarget`` (it
+    has no floor field, only ``area``), so it stays a same-turn-only
+    resolution, not carried into a third turn. ``HassGetState`` branch
+    keeps using the narrower ``_resolve_area_or_level()`` (no
+    device_class/state delta - domain/device_class there come from
+    ``last_entities[0]``, not a ``QueryCommand``, so there is no
+    ``QUERY_INTENTS`` entry to validate a device_class change against).
     """
 
     def __init__(self, intents: Intents) -> None:
@@ -978,6 +998,61 @@ class QueryFollowupParser:
         )
         return ParseResult(frame=frame, resolved_entities=[entity])
 
+    def _resolve_state_query_delta(
+        self, text: str, entities: list[EntitySnapshot]
+    ) -> tuple[str | None, str | None, str | None, str | None, str | None, str] | None:
+        """(area_id, area_name, floor_id, device_class_value, state_name,
+        target_text) from the delta grammar - "und {area}"/"und {level}"
+        (unchanged) plus the new "und welche {device_class} sind {state}"/
+        "und welche sind {state}"/"und welche {device_class} sind {state}
+        {area}" sentences (query_followup.yaml). Each of area-or-level,
+        device_class, and state is independently optional - exactly which
+        ones are present depends on which sentence matched, and the caller
+        (``_parse_state_query_followup``) carries over whatever is absent
+        from the previous turn's ``QueryCommand``. At least one is always
+        present, since every sentence in the grammar requires at least one
+        content slot - this method never has to guess "nothing changed".
+        ``None`` on any structural or resolution miss (unknown/ambiguous
+        room, no single oben/unten floor) - never guess.
+        """
+        slot_lists = {
+            "area": WildcardSlotList(name="area"),
+            "level": _LEVEL_SLOT_LIST,
+            "device_class": _DEVICE_CLASS_SLOT_LIST,
+            "state": _STATE_SLOT_LIST,
+        }
+        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+        if result is None or result.intent is None:
+            return None
+
+        area_id = area_name = floor_id = None
+        area_slot = result.entities.get("area")
+        if area_slot is not None:
+            area_name = _strip_locative_prepositions(str(area_slot.value))
+            if not area_name:
+                return None
+            area_resolved = resolve_area_name(area_name, entities)
+            if area_resolved.status is not AreaResolveStatus.OK:
+                return None  # room not found or ambiguous - never guess
+            area_id = area_resolved.area_id
+        else:
+            level_slot = result.entities.get("level")
+            if level_slot is not None:
+                level_resolved = resolve_floor_by_level_keyword(str(level_slot.value), entities)
+                if level_resolved.status is not FloorResolveStatus.OK:
+                    return None  # no single oben/unten floor - never guess
+                floor_id = level_resolved.floor_id
+                area_name = str(level_slot.value)
+
+        device_class_slot = result.entities.get("device_class")
+        device_class_value = str(device_class_slot.value) if device_class_slot is not None else None
+
+        state_slot = result.entities.get("state")
+        state_name = str(state_slot.value) if state_slot is not None else None
+
+        target_text = area_name if area_name is not None else text
+        return area_id, area_name, floor_id, device_class_value, state_name, target_text
+
     def _parse_state_query_followup(
         self,
         text: str,
@@ -985,26 +1060,54 @@ class QueryFollowupParser:
         previous: QueryCommand,
         world_model: WorldModel | None = None,
     ) -> ParseResult | None:
-        resolved_location = self._resolve_area_or_level(text, entities)
-        if resolved_location is None:
-            return None
-        area_id, area_name, floor_id, target_text = resolved_location
-
         if previous.target.kind is QueryTargetKind.DEVICE:
+            resolved_location = self._resolve_area_or_level(text, entities)
+            if resolved_location is None:
+                return None
+            area_id, area_name, _floor_id, _target_text = resolved_location
             return self._parse_device_query_followup(text, area_id, area_name, previous, world_model)
 
-        domain = previous.target.domain
-        device_class = previous.target.device_class
+        delta = self._resolve_state_query_delta(text, entities)
+        if delta is None:
+            return None
+        area_id, area_name, floor_id, device_class_value, state_name, target_text = delta
+
+        if device_class_value is not None:
+            domain, _, device_class_raw = device_class_value.partition(":")
+            device_class = device_class_raw if device_class_raw != "None" else None
+            spec = QUERY_INTENTS.get(previous.intent)
+            if spec is None or domain not in spec.allowed_domains:
+                return None  # never guess outside the intent's own allowed domains
+        else:
+            domain = previous.target.domain
+            device_class = previous.target.device_class
+
+        requested_state = _STATE_NAME_TO_SEMANTIC[state_name] if state_name is not None else previous.filter.state
+
+        # Area/floor mentioned this turn wins; otherwise carry over the
+        # previous turn's area verbatim (a floor is never carried forward -
+        # QueryTarget has no floor field, same "same-turn-only" precedent
+        # the pure "und {level}" sentence already established).
+        if area_id is not None or floor_id is not None:
+            final_area_id, final_area_name, final_floor_id = area_id, area_name, floor_id
+        elif previous.target.area is not None:
+            final_area_id = previous.target.area.area_id
+            final_area_name = previous.target.area.name
+            final_floor_id = None
+        else:
+            final_area_id = final_area_name = final_floor_id = None
+
         candidates = resolve_candidates(
-            entities, Constraints(domain=domain, area_id=area_id, floor_id=floor_id, device_class=device_class)
+            entities,
+            Constraints(domain=domain, area_id=final_area_id, floor_id=final_floor_id, device_class=device_class),
         )
 
-        area_snapshot = AreaSnapshot(area_id=area_id, name=area_name) if area_id is not None else None
+        area_snapshot = AreaSnapshot(area_id=final_area_id, name=final_area_name) if final_area_id is not None else None
         new_command = QueryCommand(
             intent=previous.intent,
             scope=previous.scope,
             target=QueryTarget(domain=domain, device_class=device_class, area=area_snapshot),
-            filter=previous.filter,
+            filter=QueryFilter(state=requested_state),
         )
         query_result = _QUERY_EXECUTOR.execute(new_command, candidates)
         if query_result.status in (QueryResultStatus.TARGET_NOT_FOUND, QueryResultStatus.AMBIGUOUS):
@@ -1021,10 +1124,12 @@ class QueryFollowupParser:
         frame = SemanticFrame(
             intent=previous.intent,
             target=TargetReference(text=target_text, domain=domain, device_class=device_class),
-            area=AreaReference(text=area_name, area_id=area_id, area_name=area_name) if area_id is not None else None,
+            area=AreaReference(text=final_area_name, area_id=final_area_id, area_name=final_area_name)
+            if final_area_id is not None
+            else None,
             quantifier=quantifier,
             parameters={
-                "semantic_state": previous.filter.state,
+                "semantic_state": requested_state,
                 "count_only": previous.scope is QueryScope.COUNT,
                 "device_class": device_class,
                 "domain": domain,
