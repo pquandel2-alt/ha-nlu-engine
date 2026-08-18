@@ -1,0 +1,12 @@
+language: "de"
+intents:
+  # V5 Wave 1 (V5.3) - the Presence Trigger ("wenn Philipp nach Hause
+  # kommt"/"sobald Philipp das Haus verlässt"). {presence_event} deliberately
+  # only carries arrive/leave (lexicon.py's own comment explains why a third
+  # "niemand mehr zuhause" value doesn't fit this slot) - {name} resolves to
+  # a `person` entity, never guessed onto a non-person domain (see
+  # automation_trigger_parser.py's domain check).
+  HassPresenceTrigger:
+    data:
+      - sentences:
+          - "[wenn|sobald|falls] [der|die|das] {name} {presence_event}"

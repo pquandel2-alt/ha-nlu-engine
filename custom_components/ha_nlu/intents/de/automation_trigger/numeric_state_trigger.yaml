@@ -1,0 +1,13 @@
+language: "de"
+intents:
+  # V5 Wave 1 (V5.3) - the Numeric Trigger ("wenn die Temperatur über 25 Grad
+  # steigt"). {comparator} reuses _COMPARATOR_SLOT_LIST verbatim (lexicon.py's
+  # own comment documents why no second list was created). The trailing
+  # unit word is inert filler (never captured into TriggerModel - the model
+  # stores a unitless threshold, mirroring HA's own numeric_state trigger),
+  # and the trailing verb is likewise inert - both exist only so the
+  # sentence reads as natural German.
+  HassNumericStateTrigger:
+    data:
+      - sentences:
+          - "[wenn|sobald|falls] [der|die|das] {name} {comparator} {threshold} [Grad|Watt|Prozent|kWh] [liegt|steigt|fällt]"

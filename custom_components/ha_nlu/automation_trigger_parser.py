@@ -1,0 +1,316 @@
+"""AutomationTriggerParser (HomeIntent V5 plan, Teil 2/10, V5.3): turns a
+spoken automation-trigger sentence ("wenn das Küchenfenster geöffnet wird",
+"um 20 Uhr", "bei Sonnenuntergang") into a ``nlu.automation_model.TriggerModel``.
+
+Top-level, hassil-aware - sibling of ``parsers.py``, not part of ``nlu/``
+(which stays hassil-/HA-import-free, see ``nlu/frame.py``'s docstring). Its
+own separately-compiled ``Intents`` grammar lives under
+``intents/de/automation_trigger/`` (7 YAML files, one per ``TriggerType``),
+loaded the same way every other grammar directory is (see
+``engine.py``'s ``STATE_QUERY_DIR``/``Intents.from_files()`` pattern) - just
+not yet from ``engine.py`` itself: this parser has no caller in
+``engine.py``/``conversation.py`` in this wave (the "HA-Schreibzugriff: erst
+nach explizitem Go" scope decision - parsing and modeling automation
+sentences is in scope, wiring a live turn to actually build one is not).
+
+Reuses existing resolvers/vocabulary throughout (Regel 6, "no parallel
+system") rather than inventing new ones:
+
+- ``resolve_area_scored``/``resolve_entity_scored``/``constraint_resolver``
+  - the exact same entity/area resolution every other parser uses.
+- ``_STATE_NAME_TO_SEMANTIC``/``StateQueryParser._device_class_candidates``
+  (``parsers.py``) - the State Trigger's {state}/{device_class} handling is
+  byte-for-byte the same normalization ``StateQueryParser`` already does.
+- ``WorldModel.device_for_entity()`` - the Device Trigger resolves a spoken
+  *entity* name (``devices.py`` deliberately has no spoken-device-name
+  resolver, see its own docstring) and looks up its owning device from
+  there, never a new name-based device lookup.
+
+Compound-name/two-slot target equivalence (architecture addendum): "wenn das
+Küchenfenster geöffnet wird" (a compound proper name) and "wenn das Fenster
+in der Küche geöffnet wird" (device_class + area) must produce an
+*identical* ``TriggerTarget`` when the name did no disambiguation beyond
+domain/device_class/area - see ``_build_named_target()``'s constraint
+recheck below. ``entity_id`` is only kept set when the spoken name picked
+one specific entity out of several otherwise-identical candidates (real
+disambiguation, e.g. "die Stehlampe" among several lights in one room).
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from hassil import Intents, RangeSlotList, RangeType, WildcardSlotList, recognize
+
+from .areas import AreaResolutionStatus, resolve_area_scored
+from .entities import EntitySnapshot, ResolutionStatus, resolve_entity_scored
+from .nlu.automation_model import (
+    NumericComparator,
+    SunEvent,
+    TriggerModel,
+    TriggerTarget,
+    TriggerType,
+)
+from .nlu.constraint_resolver import Constraints, resolve_candidates
+from .nlu.lexicon import (
+    _COMPARATOR_SLOT_LIST,
+    _DEVICE_CLASS_SLOT_LIST,
+    _DEVICE_PRESS_TYPE_SLOT_LIST,
+    _PRESENCE_EVENT_SLOT_LIST,
+    _STATE_SLOT_LIST,
+    _STATE_VERB_SLOT_LIST,
+    _SUN_EVENT_SLOT_LIST,
+    _TIME_OFFSET_DIRECTION_SLOT_LIST,
+    _WEEKDAY_SLOT_LIST,
+)
+from .nlu.parser import ParseContext
+from .parsers import StateQueryParser, _STATE_NAME_TO_SEMANTIC, _strip_locative_prepositions
+
+AUTOMATION_TRIGGER_DIR = Path(__file__).parent / "intents" / "de" / "automation_trigger"
+
+# Regex pre-selection scaffold for a future ``engine.py::_select_parser()``
+# wiring wave (not called from anywhere in this wave, see module docstring) -
+# mirrors the trigger-keyword/bare-time-phrase vocabulary the 7 grammars
+# above actually use.
+import re  # noqa: E402
+
+_AUTOMATION_TRIGGER_RE = re.compile(
+    r"\b(wenn|sobald|falls|bei sonnenaufgang|bei sonnenuntergang|^um \d)\b", re.IGNORECASE
+)
+
+
+class AutomationTriggerParser:
+    """Wraps the 7 ``intents/de/automation_trigger/*.yaml`` grammars (one
+    ``Intents`` object, 7 intents - same "one parser per grammar directory,
+    dispatch on intent name" shape ``StateQueryParser`` already established
+    for its own multi-intent grammar).
+
+    ``parse()`` returns a bare ``TriggerModel``, not a ``ParseResult``/
+    ``SemanticFrame`` - this parser isn't (yet) part of the
+    ``IntentParser`` protocol/pipeline ``engine.py`` drives; it produces the
+    semantic model directly, for the Condition/Action/Reasoning waves that
+    build on top of it later.
+    """
+
+    def __init__(self, intents: Intents) -> None:
+        self._intents = intents
+
+    def parse(self, text: str, context: ParseContext) -> TriggerModel | None:
+        slot_lists = {
+            "device_class": _DEVICE_CLASS_SLOT_LIST,
+            "area": WildcardSlotList(name="area"),
+            "name": WildcardSlotList(name="name"),
+            "state": _STATE_SLOT_LIST,
+            "state_verb": _STATE_VERB_SLOT_LIST,
+            "comparator": _COMPARATOR_SLOT_LIST,
+            # words=False (hassil default is True): 0-5000 is far too wide a
+            # range to also spell out in words, same combinatorial-explosion
+            # concern the plan's own research flagged - existing
+            # RangeSlotList calls elsewhere only ever cover small ranges
+            # (0-100, 5-30) and never needed this.
+            "threshold": RangeSlotList(name="threshold", start=0, stop=5000, step=1, type=RangeType.NUMBER, words=False),
+            "presence_event": _PRESENCE_EVENT_SLOT_LIST,
+            "device_press_type": _DEVICE_PRESS_TYPE_SLOT_LIST,
+            "sun_event": _SUN_EVENT_SLOT_LIST,
+            "offset_direction": _TIME_OFFSET_DIRECTION_SLOT_LIST,
+            "offset": RangeSlotList(name="offset", start=0, stop=120, step=1, type=RangeType.NUMBER),
+            "hour": RangeSlotList(name="hour", start=0, stop=23, step=1, type=RangeType.NUMBER),
+            "minute": RangeSlotList(name="minute", start=0, stop=59, step=1, type=RangeType.NUMBER),
+            "weekday": _WEEKDAY_SLOT_LIST,
+        }
+        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+        if result is None or result.intent is None:
+            return None
+
+        dispatch = {
+            "HassStateTrigger": self._parse_state_trigger,
+            "HassNumericStateTrigger": self._parse_numeric_state_trigger,
+            "HassDeviceTrigger": self._parse_device_trigger,
+            "HassPresenceTrigger": self._parse_presence_trigger,
+            "HassSunTrigger": self._parse_sun_trigger,
+            "HassTimeTrigger": self._parse_time_trigger,
+            "HassWeekdayTrigger": self._parse_weekday_trigger,
+        }
+        handler = dispatch.get(result.intent.name)
+        if handler is None:
+            return None
+        return handler(result.entities, context)
+
+    # -- shared helpers -----------------------------------------------------
+
+    @staticmethod
+    def _resolve_area(slots: dict, entities: list[EntitySnapshot]) -> tuple[str | None, str | None] | None:
+        """Same "(area_id, area_name) or None" contract every other
+        parser's ``_resolve_area`` already follows (see
+        ``StateQueryParser._resolve_area``) - ``None`` only when an {area}
+        word was captured but doesn't resolve to exactly one known room,
+        never for "no {area} slot at all"."""
+        area_slot = slots.get("area")
+        if area_slot is None:
+            return None, None
+        area_text = _strip_locative_prepositions(str(area_slot.value))
+        if not area_text:
+            return None, None
+        resolved = resolve_area_scored(area_text, entities)
+        if resolved.status is not AreaResolutionStatus.RESOLVED or resolved.area is None:
+            return None  # named but not a known/unambiguous room - never guess
+        return resolved.area.area_id, resolved.area.name
+
+    def _build_device_class_target(self, device_class_value: str, slots: dict, context: ParseContext) -> TriggerTarget | None:
+        resolved_area = self._resolve_area(slots, context.entities)
+        if resolved_area is None:
+            return None
+        area_id, _area_name = resolved_area
+        domain, device_class, _candidates = StateQueryParser._device_class_candidates(
+            device_class_value, context.entities, area_id
+        )
+        return TriggerTarget(domain=domain, device_class=device_class, area_id=area_id)
+
+    @staticmethod
+    def _build_named_target(name_slot, context: ParseContext) -> TriggerTarget | None:
+        name = _strip_locative_prepositions(str(name_slot.value))
+        resolved = resolve_entity_scored(name, context.entities, index=context.index)
+        if resolved.status is not ResolutionStatus.RESOLVED or resolved.entity is None:
+            return None  # not found or ambiguous - never guess (Regel 4)
+        entity = resolved.entity
+
+        # Semantic-equivalence check (architecture addendum): does this name
+        # do any disambiguation beyond domain/device_class/area alone? If
+        # not, this target must come out identical to the two-slot
+        # device_class+area path - so entity_id stays unset.
+        candidates = resolve_candidates(
+            context.entities,
+            Constraints(domain=entity.domain, device_class=entity.device_class, area_id=entity.area_id),
+        )
+        if len(candidates) == 1:
+            return TriggerTarget(domain=entity.domain, device_class=entity.device_class, area_id=entity.area_id)
+        return TriggerTarget(
+            domain=entity.domain,
+            device_class=entity.device_class,
+            area_id=entity.area_id,
+            entity_id=entity.entity_id,
+        )
+
+    # -- per-intent parsing ---------------------------------------------------
+
+    def _parse_state_trigger(self, slots: dict, context: ParseContext) -> TriggerModel | None:
+        state_slot = slots.get("state")
+        state_verb_slot = slots.get("state_verb")
+        if state_slot is not None:
+            semantic_state = _STATE_NAME_TO_SEMANTIC[str(state_slot.value)]
+        elif state_verb_slot is not None:
+            semantic_state = _STATE_NAME_TO_SEMANTIC[str(state_verb_slot.value)]
+        else:
+            return None  # structurally unreachable - HassStateTrigger's grammar always captures one of the two
+
+        device_class_slot = slots.get("device_class")
+        if device_class_slot is not None:
+            target = self._build_device_class_target(str(device_class_slot.value), slots, context)
+        else:
+            name_slot = slots.get("name")
+            if name_slot is None:
+                return None
+            target = self._build_named_target(name_slot, context)
+        if target is None:
+            return None
+        return TriggerModel(type=TriggerType.STATE, target=target, state=semantic_state)
+
+    def _parse_numeric_state_trigger(self, slots: dict, context: ParseContext) -> TriggerModel | None:
+        name_slot = slots.get("name")
+        comparator_slot = slots.get("comparator")
+        threshold_slot = slots.get("threshold")
+        if name_slot is None or comparator_slot is None or threshold_slot is None:
+            return None
+
+        comparator_value = str(comparator_slot.value)
+        if comparator_value == "gt":
+            comparator = NumericComparator.ABOVE
+        elif comparator_value == "lt":
+            comparator = NumericComparator.BELOW
+        else:
+            # "gte"/"lte" ("mindestens"/"höchstens"/"nicht höher als") still
+            # match {comparator} (shared _COMPARATOR_SLOT_LIST, see
+            # lexicon.py's comment) but HA's numeric_state trigger has no
+            # inclusive comparator to map them onto - refuse, never guess an
+            # approximation.
+            return None
+
+        target = self._build_named_target(name_slot, context)
+        if target is None:
+            return None
+        return TriggerModel(
+            type=TriggerType.NUMERIC_STATE, target=target, comparator=comparator, threshold=float(threshold_slot.value)
+        )
+
+    @staticmethod
+    def _parse_device_trigger(slots: dict, context: ParseContext) -> TriggerModel | None:
+        name_slot = slots.get("name")
+        press_slot = slots.get("device_press_type")
+        if name_slot is None or press_slot is None:
+            return None
+        if context.world_model is None:
+            return None  # no entity->device mapping available - never guess a device_id
+
+        name = _strip_locative_prepositions(str(name_slot.value))
+        resolved = resolve_entity_scored(name, context.entities, index=context.index)
+        if resolved.status is not ResolutionStatus.RESOLVED or resolved.entity is None:
+            return None
+        device = context.world_model.device_for_entity(resolved.entity.entity_id)
+        if device is None:
+            return None
+        return TriggerModel(type=TriggerType.DEVICE, device_id=device.device_id, device_trigger_type=str(press_slot.value))
+
+    @staticmethod
+    def _parse_presence_trigger(slots: dict, context: ParseContext) -> TriggerModel | None:
+        name_slot = slots.get("name")
+        event_slot = slots.get("presence_event")
+        if name_slot is None or event_slot is None:
+            return None
+
+        name = _strip_locative_prepositions(str(name_slot.value))
+        resolved = resolve_entity_scored(name, context.entities, domain="person", index=context.index)
+        if resolved.status is not ResolutionStatus.RESOLVED or resolved.entity is None:
+            return None
+        if resolved.entity.domain != "person":
+            return None  # named entity resolved, but isn't a person - never guess
+
+        target = TriggerTarget(domain="person", entity_id=resolved.entity.entity_id)
+        # Both {presence_event} outcomes (arrive/leave) watch the same "home"
+        # zone - lexicon.py's own comment explains why a third, zone-count-
+        # based outcome doesn't fit this slot (out of scope this wave).
+        return TriggerModel(type=TriggerType.PRESENCE, target=target, zone_id="home")
+
+    @staticmethod
+    def _parse_sun_trigger(slots: dict, context: ParseContext) -> TriggerModel | None:
+        event_slot = slots.get("sun_event")
+        if event_slot is None:
+            return None
+        sun_event = SunEvent.SUNRISE if str(event_slot.value) == "sunrise" else SunEvent.SUNSET
+
+        offset_slot = slots.get("offset")
+        direction_slot = slots.get("offset_direction")
+        offset_minutes = None
+        if offset_slot is not None and direction_slot is not None:
+            magnitude = int(offset_slot.value)
+            # HA's own `sun` trigger offset convention: negative = before the
+            # event, positive = after.
+            offset_minutes = -magnitude if str(direction_slot.value) == "before" else magnitude
+
+        return TriggerModel(type=TriggerType.SUN, sun_event=sun_event, offset_minutes=offset_minutes)
+
+    @staticmethod
+    def _parse_time_trigger(slots: dict, context: ParseContext) -> TriggerModel | None:
+        hour_slot = slots.get("hour")
+        if hour_slot is None:
+            return None
+        minute_slot = slots.get("minute")
+        minute = int(minute_slot.value) if minute_slot is not None else 0
+        return TriggerModel(type=TriggerType.TIME, time_hour=int(hour_slot.value), time_minute=minute)
+
+    @staticmethod
+    def _parse_weekday_trigger(slots: dict, context: ParseContext) -> TriggerModel | None:
+        weekday_slot = slots.get("weekday")
+        if weekday_slot is None:
+            return None
+        weekdays = tuple(str(weekday_slot.value).split(","))
+        return TriggerModel(type=TriggerType.WEEKDAY, weekdays=weekdays)

@@ -1,0 +1,15 @@
+language: "de"
+intents:
+  # V5 Wave 1 (V5.3) - the Time Trigger ("wenn es 20 Uhr ist"/"um 18 Uhr
+  # 30"). {hour}/{minute} are plain RangeSlotLists built inline in
+  # automation_trigger_parser.py (same construction TemporalParser already
+  # makes for its own {hour} slot, parsers.py) - {minute} is optional
+  # (defaults to 0) since "um 20 Uhr" is the far more common phrasing than
+  # naming an exact minute.
+  HassTimeTrigger:
+    data:
+      - sentences:
+          - "[wenn|sobald|falls] es {hour} Uhr ist"
+          - "[wenn|sobald|falls] es {hour} Uhr {minute} ist"
+          - "um {hour} Uhr"
+          - "um {hour} Uhr {minute}"

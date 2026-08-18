@@ -1,0 +1,33 @@
+language: "de"
+intents:
+  # V5 Wave 1 (V5.3) - the State Trigger. Trigger keyword ("wenn"/"sobald"/
+  # "falls") is a plain literal alternation, not a slot - none of the three
+  # words carries differentiated meaning into TriggerModel (same "inert
+  # optional literal" precedent state_query.yaml's "[denn]"/"[noch]" already
+  # set, just mandatory-alternation instead of optional-single-word).
+  #
+  # {state} (predicate form, "wird geöffnet") and {state_verb} (one-word/
+  # verb-phrase form, "geht auf"/"aufgeht") both normalize onto the same
+  # SemanticState via the shared _STATE_NAME_TO_SEMANTIC dict - two
+  # grammar-level spellings of the same semantic transition (architecture
+  # addendum point 2).
+  #
+  # Sentences are listed most-specific-first (device_class+area, then
+  # device_class alone, then the {name} wildcard last) - same ordering
+  # discipline state_query.yaml's HassCheckState/HassDeviceQuery comments
+  # document: a WildcardSlotList tried before a literal-constrained
+  # alternative would swallow it whole.
+  # "wird"/"werden" is a grammatical-number variant only (singular vs.
+  # plural subject, e.g. "das Fenster wird" vs. "die Fenster werden") - both
+  # spellings normalize onto the identical SemanticState, so both are
+  # accepted as a mandatory alternation rather than treated as separate
+  # meanings.
+  HassStateTrigger:
+    data:
+      - sentences:
+          - "[wenn|sobald|falls] [der|die|das] {device_class} [in der|in dem|im|am|beim] {area} {state} [wird|werden]"
+          - "[wenn|sobald|falls] [der|die|das] {device_class} [in der|in dem|im|am|beim] {area} {state_verb}"
+          - "[wenn|sobald|falls] [der|die|das] {device_class} {state} [wird|werden]"
+          - "[wenn|sobald|falls] [der|die|das] {device_class} {state_verb}"
+          - "[wenn|sobald|falls] [der|die|das] {name} {state} [wird|werden]"
+          - "[wenn|sobald|falls] [der|die|das] {name} {state_verb}"

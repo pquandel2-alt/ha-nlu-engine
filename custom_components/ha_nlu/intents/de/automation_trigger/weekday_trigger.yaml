@@ -1,0 +1,14 @@
+language: "de"
+intents:
+  # V5 Wave 1 (V5.3) - the Weekday Trigger. {weekday} already carries both
+  # the "Montag"/"Montags" spellings and the "Wochenende"/"Werktag(s)"
+  # comma-composite values (lexicon.py) - "am {weekday}" alone reads
+  # naturally for every one of them ("am Montag", "am Wochenende", "am
+  # Werktag"), so this grammar needs no separate composite-specific
+  # template.
+  HassWeekdayTrigger:
+    data:
+      - sentences:
+          - "[wenn|sobald|falls] {weekday} ist"
+          - "[wenn|sobald|falls] es {weekday} ist"
+          - "am {weekday}"
