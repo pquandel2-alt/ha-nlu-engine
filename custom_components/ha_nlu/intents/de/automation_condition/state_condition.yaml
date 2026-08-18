@@ -1,0 +1,30 @@
+language: "de"
+intents:
+  # V5 Wave 2 (V5.4) - the State Condition ("wenn das Fenster offen ist").
+  # Stative counterpart to automation_trigger/state_trigger.yaml's
+  # transitive "wird geöffnet" - reuses {state}/{state_verb}
+  # (_STATE_SLOT_LIST/_STATE_VERB_SLOT_LIST) verbatim, just wrapped in a
+  # stative "ist"/"sind" copula instead of the passive "wird"/"werden".
+  # Sentences are listed most-specific-first (device_class+area, then
+  # device_class alone, then the {name} wildcard last), same ordering
+  # discipline state_trigger.yaml's own comment documents - a
+  # WildcardSlotList tried before a literal-constrained alternative would
+  # swallow it whole.
+  #
+  # {state} precedes the optional copula ("... {state} [ist|sind]", not
+  # "[ist|sind] {state}") - German subordinate clauses introduced by
+  # "wenn"/"falls"/"sobald" put the finite verb last ("wenn das Fenster
+  # offen ist", never "wenn das Fenster ist offen"; confirmed via an
+  # isolated recognize() smoke test the copula-first order simply fails to
+  # match, or worse, lets the {area} wildcard swallow "ist"). Same
+  # verb-final discipline every other condition grammar this wave already
+  # uses (sun/weekday/presence/time/date).
+  HassStateCondition:
+    data:
+      - sentences:
+          - "[wenn|falls|sobald] [der|die|das] {device_class} [in der|in dem|im|am|beim] {area} {state} [ist|sind]"
+          - "[wenn|falls|sobald] [der|die|das] {device_class} [in der|in dem|im|am|beim] {area} {state_verb}"
+          - "[wenn|falls|sobald] [der|die|das] {device_class} {state} [ist|sind]"
+          - "[wenn|falls|sobald] [der|die|das] {device_class} {state_verb}"
+          - "[wenn|falls|sobald] [der|die|das] {name} {state} [ist|sind]"
+          - "[wenn|falls|sobald] [der|die|das] {name} {state_verb}"

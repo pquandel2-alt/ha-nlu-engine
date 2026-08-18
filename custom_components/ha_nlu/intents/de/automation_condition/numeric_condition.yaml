@@ -1,0 +1,17 @@
+language: "de"
+intents:
+  # V5 Wave 2 (V5.4) - the Numeric Condition ("wenn die Temperatur im
+  # Wohnzimmer unter 19 Grad liegt", the plan's own worked example).
+  # {comparator} reuses _COMPARATOR_SLOT_LIST verbatim - "gte"/"lte"
+  # ("mindestens"/"höchstens") still match grammatically but
+  # automation_condition_parser.py refuses them (same precedent
+  # numeric_state_trigger.yaml's own comment documents: HA's numeric
+  # condition has no inclusive comparator to map them onto). Unlike Wave 1's
+  # numeric_state_trigger.yaml (unit as inert bracket literal, never
+  # captured), {numeric_unit} here is a real grammar slot
+  # (_NUMERIC_UNIT_SLOT_LIST) - ConditionModel.unit is a genuine new field
+  # this wave adds.
+  HassNumericCondition:
+    data:
+      - sentences:
+          - "[wenn|falls|sobald] [der|die|das] {name} {comparator} {threshold} {numeric_unit} [liegt|beträgt|ist]"

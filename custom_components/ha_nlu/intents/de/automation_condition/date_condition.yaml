@@ -1,0 +1,20 @@
+language: "de"
+intents:
+  # V5 Wave 2 (V5.4) - the Date Condition ("am 15 August"). No calendar-date
+  # vocabulary existed anywhere in this codebase before this wave (verified
+  # via grep); {month} is new (_MONTH_SLOT_LIST, lexicon.py), {day_of_month}
+  # a RangeSlotList(1-31) built inline in automation_condition_parser.py
+  # (same construction discipline automation_trigger_parser.py already uses
+  # for {hour}/{minute}) - no year field (analog TIME: only a clock time,
+  # no date).
+  #
+  # "am {day_of_month}. {month}" (a period after the day, closer to natural
+  # written German - "am 15. August") was tried first and verified via an
+  # isolated recognize() smoke test to NOT tokenize correctly against
+  # hassil 3.11.0 (the trailing period breaks the day_of_month RangeSlotList
+  # match). This is the documented fallback without the period.
+  HassDateCondition:
+    data:
+      - sentences:
+          - "am {day_of_month} {month}"
+          - "[wenn|falls|sobald] es {day_of_month} {month} ist"

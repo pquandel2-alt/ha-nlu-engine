@@ -367,6 +367,75 @@ _TIME_OFFSET_DIRECTION_SLOT_LIST = TextSlotList.from_tuples(
 )
 
 
+# --- Automation Condition Engine vocabulary (V5 Wave 2, V5.4-V5.6) ---------
+#
+# STATE/WEEKDAY/SUN conditions reuse _STATE_SLOT_LIST/_STATE_VERB_SLOT_LIST/
+# _WEEKDAY_SLOT_LIST/_SUN_EVENT_SLOT_LIST above verbatim (Regel 6); NUMERIC/
+# TIME conditions reuse _COMPARATOR_SLOT_LIST/_TIME_OFFSET_DIRECTION_SLOT_LIST.
+# The four lists below are the genuinely new vocabulary this wave needs.
+
+# {month} vocabulary for the DATE condition - no calendar-date vocabulary
+# existed anywhere in this codebase before this wave (verified via grep).
+# Values are plain "1".."12" strings (cast to int by the parser), same
+# string-value convention _COUNT_SLOT_LIST/_COLOR_TEMP_SLOT_LIST already use.
+_MONTH_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("Januar", "1"), ("Februar", "2"), ("März", "3"), ("April", "4"),
+        ("Mai", "5"), ("Juni", "6"), ("Juli", "7"), ("August", "8"),
+        ("September", "9"), ("Oktober", "10"), ("November", "11"), ("Dezember", "12"),
+    ],
+    name="month",
+)
+
+# {numeric_unit} vocabulary for the NUMERIC condition ("... unter 19 Grad
+# liegt") - values are the exact HA unit symbols service_call.py's
+# _UNIT_SPOKEN_DE already uses as *keys* (this list is that dict's reverse:
+# spoken German word -> HA unit symbol), not reinvented here.
+_NUMERIC_UNIT_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("Grad Celsius", "°C"), ("Grad", "°C"),
+        ("Prozent", "%"),
+        ("Watt", "W"),
+        ("Kilowattstunden", "kWh"),
+        ("Hektopascal", "hPa"),
+        ("Lux", "lx"),
+    ],
+    name="numeric_unit",
+)
+
+# {presence_state} vocabulary for the PRESENCE condition - a *current-state*
+# reading ("jemand ist zuhause"/"weg"), distinct from _PRESENCE_EVENT_SLOT_LIST's
+# arrival/departure *event* verbs above (which don't fit a stative condition
+# sentence). Values match HA's own `person`/`device_tracker` state strings
+# (`home`/`not_home`) directly.
+_PRESENCE_STATE_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("zuhause", "home"), ("daheim", "home"), ("da", "home"),
+        ("weg", "not_home"), ("unterwegs", "not_home"),
+    ],
+    name="presence_state",
+)
+
+# {raw_entity_state} vocabulary for the ENTITY condition - closed-vocabulary
+# raw HA state equality for domains STATE's OPEN/CLOSED/ON/OFF vocabulary
+# structurally cannot address (locks/vacuums/media players don't speak
+# open/closed/on/off). Values match HA's own state strings for these
+# domains directly (`lock`: locked/unlocked, `vacuum`: docked/cleaning/
+# paused, `media_player`: playing/paused) - "pausiert" is deliberately one
+# entry shared by vacuum and media_player, since both domains use the
+# identical HA state string "paused" for it.
+_RAW_ENTITY_STATE_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("verriegelt", "locked"), ("entriegelt", "unlocked"),
+        ("dockt", "docked"), ("angedockt", "docked"),
+        ("reinigt", "cleaning"), ("läuft", "cleaning"),
+        ("pausiert", "paused"),
+        ("spielt", "playing"),
+    ],
+    name="raw_entity_state",
+)
+
+
 # --- Semantic candidate mapping (V6.3, second half) -------------------------
 #
 # The slot lists above are hassil's raw grammar vocabulary (word -> match

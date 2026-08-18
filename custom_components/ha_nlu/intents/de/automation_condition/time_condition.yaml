@@ -1,0 +1,19 @@
+language: "de"
+intents:
+  # V5 Wave 2 (V5.4) - the Time Condition ("wenn es nach 22 Uhr ist"/"nach
+  # 22 Uhr"). {time_comparator} reuses _TIME_OFFSET_DIRECTION_SLOT_LIST
+  # ("vor"/"nach" -> before/after), the same list the Sun Trigger's offset
+  # phrasing already established - no second before/after vocabulary
+  # invented (lexicon.py dict key differs from the list's own internal
+  # name, hassil only cares about the dict key it's referenced under).
+  # Trailing "ist" is optional so a bare "nach 22 Uhr" leaf (no subject/
+  # copula of its own - e.g. as the second half of a nested "... oder nach
+  # 22 Uhr)" expression, where the shared "es ... ist" only appears once)
+  # still matches on its own.
+  HassTimeCondition:
+    data:
+      - sentences:
+          - "[wenn|falls|sobald] es {time_comparator} {hour} Uhr [ist]"
+          - "[wenn|falls|sobald] es {time_comparator} {hour} Uhr {minute} [ist]"
+          - "{time_comparator} {hour} Uhr"
+          - "{time_comparator} {hour} Uhr {minute}"

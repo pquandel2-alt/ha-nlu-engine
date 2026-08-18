@@ -44,6 +44,7 @@ from .nlu.validator import validate_command
 from .parsers import (
     AreaQueryParser,
     ClimateExtendedParser,
+    CommandFollowupParser,
     ComparisonQueryParser,
     ContextFollowupParser,
     FanExtendedParser,
@@ -83,6 +84,7 @@ TEMPORAL_DIR = INTENTS_DIR / "temporal"
 AREA_QUERY_DIR = INTENTS_DIR / "area_query"
 QUERY_FOLLOWUP_DIR = INTENTS_DIR / "query_followup"
 STATE_QUERY_DIR = INTENTS_DIR / "state_query"
+COMMAND_FOLLOWUP_DIR = INTENTS_DIR / "command_followup"
 
 # Sentences containing a temporal-modifier keyword ("Minute(n)"/"Stunde(n)"/
 # "Uhr"/"morgen früh"/"heute Abend"/...) are routed to TemporalParser's
@@ -371,6 +373,7 @@ class NluEngine:
         area_query_dir: Path = AREA_QUERY_DIR,
         query_followup_dir: Path = QUERY_FOLLOWUP_DIR,
         state_query_dir: Path = STATE_QUERY_DIR,
+        command_followup_dir: Path = COMMAND_FOLLOWUP_DIR,
     ) -> None:
         yaml_files = sorted(intents_dir.glob("*.yaml"))
         if not yaml_files:
@@ -437,6 +440,11 @@ class NluEngine:
             raise FileNotFoundError(f"No intent YAML files found in {state_query_dir}")
         state_query_intents: Intents = Intents.from_files(state_query_yaml_files)
 
+        command_followup_yaml_files = sorted(command_followup_dir.glob("*.yaml"))
+        if not command_followup_yaml_files:
+            raise FileNotFoundError(f"No intent YAML files found in {command_followup_dir}")
+        command_followup_intents: Intents = Intents.from_files(command_followup_yaml_files)
+
         self._single_parser = SingleTargetParser(intents)
         self._quantifier_parser = QuantifierParser(quantifier_intents)
         self._percentage_parser = PercentageParser(percentage_intents)
@@ -450,6 +458,7 @@ class NluEngine:
         self._area_query_parser = AreaQueryParser(area_query_intents)
         self._query_followup_parser = QueryFollowupParser(query_followup_intents)
         self._state_query_parser = StateQueryParser(state_query_intents)
+        self._command_followup_parser = CommandFollowupParser(command_followup_intents)
 
     def _select_parser(self, text: str):
         if _TEMPORAL_RE.search(text):
@@ -650,6 +659,36 @@ class NluEngine:
         result = self._query_followup_parser.parse(
             normalized, entities, context.last_entities, previous_query_command, world_model
         )
+        if result is None:
+            return None
+        return self._build_match_result(result, entities, context)
+
+    def match_command_followup(
+        self, text: str, entities: list[EntitySnapshot], context: ConversationContext | None
+    ) -> MatchResult | None:
+        """Continue a previous *command* (not query) with a generic
+        follow-up ("Und jetzt wieder aus." after "Schalte das Studio ein.",
+        "Und im Schlafzimmer auch." after "Mach das Licht im Wohnzimmer
+        an.") - live conversation-context bug fix 2026-08-18. Tried by
+        ``conversation.py`` alongside ``match_followup()``/
+        ``match_reference()``/``match_query_followup()``, before the normal
+        ``match()`` - same "a leading 'und ...' never matches ``match()``'s
+        own grammars anyway" reasoning ``match_query_followup()`` already
+        documents for itself.
+
+        Gated on ``context.last_command.intent`` being one of the 5 basic
+        command intents (``INTENTS``) - the only ones ``CommandFollowupParser``
+        can meaningfully continue (either by inverting via
+        ``service_call.ACTION_OPPOSITES``, or by keeping the same intent for
+        a new area). Query-only previous turns (``QUERY_INTENTS``) are left
+        to ``match_query_followup()`` instead - strict command/query context
+        separation, never mixed.
+        """
+        if context is None or context.last_command is None or context.last_command.intent not in INTENTS:
+            return None
+
+        normalized = normalize(text)
+        result = self._command_followup_parser.parse(normalized, entities, context.last_command)
         if result is None:
             return None
         return self._build_match_result(result, entities, context)

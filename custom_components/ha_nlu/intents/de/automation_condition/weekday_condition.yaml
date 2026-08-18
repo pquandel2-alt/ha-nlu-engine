@@ -1,0 +1,16 @@
+language: "de"
+intents:
+  # V5 Wave 2 (V5.4) - the Weekday Condition ("wenn heute Samstag ist").
+  # {weekday} reuses _WEEKDAY_SLOT_LIST verbatim, including its
+  # "Wochenende"/"Werktag(s)" comma-composite values. Trailing "ist" is
+  # optional (not just the leading "wenn/falls/sobald") specifically so a
+  # coordinated "Wenn Samstag ODER Sonntag ist" splits into leaves
+  # "Wenn Samstag" (no trailing "ist" - the shared copula only appears once,
+  # at the end of the whole coordination) and "Sonntag ist", and both still
+  # parse on their own.
+  HassWeekdayCondition:
+    data:
+      - sentences:
+          - "[wenn|falls|sobald] heute {weekday} [ist]"
+          - "[wenn|falls|sobald] {weekday} [ist]"
+          - "am {weekday}"

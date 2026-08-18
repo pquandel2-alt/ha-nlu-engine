@@ -1,0 +1,37 @@
+language: "de"
+lists:
+  # "es ist dunkel"/"es ist hell" (judgment call - the plan's SUN row names
+  # {sun_comparator}/_SUN_EVENT_SLOT_LIST but not this idiom explicitly).
+  # The plan's own AND worked example ("Wenn es dunkel ist UND jemand
+  # zuhause ist" -> AND[SUN_BELOW_HORIZON, PRESENCE_HOME]) needs a SUN leaf
+  # for "es dunkel ist" specifically - a phrase that never names
+  # "vor"/"nach Sonnenaufgang/-untergang" explicitly, so the
+  # {sun_comparator}+{sun_event} sentence below can't reach it. Modeled as
+  # "after sunset"/"after sunrise" - the practical equivalent of
+  # "dark"/"light" HA's own before/after-sun condition semantics already
+  # express, no new ConditionModel field needed. A small, file-local
+  # TextSlotList (not lexicon.py) - same "declared directly in this
+  # grammar's own lists:" precedent device_condition.yaml uses for its
+  # {device_condition_type}.
+  daylight:
+    values:
+      - in: "dunkel"
+        out: "dark"
+      - in: "hell"
+        out: "light"
+intents:
+  # V5 Wave 2 (V5.4) - the Sun Condition. {sun_event} reuses
+  # _SUN_EVENT_SLOT_LIST verbatim. {sun_comparator} reuses
+  # _TIME_OFFSET_DIRECTION_SLOT_LIST ("vor"/"nach" -> before/after) under a
+  # different dict key than the Time Condition's {time_comparator} uses the
+  # exact same list under - HA's own `sun` condition schema (before/after +
+  # optional offset) differs from Wave 1's `sun` *trigger* schema (bare
+  # event, optionally offset - no explicit before/after), so this condition
+  # always requires an explicit before/after word, not an optional one.
+  HassSunCondition:
+    data:
+      - sentences:
+          - "[wenn|falls|sobald] es {sun_comparator} {sun_event} [ist]"
+          - "[wenn|falls|sobald] {offset} Minuten {sun_comparator} {sun_event}"
+          - "bei {sun_event}"
+          - "[wenn|falls|sobald] es {daylight} [ist]"

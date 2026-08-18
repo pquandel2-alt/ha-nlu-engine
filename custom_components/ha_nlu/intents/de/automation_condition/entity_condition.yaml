@@ -1,0 +1,18 @@
+language: "de"
+intents:
+  # V5 Wave 2 (V5.4) - the Entity Condition ("wenn die Tür verriegelt ist"/
+  # "wenn der Saugroboter reinigt"). {raw_state} (new this wave,
+  # _RAW_ENTITY_STATE_SLOT_LIST) is closed-vocabulary raw HA state equality
+  # for non-binary domains (locks/vacuums/media players) STATE's OPEN/
+  # CLOSED/ON/OFF vocabulary structurally cannot address (per-plan
+  # AskUserQuestion decision). "[ist]" is optional since the list mixes
+  # participle values needing a copula ("verriegelt") and plain
+  # present-tense verb values that don't ("reinigt") - see
+  # _RAW_ENTITY_STATE_SLOT_LIST's own lexicon.py comment for both forms.
+  # entity_id is mandatory here (never a device_class+area target like
+  # STATE/NUMERIC) - resolve_entity_scored must land on exactly one
+  # candidate or the whole condition refuses.
+  HassEntityCondition:
+    data:
+      - sentences:
+          - "[wenn|falls|sobald] [der|die|das] {name} [ist] {raw_state}"

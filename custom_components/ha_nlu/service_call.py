@@ -79,6 +79,24 @@ INTENTS: dict[str, IntentSpec] = {
 }
 
 
+# Central, deterministic action-inversion table (live conversation-context
+# follow-up fix, 2026-08-18): "Und jetzt wieder aus." after "Schalte das
+# Studio ein." must resolve to the *opposite* of the previous command's
+# intent, not fail as an unrelated fresh sentence (see
+# ``parsers.CommandFollowupParser``). Only intents with one semantically
+# unambiguous opposite are listed here - ``HassToggle`` is deliberately
+# absent: its own effect already depends on current state, so "the
+# opposite of toggle" has no single fixed answer. A follow-up whose
+# previous command isn't in this table falls through to the normal "nicht
+# verstanden" response instead of guessing (Regel 4).
+ACTION_OPPOSITES: dict[str, str] = {
+    "HassTurnOn": "HassTurnOff",
+    "HassTurnOff": "HassTurnOn",
+    "HassOpenCover": "HassCloseCover",
+    "HassCloseCover": "HassOpenCover",
+}
+
+
 @dataclass(frozen=True)
 class PercentIntentSpec:
     """Separate from IntentSpec: build/response take an extra percent value,

@@ -19,8 +19,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, auto
+from typing import TYPE_CHECKING
 
 from .semantic_state import SemanticState
+
+if TYPE_CHECKING:
+    # V5 Wave 2 (V5.4-V5.6): condition_model.py imports TriggerTarget/
+    # NumericComparator/SunEvent from *this* module, so a real (non-
+    # TYPE_CHECKING) import here would cycle. `from __future__ import
+    # annotations` above means this annotation is never evaluated at
+    # runtime, so the cycle only exists for type checkers, not at import
+    # time.
+    from .condition_model import ConditionNode
 
 
 class TriggerType(Enum):
@@ -102,13 +112,15 @@ class TriggerModel:
 
 @dataclass(frozen=True)
 class AutomationModel:
-    """The semantic model/AST for one automation request. ``conditions``/
-    ``actions`` are reserved for later V5 waves (Teil 3-4/10) - always
-    ``()`` in Wave 1, never read or written beyond that.
+    """The semantic model/AST for one automation request. ``conditions``
+    is populated from V5 Wave 2 onward (``ConditionNode`` trees, see
+    ``condition_model.py``); ``actions`` stays reserved for a later wave
+    (Teil 4/10) - always ``()`` until then, never read or written beyond
+    that.
     """
 
     triggers: tuple[TriggerModel, ...] = ()
-    conditions: tuple[object, ...] = ()
+    conditions: tuple["ConditionNode", ...] = ()
     actions: tuple[object, ...] = ()
     source_text: str = ""
 
@@ -165,6 +177,17 @@ def render_automation_tree(model: AutomationModel) -> str:
         lines.append(f"  triggers ({len(model.triggers)}):")
         for trigger in model.triggers:
             lines.append(f"    - {_render_trigger(trigger)}")
-    lines.append(f"  conditions: {len(model.conditions)}")
+    if not model.conditions:
+        lines.append("  conditions: 0")
+    else:
+        # Function-local import (V5 Wave 2): avoids a module-level import
+        # cycle back to condition_model.py, which itself imports
+        # TriggerTarget/NumericComparator/SunEvent from this module.
+        from .condition_model import render_condition_tree
+
+        lines.append(f"  conditions ({len(model.conditions)}):")
+        for condition in model.conditions:
+            for line in render_condition_tree(condition, indent=2).splitlines():
+                lines.append(line)
     lines.append(f"  actions: {len(model.actions)}")
     return "\n".join(lines)

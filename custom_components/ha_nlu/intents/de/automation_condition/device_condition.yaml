@@ -1,0 +1,29 @@
+language: "de"
+lists:
+  # is_on/is_off declared as literal text-slot values directly in this
+  # file's own "lists:" section, not lexicon.py (per the task's own
+  # instruction) - the smallest/last of the 9 condition types, deliberately
+  # not promoted to a shared vocabulary list since no other condition/
+  # trigger grammar needs it. Trailing "ist" is baked into each slot value,
+  # same trick _DEVICE_PRESS_TYPE_SLOT_LIST's own lexicon.py comment
+  # documents for its trailing "wird".
+  device_condition_type:
+    values:
+      - in: "eingeschaltet ist"
+        out: "is_on"
+      - in: "an ist"
+        out: "is_on"
+      - in: "ausgeschaltet ist"
+        out: "is_off"
+      - in: "aus ist"
+        out: "is_off"
+intents:
+  # V5 Wave 2 (V5.4) - the Device Condition ("wenn der Wohnzimmer Taster
+  # eingeschaltet ist"). {name} resolves to an *entity* via the existing
+  # resolver, then automation_condition_parser.py looks up that entity's
+  # owning device via WorldModel.device_for_entity() - same "no name-based
+  # device lookup" precedent device_trigger.yaml's own comment documents.
+  HassDeviceCondition:
+    data:
+      - sentences:
+          - "[wenn|falls|sobald] [der|die|das] {name} {device_condition_type}"

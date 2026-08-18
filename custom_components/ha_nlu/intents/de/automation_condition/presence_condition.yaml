@@ -1,0 +1,26 @@
+language: "de"
+intents:
+  # V5 Wave 2 (V5.4) - the Presence Condition ("wenn Philipp zuhause ist"/
+  # "wenn jemand zuhause ist"). {presence_state} (new this wave,
+  # lexicon.py) is a *current-state* reading ("zuhause"/"weg"), distinct
+  # from Wave 1's {presence_event} arrival/departure verbs which don't fit
+  # a stative condition sentence at all.
+  #
+  # "niemand [mehr] [zuhause|da|daheim] [ist]" is its own literal sentence -
+  # deliberately no {presence_state}/{name} slot captured at all, so
+  # automation_condition_parser.py's _parse_presence_condition() can detect
+  # it by the absence of both slots and build a NOT-wrapped ConditionNode
+  # (lexikalische Negation, per the architecture addendum) instead of a
+  # plain leaf - never a separate ``negated: bool`` flag.
+  #
+  # Listed most-specific-first (same discipline state_condition.yaml's own
+  # comment documents): the two literal "jemand"/"niemand" sentences must
+  # come before the generic {name} wildcard sentence, or {name} (a
+  # WildcardSlotList) swallows "jemand"/"niemand" whole and the specific
+  # sentences become unreachable.
+  HassPresenceCondition:
+    data:
+      - sentences:
+          - "[wenn|falls|sobald] niemand [mehr] [zuhause|da|daheim] [ist]"
+          - "[wenn|falls|sobald] jemand {presence_state} [ist]"
+          - "[wenn|falls|sobald] [der|die|das] {name} {presence_state} [ist]"

@@ -41,12 +41,14 @@ from .nlu.lexicon import (
     _TEMPORAL_RELATIVE_SLOT_LIST,
     _TEMPORAL_UNIT_SLOT_LIST,
 )
+from .nlu.command import SemanticCommand
 from .nlu.parser import AmbiguousReference, ClarificationRequest, ParseContext, ParseResult
 from .nlu.query_command import QueryCommand, QueryFilter, QueryResultStatus, QueryScope, QueryTarget, QueryTargetKind
 from .world_model import WorldModel
 from .nlu.query_executor import QueryExecutor
 from .nlu.semantic_state import SemanticState
 from .service_call import (
+    ACTION_OPPOSITES,
     CLIMATE_EXTENDED_INTENTS,
     FAN_EXTENDED_INTENTS,
     INTENTS,
@@ -1180,6 +1182,108 @@ class QueryFollowupParser:
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=[])
+
+
+class CommandFollowupParser:
+    """Wraps the "und wieder aus"/"und im {area} auch" command-follow-up
+    grammar (``intents/de/command_followup/command_followup.yaml``) - live
+    conversation-context bug fix 2026-08-18: "Schalte das Studio ein." ->
+    "Und jetzt wieder aus." must resolve to TURN_OFF/Studio, not fail as an
+    unrelated fresh sentence.
+
+    Structurally distinct from every other parser here the same way
+    ``QueryFollowupParser`` is: resolution happens against the previous
+    turn's already-built ``SemanticCommand`` (not a freshly spoken name), so
+    this parser takes ``last_command`` as a plain parameter rather than
+    folding it into ``ParseContext``. One ``recognize()`` call, then
+    dispatch on which of the grammar's two intents matched - never two
+    separate ``recognize()`` calls for what is structurally one decision.
+
+    **``HassCommandFollowupInvert``** ("und wieder aus", "mach es wieder
+    an") - the target (domain + area + resolved entities) is carried over
+    *verbatim* from ``last_command.entities``/``last_command.area``; only
+    the intent changes, via the central ``service_call.ACTION_OPPOSITES``
+    table. A previous intent with no listed opposite (e.g. ``HassToggle``,
+    deliberately absent from that table - its own effect already depends on
+    current state, so "the opposite of toggle" has no single fixed answer)
+    makes this branch refuse (``None``) rather than guess - falls through to
+    the normal "nicht verstanden" response (Regel 4).
+
+    **``HassCommandFollowupSameActionNewArea``** ("und im {area} auch") -
+    the *same* intent as ``last_command`` (no inversion), re-targeted at a
+    freshly resolved area using the previous command's domain. "auch" here
+    signals continuation, not inversion - deliberately a separate grammar
+    intent from the "wieder" sentences above so the two are never confused
+    (regression Test F: "Und im Schlafzimmer auch." is a *second,
+    independent* command, not an inversion of the first).
+    """
+
+    def __init__(self, intents: Intents) -> None:
+        self._intents = intents
+
+    def parse(
+        self, text: str, entities: list[EntitySnapshot], last_command: SemanticCommand
+    ) -> ParseResult | None:
+        slot_lists = {"area": WildcardSlotList(name="area")}
+        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+        if result is None or result.intent is None:
+            return None
+        if result.intent.name == "HassCommandFollowupInvert":
+            return self._parse_invert(text, last_command)
+        if result.intent.name == "HassCommandFollowupSameActionNewArea":
+            return self._parse_same_action_new_area(text, entities, result, last_command)
+        return None
+
+    def _parse_invert(self, text: str, last_command: SemanticCommand) -> ParseResult | None:
+        opposite_intent = ACTION_OPPOSITES.get(last_command.intent)
+        if opposite_intent is None:
+            return None  # no unique opposite - never guess (Regel 4)
+        if not last_command.entities:
+            return None
+        domain = last_command.entities[0].domain
+        area = last_command.area
+        frame = SemanticFrame(
+            intent=opposite_intent,
+            target=TargetReference(text=domain, domain=domain),
+            area=AreaReference(text=area.name, area_id=area.area_id) if area is not None else None,
+            quantifier=Quantifier(kind="all") if len(last_command.entities) > 1 else None,
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=list(last_command.entities))
+
+    def _parse_same_action_new_area(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        result,
+        last_command: SemanticCommand,
+    ) -> ParseResult | None:
+        if not last_command.entities:
+            return None
+        domain = last_command.entities[0].domain
+
+        area_slot = result.entities.get("area")
+        if area_slot is None:
+            return None
+        area_name = _strip_locative_prepositions(str(area_slot.value))
+        if not area_name:
+            return None
+        area_resolved = resolve_area_name(area_name, entities)
+        if area_resolved.status is not AreaResolveStatus.OK:
+            return None  # unknown or ambiguous room - never guess
+
+        candidates = resolve_candidates(entities, Constraints(domain=domain, area_id=area_resolved.area_id))
+        if not candidates:
+            return None  # nothing of the previous command's domain in the new area - never guess
+
+        frame = SemanticFrame(
+            intent=last_command.intent,
+            target=TargetReference(text=domain, domain=domain),
+            area=AreaReference(text=area_name, area_id=area_resolved.area_id),
+            quantifier=Quantifier(kind="all") if len(candidates) > 1 else None,
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=candidates)
 
 
 # Custom, non-HA-core intent names for the "die anderen" complement grammar
