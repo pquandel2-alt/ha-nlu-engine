@@ -97,6 +97,18 @@ intents:
   HassDeviceQuery:
     data:
       - sentences:
+          # Follow-up wave, Phase 4: state-filtered device listing ("Welche
+          # Geräte sind eingeschaltet im Büro?") - reuses {state} (the same
+          # closed vocabulary/slot HassStateQuery already uses), not new
+          # device-query-specific words. Aggregation rule ("at least 1 of
+          # the device's entities matches") lives in
+          # QueryExecutor._execute_device, not here. MUST be listed before
+          # the plain area-only template below: {area} is a WildcardSlotList
+          # (see StateQueryParser.parse()'s slot_lists), so a bare "welche
+          # geräte sind ... {area}" tried first would swallow "eingeschaltet
+          # im Büro" whole as the area text - same ordering trap this file's
+          # HassCheckState/HassExistsQuery comments already document.
+          - "welche geräte sind {state} [in der|in dem|im|am|beim] {area}"
           - "welche geräte sind [in der|in dem|im|am|beim] {area}"
           - "welche geräte befinden sich [in der|in dem|im|am|beim] {area}"
           - "was für geräte sind [in der|in dem|im|am|beim] {area}"

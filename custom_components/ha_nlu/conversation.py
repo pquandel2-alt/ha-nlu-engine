@@ -133,7 +133,9 @@ class NluConversationEntity(
             if result is None:
                 result = self._engine.match_reference(user_input.text, entities, pending)
             if result is None:
-                result = self._engine.match_query_followup(user_input.text, entities, pending)
+                result = self._engine.match_query_followup(
+                    user_input.text, entities, pending, self._world_model
+                )
             if result is None:
                 result = self._engine.match(user_input.text, entities, self._world_model)
 

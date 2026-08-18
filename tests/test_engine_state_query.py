@@ -552,3 +552,141 @@ def test_stateless_state_query_end_to_end_lists_area_scoped_matches(engine):
     assert result is not None
     assert result.plan is None
     assert result.response_text == "Schreibtischlampe ist im Büro."
+
+
+# --- Live incident (2026-08): "Sind Fenster offen?" etc. always returned ---
+# empty on a real HA instance despite real open/closed window/door entities
+# existing and being correctly exposed. Root cause turned out to be entirely
+# outside this pipeline (config_flow.py froze a one-time entity snapshot at
+# config-entry setup - see its module docstring) - these five cases pin down
+# that the query pipeline itself was never at fault, given a properly
+# populated entity list, so a regression here would mean a *new* bug, not
+# a recurrence of the live one.
+
+WOHNZIMMER_FENSTER_OFFEN = EntitySnapshot(
+    "binary_sensor.wohnzimmer_fenster", "Wohnzimmer Fenster", "binary_sensor", "on",
+    area_id="wohnzimmer", area_name="Wohnzimmer", device_class="window",
+)
+KUECHE_FENSTER_ZU = EntitySnapshot(
+    "binary_sensor.kueche_fenster", "Küche Fenster", "binary_sensor", "off",
+    area_id="kueche", area_name="Küche", device_class="window",
+)
+HAUSTUER = EntitySnapshot(
+    "binary_sensor.haustuer", "Haustür", "binary_sensor", "on", device_class="door",
+)
+WINDOW_DOOR_ENTITIES = [WOHNZIMMER_FENSTER_OFFEN, KUECHE_FENSTER_ZU, HAUSTUER]
+
+
+def test_live_incident_sind_fenster_offen(engine):
+    result = engine.match("sind Fenster offen", WINDOW_DOOR_ENTITIES)
+    assert result is not None
+    assert result.response_text == "Wohnzimmer Fenster ist geöffnet."
+
+
+def test_live_incident_welche_fenster_sind_im_wohnzimmer_offen(engine):
+    result = engine.match("welche Fenster sind im Wohnzimmer offen", WINDOW_DOOR_ENTITIES)
+    assert result is not None
+    assert result.response_text == "Wohnzimmer Fenster ist geöffnet."
+
+
+def test_live_incident_welche_fenster_sind_geschlossen(engine):
+    result = engine.match("welche Fenster sind geschlossen", WINDOW_DOOR_ENTITIES)
+    assert result is not None
+    assert result.response_text == "Küche Fenster ist geschlossen."
+
+
+def test_live_incident_gibt_es_fenster(engine):
+    result = engine.match("gibt es Fenster", WINDOW_DOOR_ENTITIES)
+    assert result is not None
+    assert result.response_text == "Ja, es gibt 2 Fenster."
+
+
+def test_live_incident_gibt_es_tueren(engine):
+    result = engine.match("gibt es Türen", WINDOW_DOOR_ENTITIES)
+    assert result is not None
+    assert result.response_text == "Ja, es gibt 1 Türen."
+
+
+# --- Follow-up wave, Phase 4: state-filtered device queries ("Welche -------
+# Geräte sind eingeschaltet im Büro?") - the aggregation rule is "at least 1
+# of the device's entities matches", not "all of them" (user decision, see
+# plan). LAMPE_BUERO (single entity, ON) proves the plain 1-device case;
+# DOPPELSTECKDOSE_BUERO (two entities, only one ON) is the concrete proof of
+# the "at least 1" rule itself, not just the 0/N cardinality split.
+
+LAMPE_BUERO = EntitySnapshot(
+    "light.lampe_buero", "Lampe", "light", "on", area_id="buero", area_name="Büro",
+)
+STECKDOSE_BUERO_A = EntitySnapshot(
+    "switch.doppelsteckdose_a", "Doppelsteckdose A", "switch", "on",
+    area_id="buero", area_name="Büro",
+)
+STECKDOSE_BUERO_B = EntitySnapshot(
+    "switch.doppelsteckdose_b", "Doppelsteckdose B", "switch", "off",
+    area_id="buero", area_name="Büro",
+)
+FERNSEHER_BUERO = EntitySnapshot(
+    "switch.fernseher", "Fernseher", "switch", "off", area_id="buero", area_name="Büro",
+)
+
+
+def _world_model_with_state_filtered_devices():
+    from ha_nlu.devices import DeviceSnapshot
+    from ha_nlu.world_model import build_world_model
+
+    entities = [LAMPE_BUERO, STECKDOSE_BUERO_A, STECKDOSE_BUERO_B, FERNSEHER_BUERO]
+    devices = [
+        DeviceSnapshot(
+            device_id="device.lampe", name="Lampe", area_id="buero", area_name="Büro",
+            entity_ids=("light.lampe_buero",),
+        ),
+        DeviceSnapshot(
+            device_id="device.doppelsteckdose", name="Doppelsteckdose", area_id="buero", area_name="Büro",
+            entity_ids=("switch.doppelsteckdose_a", "switch.doppelsteckdose_b"),
+        ),
+        DeviceSnapshot(
+            device_id="device.fernseher", name="Fernseher", area_id="buero", area_name="Büro",
+            entity_ids=("switch.fernseher",),
+        ),
+    ]
+    return build_world_model(entities, devices)
+
+
+def test_device_query_state_filter_lists_devices_with_at_least_one_matching_entity(engine):
+    world_model = _world_model_with_state_filtered_devices()
+    result = engine.match(
+        "welche Geräte sind eingeschaltet im Büro",
+        [LAMPE_BUERO, STECKDOSE_BUERO_A, STECKDOSE_BUERO_B, FERNSEHER_BUERO],
+        world_model=world_model,
+    )
+    assert result is not None
+    # Doppelsteckdose qualifies despite only one of its two entities being ON.
+    assert result.response_text == "Lampe und Doppelsteckdose sind eingeschaltet."
+
+
+def test_device_query_state_filter_empty_is_a_normal_answer(engine):
+    entities = [FERNSEHER_BUERO]
+    from ha_nlu.devices import DeviceSnapshot
+    from ha_nlu.world_model import build_world_model
+
+    world_model = build_world_model(
+        entities,
+        [DeviceSnapshot(
+            device_id="device.fernseher", name="Fernseher", area_id="buero", area_name="Büro",
+            entity_ids=("switch.fernseher",),
+        )],
+    )
+    result = engine.match("welche Geräte sind eingeschaltet im Büro", entities, world_model=world_model)
+    assert result is not None
+    assert result.response_text == "Im Büro sind keine Geräte eingeschaltet."
+
+
+def test_device_query_without_state_filter_still_uses_area_phrasing(engine):
+    world_model = _world_model_with_state_filtered_devices()
+    result = engine.match(
+        "welche Geräte sind im Büro",
+        [LAMPE_BUERO, STECKDOSE_BUERO_A, STECKDOSE_BUERO_B, FERNSEHER_BUERO],
+        world_model=world_model,
+    )
+    assert result is not None
+    assert result.response_text == "Lampe, Doppelsteckdose und Fernseher sind im Büro."

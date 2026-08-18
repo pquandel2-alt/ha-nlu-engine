@@ -13,8 +13,10 @@ the ``SemanticCommand`` that becomes the next turn's context, exactly how
 
 from __future__ import annotations
 
+from ha_nlu.devices import DeviceSnapshot
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.context import ConversationContext
+from ha_nlu.world_model import build_world_model
 
 WOHNZIMMER_TEMP = EntitySnapshot(
     "sensor.wohnzimmer_temp", "Wohnzimmer Temperatur", "sensor", "21.5",
@@ -51,6 +53,21 @@ ENTITIES = [WOHNZIMMER_TEMP, KUECHE_TEMP, OBEN_TEMP, LAMP]
 def _context(engine, text: str, entities: list[EntitySnapshot]) -> ConversationContext:
     """Real first-turn match(), context built the same way conversation.py does."""
     result = engine.match(text, entities)
+    assert result is not None
+    assert result.command is not None
+    return ConversationContext(
+        last_command=result.command,
+        last_entities=tuple(result.command.entities),
+        last_area=result.command.area,
+        pending_clarification=None,
+    )
+
+
+def _context_with_world_model(engine, text: str, entities: list[EntitySnapshot], world_model) -> ConversationContext:
+    """Same as ``_context`` but threads a WorldModel through the first-turn
+    ``match()`` too - required for HassDeviceQuery, which only resolves with
+    one (see ``_parse_device_query``)."""
+    result = engine.match(text, entities, world_model)
     assert result is not None
     assert result.command is not None
     return ConversationContext(
@@ -188,7 +205,7 @@ def test_query_followup_continues_state_query_list(engine):
     # FENSTER_BAD is closed - the new area legitimately has zero open
     # windows, a normal EMPTY answer, not a "not understood" miss.
     assert result.command.entities == ()
-    assert result.response_text == "Keine Fenster sind offen."
+    assert result.response_text == "Es sind keine Fenster geöffnet."
 
 
 def test_query_followup_continues_state_query_list_with_a_match(engine):
@@ -196,7 +213,7 @@ def test_query_followup_continues_state_query_list_with_a_match(engine):
     result = engine.match_query_followup("Und im Büro?", STATE_QUERY_ENTITIES + [FENSTER_BUERO], context)
     assert result is not None
     assert result.command.entities == (FENSTER_BUERO,)
-    assert result.response_text == "Fenster Büro ist offen."
+    assert result.response_text == "Fenster Büro ist geöffnet."
 
 
 def test_query_followup_continues_state_query_count_scope(engine):
@@ -207,7 +224,7 @@ def test_query_followup_continues_state_query_count_scope(engine):
     assert result is not None
     # count_only must carry over too, not just the entity set.
     assert result.command.entities == (FENSTER_BAD_2,)
-    assert result.response_text == "Fenster Bad 2 ist offen."
+    assert result.response_text == "Fenster Bad 2 ist geöffnet."
 
 
 def test_query_followup_continues_exists_query(engine):
@@ -226,7 +243,7 @@ def test_query_followup_continues_check_state(engine):
     assert result is not None
     assert result.command.intent == "HassCheckState"
     assert result.command.entities == (FENSTER_BAD,)
-    assert result.response_text == "Nein, Fenster Bad ist nicht offen."
+    assert result.response_text == "Nein, Fenster Bad ist nicht geöffnet."
 
 
 def test_query_followup_check_state_returns_none_for_ambiguous_new_area(engine):
@@ -255,3 +272,71 @@ def test_query_followup_returns_none_for_switch_domain_without_device_class(engi
         pending_clarification=None,
     )
     assert engine.match_query_followup("Und oben?", ENTITIES + [KUECHE_SWITCH], context) is None
+
+
+# --- Phase 3 (follow-up wave): HassDeviceQuery follow-ups -------------------
+#
+# "Welche Geräte sind im Büro?" -> "Und im Keller?" - devices come from the
+# WorldModel (cross-domain, no domain/device_class to carry over like the
+# ENTITY-scope followups above), so this must re-scope by area only, not
+# fall back to an unfiltered entity list (the bug this phase actually fixes -
+# see _parse_state_query_followup's QueryTargetKind.DEVICE branch).
+
+SCHREIBTISCHLAMPE_BUERO = EntitySnapshot(
+    "light.schreibtischlampe", "Schreibtischlampe", "light", "on",
+    area_id="buero", area_name="Büro",
+)
+DRUCKER_KELLER = EntitySnapshot(
+    "switch.drucker", "Drucker", "switch", "off",
+    area_id="keller", area_name="Keller",
+)
+# Bad has an entity (so the area itself resolves, unlike "Bunker" - see
+# StateQueryParser's own unknown-area precedent) but no DeviceSnapshot -
+# devices_in_area() legitimately returns none, exercising the EMPTY branch.
+FENSTER_BAD_UNDEVICED = EntitySnapshot(
+    "binary_sensor.fenster_bad", "Fenster Bad", "binary_sensor", "off",
+    area_id="bad", area_name="Bad", device_class="window",
+)
+DEVICE_QUERY_ENTITIES = [SCHREIBTISCHLAMPE_BUERO, DRUCKER_KELLER, FENSTER_BAD_UNDEVICED]
+
+
+def _device_query_world_model():
+    devices = [
+        DeviceSnapshot(
+            device_id="device.schreibtischlampe", name="Schreibtischlampe",
+            area_id="buero", area_name="Büro", entity_ids=("light.schreibtischlampe",),
+        ),
+        DeviceSnapshot(
+            device_id="device.drucker", name="Drucker",
+            area_id="keller", area_name="Keller", entity_ids=("switch.drucker",),
+        ),
+    ]
+    return build_world_model(DEVICE_QUERY_ENTITIES, devices)
+
+
+def test_query_followup_continues_device_query_in_new_area(engine):
+    world_model = _device_query_world_model()
+    context = _context_with_world_model(engine, "welche Geräte sind im Büro", DEVICE_QUERY_ENTITIES, world_model)
+    assert context.last_command.intent == "HassDeviceQuery"
+    result = engine.match_query_followup("Und im Keller?", DEVICE_QUERY_ENTITIES, context, world_model)
+    assert result is not None
+    assert result.command.intent == "HassDeviceQuery"
+    assert result.response_text == "Drucker ist im Keller."
+
+
+def test_query_followup_device_query_empty_area_is_a_normal_answer(engine):
+    world_model = _device_query_world_model()
+    context = _context_with_world_model(engine, "welche Geräte sind im Büro", DEVICE_QUERY_ENTITIES, world_model)
+    result = engine.match_query_followup("Und im Bad?", DEVICE_QUERY_ENTITIES, context, world_model)
+    assert result is not None  # Bad is a known area, just with no devices - EMPTY, not a miss
+    assert result.response_text == "Im Bad sind keine Geräte bekannt."
+
+
+def test_query_followup_device_query_floor_only_returns_none(engine):
+    # QueryTarget(kind=DEVICE) has no floor field (same gap ReasoningEngine's
+    # own Constraints building has) - "Und oben?" has nothing to resolve
+    # against, so this refuses rather than guessing an area.
+    world_model = _device_query_world_model()
+    context = _context_with_world_model(engine, "welche Geräte sind im Büro", DEVICE_QUERY_ENTITIES, world_model)
+    result = engine.match_query_followup("Und oben?", DEVICE_QUERY_ENTITIES, context, world_model)
+    assert result is None

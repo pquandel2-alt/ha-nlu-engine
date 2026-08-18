@@ -53,6 +53,16 @@ class QueryExecutor:
         if world_model is None or command.target.area is None:
             return QueryResult(status=QueryResultStatus.EMPTY, command=command)
         devices = world_model.devices_in_area(command.target.area.area_id)
+        if command.filter.state is not None:
+            state = command.filter.state
+            devices = tuple(
+                d
+                for d in devices
+                if any(
+                    matches_semantic_state(e, state)
+                    for e in world_model.entities_for_device(d.device_id)
+                )
+            )
         status = QueryResultStatus.MATCHED if devices else QueryResultStatus.EMPTY
         return QueryResult(status=status, devices=tuple(devices), command=command)
 

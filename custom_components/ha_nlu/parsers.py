@@ -43,6 +43,7 @@ from .nlu.lexicon import (
 )
 from .nlu.parser import AmbiguousReference, ClarificationRequest, ParseContext, ParseResult
 from .nlu.query_command import QueryCommand, QueryFilter, QueryResultStatus, QueryScope, QueryTarget, QueryTargetKind
+from .world_model import WorldModel
 from .nlu.query_executor import QueryExecutor
 from .nlu.semantic_state import SemanticState
 from .service_call import (
@@ -909,9 +910,10 @@ class QueryFollowupParser:
         entities: list[EntitySnapshot],
         last_entities: tuple[EntitySnapshot, ...],
         previous_query_command: QueryCommand | None = None,
+        world_model: WorldModel | None = None,
     ) -> ParseResult | None:
         if previous_query_command is not None:
-            return self._parse_state_query_followup(text, entities, previous_query_command)
+            return self._parse_state_query_followup(text, entities, previous_query_command, world_model)
         return self._parse_get_state_followup(text, entities, last_entities)
 
     def _resolve_area_or_level(
@@ -977,12 +979,19 @@ class QueryFollowupParser:
         return ParseResult(frame=frame, resolved_entities=[entity])
 
     def _parse_state_query_followup(
-        self, text: str, entities: list[EntitySnapshot], previous: QueryCommand
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        previous: QueryCommand,
+        world_model: WorldModel | None = None,
     ) -> ParseResult | None:
         resolved_location = self._resolve_area_or_level(text, entities)
         if resolved_location is None:
             return None
         area_id, area_name, floor_id, target_text = resolved_location
+
+        if previous.target.kind is QueryTargetKind.DEVICE:
+            return self._parse_device_query_followup(text, area_id, area_name, previous, world_model)
 
         domain = previous.target.domain
         device_class = previous.target.device_class
@@ -1020,10 +1029,52 @@ class QueryFollowupParser:
                 "device_class": device_class,
                 "domain": domain,
                 "query_command": new_command,
+                "query_result": query_result,
             },
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=matches)
+
+    def _parse_device_query_followup(
+        self,
+        text: str,
+        area_id: str | None,
+        area_name: str | None,
+        previous: QueryCommand,
+        world_model: WorldModel | None,
+    ) -> ParseResult | None:
+        """Continues a HassDeviceQuery ("Welche Geräte sind im Büro?" -> "Und
+        im Keller?") - devices are cross-domain and area-only
+        (``QueryTarget`` has no floor field, same gap ``ReasoningEngine``'s
+        own ``Constraints`` building has), so a floor-only followup ("Und
+        oben?") has nothing to resolve against and is refused rather than
+        guessed. ``_respond_device_list`` also assumes an area is always
+        present, so ``area_id is None`` must never reach ``QueryExecutor``
+        here.
+        """
+        if area_id is None:
+            return None
+        area_snapshot = AreaSnapshot(area_id=area_id, name=area_name)
+        new_command = QueryCommand(
+            intent=previous.intent,
+            scope=previous.scope,
+            target=QueryTarget(kind=QueryTargetKind.DEVICE, area=area_snapshot),
+            filter=QueryFilter(),
+        )
+        query_result = _QUERY_EXECUTOR.execute(new_command, candidates=[], world_model=world_model)
+
+        frame = SemanticFrame(
+            intent=previous.intent,
+            target=None,
+            area=AreaReference(text=area_name, area_id=area_id, area_name=area_name),
+            quantifier=Quantifier(kind="all"),
+            parameters={
+                "query_command": new_command,
+                "query_result": query_result,
+            },
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=[])
 
 
 # Custom, non-HA-core intent names for the "die anderen" complement grammar
@@ -1511,6 +1562,13 @@ class StateQueryParser:
         filter. No {area} resolving to exactly one known room -> ``None``,
         same "never guess" precedent every other ``_parse_*`` method here
         follows (no "alle Geräte im Haus" fallback).
+
+        Follow-up wave, Phase 4: an optional {state} slot ("Welche Geräte
+        sind eingeschaltet im Büro?") narrows the device list further -
+        ``QueryExecutor._execute_device`` applies the "at least 1 entity
+        matches" aggregation rule, this method only reads and forwards the
+        slot, same division of labor as every other ``QueryFilter.state``
+        caller here.
         """
         resolved_area = self._resolve_area(slots, context.entities)
         if resolved_area is None:
@@ -1519,12 +1577,15 @@ class StateQueryParser:
         if area_id is None:
             return None
 
+        state_slot = slots.get("state")
+        requested_state = _STATE_NAME_TO_SEMANTIC[str(state_slot.value)] if state_slot is not None else None
+
         area_snapshot = AreaSnapshot(area_id=area_id, name=area_name)
         query_command = QueryCommand(
             intent="HassDeviceQuery",
             scope=QueryScope.LIST,
             target=QueryTarget(kind=QueryTargetKind.DEVICE, area=area_snapshot),
-            filter=QueryFilter(),
+            filter=QueryFilter(state=requested_state),
         )
         query_result = _QUERY_EXECUTOR.execute(query_command, candidates=[], world_model=context.world_model)
 

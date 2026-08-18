@@ -124,9 +124,22 @@ class ResponseGenerator:
     def _respond_device_list(self, result: QueryResult) -> str:
         """DEVICE-scope queries (HassDeviceQuery, "welche Geräte sind im
         Büro?") - always has a resolved area (``_parse_device_query`` refuses
-        without one before ever building a ``QueryCommand``)."""
+        without one before ever building a ``QueryCommand``).
+
+        Follow-up wave, Phase 4: an optional ``filter.state`` ("Welche Geräte
+        sind eingeschaltet im Büro?") switches to state-based phrasing,
+        mirroring ``_respond_list_or_count``'s state-word branch exactly -
+        same wording pattern, just for devices instead of entities."""
         area_name = result.command.target.area.name
         devices = result.devices
+        state = result.command.filter.state
+        if state is not None:
+            state_word = _SEMANTIC_STATE_SPOKEN_DE[state]
+            if not devices:
+                return f"Im {area_name} sind keine Geräte {state_word}."
+            if len(devices) == 1:
+                return f"{devices[0].name} ist {state_word}."
+            return _join_names([d.name for d in devices]) + f" sind {state_word}."
         if not devices:
             return f"Im {area_name} sind keine Geräte bekannt."
         if len(devices) == 1:

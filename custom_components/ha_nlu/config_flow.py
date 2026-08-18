@@ -5,6 +5,19 @@ entities it may act on, and that defaults to whatever is already exposed to
 Assist. The options flow (pattern ported from xiaozhi_entity_mcp's
 ``CONF_SELECTED_ENTITIES`` multi-select) lets that default be overridden.
 Single-instance only: one ha_nlu agent is enough to register with Assist.
+
+Setup deliberately does *not* persist a ``default_exposed_entities()``
+snapshot into ``options`` (bug found via live testing, 2026-08): a frozen
+list captured once at entry-creation time silently excludes any entity
+exposed to Assist *afterwards* - e.g. a whole domain such as
+``binary_sensor`` that wasn't yet exposed at setup - with no error, just
+quietly empty query results forever after, regardless of later exposure
+changes. Leaving ``options`` empty keeps ``get_selected_entity_ids()``
+(``hass_entities.py``) on its documented dynamic fallback
+(``default_exposed_entities()`` computed fresh every turn) until a user
+explicitly saves a selection via the options flow below - which is the
+only case ``CONF_SELECTED_ENTITIES`` should ever "win" per that function's
+own docstring.
 """
 
 from __future__ import annotations
@@ -43,7 +56,7 @@ class HaNluConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_create_entry(
             title=TITLE,
             data={},
-            options={CONF_SELECTED_ENTITIES: default_exposed_entities(self.hass)},
+            options={},
         )
 
     @staticmethod

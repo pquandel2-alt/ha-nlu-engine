@@ -36,6 +36,7 @@ from .nlu.debug import DebugTrace, format_command
 from .nlu.frame import SemanticFrame, TargetReference
 from .nlu.normalize import normalize
 from .nlu.parser import AmbiguousReference, ClarificationRequest, ParseContext, ParseResult
+from .nlu.reasoning import ReasoningEngine, ResolvedSemanticIntent
 from .nlu.response import NluError, NluResponse
 from .nlu.response_generator import ResponseGenerator
 from .nlu.service_mapper import map_to_service_call
@@ -166,7 +167,9 @@ _STATE_QUERY_RE = re.compile(
 # v4.9) plus the three StateQueryParser intents (HomeIntent v4.2.1 plan,
 # Phase 8). Deliberately excludes HassQueryComparison - see that method's
 # docstring.
-_QUERY_FOLLOWUP_INTENTS = frozenset({"HassGetState", "HassStateQuery", "HassCheckState", "HassExistsQuery"})
+_QUERY_FOLLOWUP_INTENTS = frozenset(
+    {"HassGetState", "HassStateQuery", "HassCheckState", "HassExistsQuery", "HassDeviceQuery"}
+)
 
 # Sentences containing "Prozent" are routed to PercentageParser's separately-
 # compiled grammar for the same reason as the quantifier routing below: the
@@ -306,6 +309,18 @@ class MatchResult:
     # query-vs-action distinction ``conversation.py`` already made in Phase
     # 19/Query-Engine (see its module docstring).
     clarification: ClarificationRequest | None = None
+    # ReasoningEngine's composed view of the same match (V6.25/V6.26) -
+    # additive/observational only, same "no consumer yet" pattern as
+    # ``command`` above: computed centrally in ``_build_match_result`` so
+    # ``ReasoningEngine`` is actually wired into the live pipeline instead
+    # of unreferenced code, but nothing here drives ``plan``/``response_text``.
+    # For a current-turn floor reference ("oben"/"unten") this can diverge
+    # from ``command`` - ``SemanticFrame`` has no floor field, so
+    # ``ReasoningEngine.resolve()`` can only pick up a floor from
+    # ``ConversationContext.last_floor`` (a remembered turn), never from the
+    # sentence just parsed. Known, documented, not a behaviour regression
+    # since nothing reads this field yet.
+    resolved_intent: ResolvedSemanticIntent | None = None
 
 
 @dataclass(frozen=True)
@@ -477,7 +492,7 @@ class NluEngine:
             return MatchResult(
                 plan=None, response_text=_clarification_question(result), clarification=result,
             )
-        return self._build_match_result(result)
+        return self._build_match_result(result, entities)
 
     def _match_multi(
         self, segments: list[str], entities: list[EntitySnapshot], world_model: WorldModel | None = None
@@ -555,7 +570,9 @@ class NluEngine:
             parameters=parameters,
             source_text=text,
         )
-        return self._build_match_result(ParseResult(frame=frame, resolved_entities=[entity]))
+        return self._build_match_result(
+            ParseResult(frame=frame, resolved_entities=[entity]), list(context.last_entities), context
+        )
 
     def match_reference(self, text: str, entities: list[EntitySnapshot], context: ConversationContext | None) -> MatchResult | None:
         """Resolve a pronoun or relative reference ("Mach es aus.", "Mach die
@@ -582,10 +599,14 @@ class NluEngine:
         result = self._reference_parser.parse(normalized, entities, context.last_entities, context.last_area)
         if result is None or isinstance(result, AmbiguousReference):
             return None
-        return self._build_match_result(result)
+        return self._build_match_result(result, entities, context)
 
     def match_query_followup(
-        self, text: str, entities: list[EntitySnapshot], context: ConversationContext | None
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        context: ConversationContext | None,
+        world_model: WorldModel | None = None,
     ) -> MatchResult | None:
         """Continue a previous state query with a new room/floor ("Und in
         der Küche?", "Und oben?" after "Wie warm ist es im Wohnzimmer?") -
@@ -627,11 +648,11 @@ class NluEngine:
         normalized = normalize(text)
         previous_query_command = context.last_command.parameters.get("query_command")
         result = self._query_followup_parser.parse(
-            normalized, entities, context.last_entities, previous_query_command
+            normalized, entities, context.last_entities, previous_query_command, world_model
         )
         if result is None:
             return None
-        return self._build_match_result(result)
+        return self._build_match_result(result, entities, context)
 
     def resolve_clarification(
         self, reply_text: str, clarification: ClarificationRequest, entities: list[EntitySnapshot]
@@ -706,7 +727,7 @@ class NluEngine:
                 success=False, speech=None, command=None, error=NluError[validation_error.name]
             )
 
-        match_result = self._build_match_result(result)
+        match_result = self._build_match_result(result, entities)
         if match_result is None:
             # Structurally unreachable once validate_command() has passed -
             # every remaining lookup in _build_match_result mirrors a check
@@ -792,7 +813,7 @@ class NluEngine:
         if validation_error is not None:
             validation = validation_error.name
         else:
-            match_result = self._build_match_result(result)
+            match_result = self._build_match_result(result, entities)
             if match_result is not None:
                 response_text = match_result.response_text
                 if match_result.plan is not None:
@@ -820,7 +841,11 @@ class NluEngine:
         )
 
     @staticmethod
-    def _build_match_result(result: ParseResult) -> MatchResult | None:
+    def _build_match_result(
+        result: ParseResult,
+        entities: list[EntitySnapshot],
+        context: ConversationContext | None = None,
+    ) -> MatchResult | None:
         frame = result.frame
         matched = result.resolved_entities
         command = build_semantic_command(result)
@@ -835,6 +860,13 @@ class NluEngine:
         if validate_command(command) is not None:
             return None
 
+        # ReasoningEngine (V6.25/26) composed centrally, once, for every
+        # match that reaches here - additive/observational only (see
+        # MatchResult.resolved_intent's own docstring for the known
+        # current-turn-floor limitation). Not used to drive plan/response_text
+        # below; each parser's own resolution (``matched``) stays authoritative.
+        resolved_intent = ReasoningEngine.resolve(frame, entities, context)
+
         percent = frame.parameters.get("percent")
         if percent is not None:
             spec = PERCENT_INTENTS.get(matched[0].domain)
@@ -845,6 +877,7 @@ class NluEngine:
                 response_text=spec.response(matched, percent),
                 frame=frame,
                 command=command,
+                resolved_intent=resolved_intent,
             )
 
         light_extended_spec = LIGHT_EXTENDED_INTENTS.get(frame.intent)
@@ -854,6 +887,7 @@ class NluEngine:
                 response_text=light_extended_spec.response(matched, frame.parameters),
                 frame=frame,
                 command=command,
+                resolved_intent=resolved_intent,
             )
 
         fan_extended_spec = FAN_EXTENDED_INTENTS.get(frame.intent)
@@ -863,6 +897,7 @@ class NluEngine:
                 response_text=fan_extended_spec.response(matched, frame.parameters),
                 frame=frame,
                 command=command,
+                resolved_intent=resolved_intent,
             )
 
         climate_extended_spec = CLIMATE_EXTENDED_INTENTS.get(frame.intent)
@@ -878,6 +913,7 @@ class NluEngine:
                 response_text=climate_extended_spec.response(matched, frame.parameters),
                 frame=frame,
                 command=command,
+                resolved_intent=resolved_intent,
             )
 
         # WorldModelQuery wave: StateQueryParser's four intents (HassStateQuery/
@@ -888,18 +924,30 @@ class NluEngine:
         query_result = frame.parameters.get("query_result")
         if query_result is not None:
             return MatchResult(
-                plan=None, response_text=_RESPONSE_GENERATOR.respond(query_result), frame=frame, command=command,
+                plan=None,
+                response_text=_RESPONSE_GENERATOR.respond(query_result),
+                frame=frame,
+                command=command,
+                resolved_intent=resolved_intent,
             )
 
         query_spec = QUERY_INTENTS.get(frame.intent)
         if query_spec is not None:
             return MatchResult(
-                plan=None, response_text=query_spec.response(matched, frame.parameters), frame=frame, command=command
+                plan=None,
+                response_text=query_spec.response(matched, frame.parameters),
+                frame=frame,
+                command=command,
+                resolved_intent=resolved_intent,
             )
 
         spec = INTENTS.get(frame.intent)
         if spec is None:
             return None
         return MatchResult(
-            plan=map_to_service_call(command), response_text=spec.response(matched), frame=frame, command=command
+            plan=map_to_service_call(command),
+            response_text=spec.response(matched),
+            frame=frame,
+            command=command,
+            resolved_intent=resolved_intent,
         )

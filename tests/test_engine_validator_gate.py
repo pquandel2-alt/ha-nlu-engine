@@ -24,4 +24,4 @@ def test_unsupported_capability_command_is_rejected_by_the_engine():
         parameters={"percent": 50},
     )
     result = ParseResult(frame=frame, resolved_entities=[LIGHT_WITHOUT_BRIGHTNESS])
-    assert NluEngine._build_match_result(result) is None
+    assert NluEngine._build_match_result(result, [LIGHT_WITHOUT_BRIGHTNESS]) is None

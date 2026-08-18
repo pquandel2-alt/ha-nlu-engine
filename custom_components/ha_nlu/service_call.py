@@ -14,7 +14,6 @@ from typing import Any, Callable, Mapping
 from .entities import EntitySnapshot
 from .nlu.capabilities import Capability
 from .nlu.query import QueryType, derive_query_type
-from .nlu.semantic_state import SemanticState, matches_semantic_state
 
 
 @dataclass(frozen=True)
@@ -202,83 +201,6 @@ def _speak_comparison_matches(entities: list[EntitySnapshot]) -> str:
     return ", ".join(f"{e.friendly_name} ({_speak_comparison_value(e)})" for e in entities) + "."
 
 
-# German phrasing for a SemanticState, used by the two multi-entity V4.2
-# response builders below (_speak_state_query/_speak_exists) and the
-# singular _speak_check_state.
-_SEMANTIC_STATE_SPOKEN_DE = {
-    SemanticState.OPEN: "offen",
-    SemanticState.CLOSED: "geschlossen",
-    SemanticState.ON: "eingeschaltet",
-    SemanticState.OFF: "ausgeschaltet",
-}
-
-# German plural noun per binary_sensor device_class (V4.2) - "Fenster" is
-# identical in singular/plural German, same as _DOMAIN_PLURAL_DE's own
-# per-domain nouns this dict sits alongside.
-_DEVICE_CLASS_PLURAL_DE = {
-    "window": "Fenster", "door": "Türen", "garage_door": "Garagentore", "motion": "Bewegungsmelder",
-}
-
-
-def _state_query_noun(params: Mapping[str, Any]) -> str:
-    """The plural noun to speak for a state-query/exists-query result -
-    device_class-specific if StateQueryParser resolved one (a binary_sensor
-    target), otherwise the domain's own generic plural (light/switch/cover)."""
-    device_class = params.get("device_class")
-    if device_class is not None:
-        return _DEVICE_CLASS_PLURAL_DE.get(device_class, "Geräte")
-    return _DOMAIN_PLURAL_DE.get(params.get("domain"), "Geräte")
-
-
-def _speak_state_query(entities: list[EntitySnapshot], params: Mapping[str, Any]) -> str:
-    """StateQueryParser's HassStateQuery response (V4.2, "welche
-    {device_class} sind [im {area}] {state}"/"wie viele ..."). 0 results is
-    a normal, correct sentence ("Keine Fenster sind offen.") - not an error,
-    see QueryIntentSpec.allows_empty's docstring for why StateQueryParser is
-    allowed to reach here with an empty ``entities``. ``count_only``
-    (params, set by StateQueryParser from which sentence variant matched -
-    "wie viele" vs "welche") picks a count phrasing over a name list for 2+
-    results.
-    """
-    state_word = _SEMANTIC_STATE_SPOKEN_DE[params["semantic_state"]]
-    noun = _state_query_noun(params)
-    if not entities:
-        return f"Keine {noun} sind {state_word}."
-    if len(entities) == 1:
-        return f"{entities[0].friendly_name} ist {state_word}."
-    if params.get("count_only"):
-        return f"{len(entities)} {noun} sind {state_word}."
-    return ", ".join(e.friendly_name for e in entities) + f" sind {state_word}."
-
-
-def _speak_check_state(entities: list[EntitySnapshot], params: Mapping[str, Any]) -> str:
-    """StateQueryParser's HassCheckState response (V4.2, "ist [der|die|das]
-    {name} [im {area}] {state}") - always exactly 1 entity by construction
-    (see StateQueryParser's docstring: ambiguous/unresolved names never
-    reach here). Reads the entity's *current* live state via
-    ``matches_semantic_state`` rather than trusting the parser's match
-    (which only decided routing/domain, not this exact yes/no) - Regel 5,
-    state is never cached as truth between resolution and response.
-    """
-    entity = entities[0]
-    requested = params["semantic_state"]
-    state_word = _SEMANTIC_STATE_SPOKEN_DE[requested]
-    if matches_semantic_state(entity, requested):
-        return f"Ja, {entity.friendly_name} ist {state_word}."
-    return f"Nein, {entity.friendly_name} ist nicht {state_word}."
-
-
-def _speak_exists(entities: list[EntitySnapshot], params: Mapping[str, Any]) -> str:
-    """StateQueryParser's HassExistsQuery response (V4.2, "gibt es [im
-    {area}] [{state_adj}] {device_class}") - 0 results is a normal "Nein"
-    answer, not an error (same allows_empty reasoning as
-    _speak_state_query)."""
-    noun = _state_query_noun(params)
-    if not entities:
-        return f"Nein, es gibt keine {noun}."
-    return f"Ja, es gibt {len(entities)} {noun}."
-
-
 QUERY_INTENTS: dict[str, QueryIntentSpec] = {
     "HassGetState": QueryIntentSpec(
         allowed_domains=frozenset({"sensor", "light"}),
@@ -288,27 +210,28 @@ QUERY_INTENTS: dict[str, QueryIntentSpec] = {
         allowed_domains=frozenset({"light", "cover", "climate"}),
         response=lambda es, params: _speak_comparison_matches(es),
     ),
+    # WorldModelQuery wave: dead-code responses (engine.py::_build_match_result's
+    # "query_result" branch intercepts these four intents before the
+    # placeholder lambda below is ever reached - every parser that produces
+    # them now stashes frame.parameters["query_result"]). Kept only because
+    # QueryIntentSpec.response has no default and allows_empty/dict
+    # membership are still load-bearing for validate_command() and
+    # conversation.py's QUERY_INTENT_NAMES.
     "HassStateQuery": QueryIntentSpec(
         allowed_domains=frozenset({"binary_sensor", "cover", "light", "switch"}),
-        response=_speak_state_query,
+        response=lambda es, params: "Das habe ich nicht verstanden.",
         allows_empty=True,
     ),
     "HassCheckState": QueryIntentSpec(
         allowed_domains=frozenset({"binary_sensor", "cover", "light", "switch"}),
-        response=_speak_check_state,
+        response=lambda es, params: "Das habe ich nicht verstanden.",
         allows_empty=False,
     ),
     "HassExistsQuery": QueryIntentSpec(
         allowed_domains=frozenset({"binary_sensor", "cover", "light", "switch"}),
-        response=_speak_exists,
+        response=lambda es, params: "Das habe ich nicht verstanden.",
         allows_empty=True,
     ),
-    # WorldModelQuery wave: dead-code response (engine.py::_build_match_result's
-    # "query_result" branch intercepts HassDeviceQuery before this lambda is
-    # ever reached, same as the three lambdas above post-Phase-D). Kept only
-    # because QueryIntentSpec.response has no default and allows_empty/dict
-    # membership are still load-bearing for validate_command() and
-    # conversation.py's QUERY_INTENT_NAMES.
     "HassDeviceQuery": QueryIntentSpec(
         allowed_domains=frozenset(),
         response=lambda es, params: "Das habe ich nicht verstanden.",
