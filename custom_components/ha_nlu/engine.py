@@ -763,10 +763,10 @@ class NluEngine:
     ) -> AutomationMatchResult | None:
         """Match a combined spoken automation sentence ("Wenn das
         Küchenfenster geöffnet wird, schalte das Küchenlicht ein.") into an
-        ``AutomationModel`` (Integration Wave Migration Step 3). Not yet
-        called from ``conversation.py`` (Migration Step 4 wires the
-        response branch) - additive, like every other new entry point this
-        engine has grown before its consumer existed.
+        ``AutomationModel`` (Integration Wave Migration Step 3). Called live
+        from ``conversation.py`` since Migration Step 4, after
+        ``match_command_followup()`` and before the plain ``match()``
+        fallback (see ``NluConversationEntity._async_handle_message()``).
 
         Scope boundary (Integration Plan Section 9, stated plainly): this
         method only ever produces and validates an ``AutomationModel`` - it

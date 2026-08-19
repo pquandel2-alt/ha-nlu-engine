@@ -202,10 +202,14 @@ wiederverwendet und die Vokabulare ohnehin konsolidiert werden müssen).
 
 Der explizite Zweck der Trennung (Ziel 5 des v4.2.1-Plans): `QueryCommand`/
 `QueryExecutor` kennen weder `hass` noch irgendetwas Conversation-
-spezifisches - ein künftiger Automation-Trigger/-Bedingungs-Parser (V5,
-heute nicht gebaut, siehe "Explizit außerhalb des Scopes" unten) könnte
+spezifisches - der Automation-Trigger-/Bedingungs-Parser (V5, inzwischen
+gebaut und seit der Integration Wave live über `engine.py::match_automation()`
+verdrahtet, siehe "Explizit außerhalb des Scopes" unten) könnte
 dieselben Typen für "wenn Zustand X erfüllt ist" wiederverwenden, ohne die
-Query-Engine noch einmal zu schreiben. `frame.parameters["query_command"]`
+Query-Engine noch einmal zu schreiben - bislang aber nicht genutzt: V5s
+eigene Condition-Auflösung läuft weiterhin direkt über `resolve_entity_scored`/
+`constraint_resolver.resolve_candidates`, nicht über `QueryCommand`/
+`QueryExecutor`. `frame.parameters["query_command"]`
 (Phase 7) ist bereits der konkrete, additive Kanal, über den ein solcher
 künftiger Aufrufer den zuletzt ausgeführten `QueryCommand` einer
 Konversation lesen kann, ohne ihn aus rohem Text neu abzuleiten - Phase 8

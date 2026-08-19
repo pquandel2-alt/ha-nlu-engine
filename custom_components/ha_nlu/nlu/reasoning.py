@@ -23,14 +23,18 @@ already exposes. Only the ``Constraints`` assembly (reading ``SemanticFrame``'s
 ``ConversationContext`` fallback for area/floor scoping on a follow-up turn)
 is this module's own logic.
 
-Not yet wired into ``engine.py``/``conversation.py`` - same build-ahead-of-
-consumer pattern as ``nlu/context.py``'s ``ConversationContext`` (Phase 24),
-``nlu/primitives.py``'s ``SemanticDegree``/``NumericValue``, and
-``nlu/frame.py``'s V6.2 primitive fields (populated only by the also-unwired
-``SemanticComposer``, V6.4). Full pipeline integration - engine.py actually
-calling ``ReasoningEngine.resolve()`` ahead of the Command Validator - is
-planned for a later "Wave 7: Integration" step of this same architecture
-effort, not this phase.
+Wired into ``engine.py::_build_match_result()`` since the Integration Wave
+(2026-08-19) - called unconditionally for every match, its result stored in
+``MatchResult.resolved_intent``. Still purely additive/observational, not
+ahead of the Command Validator: no consumer reads ``resolved_intent`` to
+gate or alter ``plan``/``response_text`` (see that field's own docstring in
+engine.py for the known floor-reference limitation this implies). Wiring
+``ReasoningEngine.resolve()`` so it actually drives behavior ahead of the
+Command Validator would require migrating each parser's own
+``resolve_entity_scored()``-based entity resolution onto
+``constraint_resolver.resolve_candidates()`` first (Regel 6 - see
+docs/architecture-v6.md, section 6a/6c) - that migration has not happened,
+so this module's role stays observational until it does.
 """
 
 from __future__ import annotations
