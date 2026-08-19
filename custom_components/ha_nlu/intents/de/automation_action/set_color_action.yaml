@@ -1,0 +1,19 @@
+language: "de"
+intents:
+  # V5 Wave 3 (V5.7) - ActionType.SET_COLOR. {color} reuses _COLOR_SLOT_LIST
+  # verbatim (Regel 6). The {action_domain}+{area} sentence uses a
+  # *mandatory* (not bracket-optional) preposition alternation - same
+  # "swallow"-prevention fix turn_on_action.yaml's own comment documents in
+  # detail: an optional preposition would let the {area} wildcard eat
+  # whatever comes next (e.g. "auf") when no area is actually named,
+  # silently mis-resolving the target (empirically confirmed against
+  # hassil==3.11.0 before this fix). "[auf]" itself stays optional in all
+  # three sentences - "mach das Licht im Wohnzimmer rot" and "mach das
+  # Licht im Wohnzimmer auf rot" both work once the preposition itself is
+  # the mandatory anchor instead.
+  HassSetColorAction:
+    data:
+      - sentences:
+          - "(stelle|mach|setze) [den|die|das] {action_domain} (in der|in dem|im|am|beim) {area} [auf] {color}"
+          - "(stelle|mach|setze) [den|die|das] {action_domain} [auf] {color}"
+          - "(stelle|mach|setze) [den|die|das] {name} [auf] {color}"

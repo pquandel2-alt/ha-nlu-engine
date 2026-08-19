@@ -1,0 +1,13 @@
+language: "de"
+intents:
+  # V5 Wave 3 (V5.7) - ActionType.TURN_OFF, the counterpart to
+  # turn_on_action.yaml. "aus"/"zu"/"runter" for off/close - no duration
+  # suffix here (ActionModel.duration_seconds is TURN_ON-only, see
+  # action_model.py's own field comment: "revert after N seconds" only
+  # makes sense starting from an on/open state).
+  HassTurnOffAction:
+    data:
+      - sentences:
+          - "(schalte|mach|dreh|lass|fahre) [den|die|das] {action_domain} [in der|in dem|im|am|beim] {area} (aus|zu|runter)"
+          - "(schalte|mach|dreh|lass|fahre) [den|die|das] {action_domain} (aus|zu|runter)"
+          - "(schalte|mach|dreh|lass|fahre) [den|die|das] {name} (aus|zu|runter)"

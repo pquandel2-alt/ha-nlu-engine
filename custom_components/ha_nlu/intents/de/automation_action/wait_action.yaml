@@ -1,0 +1,15 @@
+language: "de"
+intents:
+  # V5 Wave 3 (V5.12) - Wait Until. {condition_text} is a WildcardSlotList
+  # (must stay the last token) that automation_action_parser.py's
+  # _parse_wait rewrites to "wenn {condition_text}" and re-parses via the
+  # injected AutomationConditionParser (composition, Regel 6 - see that
+  # method's own comment) - so the text after "bis" must be phrased exactly
+  # like the 9 existing condition grammars expect (e.g. "es nach
+  # Sonnenuntergang ist", not "die Sonne untergegangen ist"), noted in the
+  # module docstring, not hidden. "[maximal {amount} {action_temporal_unit}]"
+  # is the optional timeout ("warte maximal 30 Minuten bis ...").
+  HassWaitAction:
+    data:
+      - sentences:
+          - "warte [maximal {amount} {action_temporal_unit}] bis {condition_text}"

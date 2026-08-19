@@ -1,0 +1,358 @@
+"""AutomationActionParser (HomeIntent V5 plan, Teil 4/10, V5.7-V5.12): turns
+a spoken automation-action sentence ("mach das Flurlicht an, fahr die
+Rollläden hoch und stelle die Heizung auf 21 Grad") into a tuple of
+``nlu.action_model.ActionModel``/``ActionGroup`` steps.
+
+Top-level, hassil-aware - sibling of ``automation_trigger_parser.py``/
+``automation_condition_parser.py``, not part of ``nlu/`` (see
+``nlu/frame.py``'s docstring). Its own separately-compiled ``Intents``
+grammar lives under ``intents/de/automation_action/`` (9 YAML files/9
+hassil intents for the 11 ``ActionType`` values - SET_BRIGHTNESS/
+SET_POSITION/SET_FAN_SPEED share one grammar intent,
+``HassSetPercentageAction``/set_percentage_action.yaml, since their
+sentences are structurally identical and only the *resolved target's
+domain* actually distinguishes them - see that file's own comment and
+``_parse_set_percentage``/``_PERCENTAGE_ACTION_TYPE_BY_DOMAIN`` below). No
+caller in ``engine.py``/``conversation.py`` in this wave either - same
+"HA-Schreibzugriff: erst nach explizitem Go" scope decision Wave 1/2
+already made.
+
+Two layers, deliberately simpler than ``AutomationConditionParser``'s
+boolean-expression layer since actions have no AND/OR/NOT nesting to parse -
+only sequencing and (optionally) an explicit parallel grouping:
+
+1. A pure-Python chunk-splitting layer (no hassil) - ``_split_chunks()``
+   splits the raw text on "," and "und" (both structural, comma- and
+   \\b-word-boundary-anchored so "Grund"/"Sekunde" are never mis-split, same
+   discipline ``automation_condition_parser.py``'s own ``_tokenize()``
+   documents). If the text names "gleichzeitig"/"parallel" anywhere (V5.9),
+   *every* chunk in that sentence becomes one ``ActionGroup(PARALLEL, ...)``
+   instead of a flat sequential tuple - the plan's own example only ever
+   scopes "gleichzeitig" sentence-wide, so no per-chunk parallel/sequential
+   mixing is attempted here. A leading "dann"/"danach" per chunk (V5.10's own
+   example, "... und schalte dann alle Lichter aus") is stripped as a
+   connector word, not captured as data.
+2. Leaf parsing via hassil: each chunk goes to ``_parse_leaf()``, the same
+   "one ``Intents`` object, one dispatch dict on ``result.intent.name``"
+   shape every other parser in this project already established.
+
+Scope limitation (stated plainly, not hidden): each chunk must be its own
+independently-grammatical clause - "mach das Licht an und fahr die Rollläden
+hoch" parses (two full clauses), but a genuinely elliptical variant with an
+implicit shared verb ("mach gleichzeitig das Licht an und die Rollläden
+hoch" - the second clause has no verb of its own) does not. Resolving
+cross-clause ellipsis is real, separate NLU work no other leaf-dispatch
+parser in this project attempts either (``AutomationConditionParser``'s own
+leaf conditions are every bit as independently-grammatical) - not invented
+here ahead of it.
+
+``ActionType.WAIT``'s condition delegates straight to
+``AutomationConditionParser`` (composition, not a second condition grammar,
+Regel 6): "warte [maximal N Minuten] bis <condition>" rewrites to "wenn
+<condition>" and re-runs it through the caller-supplied condition parser
+instance, so it must be phrased exactly like the 9 existing condition
+grammars already expect (e.g. "warte bis es nach Sonnenuntergang ist", not
+the plan's own more casual "warte bis die Sonne untergegangen ist" - noted
+here, not hidden, same as every other grammar-phrasing boundary this V5
+plan's waves have already documented).
+
+TURN_ON/TURN_OFF boundary decision: reused across every actionable domain
+this project models (light/switch/fan/climate on/off *and* cover open/
+close) rather than adding separate OPEN/CLOSE action types beyond the 11
+V5.7 names - mirrors ``ConditionType.STATE``'s own domain-agnostic
+OPEN/CLOSED/ON/OFF conflation (one leaf type, the concrete HA service call
+is later HA-generator work, V5.25). "hoch"/"auf" -> TURN_ON, "runter"/"zu"
+-> TURN_OFF for covers, alongside "an"/"aus" for the rest.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from hassil import Intents, RangeSlotList, RangeType, WildcardSlotList, recognize
+
+from .areas import AreaResolutionStatus, resolve_area_scored
+from .automation_condition_parser import AutomationConditionParser
+from .entities import EntitySnapshot, ResolutionStatus, resolve_entity_scored
+from .nlu.action_model import ActionGroup, ActionModel, ActionType, ExecutionMode
+from .nlu.automation_model import TriggerTarget
+from .nlu.constraint_resolver import Constraints, resolve_candidates
+from .nlu.lexicon import _ACTION_TEMPORAL_UNIT_SLOT_LIST, _COLOR_SLOT_LIST, _COLOR_TEMP_SLOT_LIST
+from .nlu.parser import ParseContext
+from .parsers import _strip_locative_prepositions
+
+AUTOMATION_ACTION_DIR = Path(__file__).parent / "intents" / "de" / "automation_action"
+
+# {action_domain} vocabulary for TURN_ON/TURN_OFF/SET_* target resolution -
+# a union of _DOMAIN_SLOT_LIST's light/switch/cover/fan and
+# _COMPARISON_DOMAIN_SLOT_LIST's climate synonyms (Heizung/Thermostat),
+# deliberately its own list (not either of those two) rather than a
+# module-level import combining them: mirrors _ACTION_TEMPORAL_UNIT_SLOT_LIST's
+# own "don't leak a widened vocabulary into an unrelated existing grammar"
+# reasoning in lexicon.py - this project's other consumers of
+# _DOMAIN_SLOT_LIST (QuantifierParser/ReferenceParser) must not suddenly
+# accept "Heizung" as a domain word, and _COMPARISON_DOMAIN_SLOT_LIST's own
+# "Raum"/"Räume" synonym is deliberately excluded here (too generic a word
+# to safely target for a write action - a query-only judgment call, not
+# reused for actions).
+from hassil import TextSlotList  # noqa: E402
+
+_ACTION_DOMAIN_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("Lichter", "light"), ("Licht", "light"), ("Lampen", "light"), ("Lampe", "light"),
+        ("Schalter", "switch"), ("Steckdosen", "switch"), ("Steckdose", "switch"),
+        ("Rollläden", "cover"), ("Rollladen", "cover"), ("Rolladen", "cover"), ("Rolläden", "cover"),
+        ("Rollos", "cover"), ("Rollo", "cover"),
+        ("Ventilatoren", "fan"), ("Ventilator", "fan"),
+        ("Heizungen", "climate"), ("Heizung", "climate"),
+        ("Thermostate", "climate"), ("Thermostat", "climate"),
+    ],
+    name="action_domain",
+)
+
+# \b-anchored, same discipline _STRUCTURAL_TOKEN_RE (automation_condition_parser.py)
+# documents - neither side of the embedded "und" substring in "Grund"/
+# "Sekunde"/"München" is itself a word boundary, so this never mis-splits them.
+_CHUNK_SPLIT_RE = re.compile(r",|\bund\b", re.IGNORECASE)
+_PARALLEL_MARKER_RE = re.compile(r"\b(gleichzeitig|parallel)\b", re.IGNORECASE)
+_LEADING_CONNECTOR_RE = re.compile(r"^(dann|danach)\b\s*", re.IGNORECASE)
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _split_chunks(text: str) -> tuple[list[str], bool]:
+    """Splits ``text`` into independently-parseable clause chunks, and
+    reports whether "gleichzeitig"/"parallel" (V5.9) appeared anywhere -
+    see the module docstring for why that flag scopes the *whole* sentence
+    rather than an individual chunk."""
+    is_parallel = bool(_PARALLEL_MARKER_RE.search(text))
+    normalized = _WHITESPACE_RE.sub(" ", _PARALLEL_MARKER_RE.sub(" ", text)).strip()
+    raw_chunks = [c.strip() for c in _CHUNK_SPLIT_RE.split(normalized) if c.strip()]
+    chunks = [_LEADING_CONNECTOR_RE.sub("", c).strip() for c in raw_chunks]
+    return [c for c in chunks if c], is_parallel
+
+
+def _seconds_from_amount_unit(amount: int, unit: str) -> int:
+    multiplier = {"seconds": 1, "minutes": 60, "hours": 3600}[unit]
+    return amount * multiplier
+
+
+class AutomationActionParser:
+    """Wraps the 11 ``intents/de/automation_action/*.yaml`` grammars (one
+    ``Intents`` object, 11 intents) plus the chunk-splitting layer around
+    them. ``parse()`` is the sole public entry point - a bare single action
+    (no "und"/","/"gleichzeitig") still comes back as a 1-tuple, never a
+    separate union type.
+    """
+
+    def __init__(self, intents: Intents, condition_parser: AutomationConditionParser, max_depth: int = 3) -> None:
+        self._intents = intents
+        # WAIT (V5.12) delegates to an already-constructed condition parser
+        # instance rather than building its own - composition, not a second
+        # condition grammar (Regel 6, see module docstring).
+        self._condition_parser = condition_parser
+        self._max_depth = max_depth
+        self._slot_lists = {
+            "action_domain": _ACTION_DOMAIN_SLOT_LIST,
+            "area": WildcardSlotList(name="area"),
+            "name": WildcardSlotList(name="name"),
+            "percent": RangeSlotList(name="percent", start=0, stop=100, step=1, type=RangeType.PERCENTAGE),
+            "temperature": RangeSlotList(name="temperature", start=5, stop=30, step=1, type=RangeType.NUMBER),
+            "color": _COLOR_SLOT_LIST,
+            "color_temp": _COLOR_TEMP_SLOT_LIST,
+            "message": WildcardSlotList(name="message"),
+            "amount": RangeSlotList(name="amount", start=1, stop=59, step=1, type=RangeType.NUMBER),
+            "action_temporal_unit": _ACTION_TEMPORAL_UNIT_SLOT_LIST,
+            "condition_text": WildcardSlotList(name="condition_text"),
+        }
+        self._dispatch = {
+            "HassTurnOnAction": self._parse_turn_on,
+            "HassTurnOffAction": self._parse_turn_off,
+            "HassSetPercentageAction": self._parse_set_percentage,
+            "HassSetColorAction": self._parse_set_color,
+            "HassSetColorTemperatureAction": self._parse_set_color_temperature,
+            "HassSetTemperatureAction": self._parse_set_temperature,
+            "HassNotifyAction": self._parse_notify,
+            "HassDelayAction": self._parse_delay,
+            "HassWaitAction": self._parse_wait,
+        }
+
+    def parse(self, text: str, context: ParseContext) -> tuple["ActionModel | ActionGroup", ...] | None:
+        chunks, is_parallel = _split_chunks(text)
+        if not chunks:
+            return None
+        actions: list[ActionModel] = []
+        for chunk in chunks:
+            action = self._parse_leaf(chunk, context)
+            if action is None:
+                return None  # any unparseable chunk refuses the whole sentence - never partially guess (Regel 4)
+            actions.append(action)
+        if is_parallel:
+            return (ActionGroup(mode=ExecutionMode.PARALLEL, steps=tuple(actions)),)
+        return tuple(actions)
+
+    # -- leaf parsing via hassil -----------------------------------------------
+
+    def _parse_leaf(self, text: str, context: ParseContext) -> ActionModel | None:
+        result = recognize(text, self._intents, slot_lists=self._slot_lists, language="de")
+        if result is None or result.intent is None:
+            return None
+        handler = self._dispatch.get(result.intent.name)
+        if handler is None:
+            return None
+        return handler(result.entities, context)
+
+    # -- shared helpers (architectural precedent: AutomationConditionParser) --
+
+    @staticmethod
+    def _resolve_area(slots: dict, entities: list[EntitySnapshot]) -> tuple[str | None, str | None] | None:
+        area_slot = slots.get("area")
+        if area_slot is None:
+            return None, None
+        area_text = _strip_locative_prepositions(str(area_slot.value))
+        if not area_text:
+            return None, None
+        resolved = resolve_area_scored(area_text, entities)
+        if resolved.status is not AreaResolutionStatus.RESOLVED or resolved.area is None:
+            return None  # named but not a known/unambiguous room - never guess
+        return resolved.area.area_id, resolved.area.name
+
+    def _build_domain_area_target(self, domain_value: str, slots: dict, context: ParseContext) -> TriggerTarget | None:
+        resolved_area = self._resolve_area(slots, context.entities)
+        if resolved_area is None:
+            return None
+        area_id, _area_name = resolved_area
+        return TriggerTarget(domain=domain_value, area_id=area_id)
+
+    @staticmethod
+    def _build_named_target(name_slot, context: ParseContext) -> TriggerTarget | None:
+        name = _strip_locative_prepositions(str(name_slot.value))
+        resolved = resolve_entity_scored(name, context.entities, index=context.index)
+        if resolved.status is not ResolutionStatus.RESOLVED or resolved.entity is None:
+            return None  # not found or ambiguous - never guess (Regel 4)
+        entity = resolved.entity
+
+        # Same semantic-equivalence recheck AutomationTriggerParser/
+        # AutomationConditionParser's own _build_named_target documents.
+        candidates = resolve_candidates(
+            context.entities,
+            Constraints(domain=entity.domain, device_class=entity.device_class, area_id=entity.area_id),
+        )
+        if len(candidates) == 1:
+            return TriggerTarget(domain=entity.domain, device_class=entity.device_class, area_id=entity.area_id)
+        return TriggerTarget(
+            domain=entity.domain,
+            device_class=entity.device_class,
+            area_id=entity.area_id,
+            entity_id=entity.entity_id,
+        )
+
+    def _build_target(self, slots: dict, context: ParseContext) -> TriggerTarget | None:
+        """{action_domain}+{area} takes precedence over {name} when both are
+        structurally present - mirrors AutomationConditionParser's own
+        device_class-before-name dispatch order in e.g. _parse_state_condition."""
+        domain_slot = slots.get("action_domain")
+        if domain_slot is not None:
+            return self._build_domain_area_target(str(domain_slot.value), slots, context)
+        name_slot = slots.get("name")
+        if name_slot is None:
+            return None
+        return self._build_named_target(name_slot, context)
+
+    @staticmethod
+    def _optional_duration_seconds(slots: dict) -> int | None:
+        amount_slot = slots.get("amount")
+        unit_slot = slots.get("action_temporal_unit")
+        if amount_slot is None or unit_slot is None:
+            return None
+        return _seconds_from_amount_unit(int(amount_slot.value), str(unit_slot.value))
+
+    # -- per-intent leaf parsing ------------------------------------------------
+
+    def _parse_turn_on(self, slots: dict, context: ParseContext) -> ActionModel | None:
+        target = self._build_target(slots, context)
+        if target is None:
+            return None
+        return ActionModel(type=ActionType.TURN_ON, target=target, duration_seconds=self._optional_duration_seconds(slots))
+
+    def _parse_turn_off(self, slots: dict, context: ParseContext) -> ActionModel | None:
+        target = self._build_target(slots, context)
+        if target is None:
+            return None
+        return ActionModel(type=ActionType.TURN_OFF, target=target)
+
+    # Domain -> ActionType for the single percent grammar (set_percentage_action.yaml's
+    # own comment explains why one grammar covers all three types) - mirrors
+    # service_call.py's PERCENT_INTENTS dict verbatim for cover/light, plus fan
+    # (not a PERCENT_INTENTS member - that dict is query-engine scope, this is
+    # the action engine's own V5.7 vocabulary). switch/climate/anything else
+    # has no percent semantics and is refused (Regel 4, never guess).
+    _PERCENTAGE_ACTION_TYPE_BY_DOMAIN = {
+        "light": ActionType.SET_BRIGHTNESS,
+        "cover": ActionType.SET_POSITION,
+        "fan": ActionType.SET_FAN_SPEED,
+    }
+
+    def _parse_set_percentage(self, slots: dict, context: ParseContext) -> ActionModel | None:
+        target = self._build_target(slots, context)
+        percent_slot = slots.get("percent")
+        if target is None or percent_slot is None:
+            return None
+        action_type = self._PERCENTAGE_ACTION_TYPE_BY_DOMAIN.get(target.domain or "")
+        if action_type is None:
+            return None  # domain has no percent semantics - refuse, don't guess (Regel 4)
+        return ActionModel(type=action_type, target=target, value=float(percent_slot.value))
+
+    def _parse_set_temperature(self, slots: dict, context: ParseContext) -> ActionModel | None:
+        target = self._build_target(slots, context)
+        temperature_slot = slots.get("temperature")
+        if target is None or temperature_slot is None:
+            return None
+        return ActionModel(type=ActionType.SET_TEMPERATURE, target=target, value=float(temperature_slot.value))
+
+    def _parse_set_color(self, slots: dict, context: ParseContext) -> ActionModel | None:
+        target = self._build_target(slots, context)
+        color_slot = slots.get("color")
+        if target is None or color_slot is None:
+            return None
+        return ActionModel(type=ActionType.SET_COLOR, target=target, color_name=str(color_slot.value))
+
+    def _parse_set_color_temperature(self, slots: dict, context: ParseContext) -> ActionModel | None:
+        target = self._build_target(slots, context)
+        color_temp_slot = slots.get("color_temp")
+        if target is None or color_temp_slot is None:
+            return None
+        return ActionModel(type=ActionType.SET_COLOR_TEMPERATURE, target=target, color_temp_kelvin=int(color_temp_slot.value))
+
+    @staticmethod
+    def _parse_notify(slots: dict, context: ParseContext) -> ActionModel | None:
+        message_slot = slots.get("message")
+        if message_slot is None:
+            return None
+        message = str(message_slot.value).strip()
+        if not message:
+            return None
+        return ActionModel(type=ActionType.NOTIFY, message=message)
+
+    def _parse_delay(self, slots: dict, context: ParseContext) -> ActionModel | None:
+        delay_seconds = self._optional_duration_seconds(slots)
+        if delay_seconds is None:
+            return None
+        return ActionModel(type=ActionType.DELAY, delay_seconds=delay_seconds)
+
+    def _parse_wait(self, slots: dict, context: ParseContext) -> ActionModel | None:
+        condition_text_slot = slots.get("condition_text")
+        if condition_text_slot is None:
+            return None
+        condition_text = str(condition_text_slot.value).strip()
+        if not condition_text:
+            return None
+        # Rewrite "warte [maximal N Einheit] bis <condition>" -> "wenn
+        # <condition>" and delegate straight to the shared condition parser
+        # (see module docstring) - never a second condition grammar.
+        condition_node = self._condition_parser.parse(f"wenn {condition_text}", context)
+        if condition_node is None:
+            return None
+        return ActionModel(
+            type=ActionType.WAIT, wait_condition=condition_node, timeout_seconds=self._optional_duration_seconds(slots)
+        )

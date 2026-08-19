@@ -1,0 +1,12 @@
+language: "de"
+intents:
+  # V5 Wave 3 (V5.7) - ActionType.SET_TEMPERATURE. {temperature} reuses the
+  # 5-30 range slot already used by climate_extended/temperature.yaml -
+  # "Grad" is mandatory here (unlike "[Prozent]" above) since a bare number
+  # would be ambiguous with {percent}/{amount} in the same sentence family.
+  HassSetTemperatureAction:
+    data:
+      - sentences:
+          - "(stelle|mach|setze) [den|die|das] {action_domain} [in der|in dem|im|am|beim] {area} auf {temperature} Grad"
+          - "(stelle|mach|setze) [den|die|das] {action_domain} auf {temperature} Grad"
+          - "(stelle|mach|setze) [den|die|das] {name} auf {temperature} Grad"

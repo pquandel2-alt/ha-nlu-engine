@@ -177,7 +177,7 @@ def test_render_automation_tree_reports_no_triggers_for_an_empty_model():
     assert "source_text='leer'" in tree
     assert "triggers: (none)" in tree
     assert "conditions: 0" in tree
-    assert "actions: 0" in tree
+    assert "actions: (none)" in tree
 
 
 def test_render_automation_tree_renders_a_state_trigger_with_its_target_and_state():
@@ -247,6 +247,9 @@ def test_render_automation_tree_renders_multiple_triggers_and_counts_reserved_fi
     assert "triggers (2):" in tree
     assert "STATE(" in tree
     assert "TIME(" in tree
-    # V5 Wave 1 never populates conditions/actions - render always reports 0 for them this wave
+    # V5 Wave 2 (conditions) / Wave 3 (actions) now render real content when
+    # populated; an empty AutomationModel still reports both as absent -
+    # "conditions: 0" (Wave 2's own idiom) and "actions: (none)" (Wave 3,
+    # matching triggers' own "(none)" wording - see render_automation_tree).
     assert "conditions: 0" in tree
-    assert "actions: 0" in tree
+    assert "actions: (none)" in tree

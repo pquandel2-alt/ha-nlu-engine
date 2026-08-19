@@ -1,0 +1,15 @@
+language: "de"
+intents:
+  # V5 Wave 3 (V5.10) - the Delay Engine. {amount}/{action_temporal_unit}
+  # reuse the isolated action-only temporal vocabulary
+  # (_ACTION_TEMPORAL_UNIT_SLOT_LIST, lexicon.py - see that list's own
+  # comment for why it's separate from parsers.py's TemporalParser). No
+  # "bis"-clause here (that's wait_action.yaml's HassWaitAction) - a bare
+  # "warte {amount} {unit}" always means a fixed delay, never a condition
+  # wait, so the two intents never structurally collide.
+  HassDelayAction:
+    data:
+      - sentences:
+          - "warte [für] {amount} {action_temporal_unit}"
+          - "in {amount} {action_temporal_unit}"
+          - "nach {amount} {action_temporal_unit}"

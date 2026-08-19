@@ -1,0 +1,14 @@
+language: "de"
+intents:
+  # V5 Wave 3 (V5.7) - ActionType.SET_COLOR_TEMPERATURE. {color_temp}
+  # reuses _COLOR_TEMP_SLOT_LIST verbatim (warmweiß/kaltweiß -> Kelvin,
+  # Regel 6). Same mandatory-preposition fix set_color_action.yaml
+  # documents in detail - required in the {area} sentence to stop the
+  # {area} wildcard from swallowing "auf" itself when no area is named;
+  # "[auf]" stays optional in all three sentences.
+  HassSetColorTemperatureAction:
+    data:
+      - sentences:
+          - "(stelle|mach|setze) [den|die|das] {action_domain} (in der|in dem|im|am|beim) {area} [auf] {color_temp}"
+          - "(stelle|mach|setze) [den|die|das] {action_domain} [auf] {color_temp}"
+          - "(stelle|mach|setze) [den|die|das] {name} [auf] {color_temp}"

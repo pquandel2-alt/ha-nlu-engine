@@ -1,0 +1,37 @@
+language: "de"
+intents:
+  # V5 Wave 3 (V5.7) - ActionType.TURN_ON. Domain-agnostic across every
+  # actionable domain this project models (light/switch/fan/climate on
+  # *and* cover open) - "an"/"ein" for the former, "auf"/"hoch" for covers -
+  # see automation_action_parser.py's own module docstring for why no
+  # separate OPEN action type exists. Verb vocabulary ("mach"/"schalte"/
+  # "dreh"/"lass"/"fahre") reused from light_switch.yaml's HassTurnOn plus
+  # "fahre" (cover.yaml's own cover-idiomatic verb).
+  # Sentences most-specific-first ({action_domain}+{area}, then
+  # {action_domain} alone, then the {name} wildcard last) - same ordering
+  # discipline every other grammar in this project already documents.
+  # Optional "[für {amount} {action_temporal_unit}]" before the final verb
+  # is the Duration Engine (V5.11) - "schalte das Licht für 30 Minuten ein"
+  # sets ActionModel.duration_seconds, distinct from the Delay Engine
+  # (V5.10, delay_action.yaml)'s own separate DELAY action type.
+  #
+  # The {action_domain}+{area} sentence uses a *mandatory* (not
+  # bracket-optional) preposition alternation - unlike state_trigger.yaml's
+  # own "[prep] {area} {state}" (safe because {state} alone is a small
+  # mandatory constrained slot directly after area), this sentence also has
+  # an *optional* duration group between {area} and the final verb
+  # alternation. A bracket-optional preposition would let the {area}
+  # wildcard swallow "für 30 Minuten" wholesale when no area is actually
+  # named, skip the now-empty duration group, and still land on a valid
+  # final verb match - a structurally legal but semantically wrong parse
+  # (empirically confirmed against hassil==3.11.0 before this fix). Forcing
+  # the preposition to be a real, mandatory word closes that path: without
+  # it, this sentence can't match at all and control falls through to the
+  # {action_domain}-alone sentence below, which has the same
+  # optional-duration-group shape but no {area} wildcard to mis-swallow it.
+  HassTurnOnAction:
+    data:
+      - sentences:
+          - "(schalte|mach|dreh|lass|fahre) [den|die|das] {action_domain} (in der|in dem|im|am|beim) {area} [für {amount} {action_temporal_unit}] (an|ein|auf|hoch)"
+          - "(schalte|mach|dreh|lass|fahre) [den|die|das] {action_domain} [für {amount} {action_temporal_unit}] (an|ein|auf|hoch)"
+          - "(schalte|mach|dreh|lass|fahre) [den|die|das] {name} [für {amount} {action_temporal_unit}] (an|ein|auf|hoch)"

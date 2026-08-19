@@ -1,0 +1,27 @@
+language: "de"
+intents:
+  # V5 Wave 3 (V5.7) - covers ActionType.SET_BRIGHTNESS/SET_POSITION/
+  # SET_FAN_SPEED with a *single* grammar intent, not three. "stelle das
+  # Licht auf 50 Prozent"/"fahre den Rollladen auf 50 Prozent"/"stelle den
+  # Ventilator auf 50 Prozent" are structurally identical sentences (verb +
+  # target + "auf {percent} [Prozent]") - three separate hassil intents
+  # with that identical shape are genuinely ambiguous to hassil itself (it
+  # has no domain-awareness at grammar time, so it just returns whichever
+  # intent happens to be tried first, silently mis-typing e.g. a light
+  # brightness command as SET_FAN_SPEED - empirically confirmed against
+  # hassil==3.11.0 before this file replaced the original three-file
+  # split). Which concrete ActionType applies is only knowable *after* the
+  # target is resolved to a real domain - exactly the precedent
+  # percentage/position_brightness.yaml's own HassSetPercentage +
+  # service_call.py's PERCENT_INTENTS dict already set for the plain
+  # (non-automation) percent command (Regel 6, reused here rather than
+  # reinvented): automation_action_parser.py's _parse_set_percentage
+  # resolves the target first, then maps its domain to SET_BRIGHTNESS
+  # (light)/SET_POSITION (cover)/SET_FAN_SPEED (fan), refusing any other
+  # domain rather than guessing (Regel 4).
+  HassSetPercentageAction:
+    data:
+      - sentences:
+          - "(fahre|stelle|mach|setze) [den|die|das] {action_domain} [in der|in dem|im|am|beim] {area} auf {percent} [Prozent]"
+          - "(fahre|stelle|mach|setze) [den|die|das] {action_domain} auf {percent} [Prozent]"
+          - "(fahre|stelle|mach|setze) [den|die|das] {name} auf {percent} [Prozent]"

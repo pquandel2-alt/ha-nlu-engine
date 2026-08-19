@@ -436,6 +436,40 @@ _RAW_ENTITY_STATE_SLOT_LIST = TextSlotList.from_tuples(
 )
 
 
+# --- Automation Action Engine vocabulary (V5 Wave 3, V5.7-V5.12) -----------
+#
+# SET_COLOR/SET_COLOR_TEMPERATURE reuse _COLOR_SLOT_LIST/_COLOR_TEMP_SLOT_LIST
+# above verbatim (Regel 6). Percent/temperature RangeSlotLists are defined
+# inline in automation_action_parser.py (not here), same precedent
+# PercentageParser/ClimateExtendedParser already set in parsers.py - a
+# RangeSlotList's start/stop/type is call-site configuration, not shared
+# closed vocabulary.
+
+# {action_temporal_unit} for DELAY ("warte 5 Minuten")/TURN_ON's Duration
+# Engine ("... für 30 Minuten an")/WAIT's timeout ("warte maximal 30
+# Minuten bis ..."). Deliberately its own list, NOT merged into the existing
+# _TEMPORAL_UNIT_SLOT_LIST (V4.7, TemporalParser) even though both cover
+# Minuten/Stunden: that list's own consumer (TemporalParser._build_temporal)
+# only ever special-cases "hours" and otherwise treats the raw amount as
+# minutes - adding "Sekunden" there would silently make TemporalParser's
+# *existing*, already-shipped "in 5 Sekunden"-shaped sentences parse as "5
+# minutes" instead of failing to match, a regression in unrelated, already-
+# verified behaviour. Same "don't leak a widened vocabulary into an existing
+# grammar's shared slot" reasoning _COMPARISON_DOMAIN_SLOT_LIST's own
+# docstring documents for why *that* list stays separate from
+# _DOMAIN_SLOT_LIST. Values are the literal second-level unit the automation
+# action parser itself converts to seconds (1/60/3600 multiplier), not
+# reused across any other grammar.
+_ACTION_TEMPORAL_UNIT_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("Sekunden", "seconds"), ("Sekunde", "seconds"),
+        ("Minuten", "minutes"), ("Minute", "minutes"),
+        ("Stunden", "hours"), ("Stunde", "hours"),
+    ],
+    name="action_temporal_unit",
+)
+
+
 # --- Semantic candidate mapping (V6.3, second half) -------------------------
 #
 # The slot lists above are hassil's raw grammar vocabulary (word -> match

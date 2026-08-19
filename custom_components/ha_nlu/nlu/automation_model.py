@@ -32,6 +32,11 @@ if TYPE_CHECKING:
     # time.
     from .condition_model import ConditionNode
 
+    # V5 Wave 3 (V5.7-V5.12): action_model.py imports TriggerTarget from
+    # *this* module (and ConditionNode from condition_model.py, for WAIT) -
+    # same TYPE_CHECKING-only cycle-avoidance as ConditionNode above.
+    from .action_model import ActionGroup, ActionModel
+
 
 class TriggerType(Enum):
     """The 7 trigger types HomeIntent V5 Teil 2/10 (V5.3) names.
@@ -114,14 +119,18 @@ class TriggerModel:
 class AutomationModel:
     """The semantic model/AST for one automation request. ``conditions``
     is populated from V5 Wave 2 onward (``ConditionNode`` trees, see
-    ``condition_model.py``); ``actions`` stays reserved for a later wave
-    (Teil 4/10) - always ``()`` until then, never read or written beyond
-    that.
+    ``condition_model.py``); ``actions`` is populated from V5 Wave 3 onward
+    (``ActionModel``/``ActionGroup``, see ``action_model.py``) - a flat,
+    top-level-SEQUENTIAL tuple whose elements may themselves be a nested
+    ``ActionGroup`` for an explicit parallel branch (V5.9). No redundant
+    top-level ``ActionGroup(mode=SEQUENTIAL)`` wrapper - HA's own action
+    lists are sequential by default, so that's this tuple's default shape
+    too, same as it always was before this wave.
     """
 
     triggers: tuple[TriggerModel, ...] = ()
     conditions: tuple["ConditionNode", ...] = ()
-    actions: tuple[object, ...] = ()
+    actions: tuple["ActionModel | ActionGroup", ...] = ()
     source_text: str = ""
 
 
@@ -189,5 +198,16 @@ def render_automation_tree(model: AutomationModel) -> str:
         for condition in model.conditions:
             for line in render_condition_tree(condition, indent=2).splitlines():
                 lines.append(line)
-    lines.append(f"  actions: {len(model.actions)}")
+    if not model.actions:
+        lines.append("  actions: (none)")
+    else:
+        # Function-local import (V5 Wave 3): avoids a module-level import
+        # cycle back to action_model.py, which itself imports TriggerTarget
+        # from this module - same reasoning as render_condition_tree above.
+        from .action_model import render_action_step
+
+        lines.append(f"  actions ({len(model.actions)}):")
+        for action in model.actions:
+            for line in render_action_step(action, indent=2).splitlines():
+                lines.append(line)
     return "\n".join(lines)

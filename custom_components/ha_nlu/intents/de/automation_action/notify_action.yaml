@@ -1,0 +1,14 @@
+language: "de"
+intents:
+  # V5 Wave 3 (V5.7) - ActionType.NOTIFY. No target ({action_domain}/{name})
+  # - a notification action is a standalone message, not domain-bound.
+  # {message} is a WildcardSlotList and must stay the last token in every
+  # sentence (a wildcard anywhere else would swallow the rest), same
+  # discipline every other wildcard slot in this project's grammars follows.
+  HassNotifyAction:
+    data:
+      - sentences:
+          - "[schick|sende] [mir|uns] eine Nachricht [dass] {message}"
+          - "benachrichtige [mich|uns] [dass] {message}"
+          - "sag [mir|uns] Bescheid [dass] {message}"
+          - "sende eine Benachrichtigung [dass] {message}"
