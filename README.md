@@ -72,12 +72,12 @@ No LLM is required.
 
 Current Status
 
-HomeIntent has completed v1 (Deterministic NLU), v2 (Semantic NLU), v3 (Conversational NLU) and v4 (Advanced Natural Language) as defined in the roadmap below. v5 (Natural-Language Automation) has not been started.
+HomeIntent has completed v1 (Deterministic NLU), v2 (Semantic NLU), v3 (Conversational NLU) and v4 (Advanced Natural Language) as defined in the roadmap below. v5 (Natural-Language Automation) is built and integrated: a spoken "wenn ... schalte ..." sentence is parsed into a validated `AutomationModel` and returned as a debug/confirmation response - it does not yet write a real Home Assistant automation (that generation step is a separate, later phase).
 
 Current functionality includes:
 
 * Home Assistant Conversation Agent integration
-* German language grammars (hassil-based, 13 separately compiled intent groups)
+* German language grammars (hassil-based, 16 separately compiled intent groups)
 * deterministic intent matching
 * Semantic Frame / Semantic Command pipeline with entity, area and capability resolution
 * alias-based entity resolution with deterministic candidate ranking
@@ -90,9 +90,8 @@ Current functionality includes:
 * implicit/relative targets ("oben"/"unten", "im selben Raum")
 * temporal expressions (delay, duration, relative/absolute time) - parsed and validated, execution deferred to a later layer
 * multi-step commands ("... und ...")
-* extensive regression tests (950+ tests, including a generated golden test suite)
-
-The project is actively evolving toward v5 (natural-language automation understanding).
+* natural-language automation understanding ("wenn ... , schalte ... ein") - parsed into a validated `AutomationModel` (trigger + action, safety-checked), never a service call or a persisted HA automation
+* extensive regression tests (1360+ tests, including a generated golden test suite)
 
 ⸻
 
@@ -456,19 +455,15 @@ Und im Bad? (cross-sentence follow-up, same as above)
 
 v5 – Natural-Language Automation
 
-A possible future direction is understanding natural-language automation requests.
+HomeIntent understands natural-language automation requests - a trigger clause and an action clause, separated by a comma, matched against the same deterministic grammars, entity resolution and capability/safety validation as every other command.
 
 For example:
 
-Wenn ich das Haus verlasse, mach alle Lichter aus und fahr die Rollläden runter.
+Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht ein.
 
-or:
+The result is a validated `AutomationModel` (trigger + action), returned as a debug-style confirmation. This is intentionally the full scope of v5 today: Sprache → AutomationModel → Validation → Response/Debug. It never calls a Home Assistant service and never writes a real HA automation - turning a validated `AutomationModel` into an actual HA automation (YAML, persisted, editable in the UI) is a separate, later, not-yet-started phase.
 
-Wenn es draußen dunkel wird, mach das Wohnzimmerlicht auf 30 Prozent.
-
-This would move HomeIntent beyond simple Assist commands toward a natural-language automation layer.
-
-This stage is intentionally separate from the core NLU roadmap.
+Ambiguous or unresolvable trigger/action targets are never guessed - the sentence is simply not recognized as an automation (same "never guess" rule as every other command path).
 
 ⸻
 

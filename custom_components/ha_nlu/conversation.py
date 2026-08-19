@@ -26,7 +26,7 @@ from homeassistant.helpers import device_registry as dr, intent
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, NOT_UNDERSTOOD_TEXT
-from .engine import CommandPlan, NluEngine
+from .engine import AutomationMatchResult, CommandPlan, NluEngine
 from .hass_entities import build_device_snapshots, build_entity_snapshots
 from .nlu.context import ConversationContext, ConversationContextStore
 from .service_call import QUERY_INTENTS
@@ -139,6 +139,10 @@ class NluConversationEntity(
             if result is None:
                 result = self._engine.match_command_followup(user_input.text, entities, pending)
             if result is None:
+                result = self._engine.match_automation(
+                    user_input.text, entities, self._world_model, pending
+                )
+            if result is None:
                 result = self._engine.match(user_input.text, entities, self._world_model)
 
         if result is None:
@@ -190,6 +194,21 @@ class NluConversationEntity(
                     )
                 response_parts.append(sub_result.response_text)
             response.async_set_speech(" ".join(response_parts))
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        if isinstance(result, AutomationMatchResult):
+            # Integration Wave scope boundary (Migration Step 4, Integration
+            # Plan Section 9): Sprache -> AutomationModel -> Validation ->
+            # Response/Debug only - never a HA service call, never persisted
+            # as a real HA automation (that's a separate, later,
+            # separately-approved phase). No context is stored either: a
+            # follow-up onto a just-described automation is out of scope
+            # this wave (Integration Plan Section 12), same as CommandPlan's
+            # "follow-ups start fresh" precedent above.
+            self._context_store.clear(user_input.conversation_id)
+            response.async_set_speech(result.response_text)
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
             )

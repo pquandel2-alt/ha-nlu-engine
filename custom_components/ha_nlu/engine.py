@@ -41,6 +41,12 @@ from .nlu.response import NluError, NluResponse
 from .nlu.response_generator import ResponseGenerator
 from .nlu.service_mapper import map_to_service_call
 from .nlu.validator import validate_command
+from .automation_action_parser import AutomationActionParser
+from .automation_condition_parser import AutomationConditionParser
+from .automation_trigger_parser import _AUTOMATION_TRIGGER_RE, AutomationTriggerParser
+from .nlu.automation_model import AutomationModel, render_automation_tree
+from .nlu.automation_sentence_split import split_trigger_action
+from .nlu.automation_validator import AutomationValidationError, validate_automation
 from .parsers import (
     AreaQueryParser,
     ClimateExtendedParser,
@@ -85,6 +91,9 @@ AREA_QUERY_DIR = INTENTS_DIR / "area_query"
 QUERY_FOLLOWUP_DIR = INTENTS_DIR / "query_followup"
 STATE_QUERY_DIR = INTENTS_DIR / "state_query"
 COMMAND_FOLLOWUP_DIR = INTENTS_DIR / "command_followup"
+AUTOMATION_TRIGGER_DIR = INTENTS_DIR / "automation_trigger"
+AUTOMATION_CONDITION_DIR = INTENTS_DIR / "automation_condition"
+AUTOMATION_ACTION_DIR = INTENTS_DIR / "automation_action"
 
 # Sentences containing a temporal-modifier keyword ("Minute(n)"/"Stunde(n)"/
 # "Uhr"/"morgen früh"/"heute Abend"/...) are routed to TemporalParser's
@@ -353,6 +362,31 @@ class CommandPlan:
     commands: tuple[MatchResult, ...]
 
 
+@dataclass(frozen=True)
+class AutomationMatchResult:
+    """Result of ``NluEngine.match_automation()`` - the Integration Wave's
+    automation counterpart to ``MatchResult``, deliberately shaped
+    differently: no ``plan``/``ServiceCallPlan`` field, since this wave's
+    scope explicitly stops at "Sprache -> AutomationModel -> Validation ->
+    Response/Debug" (Integration Plan Section 9) - never
+    "AutomationModel -> HA Automation YAML -> HA speichern", that is a
+    separate, later, separately-approved phase. Nothing on this path ever
+    calls ``hass.services.async_call()``.
+
+    ``response_text`` reuses ``render_automation_tree()`` (a plain-text
+    debug rendering, not a new spoken-language generator - Regel 6, no
+    parallel response system) for both outcomes: the plain automation tree
+    when ``validation_error`` is ``None``, or that same tree plus the first
+    violated ``AutomationValidationError`` when it isn't - "niemals raten":
+    a structurally-parsed but semantically-invalid automation is still
+    surfaced, never silently dropped or silently treated as valid.
+    """
+
+    model: AutomationModel
+    response_text: str
+    validation_error: AutomationValidationError | None
+
+
 class NluEngine:
     """Loads all intent YAML files once at construction; ``match()`` is
     stateless per call (entities are passed in fresh each time since HA
@@ -374,6 +408,9 @@ class NluEngine:
         query_followup_dir: Path = QUERY_FOLLOWUP_DIR,
         state_query_dir: Path = STATE_QUERY_DIR,
         command_followup_dir: Path = COMMAND_FOLLOWUP_DIR,
+        automation_trigger_dir: Path = AUTOMATION_TRIGGER_DIR,
+        automation_condition_dir: Path = AUTOMATION_CONDITION_DIR,
+        automation_action_dir: Path = AUTOMATION_ACTION_DIR,
     ) -> None:
         yaml_files = sorted(intents_dir.glob("*.yaml"))
         if not yaml_files:
@@ -445,6 +482,21 @@ class NluEngine:
             raise FileNotFoundError(f"No intent YAML files found in {command_followup_dir}")
         command_followup_intents: Intents = Intents.from_files(command_followup_yaml_files)
 
+        automation_trigger_yaml_files = sorted(automation_trigger_dir.glob("*.yaml"))
+        if not automation_trigger_yaml_files:
+            raise FileNotFoundError(f"No intent YAML files found in {automation_trigger_dir}")
+        automation_trigger_intents: Intents = Intents.from_files(automation_trigger_yaml_files)
+
+        automation_condition_yaml_files = sorted(automation_condition_dir.glob("*.yaml"))
+        if not automation_condition_yaml_files:
+            raise FileNotFoundError(f"No intent YAML files found in {automation_condition_dir}")
+        automation_condition_intents: Intents = Intents.from_files(automation_condition_yaml_files)
+
+        automation_action_yaml_files = sorted(automation_action_dir.glob("*.yaml"))
+        if not automation_action_yaml_files:
+            raise FileNotFoundError(f"No intent YAML files found in {automation_action_dir}")
+        automation_action_intents: Intents = Intents.from_files(automation_action_yaml_files)
+
         self._single_parser = SingleTargetParser(intents)
         self._quantifier_parser = QuantifierParser(quantifier_intents)
         self._percentage_parser = PercentageParser(percentage_intents)
@@ -459,6 +511,15 @@ class NluEngine:
         self._query_followup_parser = QueryFollowupParser(query_followup_intents)
         self._state_query_parser = StateQueryParser(state_query_intents)
         self._command_followup_parser = CommandFollowupParser(command_followup_intents)
+
+        # Automation-Grammatiken/Parser (Integration Wave Migrationsschritt 1):
+        # nur geladen und instanziiert, noch nicht an _select_parser()/match()
+        # angeschlossen - reines Laden ohne Routing, Regressionsrisiko ≈ 0.
+        self._automation_trigger_parser = AutomationTriggerParser(automation_trigger_intents)
+        self._automation_condition_parser = AutomationConditionParser(automation_condition_intents)
+        self._automation_action_parser = AutomationActionParser(
+            automation_action_intents, self._automation_condition_parser
+        )
 
     def _select_parser(self, text: str):
         if _TEMPORAL_RE.search(text):
@@ -692,6 +753,77 @@ class NluEngine:
         if result is None:
             return None
         return self._build_match_result(result, entities, context)
+
+    def match_automation(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
+        context: ConversationContext | None = None,
+    ) -> AutomationMatchResult | None:
+        """Match a combined spoken automation sentence ("Wenn das
+        Küchenfenster geöffnet wird, schalte das Küchenlicht ein.") into an
+        ``AutomationModel`` (Integration Wave Migration Step 3). Not yet
+        called from ``conversation.py`` (Migration Step 4 wires the
+        response branch) - additive, like every other new entry point this
+        engine has grown before its consumer existed.
+
+        Scope boundary (Integration Plan Section 9, stated plainly): this
+        method only ever produces and validates an ``AutomationModel`` - it
+        never builds HA Automation YAML and never calls
+        ``hass.services.async_call()``. Existing HA write access is
+        completely unchanged by this method's existence.
+
+        Gated by ``_AUTOMATION_TRIGGER_RE`` first - the same cheap,
+        collision-free (verified empirically against all 14 existing live
+        grammars) regex scaffold ``automation_trigger_parser.py`` already
+        defined - so an ordinary command/query sentence never pays the cost
+        of ``split_trigger_action()``/two extra parser passes below it.
+        Deliberately checked on the raw (not yet ``normalize()``-d) text,
+        same as every other pre-check regex in this module runs on already-
+        normalized text for ``_select_parser()`` - here there is no shared
+        normalization step yet to hook into (this is a new, independent
+        entry point, not a branch inside ``_select_parser()`` itself; see
+        the Integration Plan's Section 4/Variante D).
+
+        Only the trigger+action combination is split and matched this wave
+        (``split_trigger_action()``'s own scope decision) - a sentence with
+        a condition clause, or with no comma at all, returns ``None`` here,
+        same "never guess" rule as the rest of this engine.
+        """
+        if not _AUTOMATION_TRIGGER_RE.search(text):
+            return None
+
+        normalized = normalize(text)
+        split = split_trigger_action(normalized)
+        if split is None:
+            return None
+        trigger_text, action_text = split
+
+        last_entities = context.last_entities if context is not None else ()
+        last_area = context.last_area if context is not None else None
+        parse_context = ParseContext(
+            entities=entities,
+            index=build_entity_index(entities),
+            world_model=world_model,
+            last_entities=tuple(last_entities),
+            last_area=last_area,
+        )
+
+        trigger = self._automation_trigger_parser.parse(trigger_text, parse_context)
+        if trigger is None:
+            return None
+
+        actions = self._automation_action_parser.parse(action_text, parse_context)
+        if not actions:
+            return None
+
+        model = AutomationModel(triggers=(trigger,), actions=actions, source_text=text)
+        validation_error = validate_automation(model)
+        response_text = render_automation_tree(model)
+        if validation_error is not None:
+            response_text = f"{response_text}\nvalidation_error: {validation_error.name}"
+        return AutomationMatchResult(model=model, response_text=response_text, validation_error=validation_error)
 
     def resolve_clarification(
         self, reply_text: str, clarification: ClarificationRequest, entities: list[EntitySnapshot]

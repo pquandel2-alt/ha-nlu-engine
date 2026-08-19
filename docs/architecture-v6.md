@@ -10,9 +10,15 @@ Abschnitt 8). Stand: V6.6 (Home World Model, Parser-Migration), HEAD
 `932444d`.
 
 Vorstufe: `docs/architecture-v4.md` (v4 – Advanced Natural Language,
-abgeschlossen). v5 (Automation Engine) wurde als Plan (V5.1-V5.53) im
-Brain hinterlegt, aber nie implementiert (siehe V6.28-Zeile in Abschnitt
-6) – nicht Gegenstand dieses Dokuments.
+abgeschlossen). v5 (Automation Engine, V5.1-V5.53) wurde inzwischen
+vollständig gebaut (Waves 1-5, Release 4.10.0) und über eine eigene
+Integration Wave (2026-08-18/19) in `engine.py::match_automation()`/
+`conversation.py` eingehängt: Sprache → `AutomationModel` → Validation →
+Response/Debug, bewusst ohne HA-Service-Aufruf und ohne persistierte
+HA-Automation (das bleibt eine spätere, eigene Phase). Die V6.28/V6.29-
+Zeilen in Abschnitt 6 unten spiegeln noch den Stand *vor* dieser
+Integration Wave und sind insofern historisch zu lesen, nicht als
+aktueller Status.
 
 ⸻
 
@@ -247,6 +253,38 @@ Multi-Wave-Vorhaben, kein Einzelschritt). Legacy-Pfad vollständig intakt und
 weiter alleiniger Produktionspfad; kein Fallback-Kaskaden-Code nötig, da
 nichts umgeschaltet wurde. Kein HA-Integrationsrisiko: `conversation.py`s
 Aufruf von `engine.match()`/`match_followup()`/etc. ist unverändert.
+
+**Bestätigt in der Integration Wave (2026-08-19):** ein analog benannter
+Migrationsschritt ("ReasoningEngine-Ambiguitäts-Gate", Command-Pfad) wurde
+in der Automation-Integration-Wave erneut vorgeschlagen und aus genau
+diesem Regel-6-Grund wieder gestrichen (Details: Brain-Knoten
+`9d6519a8-4e76-4357-91c0-ad5d9e7c72a8`). Nutzer-Klarstellung dazu: das ist
+**keine generelle Absage** an `ReasoningEngine`/`SemanticComposer` – das
+Ziel bleibt ein gemeinsamer Semantic Core. Verbindlich bleibt nur:
+
+- keine zweite Entity-Resolution im bestehenden Command-Pfad
+- kein zweites Ambiguitäts-Gate neben `resolve_entity_scored()`
+- keine parallele Resolver-Implementierung
+- `ClarificationRequest`/die bestehende Ambiguitätslogik bleibt für den
+  Command-Pfad autoritativ
+
+Jeder künftige Integrationsschritt (Command, Query oder Automation) ist vor
+der Umsetzung gegen diese vier Fragen zu prüfen:
+
+1. Kann Reasoning bereits benötigte Informationen aus dem bestehenden
+   Parser-Ergebnis übernehmen, statt sie neu aufzulösen?
+2. Kann der Composer auf bereits aufgelösten semantischen Ergebnissen
+   arbeiten, statt selbst neu zu resolven?
+3. Können Follow-ups über den vorhandenen `ConversationContext` komponiert
+   werden, statt einen neuen Context-Mechanismus zu bauen?
+4. Können Automation, Query und Command gemeinsame semantische Strukturen
+   nutzen, ohne dass dafür ein zweiter Resolver eingeführt wird?
+
+Die oben skizzierte Parser-für-Parser-Migration auf
+`constraint_resolver.resolve_candidates()` (V6.6-Nachfolgeaufwand) bleibt
+der wahrscheinlichste erste Schritt, der Frage 1/2 bejaht, ohne einen
+zweiten Resolver einzuführen (er *ersetzt* den bestehenden statt einen
+neuen daneben zu stellen).
 
 ## 6b. Wave 8 – Validation (Ergebnis, 2026-08-13)
 
