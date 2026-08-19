@@ -88,6 +88,16 @@ class TriggerTarget:
     device_class: str | None = None
     area_id: str | None = None
     entity_id: str | None = None
+    # V5 Wave 4 (V5.17, "Natural Language Quantifiers in Automations") -
+    # reuses parsers.py's QuantifierParser vocabulary/values verbatim
+    # (Regel 6): "all"/"both"/"count" (same 3 kinds, same "beide"==exactly-2/
+    # "die drei X"==exactly-3 validation rules), populated only by
+    # automation_action_parser.py's quantified TURN_ON/TURN_OFF sentences -
+    # every other target (triggers, conditions, single-entity actions) keeps
+    # these at their default and is completely unaffected.
+    quantifier: str | None = None
+    quantifier_count: int | None = None  # only set when quantifier == "count"
+    exclude_entity_ids: tuple[str, ...] = ()  # entities named via "... außer [dem|der|den] {name}"
 
 
 @dataclass(frozen=True)
@@ -113,6 +123,14 @@ class TriggerModel:
     time_hour: int | None = None  # TIME
     time_minute: int | None = None  # TIME
     weekdays: tuple[str, ...] = ()  # WEEKDAY - HA weekday abbreviations, e.g. ("sat", "sun")
+    # V5 Wave 4 (V5.14, "Relative Time" - "10 Minuten nachdem ich nach Hause
+    # komme") - only ever set on an event-based trigger type (STATE/
+    # NUMERIC_STATE/PRESENCE/DEVICE, see automation_trigger_parser.py's
+    # _parse_delay_trigger); TIME/SUN/WEEKDAY triggers never carry a delay -
+    # they already express an absolute/recurring point in time, "X Minuten
+    # nachdem es 20 Uhr ist" is not a sentence any of the 7 trigger grammars
+    # accept.
+    delay_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -142,9 +160,13 @@ def _render_target(target: TriggerTarget) -> str:
             ("device_class", target.device_class),
             ("area_id", target.area_id),
             ("entity_id", target.entity_id),
+            ("quantifier", target.quantifier),
+            ("quantifier_count", target.quantifier_count),
         )
         if value is not None
     ]
+    if target.exclude_entity_ids:
+        parts.append(f"exclude_entity_ids={','.join(target.exclude_entity_ids)}")
     return "{" + ", ".join(parts) + "}"
 
 
@@ -172,6 +194,8 @@ def _render_trigger(trigger: TriggerModel) -> str:
         parts.append(f"time={trigger.time_hour:02d}:{(trigger.time_minute or 0):02d}")
     if trigger.weekdays:
         parts.append(f"weekdays={','.join(trigger.weekdays)}")
+    if trigger.delay_seconds is not None:
+        parts.append(f"delay_seconds={trigger.delay_seconds}")
     return f"{trigger.type.name}(" + ", ".join(parts) + ")"
 
 

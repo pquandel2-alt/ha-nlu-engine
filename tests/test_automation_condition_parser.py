@@ -71,7 +71,7 @@ ALL_DEVICES: list[DeviceSnapshot] = []
 @pytest.fixture(scope="module")
 def parser() -> AutomationConditionParser:
     """Load condition intents from automation_condition/*.yaml and construct parser."""
-    yaml_files = list(AUTOMATION_CONDITION_DIR.glob("*.yaml"))
+    yaml_files = sorted(AUTOMATION_CONDITION_DIR.glob("*.yaml"))
     intents = Intents.from_files(yaml_files)
     return AutomationConditionParser(intents, max_depth=3)
 
@@ -90,8 +90,9 @@ def context() -> ParseContext:
 
 def test_parser_loads_intents_and_accepts_max_depth_parameter():
     """Parser loads from intents/de/automation_condition/, accepts max_depth."""
-    yaml_files = list(AUTOMATION_CONDITION_DIR.glob("*.yaml"))
-    assert len(yaml_files) == 9, "Must have 9 condition intent YAML files"
+    yaml_files = sorted(AUTOMATION_CONDITION_DIR.glob("*.yaml"))
+    # V5 Wave 4 (V5.15) added a 10th: time_window_condition.yaml.
+    assert len(yaml_files) == 10, "Must have 10 condition intent YAML files"
     intents = Intents.from_files(yaml_files)
     parser_depth_2 = AutomationConditionParser(intents, max_depth=2)
     parser_depth_3 = AutomationConditionParser(intents, max_depth=3)
@@ -239,6 +240,80 @@ def test_sun_condition_before_sunset(parser, context):
     assert node.condition.type is ConditionType.SUN
     assert node.condition.sun_event is SunEvent.SUNSET
     assert node.condition.sun_comparator is TimeComparator.BEFORE
+
+
+# --- TIME WINDOW (V5 Wave 4, V5.15) -----------------------------------------
+
+
+def test_time_window_condition_non_wrapping_range_composes_as_and(parser, context):
+    """"zwischen 18 und 22 Uhr" - a non-wrapping window (start <= end)
+    composes as AND(after start, before end) - both must hold."""
+    node = parser.parse("zwischen 18 und 22 Uhr", context)
+    assert node is not None
+    assert node.operator is LogicalOperator.AND
+    assert len(node.children) == 2
+    after, before = node.children
+    assert after.condition.type is ConditionType.TIME
+    assert after.condition.time_comparator is TimeComparator.AFTER
+    assert after.condition.time_hour == 18
+    assert before.condition.time_comparator is TimeComparator.BEFORE
+    assert before.condition.time_hour == 22
+
+
+def test_time_window_condition_midnight_wrapping_day_part_composes_as_or(parser, context):
+    """"nur nachts" (day_part_window "22,6") wraps past midnight
+    (start > end) - AND would be permanently false, so this must compose as
+    OR(after 22, before 6)."""
+    node = parser.parse("nur nachts", context)
+    assert node is not None
+    assert node.operator is LogicalOperator.OR
+    assert len(node.children) == 2
+    after, before = node.children
+    assert after.condition.time_comparator is TimeComparator.AFTER
+    assert after.condition.time_hour == 22
+    assert before.condition.time_comparator is TimeComparator.BEFORE
+    assert before.condition.time_hour == 6
+
+
+def test_time_window_condition_non_wrapping_day_part_composes_as_and(parser, context):
+    """"morgens" (day_part_window "6,10") doesn't wrap - stays AND, not OR."""
+    node = parser.parse("morgens", context)
+    assert node is not None
+    assert node.operator is LogicalOperator.AND
+    after, before = node.children
+    assert after.condition.time_hour == 6
+    assert before.condition.time_hour == 10
+
+
+def test_time_window_condition_werktags_compound_composes_weekday_and_window(parser, context):
+    """"werktags zwischen 7 und 9 Uhr" - {weekday} on the same leaf composes
+    as a further AND: AND(WEEKDAY, AND(TIME after 7, TIME before 9))."""
+    node = parser.parse("werktags zwischen 7 und 9 Uhr", context)
+    assert node is not None
+    assert node.operator is LogicalOperator.AND
+    assert len(node.children) == 2
+    weekday_node, window_node = node.children
+    assert weekday_node.condition.type is ConditionType.WEEKDAY
+    assert weekday_node.condition.weekdays == ("mon", "tue", "wed", "thu", "fri")
+    assert window_node.operator is LogicalOperator.AND
+    assert window_node.children[0].condition.time_hour == 7
+    assert window_node.children[1].condition.time_hour == 9
+
+
+def test_time_window_condition_embedded_und_survives_outer_and_combination(parser, context):
+    """"zwischen 18 und 22 Uhr und Samstag" - the mask/unmask machinery must
+    keep the window's own "und" intact while still splitting the outer
+    "und" into a nested AND(AND(TIME, TIME), WEEKDAY)."""
+    node = parser.parse("zwischen 18 und 22 Uhr und Samstag", context)
+    assert node is not None
+    assert node.operator is LogicalOperator.AND
+    assert len(node.children) == 2
+    window_node, weekday_node = node.children
+    assert window_node.operator is LogicalOperator.AND
+    assert window_node.children[0].condition.time_hour == 18
+    assert window_node.children[1].condition.time_hour == 22
+    assert weekday_node.condition.type is ConditionType.WEEKDAY
+    assert "sat" in weekday_node.condition.weekdays
 
 
 # --- PRESENCE (2 cases) -------------------------------------------------------
@@ -454,7 +529,7 @@ def test_max_depth_3_accepts_depth_3_tree(parser, context):
 
 def test_max_depth_3_rejects_depth_4_tree():
     """Parser with max_depth=3 rejects depth-4 tree."""
-    yaml_files = list(AUTOMATION_CONDITION_DIR.glob("*.yaml"))
+    yaml_files = sorted(AUTOMATION_CONDITION_DIR.glob("*.yaml"))
     intents = Intents.from_files(yaml_files)
     parser_max_3 = AutomationConditionParser(intents, max_depth=3)
 
@@ -471,7 +546,7 @@ def test_max_depth_3_rejects_depth_4_tree():
 
 def test_max_depth_2_is_more_restrictive_than_max_depth_3():
     """max_depth=2 vs max_depth=3 shows parameter effectiveness."""
-    yaml_files = list(AUTOMATION_CONDITION_DIR.glob("*.yaml"))
+    yaml_files = sorted(AUTOMATION_CONDITION_DIR.glob("*.yaml"))
     intents = Intents.from_files(yaml_files)
     parser_max_2 = AutomationConditionParser(intents, max_depth=2)
     parser_max_3 = AutomationConditionParser(intents, max_depth=3)

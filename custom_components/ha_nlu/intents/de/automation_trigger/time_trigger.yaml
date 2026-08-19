@@ -6,10 +6,27 @@ intents:
   # makes for its own {hour} slot, parsers.py) - {minute} is optional
   # (defaults to 0) since "um 20 Uhr" is the far more common phrasing than
   # naming an exact minute.
+  #
+  # V5 Wave 4 (V5.13, "Temporal Engine") - "gegen {hour} Uhr" is an approx.
+  # synonym for "um {hour} Uhr" (added to the same two bare sentences via
+  # "[um|gegen]" - the "wenn/sobald/falls es ... ist" sentences stay
+  # "um"-only since "gegen" doesn't read naturally after a copula: "wenn es
+  # gegen 20 Uhr ist" is not idiomatic German). No new field tracks the
+  # approximation itself - same TriggerType.TIME hour/minute pair either way
+  # (stated plainly: "gegen" and "um" become indistinguishable once parsed,
+  # this wave doesn't add an "approximate" flag).
+  #
+  # {day_part} (lexicon.py's new _DAY_PART_HOUR_SLOT_LIST) - "morgens"/
+  # "abends"/etc. as a bare canonical-hour trigger, alone or after "jeden"
+  # (V5.16 Recurrence's own "jeden Morgen"/"jeden Abend" example - a Time
+  # Trigger already fires daily, so "jeden" here is accepted but adds no
+  # further meaning beyond the day-part word alone, see lexicon.py's own
+  # comment on this collapse).
   HassTimeTrigger:
     data:
       - sentences:
           - "[wenn|sobald|falls] es {hour} Uhr ist"
           - "[wenn|sobald|falls] es {hour} Uhr {minute} ist"
-          - "um {hour} Uhr"
-          - "um {hour} Uhr {minute}"
+          - "[um|gegen] {hour} Uhr"
+          - "[um|gegen] {hour} Uhr {minute}"
+          - "[jeden] {day_part}"

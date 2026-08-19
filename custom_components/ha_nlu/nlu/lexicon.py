@@ -469,6 +469,51 @@ _ACTION_TEMPORAL_UNIT_SLOT_LIST = TextSlotList.from_tuples(
     name="action_temporal_unit",
 )
 
+# V5 Wave 4 (V5.13, "Temporal Engine") - {day_part} vocabulary for the Time
+# Trigger/Condition, a fixed canonical-hour mapping (same "conventional
+# fixed value, not a UX decision" precedent _COLOR_TEMP_SLOT_LIST's own
+# warmweiß=2700K/kaltweiß=6500K docstring already sets). Since HA's own time
+# trigger platform fires daily at a wall-clock hour:minute (no date
+# component), "morgen früh"/"heute Abend" carry no distinguishable meaning
+# beyond their day-part word alone here - both "heute" and "morgen" collapse
+# onto the same recurring canonical hour (stated plainly, not hidden: this
+# is a deliberately narrower reading than frame.py's own plain-command
+# TemporalExpression, which *does* keep "heute"/"morgen" apart - that system
+# answers a different question, "what happens right now", not "what daily
+# time does this automation recur at").
+_DAY_PART_HOUR_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("morgens", "7"), ("früh", "7"), ("heute früh", "7"), ("morgen früh", "7"),
+        ("vormittags", "10"),
+        ("mittags", "12"),
+        ("nachmittags", "15"),
+        ("abends", "19"), ("heute abend", "19"), ("morgen abend", "19"),
+        ("nachts", "22"),
+    ],
+    name="day_part",
+)
+
+# V5 Wave 4 (V5.15, "Time Windows") - {day_part_window} vocabulary for the
+# Time Window Condition ("nur nachts", "morgens"). Comma-composite
+# "start,end" values, same packing convention _WEEKDAY_SLOT_LIST's own
+# "Wochenende"->"sat,sun" already established - the handler
+# (automation_condition_parser.py's _parse_time_window_condition) splits on
+# "," and builds an AND(after start, before end) node, or an OR node when
+# the window wraps past midnight (start > end, e.g. "nachts" 22->6) - see
+# that function's own comment for why OR is the structurally correct
+# composition there, not a special case invented ad hoc.
+_DAY_PART_WINDOW_SLOT_LIST = TextSlotList.from_tuples(
+    [
+        ("morgens", "6,10"),
+        ("vormittags", "9,12"),
+        ("mittags", "11,14"),
+        ("nachmittags", "14,18"),
+        ("abends", "18,22"),
+        ("nachts", "22,6"),
+    ],
+    name="day_part_window",
+)
+
 
 # --- Semantic candidate mapping (V6.3, second half) -------------------------
 #

@@ -6,9 +6,19 @@ intents:
   # naturally for every one of them ("am Montag", "am Wochenende", "am
   # Werktag"), so this grammar needs no separate composite-specific
   # template.
+  #
+  # V5 Wave 4 (V5.16, "Recurrence") - "jeden {weekday}" (a recurring
+  # synonym for "am {weekday}", the same composite "Wochenende"/"Werktags"
+  # values apply unchanged: "jeden Werktag"/"jedes Wochenende" both already
+  # read naturally). "jeden {weekday} und {weekday2}" is a *second*,
+  # independent instance of the same vocabulary (see
+  # automation_trigger_parser.py's own {weekday2} slot comment) - bounded to
+  # exactly 2 weekdays per sentence, not arbitrary N.
   HassWeekdayTrigger:
     data:
       - sentences:
           - "[wenn|sobald|falls] {weekday} ist"
           - "[wenn|sobald|falls] es {weekday} ist"
           - "am {weekday}"
+          - "[jeden|jedes] {weekday}"
+          - "[jeden|jedes] {weekday} und {weekday2}"

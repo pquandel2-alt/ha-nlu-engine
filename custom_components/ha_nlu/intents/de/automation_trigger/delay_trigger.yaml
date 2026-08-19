@@ -1,0 +1,17 @@
+language: "de"
+intents:
+  # V5 Wave 4 (V5.14, "Relative Time") - "{amount} {action_temporal_unit}
+  # nachdem {trigger_text}" ("10 Minuten nachdem Philipp nach Hause kommt").
+  # {trigger_text} is a WildcardSlotList (must stay the last token) that
+  # automation_trigger_parser.py's _parse_delay_trigger rewrites away the
+  # "nachdem"-prefix and re-parses via a recursive self.parse() call - same
+  # text-rewrite-and-reparse composition automation_action_parser.py's
+  # HassWaitAction already established for "warte ... bis {condition_text}"
+  # (Regel 6, see that grammar's own comment). Only event-based trigger
+  # clauses (state/numeric_state/presence/device) make sense after "nachdem"
+  # - TIME/SUN/WEEKDAY are refused by the handler itself, not by this
+  # grammar (hassil can't express that constraint).
+  HassDelayTrigger:
+    data:
+      - sentences:
+          - "{amount} {action_temporal_unit} nachdem {trigger_text}"

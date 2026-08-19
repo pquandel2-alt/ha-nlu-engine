@@ -1,0 +1,30 @@
+language: "de"
+intents:
+  # V5 Wave 4 (V5.15, "Time Windows") - "zwischen 18 und 22 Uhr"/"nur
+  # nachts"/"morgens"/"werktags zwischen 7 und 9 Uhr". {hour}/{hour2} reuse
+  # the exact same 0-23 RangeSlotList HassTimeCondition's own {hour} already
+  # is (two distinct slot names for two positions, see
+  # automation_condition_parser.py's own {hour2} comment) - its embedded
+  # "und" is masked before the top-level boolean-expression tokenizer ever
+  # sees it (_mask_time_window_and/_unmask_time_window_and in
+  # automation_condition_parser.py), so "zwischen 18 und 22 Uhr" stays one
+  # leaf instead of being split into two by the "und" that also means
+  # logical AND everywhere else in this grammar family.
+  #
+  # {day_part_window} (lexicon.py's _DAY_PART_WINDOW_SLOT_LIST) covers the
+  # bare day-part phrasing ("nachts", optionally prefixed "nur nachts") -
+  # same canonical-window convention the Time Trigger's {day_part} already
+  # set for a single canonical hour, here a start/end pair instead.
+  #
+  # The optional leading {weekday} on the "zwischen"-sentences covers
+  # "werktags zwischen 7 und 9 Uhr" (reuses _WEEKDAY_SLOT_LIST verbatim,
+  # including its "Werktag(s)"/"Wochenende" composite values) - the handler
+  # composes it as a further AND alongside the time window itself.
+  HassTimeWindowCondition:
+    data:
+      - sentences:
+          - "zwischen {hour} und {hour2} Uhr"
+          - "[wenn|falls|sobald] es zwischen {hour} und {hour2} Uhr ist"
+          - "{weekday} zwischen {hour} und {hour2} Uhr"
+          - "[nur] {day_part_window}"
+          - "[wenn|falls|sobald] es {day_part_window} ist"

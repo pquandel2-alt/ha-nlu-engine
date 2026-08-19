@@ -99,9 +99,13 @@ def _render_target(target: TriggerTarget) -> str:
             ("device_class", target.device_class),
             ("area_id", target.area_id),
             ("entity_id", target.entity_id),
+            ("quantifier", target.quantifier),
+            ("quantifier_count", target.quantifier_count),
         )
         if value is not None
     ]
+    if target.exclude_entity_ids:
+        parts.append(f"exclude_entity_ids={','.join(target.exclude_entity_ids)}")
     return "{" + ", ".join(parts) + "}"
 
 

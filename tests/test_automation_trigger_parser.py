@@ -74,7 +74,17 @@ ALL_DEVICES = [
 
 @pytest.fixture(scope="module")
 def parser() -> AutomationTriggerParser:
-    yaml_files = list(AUTOMATION_TRIGGER_DIR.glob("*.yaml"))
+    # sorted(), not list() - raw glob() order is filesystem-dependent, and
+    # hassil's recognize() returns the first *intent* (not just sentence)
+    # that matches across the whole loaded set. V5 Wave 4 (V5.14) hit this
+    # for real: on this filesystem, unsorted glob() put state_trigger.yaml
+    # before delay_trigger.yaml, so HassStateTrigger's own bare-{name}
+    # sentence (its "wenn"/"der" prefix is fully optional) silently
+    # swallowed "5 Minuten nachdem das Küchenfenster geöffnet wird" whole
+    # before HassDelayTrigger ever got a chance - engine.py's own
+    # `sorted(dir.glob("*.yaml"))` convention (every one of its own
+    # Intents.from_files() call sites) closes this the same way here.
+    yaml_files = sorted(AUTOMATION_TRIGGER_DIR.glob("*.yaml"))
     intents = Intents.from_files(yaml_files)
     return AutomationTriggerParser(intents)
 
@@ -250,6 +260,71 @@ def test_weekday_trigger_composite_weekend(parser, context):
     assert trigger.weekdays == ("sat", "sun")
 
 
+def test_weekday_trigger_recurring_jeden_synonym(parser, context):
+    # V5 Wave 4 (V5.16): "jeden {weekday}" is a recurring synonym for "am
+    # {weekday}" - must produce the identical TriggerModel.
+    trigger = parser.parse("jeden Montag", context)
+    assert trigger.type is TriggerType.WEEKDAY
+    assert trigger.weekdays == ("mon",)
+
+
+def test_weekday_trigger_two_weekday_combination_is_deduplicated_and_ordered(parser, context):
+    # V5 Wave 4 (V5.16): {weekday2} combines with {weekday} into one sorted,
+    # deduplicated tuple - "Mittwoch und Montag" must equal "Montag und Mittwoch".
+    trigger = parser.parse("jeden Mittwoch und Montag", context)
+    assert trigger.type is TriggerType.WEEKDAY
+    assert trigger.weekdays == ("mon", "wed")
+
+
+# -- Temporal Engine (V5.13) -------------------------------------------------
+
+
+def test_time_trigger_accepts_gegen_as_an_approximate_synonym_for_um(parser, context):
+    # V5 Wave 4 (V5.13): "gegen" and "um" become indistinguishable once
+    # parsed - no separate "approximate" flag, same TriggerType.TIME pair.
+    trigger = parser.parse("gegen 7 Uhr", context)
+    assert trigger.type is TriggerType.TIME
+    assert trigger.time_hour == 7
+    assert trigger.time_minute == 0
+
+
+def test_time_trigger_day_part_word_resolves_to_its_canonical_hour(parser, context):
+    trigger = parser.parse("morgens", context)
+    assert trigger.type is TriggerType.TIME
+    assert trigger.time_hour == 7
+    assert trigger.time_minute == 0
+
+
+def test_time_trigger_day_part_word_accepts_the_optional_jeden_prefix(parser, context):
+    # "jeden Morgen" reads naturally but adds no further meaning beyond the
+    # day-part word alone - a Time Trigger already fires daily.
+    trigger = parser.parse("jeden abends", context)
+    assert trigger.type is TriggerType.TIME
+    assert trigger.time_hour == 19
+
+
+# -- Relative Time / Delay Wrapper (V5.14) -----------------------------------
+
+
+def test_delay_trigger_wraps_a_presence_trigger_with_delay_seconds(parser, context):
+    trigger = parser.parse("10 Minuten nachdem Philipp nach Hause kommt", context)
+    assert trigger.type is TriggerType.PRESENCE
+    assert trigger.target.entity_id == "person.philipp"
+    assert trigger.delay_seconds == 600
+
+
+def test_delay_trigger_wraps_a_state_trigger_with_delay_seconds(parser, context):
+    trigger = parser.parse("5 Minuten nachdem das Küchenfenster geöffnet wird", context)
+    assert trigger.type is TriggerType.STATE
+    assert trigger.delay_seconds == 300
+
+
+def test_delay_trigger_refuses_to_wrap_a_time_trigger(parser, context):
+    # Regel 4: a delay after an already-fixed clock time ("10 Minuten
+    # nachdem es 20 Uhr ist") is never guessed - TIME/SUN/WEEKDAY are refused.
+    assert parser.parse("10 Minuten nachdem es 20 Uhr ist", context) is None
+
+
 # -- Negative / ambiguity cases ---------------------------------------------
 
 
@@ -303,7 +378,7 @@ def test_state_and_numeric_state_triggers_stay_distinguishable_not_merged_across
     # binary_sensor) and a NUMERIC_STATE trigger (threshold, sensor) must
     # never collapse onto the same type/fields just because both are
     # "triggered by a change".
-    yaml_files = list(AUTOMATION_TRIGGER_DIR.glob("*.yaml"))
+    yaml_files = sorted(AUTOMATION_TRIGGER_DIR.glob("*.yaml"))
     intents = Intents.from_files(yaml_files)
     parser = AutomationTriggerParser(intents)
     world_model = build_world_model(ALL_ENTITIES, ALL_DEVICES)

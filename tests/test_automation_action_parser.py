@@ -33,6 +33,10 @@ FLUR_LICHT = EntitySnapshot(
     entity_id="light.flur_licht", friendly_name="Flurlicht", domain="light",
     state="off", area_id="flur", area_name="Flur",
 )
+KUECHE_LICHT = EntitySnapshot(
+    entity_id="light.kueche_licht", friendly_name="Küchenlicht", domain="light",
+    state="off", area_id="kueche", area_name="Küche",
+)
 WOHNZIMMER_ROLLLADEN = EntitySnapshot(
     entity_id="cover.wohnzimmer_rollladen", friendly_name="Wohnzimmer Rollladen", domain="cover",
     state="closed", area_id="wohnzimmer", area_name="Wohnzimmer",
@@ -52,7 +56,7 @@ KUECHE_STECKDOSE = EntitySnapshot(
 SONNE = EntitySnapshot(entity_id="sun.sun", friendly_name="Sonne", domain="sun", state="above_horizon")
 
 ALL_ENTITIES = [
-    WOHNZIMMER_LICHT, FLUR_LICHT, WOHNZIMMER_ROLLLADEN, WOHNZIMMER_HEIZUNG,
+    WOHNZIMMER_LICHT, FLUR_LICHT, KUECHE_LICHT, WOHNZIMMER_ROLLLADEN, WOHNZIMMER_HEIZUNG,
     WOHNZIMMER_VENTILATOR, KUECHE_STECKDOSE, SONNE,
 ]
 ALL_DEVICES: list[DeviceSnapshot] = []
@@ -62,7 +66,7 @@ ALL_DEVICES: list[DeviceSnapshot] = []
 def condition_parser() -> AutomationConditionParser:
     """WAIT (V5.12) delegates to a real condition parser instance (composition,
     see automation_action_parser.py's own module docstring)."""
-    yaml_files = list(AUTOMATION_CONDITION_DIR.glob("*.yaml"))
+    yaml_files = sorted(AUTOMATION_CONDITION_DIR.glob("*.yaml"))
     intents = Intents.from_files(yaml_files)
     return AutomationConditionParser(intents, max_depth=3)
 
@@ -70,7 +74,7 @@ def condition_parser() -> AutomationConditionParser:
 @pytest.fixture(scope="module")
 def parser(condition_parser: AutomationConditionParser) -> AutomationActionParser:
     """Load action intents from automation_action/*.yaml and construct parser."""
-    yaml_files = list(AUTOMATION_ACTION_DIR.glob("*.yaml"))
+    yaml_files = sorted(AUTOMATION_ACTION_DIR.glob("*.yaml"))
     intents = Intents.from_files(yaml_files)
     return AutomationActionParser(intents, condition_parser, max_depth=3)
 
@@ -158,6 +162,69 @@ def test_turn_off_cover_via_runter(parser, context):
     action = result[0]
     assert action.type is ActionType.TURN_OFF
     assert action.target.domain == "cover"
+
+
+# ============================================================================
+# Section 3b: Natural Language Quantifiers in Automations (V5 Wave 4, V5.17)
+# ============================================================================
+
+
+def test_turn_off_quantifier_all_lights(parser, context):
+    """"schalte alle Lichter aus" -> TURN_OFF, quantifier=all, all 3 lights."""
+    result = parser.parse("schalte alle Lichter aus", context)
+    assert result is not None
+    action = result[0]
+    assert action.type is ActionType.TURN_OFF
+    assert action.target.domain == "light"
+    assert action.target.quantifier == "all"
+    assert action.target.quantifier_count is None
+    assert action.target.exclude_entity_ids == ()
+
+
+def test_turn_on_quantifier_both_requires_exactly_two_matches(parser, context):
+    """"mach beide Lichter an" - "beide" only ever means exactly 2 (Regel 4,
+    never guess) - refused here since ALL_ENTITIES has 3 lights domain-wide."""
+    assert parser.parse("mach beide Lichter an", context) is None
+
+
+def test_turn_on_quantifier_both_lights_in_one_area():
+    """Two lights, scoped to exactly 2 matches - "beide" resolves unambiguously."""
+    result = _parse_single_action_with_entities("mach beide Lichter an", [WOHNZIMMER_LICHT, FLUR_LICHT])
+    assert result.type is ActionType.TURN_ON
+    assert result.target.quantifier == "both"
+
+
+def test_turn_on_quantifier_count_requires_exact_match_count(parser, context):
+    """"mach die drei Lichter an" -> quantifier=count, count=3 (all 3 test lights)."""
+    result = parser.parse("mach die drei Lichter an", context)
+    assert result is not None
+    action = result[0]
+    assert action.type is ActionType.TURN_ON
+    assert action.target.quantifier == "count"
+    assert action.target.quantifier_count == 3
+
+
+def test_turn_on_quantifier_count_refuses_when_match_count_differs(parser, context):
+    """"mach die beiden Lichter an" phrased as count=2, but 3 lights exist
+    domain-wide - refuse rather than silently acting on the wrong set."""
+    assert parser.parse("mach die zwei Lichter an", context) is None
+
+
+def test_turn_off_quantifier_all_with_exclusion(parser, context):
+    """"schalte alle Lichter aus außer dem Flurlicht" -> quantifier=all,
+    Flurlicht excluded from both the match set and the count check."""
+    result = parser.parse("schalte alle Lichter aus außer dem Flurlicht", context)
+    assert result is not None
+    action = result[0]
+    assert action.type is ActionType.TURN_OFF
+    assert action.target.quantifier == "all"
+    assert action.target.exclude_entity_ids == ("light.flur_licht",)
+
+
+def test_turn_on_quantifier_exclusion_target_must_resolve(parser, context):
+    """An exclusion name that doesn't resolve to a known entity refuses the
+    whole action (Regel 4) rather than silently ignoring the exclusion."""
+    assert parser.parse("schalte alle Lichter an außer dem Dingsbums", context) is None
 
 
 # ============================================================================
@@ -474,11 +541,11 @@ def test_empty_text_refuses(parser, context):
 
 
 def _build_parser() -> AutomationActionParser:
-    cond_files = list(AUTOMATION_CONDITION_DIR.glob("*.yaml"))
+    cond_files = sorted(AUTOMATION_CONDITION_DIR.glob("*.yaml"))
     cond_intents = Intents.from_files(cond_files)
     condition_parser = AutomationConditionParser(cond_intents, max_depth=3)
 
-    action_files = list(AUTOMATION_ACTION_DIR.glob("*.yaml"))
+    action_files = sorted(AUTOMATION_ACTION_DIR.glob("*.yaml"))
     action_intents = Intents.from_files(action_files)
     return AutomationActionParser(action_intents, condition_parser, max_depth=3)
 
@@ -494,6 +561,20 @@ def _parse_actions(text: str):
 
 def _parse_single_action(text: str) -> ActionModel:
     result = _parse_actions(text)
+    assert result is not None
+    assert len(result) == 1
+    action = result[0]
+    assert isinstance(action, ActionModel)
+    return action
+
+
+def _parse_single_action_with_entities(text: str, entities: list[EntitySnapshot]) -> ActionModel:
+    """Same as _parse_single_action, but scoped to a custom entity set - used
+    by the V5.17 quantifier tests that need a specific match count (e.g.
+    exactly 2 lights for "beide") rather than module-level ALL_ENTITIES."""
+    world_model = build_world_model(entities, [])
+    context = ParseContext(entities=entities, index=world_model.entity_index, world_model=world_model)
+    result = _build_parser().parse(text, context)
     assert result is not None
     assert len(result) == 1
     action = result[0]

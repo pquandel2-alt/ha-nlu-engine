@@ -5,9 +5,16 @@ intents:
   # suffix here (ActionModel.duration_seconds is TURN_ON-only, see
   # action_model.py's own field comment: "revert after N seconds" only
   # makes sense starting from an on/open state).
+  # V5 Wave 4 (V5.17) - same 4 quantifier/count/exclusion sentences
+  # turn_on_action.yaml's own comment documents, mirrored for TURN_OFF -
+  # including the same before-the-bare-{name}-sentence ordering requirement.
   HassTurnOffAction:
     data:
       - sentences:
           - "(schalte|mach|dreh|lass|fahre) [den|die|das] {action_domain} [in der|in dem|im|am|beim] {area} (aus|zu|runter)"
           - "(schalte|mach|dreh|lass|fahre) [den|die|das] {action_domain} (aus|zu|runter)"
+          - "(schalte|mach) [die] {quantifier} [den|die|das] {action_domain} (aus|zu|runter)"
+          - "(schalte|mach) [die] {quantifier} [den|die|das] {action_domain} [in der|in dem|im|am|beim] {area} (aus|zu|runter)"
+          - "(schalte|mach) [den|die|das] {count} {action_domain} (aus|zu|runter)"
+          - "(schalte|mach) alle {action_domain} (aus|zu|runter) außer [dem|der|den] {name}"
           - "(schalte|mach|dreh|lass|fahre) [den|die|das] {name} (aus|zu|runter)"

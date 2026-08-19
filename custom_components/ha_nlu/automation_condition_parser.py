@@ -56,6 +56,7 @@ from .nlu.condition_model import ConditionModel, ConditionNode, ConditionType, L
 from .nlu.constraint_resolver import Constraints, resolve_candidates
 from .nlu.lexicon import (
     _COMPARATOR_SLOT_LIST,
+    _DAY_PART_WINDOW_SLOT_LIST,
     _DEVICE_CLASS_SLOT_LIST,
     _MONTH_SLOT_LIST,
     _NUMERIC_UNIT_SLOT_LIST,
@@ -77,6 +78,29 @@ AUTOMATION_CONDITION_DIR = Path(__file__).parent / "intents" / "de" / "automatio
 # word boundary (both neighbouring characters are word characters), so the
 # \b assertions on both ends of each alternative never match inside them.
 _STRUCTURAL_TOKEN_RE = re.compile(r"\(|\)|\bund\b|\boder\b|\bnicht\b", re.IGNORECASE)
+
+# V5 Wave 4 (V5.15, "Time Windows") - "zwischen {hour} und {hour2} Uhr" has
+# its own embedded "und" that _STRUCTURAL_TOKEN_RE would otherwise split on
+# (producing two malformed leaves, "zwischen 18" AND "22 Uhr", instead of one
+# HassTimeWindowCondition leaf). Masked before _tokenize() ever sees the
+# text, unmasked again in _parse_leaf() right before the hassil-level
+# recognize() call (which needs the literal "und" back to match
+# time_window_condition.yaml's own "{hour} und {hour2}" sentence) - the
+# boolean-expression layer only ever sees the masked marker, never the real
+# word, so it can't misinterpret it as a second top-level "und".
+_TIME_WINDOW_SPAN_RE = re.compile(r"\bzwischen\b.*?\buhr\b", re.IGNORECASE)
+_TIME_WINDOW_AND_MARKER = "UNDZWISCHENMARKER"
+
+
+def _mask_time_window_and(text: str) -> str:
+    def _mask_span(match: re.Match[str]) -> str:
+        return re.sub(r"\bund\b", _TIME_WINDOW_AND_MARKER, match.group(0), count=1, flags=re.IGNORECASE)
+
+    return _TIME_WINDOW_SPAN_RE.sub(_mask_span, text)
+
+
+def _unmask_time_window_and(text: str) -> str:
+    return re.sub(_TIME_WINDOW_AND_MARKER, "und", text, flags=re.IGNORECASE)
 
 
 def _tokenize(text: str) -> list[tuple[str, str]]:
@@ -151,6 +175,14 @@ class AutomationConditionParser:
             "sun_comparator": _TIME_OFFSET_DIRECTION_SLOT_LIST,
             "hour": RangeSlotList(name="hour", start=0, stop=23, step=1, type=RangeType.NUMBER),
             "minute": RangeSlotList(name="minute", start=0, stop=59, step=1, type=RangeType.NUMBER),
+            # V5 Wave 4 (V5.15, "Time Windows") - {hour2} is a second,
+            # independent instance of the same 0-23 range, only ever used
+            # together with {hour} in time_window_condition.yaml's
+            # "zwischen {hour} und {hour2} Uhr" sentence (same "two distinct
+            # slot names for two positions of the same vocabulary" precedent
+            # AutomationTriggerParser's own {weekday2} already established).
+            "hour2": RangeSlotList(name="hour2", start=0, stop=23, step=1, type=RangeType.NUMBER),
+            "day_part_window": _DAY_PART_WINDOW_SLOT_LIST,
             # words=True default kept (plan's own note): 1-31 is a small
             # range, comparable to other small existing RangeSlotLists.
             "day_of_month": RangeSlotList(name="day_of_month", start=1, stop=31, step=1, type=RangeType.NUMBER),
@@ -169,6 +201,7 @@ class AutomationConditionParser:
             "HassStateCondition": self._parse_state_condition,
             "HassNumericCondition": self._parse_numeric_condition,
             "HassTimeCondition": self._parse_time_condition,
+            "HassTimeWindowCondition": self._parse_time_window_condition,
             "HassDateCondition": self._parse_date_condition,
             "HassWeekdayCondition": self._parse_weekday_condition,
             "HassSunCondition": self._parse_sun_condition,
@@ -178,7 +211,7 @@ class AutomationConditionParser:
         }
 
     def parse(self, text: str, context: ParseContext) -> ConditionNode | None:
-        tokens = _tokenize(text)
+        tokens = _tokenize(_mask_time_window_and(text))
         if not tokens:
             return None
         cursor = _TokenCursor(tokens)
@@ -254,6 +287,7 @@ class AutomationConditionParser:
     # -- leaf parsing via hassil -----------------------------------------------
 
     def _parse_leaf(self, text: str, context: ParseContext) -> ConditionNode | None:
+        text = _unmask_time_window_and(text)
         result = recognize(text, self._intents, slot_lists=self._slot_lists, language="de")
         if result is None or result.intent is None:
             return None
@@ -379,6 +413,47 @@ class AutomationConditionParser:
             type=ConditionType.TIME, time_hour=int(hour_slot.value), time_minute=minute, time_comparator=time_comparator
         )
         return ConditionNode(condition=condition)
+
+    @staticmethod
+    def _build_time_window_node(start_hour: int, end_hour: int) -> ConditionNode:
+        """"zwischen 18 und 22 Uhr" -> two TIME leaves (after start, before
+        end). Non-wrapping windows (start <= end, the common case) compose
+        as AND - both must hold. Wrapping windows (start > end, e.g.
+        "nachts" 22->6) must compose as OR: AND(after 22, before 6) is
+        permanently false (no hour is both >= 22 and < 6), whereas OR(after
+        22, before 6) correctly matches 22:00-23:59 and 00:00-05:59 - see
+        lexicon.py's _DAY_PART_WINDOW_SLOT_LIST docstring for the same point.
+        """
+        after = ConditionModel(type=ConditionType.TIME, time_hour=start_hour, time_minute=0, time_comparator=TimeComparator.AFTER)
+        before = ConditionModel(type=ConditionType.TIME, time_hour=end_hour, time_minute=0, time_comparator=TimeComparator.BEFORE)
+        after_node = ConditionNode(condition=after)
+        before_node = ConditionNode(condition=before)
+        operator = LogicalOperator.AND if start_hour <= end_hour else LogicalOperator.OR
+        return ConditionNode(operator=operator, children=(after_node, before_node))
+
+    @staticmethod
+    def _parse_time_window_condition(slots: dict, context: ParseContext) -> ConditionNode | None:
+        day_part_slot = slots.get("day_part_window")
+        if day_part_slot is not None:
+            start_str, end_str = str(day_part_slot.value).split(",")
+            window_node = AutomationConditionParser._build_time_window_node(int(start_str), int(end_str))
+        else:
+            hour_slot = slots.get("hour")
+            hour2_slot = slots.get("hour2")
+            if hour_slot is None or hour2_slot is None:
+                return None
+            window_node = AutomationConditionParser._build_time_window_node(int(hour_slot.value), int(hour2_slot.value))
+
+        # "werktags zwischen 7 und 9 Uhr" - an optional {weekday} slot on the
+        # same leaf (see time_window_condition.yaml's own compound sentence)
+        # composes as a further AND, reusing ConditionType.WEEKDAY verbatim
+        # (Regel 6) rather than inventing a combined condition type.
+        weekday_slot = slots.get("weekday")
+        if weekday_slot is None:
+            return window_node
+        weekday_condition = ConditionModel(type=ConditionType.WEEKDAY, weekdays=tuple(str(weekday_slot.value).split(",")))
+        weekday_node = ConditionNode(condition=weekday_condition)
+        return ConditionNode(operator=LogicalOperator.AND, children=(weekday_node, window_node))
 
     @staticmethod
     def _parse_date_condition(slots: dict, context: ParseContext) -> ConditionNode | None:

@@ -78,7 +78,13 @@ from .entities import EntitySnapshot, ResolutionStatus, resolve_entity_scored
 from .nlu.action_model import ActionGroup, ActionModel, ActionType, ExecutionMode
 from .nlu.automation_model import TriggerTarget
 from .nlu.constraint_resolver import Constraints, resolve_candidates
-from .nlu.lexicon import _ACTION_TEMPORAL_UNIT_SLOT_LIST, _COLOR_SLOT_LIST, _COLOR_TEMP_SLOT_LIST
+from .nlu.lexicon import (
+    _ACTION_TEMPORAL_UNIT_SLOT_LIST,
+    _COLOR_SLOT_LIST,
+    _COLOR_TEMP_SLOT_LIST,
+    _COUNT_SLOT_LIST,
+    _QUANTIFIER_SLOT_LIST,
+)
 from .nlu.parser import ParseContext
 from .parsers import _strip_locative_prepositions
 
@@ -164,6 +170,16 @@ class AutomationActionParser:
             "amount": RangeSlotList(name="amount", start=1, stop=59, step=1, type=RangeType.NUMBER),
             "action_temporal_unit": _ACTION_TEMPORAL_UNIT_SLOT_LIST,
             "condition_text": WildcardSlotList(name="condition_text"),
+            # V5 Wave 4 (V5.17, "Natural Language Quantifiers in
+            # Automations") - {quantifier}/{count} reuse parsers.py's
+            # QuantifierParser vocabulary verbatim (Regel 6); {name} here
+            # doubles as the exclusion target ("... außer der Flurlampe"),
+            # same WildcardSlotList already used above for the singular
+            # named-target sentences - _build_target() tells the two apart
+            # by whether {action_domain} is also present (see its own
+            # comment).
+            "quantifier": _QUANTIFIER_SLOT_LIST,
+            "count": _COUNT_SLOT_LIST,
         }
         self._dispatch = {
             "HassTurnOnAction": self._parse_turn_on,
@@ -250,14 +266,84 @@ class AutomationActionParser:
     def _build_target(self, slots: dict, context: ParseContext) -> TriggerTarget | None:
         """{action_domain}+{area} takes precedence over {name} when both are
         structurally present - mirrors AutomationConditionParser's own
-        device_class-before-name dispatch order in e.g. _parse_state_condition."""
+        device_class-before-name dispatch order in e.g. _parse_state_condition.
+
+        V5 Wave 4 (V5.17) - {quantifier}/{count}/{name} alongside
+        {action_domain} routes to _build_quantified_target() instead of the
+        plain domain+area path ({name} here is the exclusion target, "...
+        außer der Flurlampe" - only reachable together with
+        {action_domain}, see turn_on_action.yaml/turn_off_action.yaml's own
+        sentences; a bare {name} with no {action_domain} is still the
+        original singular-target sentence, unchanged below).
+        """
         domain_slot = slots.get("action_domain")
         if domain_slot is not None:
+            if slots.get("quantifier") is not None or slots.get("count") is not None or slots.get("name") is not None:
+                return self._build_quantified_target(str(domain_slot.value), slots, context)
             return self._build_domain_area_target(str(domain_slot.value), slots, context)
         name_slot = slots.get("name")
         if name_slot is None:
             return None
         return self._build_named_target(name_slot, context)
+
+    def _build_quantified_target(self, domain_value: str, slots: dict, context: ParseContext) -> TriggerTarget | None:
+        """Ports QuantifierParser's exact validation rules (parsers.py,
+        Regel 6 - no second quantifier-resolution system): "both" requires
+        exactly 2 matches, "count" requires exactly N matches, an exclusion
+        name must resolve unambiguously and be part of the filtered match
+        set before being removed from it. Matches are only checked at parse
+        (authoring) time as a sanity check, same as QuantifierParser's own -
+        re-validation against live HA state at execution time is a future
+        HA-generator wave's job (V5.25), not this one's (stated plainly, not
+        hidden).
+        """
+        resolved_area = self._resolve_area(slots, context.entities)
+        if resolved_area is None:
+            return None
+        area_id, _area_name = resolved_area
+
+        quantifier_slot = slots.get("quantifier")
+        count_slot = slots.get("count")
+        quantifier_value: int | None = None
+        if quantifier_slot is not None:
+            quantifier = str(quantifier_slot.value)
+        elif count_slot is not None:
+            quantifier = "count"
+            quantifier_value = int(count_slot.value)
+        else:
+            # Exclusion sentences hardcode the literal "alle" instead of
+            # using {quantifier} (see turn_on_action.yaml's own comment) -
+            # same precedent QuantifierParser's own docstring documents.
+            quantifier = "all"
+
+        matches = resolve_candidates(context.entities, Constraints(domain=domain_value, area_id=area_id))
+
+        exclude_entity_ids: tuple[str, ...] = ()
+        name_slot = slots.get("name")
+        if name_slot is not None:
+            exclude_name = _strip_locative_prepositions(str(name_slot.value))
+            resolved = resolve_entity_scored(exclude_name, context.entities, index=context.index)
+            if resolved.status is not ResolutionStatus.RESOLVED or resolved.entity is None:
+                return None  # exclusion target doesn't resolve unambiguously - never guess
+            if resolved.entity not in matches:
+                return None  # not part of the filtered match set - refuse, don't silently no-op
+            matches = [e for e in matches if e.entity_id != resolved.entity.entity_id]
+            exclude_entity_ids = (resolved.entity.entity_id,)
+
+        if not matches:
+            return None
+        if quantifier == "both" and len(matches) != 2:
+            return None  # "beide" requires exactly 2 hits - otherwise not understood
+        if quantifier == "count" and len(matches) != quantifier_value:
+            return None  # "die drei Lichter" requires exactly 3 hits - same rule, generalized
+
+        return TriggerTarget(
+            domain=domain_value,
+            area_id=area_id,
+            quantifier=quantifier,
+            quantifier_count=quantifier_value,
+            exclude_entity_ids=exclude_entity_ids,
+        )
 
     @staticmethod
     def _optional_duration_seconds(slots: dict) -> int | None:

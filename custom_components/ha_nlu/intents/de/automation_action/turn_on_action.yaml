@@ -29,9 +29,36 @@ intents:
   # it, this sentence can't match at all and control falls through to the
   # {action_domain}-alone sentence below, which has the same
   # optional-duration-group shape but no {area} wildcard to mis-swallow it.
+  # V5 Wave 4 (V5.17, "Natural Language Quantifiers in Automations") - the
+  # 4 sentences below reuse {quantifier}/{count}/{name} verbatim from
+  # QuantifierParser's own vocabulary (lexicon.py's _QUANTIFIER_SLOT_LIST/
+  # _COUNT_SLOT_LIST, Regel 6 - no second quantifier grammar), mirroring
+  # intents/de/quantifiers/light_switch_all.yaml's own sentence shapes but
+  # scoped to {action_domain} (this parser's own domain vocabulary, not
+  # {domain}) and with no {level} combination (not part of this project's
+  # automation-action vocabulary). The exclusion sentence hardcodes the
+  # literal "alle" rather than using {quantifier} (same precedent
+  # light_switch_all.yaml's own "mach alle {domain} an außer ..." sentence
+  # already sets) - automation_action_parser.py's _build_target() routes to
+  # _build_quantified_target() whenever {quantifier}/{count}/{name} is
+  # present alongside {action_domain}.
+  #
+  # Ordering (empirically confirmed, same trap lexicon.py's
+  # _DEVICE_PRESS_TYPE_SLOT_LIST comment documents for *within* a slot
+  # list - here it's *across* sentences): these 4 must come *before* the
+  # bare "{name} ... an" sentence below, not after. hassil's recognize()
+  # returns the first sentence in listed order that matches; the bare
+  # {name} wildcard alone is happy to swallow "alle Lichter"/"die drei
+  # Lichter" whole as if it were one entity's spoken name, so if it were
+  # listed first it would win before the more specific quantifier
+  # sentences ever got a chance to match the same text.
   HassTurnOnAction:
     data:
       - sentences:
           - "(schalte|mach|dreh|lass|fahre) [den|die|das] {action_domain} (in der|in dem|im|am|beim) {area} [für {amount} {action_temporal_unit}] (an|ein|auf|hoch)"
           - "(schalte|mach|dreh|lass|fahre) [den|die|das] {action_domain} [für {amount} {action_temporal_unit}] (an|ein|auf|hoch)"
+          - "(schalte|mach) [die] {quantifier} [den|die|das] {action_domain} (an|ein|auf|hoch)"
+          - "(schalte|mach) [die] {quantifier} [den|die|das] {action_domain} [in der|in dem|im|am|beim] {area} (an|ein|auf|hoch)"
+          - "(schalte|mach) [den|die|das] {count} {action_domain} (an|ein|auf|hoch)"
+          - "(schalte|mach) alle {action_domain} (an|ein|auf|hoch) außer [dem|der|den] {name}"
           - "(schalte|mach|dreh|lass|fahre) [den|die|das] {name} [für {amount} {action_temporal_unit}] (an|ein|auf|hoch)"

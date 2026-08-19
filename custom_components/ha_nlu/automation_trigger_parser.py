@@ -38,6 +38,7 @@ disambiguation, e.g. "die Stehlampe" among several lights in one room).
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from hassil import Intents, RangeSlotList, RangeType, WildcardSlotList, recognize
@@ -53,7 +54,9 @@ from .nlu.automation_model import (
 )
 from .nlu.constraint_resolver import Constraints, resolve_candidates
 from .nlu.lexicon import (
+    _ACTION_TEMPORAL_UNIT_SLOT_LIST,
     _COMPARATOR_SLOT_LIST,
+    _DAY_PART_HOUR_SLOT_LIST,
     _DEVICE_CLASS_SLOT_LIST,
     _DEVICE_PRESS_TYPE_SLOT_LIST,
     _PRESENCE_EVENT_SLOT_LIST,
@@ -117,6 +120,24 @@ class AutomationTriggerParser:
             "hour": RangeSlotList(name="hour", start=0, stop=23, step=1, type=RangeType.NUMBER),
             "minute": RangeSlotList(name="minute", start=0, stop=59, step=1, type=RangeType.NUMBER),
             "weekday": _WEEKDAY_SLOT_LIST,
+            # V5 Wave 4 (V5.13) - {weekday2} is a second, independent
+            # instance of the exact same _WEEKDAY_SLOT_LIST vocabulary, only
+            # ever used together with {weekday} in weekday_trigger.yaml's
+            # 2-weekday combination sentence ("jeden Montag und Mittwoch") -
+            # hassil needs two distinct slot names to fill two separate
+            # positions in one sentence with the same underlying vocabulary.
+            "weekday2": _WEEKDAY_SLOT_LIST,
+            "day_part": _DAY_PART_HOUR_SLOT_LIST,
+            # V5 Wave 4 (V5.14, "nachdem"-Delay-Wrapper) - {amount}/
+            # {action_temporal_unit} reuse the exact vocabulary
+            # automation_action_parser.py's DELAY action already established
+            # (Regel 6); {trigger_text} is a WildcardSlotList capturing the
+            # remainder after "nachdem", re-parsed via a recursive self.parse()
+            # call - same text-rewrite-and-reparse composition Wave 3's WAIT
+            # action already established (see _parse_delay_trigger below).
+            "amount": RangeSlotList(name="amount", start=1, stop=59, step=1, type=RangeType.NUMBER),
+            "action_temporal_unit": _ACTION_TEMPORAL_UNIT_SLOT_LIST,
+            "trigger_text": WildcardSlotList(name="trigger_text"),
         }
         result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
         if result is None or result.intent is None:
@@ -130,6 +151,7 @@ class AutomationTriggerParser:
             "HassSunTrigger": self._parse_sun_trigger,
             "HassTimeTrigger": self._parse_time_trigger,
             "HassWeekdayTrigger": self._parse_weekday_trigger,
+            "HassDelayTrigger": self._parse_delay_trigger,
         }
         handler = dispatch.get(result.intent.name)
         if handler is None:
@@ -300,6 +322,12 @@ class AutomationTriggerParser:
 
     @staticmethod
     def _parse_time_trigger(slots: dict, context: ParseContext) -> TriggerModel | None:
+        day_part_slot = slots.get("day_part")
+        if day_part_slot is not None:
+            # V5 Wave 4 (V5.13) - canonical-hour day-part word ("morgens"/
+            # "abends"/...), minute always 0 - see lexicon.py's
+            # _DAY_PART_HOUR_SLOT_LIST docstring for the fixed mapping.
+            return TriggerModel(type=TriggerType.TIME, time_hour=int(day_part_slot.value), time_minute=0)
         hour_slot = slots.get("hour")
         if hour_slot is None:
             return None
@@ -312,5 +340,53 @@ class AutomationTriggerParser:
         weekday_slot = slots.get("weekday")
         if weekday_slot is None:
             return None
-        weekdays = tuple(str(weekday_slot.value).split(","))
-        return TriggerModel(type=TriggerType.WEEKDAY, weekdays=weekdays)
+        weekdays = list(str(weekday_slot.value).split(","))
+        # V5 Wave 4 (V5.16, "jeden Montag und Mittwoch") - {weekday2} is only
+        # ever present on the 2-weekday combination sentence; deduplicated
+        # and order-normalized (mon..sun) so "Montag und Mittwoch"/"Mittwoch
+        # und Montag" produce the identical TriggerModel. Bounded to exactly
+        # 2 weekdays per sentence (not arbitrary N) - same "bounded, not
+        # fully general" scope decision this project's other closed-
+        # vocabulary combinations already make (stated plainly, not hidden).
+        weekday2_slot = slots.get("weekday2")
+        if weekday2_slot is not None:
+            weekdays.extend(str(weekday2_slot.value).split(","))
+        canonical_order = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+        unique_weekdays = sorted(set(weekdays), key=canonical_order.index)
+        return TriggerModel(type=TriggerType.WEEKDAY, weekdays=tuple(unique_weekdays))
+
+    def _parse_delay_trigger(self, slots: dict, context: ParseContext) -> TriggerModel | None:
+        """V5 Wave 4 (V5.14, "Relative Time") - "{amount} {unit} nachdem
+        <trigger-clause>" rewrites to just "<trigger-clause>" and recurses
+        into ``self.parse()`` (same text-rewrite-and-reparse composition
+        ``AutomationActionParser._parse_wait`` already established for
+        "warte bis <condition>", Regel 6) - never a second trigger grammar.
+
+        ``delay_seconds`` is only meaningful on an event-based trigger (it
+        already fires the moment its own event happens; the delay pushes
+        the actual automation start later) - TIME/SUN/WEEKDAY triggers are
+        refused here (Regel 4, never guess what "10 Minuten nachdem es 20
+        Uhr ist" would even mean for a trigger that's already a fixed clock
+        time).
+        """
+        amount_slot = slots.get("amount")
+        unit_slot = slots.get("action_temporal_unit")
+        trigger_text_slot = slots.get("trigger_text")
+        if amount_slot is None or unit_slot is None or trigger_text_slot is None:
+            return None
+        inner_text = str(trigger_text_slot.value).strip()
+        if not inner_text:
+            return None
+        inner_trigger = self.parse(inner_text, context)
+        if inner_trigger is None:
+            return None
+        if inner_trigger.type not in (
+            TriggerType.STATE,
+            TriggerType.NUMERIC_STATE,
+            TriggerType.PRESENCE,
+            TriggerType.DEVICE,
+        ):
+            return None
+        multiplier = {"seconds": 1, "minutes": 60, "hours": 3600}[str(unit_slot.value)]
+        delay_seconds = int(amount_slot.value) * multiplier
+        return replace(inner_trigger, delay_seconds=delay_seconds)

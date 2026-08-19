@@ -60,6 +60,22 @@ def test_trigger_target_can_carry_device_class_area_and_entity_id():
     assert target.entity_id == "binary_sensor.fenster"
 
 
+def test_trigger_target_defaults_to_no_quantifier_or_exclusions():
+    target = TriggerTarget(domain="light")
+    assert target.quantifier is None
+    assert target.quantifier_count is None
+    assert target.exclude_entity_ids == ()
+
+
+def test_trigger_target_can_carry_quantifier_count_and_exclusions():
+    target = TriggerTarget(
+        domain="light", quantifier="count", quantifier_count=3, exclude_entity_ids=("light.flur_lampe",)
+    )
+    assert target.quantifier == "count"
+    assert target.quantifier_count == 3
+    assert target.exclude_entity_ids == ("light.flur_lampe",)
+
+
 def test_trigger_model_only_requires_type_everything_else_defaults_to_none_or_empty():
     trigger = TriggerModel(type=TriggerType.SUN)
     assert trigger.target is None
@@ -74,6 +90,13 @@ def test_trigger_model_only_requires_type_everything_else_defaults_to_none_or_em
     assert trigger.time_hour is None
     assert trigger.time_minute is None
     assert trigger.weekdays == ()
+    assert trigger.delay_seconds is None
+
+
+def test_trigger_model_can_carry_a_delay_alongside_an_event_based_type():
+    target = TriggerTarget(domain="person", entity_id="person.philipp")
+    trigger = TriggerModel(type=TriggerType.PRESENCE, target=target, zone_id="home", delay_seconds=600)
+    assert trigger.delay_seconds == 600
 
 
 def test_trigger_model_state_trigger_carries_target_and_semantic_state():
@@ -253,3 +276,19 @@ def test_render_automation_tree_renders_multiple_triggers_and_counts_reserved_fi
     # matching triggers' own "(none)" wording - see render_automation_tree).
     assert "conditions: 0" in tree
     assert "actions: (none)" in tree
+
+
+def test_render_automation_tree_renders_a_delay_wrapped_presence_trigger():
+    target = TriggerTarget(domain="person", entity_id="person.philipp")
+    trigger = TriggerModel(type=TriggerType.PRESENCE, target=target, zone_id="home", delay_seconds=600)
+    tree = render_automation_tree(AutomationModel(triggers=(trigger,)))
+    assert "PRESENCE(" in tree
+    assert "delay_seconds=600" in tree
+
+
+def test_render_automation_tree_renders_a_quantified_exclusion_target():
+    target = TriggerTarget(domain="light", quantifier="all", exclude_entity_ids=("light.flur_lampe",))
+    trigger = TriggerModel(type=TriggerType.STATE, target=target, state=SemanticState.OFF)
+    tree = render_automation_tree(AutomationModel(triggers=(trigger,)))
+    assert "quantifier=all" in tree
+    assert "exclude_entity_ids=light.flur_lampe" in tree
