@@ -692,3 +692,47 @@ def test_pronoun_es_refuses_when_remembered_entities_span_multiple_domains(parse
 
 
 from ha_nlu.nlu.condition_model import TimeComparator  # noqa: E402
+
+
+# ============================================================================
+# Conditions Wave (2026-08-19): split_on_top_level_and() - pure text search
+# for every real top-level "und" split point, used by engine.py's
+# match_automation() as the Trigger/Condition disambiguation fallback (see
+# that method's own docstring). Isolated from the engine, mirroring
+# tests/test_automation_sentence_split.py's "call the splitter, not the
+# engine" style.
+# ============================================================================
+
+from ha_nlu.automation_condition_parser import split_on_top_level_and  # noqa: E402
+
+
+def test_split_on_top_level_and_finds_the_single_conjunction():
+    result = split_on_top_level_and("das Küchenfenster geöffnet wird und es nach 18 Uhr ist")
+    assert result == [("das Küchenfenster geöffnet wird", "es nach 18 Uhr ist")]
+
+
+def test_split_on_top_level_and_returns_one_pair_per_occurrence():
+    result = split_on_top_level_and("A und B und C")
+    assert result == [("A", "B und C"), ("A und B", "C")]
+
+
+def test_split_on_top_level_and_returns_empty_list_without_a_conjunction():
+    assert split_on_top_level_and("das Küchenfenster geöffnet wird") == []
+
+
+def test_split_on_top_level_and_ignores_the_embedded_time_window_and():
+    # "zwischen 18 und 22 Uhr" has its own "und" - must not be offered as a
+    # split point (same masking automation_condition_parser.py's own
+    # _tokenize() already relies on for this exact phrase).
+    result = split_on_top_level_and("es ist zwischen 18 und 22 Uhr")
+    assert result == []
+
+
+def test_split_on_top_level_and_finds_the_real_and_around_a_time_window():
+    result = split_on_top_level_and("das Fenster offen ist und es zwischen 18 und 22 Uhr ist")
+    assert result == [("das Fenster offen ist", "es zwischen 18 und 22 Uhr ist")]
+
+
+def test_split_on_top_level_and_skips_a_split_point_that_leaves_an_empty_half():
+    assert split_on_top_level_and("und danach") == []
+    assert split_on_top_level_and("davor und") == []

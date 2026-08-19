@@ -467,6 +467,59 @@ Grammatik/ein Feature tatsächlich Device-Daten braucht.
 
 ⸻
 
+## 6e. Conditions Wave – Trigger+Condition+Action (Ergebnis, 2026-08-19)
+
+**Ziel:** `AutomationModel.conditions` (bis dahin strukturell vorhanden, aber
+von `match_automation()` nie befüllt) für Sätze der Form "Wenn Trigger und
+Condition, Action" nutzbar machen – ohne einen zweiten Parser, Resolver oder
+Ambiguitäts-Mechanismus einzuführen (Regel 6).
+
+**Bestandsanalyse-Ergebnis:** der Condition-Layer selbst war bereits fast
+vollständig gebaut und getestet – `nlu/condition_model.py` (AST, 9
+`ConditionType`-Werte über 10 Grammatik-Dateien), `automation_condition_parser.py`
+(voller AND/OR/NOT-Ausdrucksparser, Tiefe 3, alle Leaf-Parser über dieselben
+Resolver wie Trigger/Action) und `nlu/automation_validator.py`
+(`_validate_condition_node()`) validierten Conditions bereits rekursiv, ohne
+je aufgerufen zu werden. Die einzige echte Lücke war das Fehlen eines
+Trigger/Condition-Splits im kombinierten Satz.
+
+**Umsetzung:**
+
+- `automation_condition_parser.py::split_on_top_level_and()` (neu, öffentlich):
+  findet jeden echten Top-Level-"und"-Split-Punkt in einem Text, unter
+  Wiederverwendung der bereits vorhandenen Zeitfenster-Maskierung
+  (`_mask_time_window_and`/`_unmask_time_window_and`) – "zwischen 18 und 22
+  Uhr" wird nie fälschlich als Split-Punkt erkannt.
+- `engine.py::NluEngine._split_trigger_condition()` (neu, privat): Fallback
+  in `match_automation()`, der nur läuft, wenn der volle Trigger-Text
+  **nicht** als einzelner Trigger parst. Probiert jeden Split-Kandidaten
+  gegen `AutomationTriggerParser`/`AutomationConditionParser` (beide bereits
+  konstruierte Instanzen, keine neuen). Genau ein erfolgreicher Kandidat wird
+  akzeptiert; null oder mehrere führen zu `None` – "niemals raten" auf
+  Satzstruktur angewendet, nicht nur auf Entity-Auflösung.
+- Reiner Trigger+Action-Satz (kein "und" im Trigger-Teil, oder der volle
+  Text parst direkt) nimmt exakt denselben Pfad wie vor dieser Wave – der
+  Fallback ist strikt nachrangig, keine Verhaltensänderung im Normalfall.
+
+**Ausdrücklich nicht Teil dieser Wave** (siehe Wave-Plan, dem Nutzer vor
+Umsetzung vorgelegt): OR-Verknüpfung auf Trigger-Ebene, `kein`/`keine` als
+struktureller NOT-Marker bzw. ein `EXISTS`/`NOT_EXISTS`-`ConditionType`
+(bestätigte Lücke, `_STRUCTURAL_TOKEN_RE` kennt nur `nicht`), Persistenz nach
+Home Assistant, SemanticComposer-/ReasoningEngine-Erweiterung für Conditions
+(kein erkennbarer Nutzen ohne Duplizierung bestehender Resolver-Logik),
+ANY/ALL-Ausführungssemantik für Device-Class+Area-Targets mit mehreren
+Kandidaten (Ausführungssemantik, kein Validierungsthema – diese Wave baut
+keinen Executor).
+
+**Tests:** 16 neue Tests (6 isoliert für `split_on_top_level_and()` in
+`tests/test_automation_condition_parser.py`, 10 End-to-End über
+`match_automation()` in `tests/test_engine_match_automation.py`, u. a.
+Numeric/Time/Presence/Weekday-Condition, Ambiguität, unauflösbares Ziel,
+Regressions-Fall ohne Condition). Vollständige Regression: 1376 passed, 14
+skipped (vorher 1360 passed) – kein bestehender Test verändert.
+
+⸻
+
 ## 7. Sicherheitsregeln
 
 - **Niemals bei echter Ambiguität raten.** Je unsicherer die

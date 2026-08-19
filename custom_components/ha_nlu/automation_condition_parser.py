@@ -6,11 +6,19 @@ with "und"/"oder"/"nicht", possibly nested in parentheses - into a
 Top-level, hassil-aware - sibling of ``automation_trigger_parser.py``/
 ``parsers.py``, not part of ``nlu/`` (which stays hassil-/HA-import-free,
 see ``nlu/frame.py``'s docstring). Its own separately-compiled ``Intents``
-grammar lives under ``intents/de/automation_condition/`` (9 YAML files, one
-per ``ConditionType``), loaded the same way ``automation_trigger_parser.py``
-loads its own 7. No caller in ``engine.py``/``conversation.py`` in this
-wave either - same "HA-Schreibzugriff: erst nach explizitem Go" scope
-decision Wave 1 already made.
+grammar lives under ``intents/de/automation_condition/`` (10 YAML files for
+9 ``ConditionType`` values - TIME has two, plain and time-window), loaded
+the same way ``automation_trigger_parser.py`` loads its own 7.
+
+Called live from ``engine.py::match_automation()`` since the Conditions Wave
+(2026-08-19), for two purposes: (1) ``AutomationActionParser``'s WAIT action
+already delegated to this same instance before that wave, and (2)
+``match_automation()`` itself now falls back to ``split_on_top_level_and()``
++ this parser when a combined "wenn ... und ..." clause doesn't parse as a
+single Trigger - see that method's own docstring for the full fallback
+logic. Still never produces or reaches HA write access on its own - same
+"HA-Schreibzugriff: erst nach explizitem Go" scope decision Wave 1 already
+made.
 
 Two layers, per the plan:
 
@@ -106,6 +114,26 @@ def _mask_time_window_and(text: str) -> str:
 
 def _unmask_time_window_and(text: str) -> str:
     return re.sub(_TIME_WINDOW_AND_MARKER, "und", text, flags=re.IGNORECASE)
+
+
+def split_on_top_level_and(text: str) -> list[tuple[str, str]]:
+    """Returns every ``(left, right)`` pair split at a real top-level "und" -
+    reusing this module's own time-window masking so a "zwischen 18 und 22
+    Uhr" span is never mistaken for a split point (Regel 6: this module
+    already owns the definition of which "und" is structural, no second
+    definition elsewhere). Used by ``engine.py``'s ``match_automation()`` to
+    search for a Trigger/Condition split point when a combined "wenn ... und
+    ..." clause fails to parse as a single Trigger on its own - see that
+    method's own docstring for why this is a fallback, never the first
+    attempt."""
+    masked = _mask_time_window_and(text)
+    pairs: list[tuple[str, str]] = []
+    for match in re.finditer(r"\bund\b", masked, re.IGNORECASE):
+        left = _unmask_time_window_and(masked[: match.start()]).strip()
+        right = _unmask_time_window_and(masked[match.end() :]).strip()
+        if left and right:
+            pairs.append((left, right))
+    return pairs
 
 
 def _tokenize(text: str) -> list[tuple[str, str]]:

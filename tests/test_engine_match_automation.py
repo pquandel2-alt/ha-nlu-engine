@@ -4,6 +4,13 @@ sentence-split gate, propagation of each sub-parser's own "never guess"
 ``None``, and the happy-path -> ``validate_automation()`` wiring. Complements
 ``tests/test_integration_wave_e2e.py``, which exercises the same method
 through the real conversation entity instead.
+
+Conditions Wave (2026-08-19): also covers the Trigger/Condition split
+fallback (``NluEngine._split_trigger_condition()``) end-to-end through
+``match_automation()`` itself - not just ``split_on_top_level_and()`` in
+isolation (see ``tests/test_automation_condition_parser.py`` for that), the
+same "unit tests plus real pipeline tests" split every other automation
+sub-feature in this repo already follows.
 """
 
 from __future__ import annotations
@@ -11,6 +18,7 @@ from __future__ import annotations
 from ha_nlu.engine import AutomationMatchResult
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.automation_validator import AutomationValidationError
+from ha_nlu.nlu.condition_model import ConditionType, LogicalOperator
 
 KUECHE_FENSTER = EntitySnapshot(
     "binary_sensor.kueche_fenster", "Küchenfenster", "binary_sensor", "off",
@@ -101,3 +109,122 @@ def test_never_produces_a_service_call_plan():
     structurally impossible to reach hass.services.async_call() from this
     path (see AutomationMatchResult's own docstring)."""
     assert not hasattr(AutomationMatchResult, "plan")
+
+
+# ============================================================================
+# Conditions Wave (2026-08-19): "wenn Trigger und Condition, Action" through
+# the real match_automation() Trigger/Condition split fallback.
+# ============================================================================
+
+WOHNZIMMER_LICHT = EntitySnapshot(
+    "light.wohnzimmer_licht", "Wohnzimmerlicht", "light", "off",
+    area_id="wohnzimmer", area_name="Wohnzimmer",
+    capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+)
+
+CONDITIONS_ENTITIES = ENTITIES + [WOHNZIMMER_LICHT]
+
+
+def test_trigger_and_action_without_a_condition_still_matches_unchanged(engine):
+    # Same sentence test_valid_trigger_and_action_produces_a_validated_automation_model
+    # already covers - repeated here to pin that adding the Condition
+    # fallback did not change the primary (no "und") path at all.
+    result = engine.match_automation(
+        "Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht ein.", CONDITIONS_ENTITIES
+    )
+    assert isinstance(result, AutomationMatchResult)
+    assert result.model.conditions == ()
+    assert result.validation_error is None
+
+
+def test_trigger_and_action_with_a_multi_entity_und_still_matches_as_a_single_trigger(engine):
+    # "Tür und Fenster" is a single Trigger, not a Trigger+Condition split -
+    # the full-text Trigger parse must succeed first and win, so the split
+    # fallback never even runs (see match_automation()'s own docstring).
+    result = engine.match_automation(
+        "Wenn das Küchenfenster und das Bürofenster geöffnet werden, schalte das Küchenlicht ein.",
+        CONDITIONS_ENTITIES,
+    )
+    assert result is None  # Bürofenster is ambiguous across two areas - never guessed, not a regression
+
+
+def test_trigger_and_numeric_condition_and_action(engine):
+    result = engine.match_automation(
+        "Wenn das Küchenfenster geöffnet wird und die Heizung Wohnzimmer über 22 Grad liegt, "
+        "schalte das Küchenlicht ein.",
+        CONDITIONS_ENTITIES,
+    )
+    assert isinstance(result, AutomationMatchResult)
+    assert result.validation_error is None
+    assert len(result.model.conditions) == 1
+    assert result.model.conditions[0].condition.type is ConditionType.NUMERIC
+
+
+def test_trigger_and_time_condition_and_action(engine):
+    result = engine.match_automation(
+        "Wenn das Küchenfenster geöffnet wird und es nach 18 Uhr ist, schalte das Küchenlicht ein.",
+        CONDITIONS_ENTITIES,
+    )
+    assert isinstance(result, AutomationMatchResult)
+    assert result.validation_error is None
+    assert len(result.model.conditions) == 1
+    assert result.model.conditions[0].condition.type is ConditionType.TIME
+
+
+def test_trigger_and_presence_condition_and_action(engine):
+    result = engine.match_automation(
+        "Wenn das Küchenfenster geöffnet wird und niemand zuhause ist, schalte das Küchenlicht ein.",
+        CONDITIONS_ENTITIES,
+    )
+    assert isinstance(result, AutomationMatchResult)
+    assert result.validation_error is None
+    assert len(result.model.conditions) == 1
+    assert result.model.conditions[0].operator is LogicalOperator.NOT
+
+
+def test_trigger_and_weekday_condition_and_action(engine):
+    result = engine.match_automation(
+        "Wenn das Küchenfenster geöffnet wird und Samstag ist, schalte das Küchenlicht ein.",
+        CONDITIONS_ENTITIES,
+    )
+    assert isinstance(result, AutomationMatchResult)
+    assert result.validation_error is None
+    assert len(result.model.conditions) == 1
+    assert result.model.conditions[0].condition.type is ConditionType.WEEKDAY
+
+
+def test_ambiguous_condition_target_returns_none_never_guesses(engine):
+    # Two entities named "Bürofenster" in different areas - the Condition
+    # half must refuse exactly like the Trigger half already does elsewhere
+    # in this file, not fall back to a guess.
+    result = engine.match_automation(
+        "Wenn das Küchenfenster geöffnet wird und das Bürofenster offen ist, schalte das Küchenlicht ein.",
+        CONDITIONS_ENTITIES,
+    )
+    assert result is None
+
+
+def test_unresolvable_condition_target_returns_none_never_guesses(engine):
+    result = engine.match_automation(
+        "Wenn das Küchenfenster geöffnet wird und das Kellerlicht an ist, schalte das Küchenlicht ein.",
+        CONDITIONS_ENTITIES,
+    )
+    assert result is None
+
+
+def test_condition_result_is_validated_the_same_way_as_triggers_and_actions(engine, monkeypatch):
+    monkeypatch.setattr(
+        "ha_nlu.engine.validate_automation",
+        lambda model: AutomationValidationError.INVALID_LOGIC,
+    )
+    result = engine.match_automation(
+        "Wenn das Küchenfenster geöffnet wird und es nach 18 Uhr ist, schalte das Küchenlicht ein.",
+        CONDITIONS_ENTITIES,
+    )
+    assert isinstance(result, AutomationMatchResult)
+    assert result.validation_error is AutomationValidationError.INVALID_LOGIC
+    assert "validation_error: INVALID_LOGIC" in result.response_text
+
+
+def test_plain_command_is_unaffected_by_the_condition_fallback(engine):
+    assert engine.match_automation("Schalte das Wohnzimmerlicht ein.", CONDITIONS_ENTITIES) is None

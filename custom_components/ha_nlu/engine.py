@@ -42,11 +42,12 @@ from .nlu.response_generator import ResponseGenerator
 from .nlu.service_mapper import map_to_service_call
 from .nlu.validator import validate_command
 from .automation_action_parser import AutomationActionParser
-from .automation_condition_parser import AutomationConditionParser
+from .automation_condition_parser import AutomationConditionParser, split_on_top_level_and
 from .automation_trigger_parser import _AUTOMATION_TRIGGER_RE, AutomationTriggerParser
-from .nlu.automation_model import AutomationModel, render_automation_tree
+from .nlu.automation_model import AutomationModel, TriggerModel, render_automation_tree
 from .nlu.automation_sentence_split import split_trigger_action
 from .nlu.automation_validator import AutomationValidationError, validate_automation
+from .nlu.condition_model import ConditionNode
 from .parsers import (
     AreaQueryParser,
     ClimateExtendedParser,
@@ -786,10 +787,20 @@ class NluEngine:
         entry point, not a branch inside ``_select_parser()`` itself; see
         the Integration Plan's Section 4/Variante D).
 
-        Only the trigger+action combination is split and matched this wave
-        (``split_trigger_action()``'s own scope decision) - a sentence with
-        a condition clause, or with no comma at all, returns ``None`` here,
-        same "never guess" rule as the rest of this engine.
+        Trigger+action is still the primary shape ``split_trigger_action()``
+        splits for - a sentence with no comma at all still returns ``None``
+        here, same "never guess" rule as the rest of this engine. Since the
+        Conditions Wave (2026-08-19), the trigger-clause additionally allows
+        an embedded "und"-joined condition ("Wenn X und Y, tu Z."): if the
+        whole trigger-clause doesn't parse as a single Trigger on its own,
+        ``_split_trigger_condition()`` searches every top-level "und" split
+        point for exactly one point where the left half parses as a Trigger
+        and the right half as a Condition - grammar-driven (try-parse, not
+        keyword-based), and refusing (``None``) on zero or more than one
+        such point, same ambiguity discipline every entity resolution in
+        this engine already follows. No second ambiguity gate is introduced
+        anywhere else - this fallback only ever runs inside this method, for
+        this trigger-clause.
         """
         if not _AUTOMATION_TRIGGER_RE.search(text):
             return None
@@ -810,20 +821,52 @@ class NluEngine:
             last_area=last_area,
         )
 
+        condition_node: ConditionNode | None = None
         trigger = self._automation_trigger_parser.parse(trigger_text, parse_context)
         if trigger is None:
-            return None
+            split_result = self._split_trigger_condition(trigger_text, parse_context)
+            if split_result is None:
+                return None
+            trigger, condition_node = split_result
 
         actions = self._automation_action_parser.parse(action_text, parse_context)
         if not actions:
             return None
 
-        model = AutomationModel(triggers=(trigger,), actions=actions, source_text=text)
+        conditions = (condition_node,) if condition_node is not None else ()
+        model = AutomationModel(triggers=(trigger,), conditions=conditions, actions=actions, source_text=text)
         validation_error = validate_automation(model)
         response_text = render_automation_tree(model)
         if validation_error is not None:
             response_text = f"{response_text}\nvalidation_error: {validation_error.name}"
         return AutomationMatchResult(model=model, response_text=response_text, validation_error=validation_error)
+
+    def _split_trigger_condition(
+        self, trigger_text: str, parse_context: ParseContext
+    ) -> tuple[TriggerModel, ConditionNode] | None:
+        """Fallback for ``match_automation()`` when ``trigger_text`` alone
+        doesn't parse as a single Trigger: search every top-level "und"
+        split point (``split_on_top_level_and()``, already time-window-safe)
+        for exactly one point where the left half parses as a Trigger
+        (``AutomationTriggerParser``) and the right half as a Condition
+        (``AutomationConditionParser``) - both already-constructed instances
+        this engine uses everywhere else, no parallel parser or resolver.
+        Zero or more than one successful split both refuse (``None``) -
+        "niemals raten" applied to sentence structure, the same way every
+        other ambiguity in this engine already refuses rather than guesses.
+        """
+        matches: list[tuple[TriggerModel, ConditionNode]] = []
+        for left, right in split_on_top_level_and(trigger_text):
+            candidate_trigger = self._automation_trigger_parser.parse(left, parse_context)
+            if candidate_trigger is None:
+                continue
+            candidate_condition = self._automation_condition_parser.parse(right, parse_context)
+            if candidate_condition is None:
+                continue
+            matches.append((candidate_trigger, candidate_condition))
+        if len(matches) != 1:
+            return None
+        return matches[0]
 
     def resolve_clarification(
         self, reply_text: str, clarification: ClarificationRequest, entities: list[EntitySnapshot]
