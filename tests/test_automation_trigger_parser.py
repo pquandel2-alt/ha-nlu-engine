@@ -373,6 +373,48 @@ def test_state_trigger_equivalent_phrasings_produce_an_identical_trigger_model(p
     assert trigger.state is SemanticState.OPEN
 
 
+# -- V5 Wave 5 (V5.18, "Context in Automations") - pronoun "es" ------------
+
+
+def test_pronoun_es_resolves_against_a_single_remembered_entity(parser):
+    """"Erstelle eine Automation für das Küchenfenster." (remembered) ->
+    "Wenn es geöffnet wird, ..." - "es" must resolve back to the
+    conversation's last-mentioned entity, same as ReferenceParser already
+    does on the command path (parsers.py, Regel 6)."""
+    world_model = build_world_model(ALL_ENTITIES, ALL_DEVICES)
+    context = ParseContext(
+        entities=ALL_ENTITIES, index=world_model.entity_index, world_model=world_model,
+        last_entities=(KUECHE_FENSTER,),
+    )
+    trigger = parser.parse("wenn es geöffnet wird", context)
+    assert trigger is not None
+    assert trigger.type is TriggerType.STATE
+    assert trigger.target.domain == "binary_sensor"
+    assert trigger.target.device_class == "window"
+    assert trigger.target.area_id == "kueche"
+    assert trigger.state is SemanticState.OPEN
+
+
+def test_pronoun_es_refuses_without_remembered_context(parser, context):
+    """No prior turn remembered anything (context fixture's default
+    last_entities=()) - "es" must refuse, never guess (Regel 4)."""
+    trigger = parser.parse("wenn es geöffnet wird", context)
+    assert trigger is None
+
+
+def test_pronoun_es_refuses_when_remembered_entities_span_multiple_domains(parser):
+    """Two remembered entities from different domains ("das Küchenfenster
+    und die Wohnzimmer Temperatur") give "es" no single domain/area to
+    resolve to - refuse rather than pick one arbitrarily."""
+    world_model = build_world_model(ALL_ENTITIES, ALL_DEVICES)
+    context = ParseContext(
+        entities=ALL_ENTITIES, index=world_model.entity_index, world_model=world_model,
+        last_entities=(KUECHE_FENSTER, WOHNZIMMER_TEMPERATUR),
+    )
+    trigger = parser.parse("wenn es geöffnet wird", context)
+    assert trigger is None
+
+
 def test_state_and_numeric_state_triggers_stay_distinguishable_not_merged_across_domains():
     # Deliberate non-equivalence check: a STATE trigger (equality/transition,
     # binary_sensor) and a NUMERIC_STATE trigger (threshold, sensor) must

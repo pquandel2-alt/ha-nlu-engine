@@ -647,6 +647,46 @@ def test_render_condition_tree_shows_parsed_tree(parser, context):
 
 
 # ============================================================================
+# Section 10: V5 Wave 5 (V5.18, "Context in Automations") - pronoun "es"
+# ============================================================================
+# "wenn es angeht" (state_verb form), not "wenn es an ist" (state-adjective+
+# copula form) - the latter collides with the DEVICE condition grammar's own
+# bare-{name} sentence (see tests/test_automation_condition_parser.py's
+# existing @pytest.mark.skip markers on that exact phrasing further above);
+# a pre-existing, already-scoped-out limitation, not introduced by V5.18.
+
+
+def test_pronoun_es_resolves_against_a_single_remembered_entity(parser):
+    world_model = build_world_model(ALL_ENTITIES, ALL_DEVICES)
+    context = ParseContext(
+        entities=ALL_ENTITIES, index=world_model.entity_index, world_model=world_model,
+        last_entities=(WOHNZIMMER_LICHT,),
+    )
+    node = parser.parse("wenn es angeht", context)
+    assert node is not None
+    assert node.condition is not None
+    assert node.condition.type is ConditionType.STATE
+    assert node.condition.target.domain == "light"
+    assert node.condition.target.area_id == "wohnzimmer"
+    assert node.condition.state is SemanticState.ON
+
+
+def test_pronoun_es_refuses_without_remembered_context(parser, context):
+    node = parser.parse("wenn es angeht", context)
+    assert node is None
+
+
+def test_pronoun_es_refuses_when_remembered_entities_span_multiple_domains(parser):
+    world_model = build_world_model(ALL_ENTITIES, ALL_DEVICES)
+    context = ParseContext(
+        entities=ALL_ENTITIES, index=world_model.entity_index, world_model=world_model,
+        last_entities=(WOHNZIMMER_LICHT, KUECHE_FENSTER),
+    )
+    node = parser.parse("wenn es angeht", context)
+    assert node is None
+
+
+# ============================================================================
 # Import-time TimeComparator for remaining tests
 # ============================================================================
 

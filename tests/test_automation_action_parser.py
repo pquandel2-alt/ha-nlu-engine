@@ -25,29 +25,40 @@ from ha_nlu.world_model import build_world_model
 
 # --- Test fixtures: entities and devices for action parsing --------------
 
+# V5 Wave 5 (V5.20, "Capability Validation") - real EntitySnapshots carry a
+# capabilities set derived from live HA attributes (hass_entities.py); these
+# fixtures hardcode the same values a fully-featured light/cover/fan/climate
+# entity would report, so every pre-existing SET_* test below keeps exercising
+# a capability-complete entity unless a test explicitly narrows it (see the
+# dedicated V5.20 negative-case fixtures further down).
+_LIGHT_CAPS = frozenset({"TURN_ON", "TURN_OFF", "BRIGHTNESS", "COLOR", "COLOR_TEMPERATURE"})
+_COVER_CAPS = frozenset({"TURN_ON", "TURN_OFF", "POSITION"})
+_FAN_CAPS = frozenset({"TURN_ON", "TURN_OFF", "FAN_SPEED"})
+_CLIMATE_CAPS = frozenset({"TURN_ON", "TURN_OFF", "TEMPERATURE"})
+
 WOHNZIMMER_LICHT = EntitySnapshot(
     entity_id="light.wohnzimmer_licht", friendly_name="Wohnzimmer Licht", domain="light",
-    state="off", area_id="wohnzimmer", area_name="Wohnzimmer",
+    state="off", area_id="wohnzimmer", area_name="Wohnzimmer", capabilities=_LIGHT_CAPS,
 )
 FLUR_LICHT = EntitySnapshot(
     entity_id="light.flur_licht", friendly_name="Flurlicht", domain="light",
-    state="off", area_id="flur", area_name="Flur",
+    state="off", area_id="flur", area_name="Flur", capabilities=_LIGHT_CAPS,
 )
 KUECHE_LICHT = EntitySnapshot(
     entity_id="light.kueche_licht", friendly_name="Küchenlicht", domain="light",
-    state="off", area_id="kueche", area_name="Küche",
+    state="off", area_id="kueche", area_name="Küche", capabilities=_LIGHT_CAPS,
 )
 WOHNZIMMER_ROLLLADEN = EntitySnapshot(
     entity_id="cover.wohnzimmer_rollladen", friendly_name="Wohnzimmer Rollladen", domain="cover",
-    state="closed", area_id="wohnzimmer", area_name="Wohnzimmer",
+    state="closed", area_id="wohnzimmer", area_name="Wohnzimmer", capabilities=_COVER_CAPS,
 )
 WOHNZIMMER_HEIZUNG = EntitySnapshot(
     entity_id="climate.wohnzimmer_heizung", friendly_name="Wohnzimmer Heizung", domain="climate",
-    state="heat", area_id="wohnzimmer", area_name="Wohnzimmer",
+    state="heat", area_id="wohnzimmer", area_name="Wohnzimmer", capabilities=_CLIMATE_CAPS,
 )
 WOHNZIMMER_VENTILATOR = EntitySnapshot(
     entity_id="fan.wohnzimmer_ventilator", friendly_name="Wohnzimmer Ventilator", domain="fan",
-    state="off", area_id="wohnzimmer", area_name="Wohnzimmer",
+    state="off", area_id="wohnzimmer", area_name="Wohnzimmer", capabilities=_FAN_CAPS,
 )
 KUECHE_STECKDOSE = EntitySnapshot(
     entity_id="switch.kueche_steckdose", friendly_name="Küche Steckdose", domain="switch",
@@ -532,6 +543,116 @@ def test_any_unparseable_chunk_refuses_the_whole_sentence(parser, context):
 def test_empty_text_refuses(parser, context):
     """Empty/whitespace-only text has no chunks -> refused."""
     result = parser.parse("   ", context)
+    assert result is None
+
+
+# ============================================================================
+# Section 13: V5 Wave 5 (V5.18, "Context in Automations") - pronoun "es"
+# ============================================================================
+
+
+def test_pronoun_es_resolves_against_a_single_remembered_entity(parser):
+    world_model = build_world_model(ALL_ENTITIES, ALL_DEVICES)
+    ctx = ParseContext(
+        entities=ALL_ENTITIES, index=world_model.entity_index, world_model=world_model,
+        last_entities=(WOHNZIMMER_LICHT,),
+    )
+    result = parser.parse("mach es auf 30 Prozent", ctx)
+    assert result is not None
+    action = result[0]
+    assert action.type is ActionType.SET_BRIGHTNESS
+    assert action.target.domain == "light"
+    assert action.target.area_id == "wohnzimmer"
+    assert action.value == 30.0
+
+
+def test_pronoun_es_refuses_without_remembered_context(parser, context):
+    result = parser.parse("mach es an", context)
+    assert result is None
+
+
+def test_pronoun_es_refuses_when_remembered_entities_span_multiple_domains(parser):
+    world_model = build_world_model(ALL_ENTITIES, ALL_DEVICES)
+    ctx = ParseContext(
+        entities=ALL_ENTITIES, index=world_model.entity_index, world_model=world_model,
+        last_entities=(WOHNZIMMER_LICHT, WOHNZIMMER_ROLLLADEN),
+    )
+    result = parser.parse("mach es an", ctx)
+    assert result is None
+
+
+# ============================================================================
+# Section 14: V5 Wave 5 (V5.20, "Capability Validation") (5 Tests)
+# ============================================================================
+
+
+def _parse_actions_with_entities(parser: AutomationActionParser, text: str, entities: list[EntitySnapshot]):
+    world_model = build_world_model(entities, [])
+    ctx = ParseContext(entities=entities, index=world_model.entity_index, world_model=world_model)
+    return parser.parse(text, ctx)
+
+
+def test_set_color_refuses_a_brightness_only_light(parser):
+    """A light without Capability.COLOR (e.g. a dimmable-only bulb) must
+    refuse "mach ... blau" rather than build a no-op automation."""
+    brightness_only_licht = EntitySnapshot(
+        entity_id="light.dimmer", friendly_name="Dimmerlicht", domain="light",
+        state="off", area_id="wohnzimmer", area_name="Wohnzimmer",
+        capabilities=frozenset({"TURN_ON", "TURN_OFF", "BRIGHTNESS"}),
+    )
+    result = _parse_actions_with_entities(parser, "mach das Dimmerlicht blau", [brightness_only_licht])
+    assert result is None
+
+
+def test_set_brightness_succeeds_on_a_capable_light(parser):
+    """The same capability check must not falsely reject a light that does
+    have Capability.BRIGHTNESS."""
+    brightness_only_licht = EntitySnapshot(
+        entity_id="light.dimmer", friendly_name="Dimmerlicht", domain="light",
+        state="off", area_id="wohnzimmer", area_name="Wohnzimmer",
+        capabilities=frozenset({"TURN_ON", "TURN_OFF", "BRIGHTNESS"}),
+    )
+    result = _parse_actions_with_entities(parser, "stelle das Dimmerlicht auf 50 Prozent", [brightness_only_licht])
+    assert result is not None
+    assert result[0].type is ActionType.SET_BRIGHTNESS
+
+
+def test_set_position_refuses_a_cover_without_position_capability(parser):
+    """A cover that never reports current_position (derive_capabilities()'s
+    own signal) has no Capability.POSITION - "auf 30 Prozent" must refuse."""
+    dumb_rollladen = EntitySnapshot(
+        entity_id="cover.dumb", friendly_name="Einfacher Rollladen", domain="cover",
+        state="closed", area_id="wohnzimmer", area_name="Wohnzimmer",
+        capabilities=frozenset(),
+    )
+    result = _parse_actions_with_entities(parser, "fahre den Einfachen Rollladen auf 30 Prozent", [dumb_rollladen])
+    assert result is None
+
+
+def test_turn_on_cover_ignores_capability_check_entirely(parser):
+    """TURN_ON/TURN_OFF are never capability-gated (V5.20's own scope
+    decision) - derive_capabilities() never grants Capability.TURN_ON for
+    domain "cover" in the first place, so gating "hoch"/"runter" would break
+    every legitimate cover automation. Same capability-less cover as above
+    must still open via "hoch"."""
+    dumb_rollladen = EntitySnapshot(
+        entity_id="cover.dumb", friendly_name="Einfacher Rollladen", domain="cover",
+        state="closed", area_id="wohnzimmer", area_name="Wohnzimmer",
+        capabilities=frozenset(),
+    )
+    result = _parse_actions_with_entities(parser, "fahre die Rollläden im Wohnzimmer hoch", [dumb_rollladen])
+    assert result is not None
+    assert result[0].type is ActionType.TURN_ON
+
+
+def test_set_color_temperature_refuses_a_light_without_that_capability(parser):
+    """A light with COLOR but no COLOR_TEMPERATURE must refuse "warmweiß"."""
+    color_only_licht = EntitySnapshot(
+        entity_id="light.rgb_only", friendly_name="RGB Lampe", domain="light",
+        state="off", area_id="wohnzimmer", area_name="Wohnzimmer",
+        capabilities=frozenset({"TURN_ON", "TURN_OFF", "BRIGHTNESS", "COLOR"}),
+    )
+    result = _parse_actions_with_entities(parser, "stelle die RGB Lampe auf warmweiß", [color_only_licht])
     assert result is None
 
 

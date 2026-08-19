@@ -77,6 +77,7 @@ from .automation_condition_parser import AutomationConditionParser
 from .entities import EntitySnapshot, ResolutionStatus, resolve_entity_scored
 from .nlu.action_model import ActionGroup, ActionModel, ActionType, ExecutionMode
 from .nlu.automation_model import TriggerTarget
+from .nlu.capabilities import Capability
 from .nlu.constraint_resolver import Constraints, resolve_candidates
 from .nlu.lexicon import (
     _ACTION_TEMPORAL_UNIT_SLOT_LIST,
@@ -89,6 +90,11 @@ from .nlu.parser import ParseContext
 from .parsers import _strip_locative_prepositions
 
 AUTOMATION_ACTION_DIR = Path(__file__).parent / "intents" / "de" / "automation_action"
+
+# V5 Wave 5 (V5.18, "Context in Automations") - same closed pronoun set
+# automation_trigger_parser.py/automation_condition_parser.py establish
+# (Regel 6, not a second vocabulary).
+_PRONOUN_WORDS = frozenset({"es"})
 
 # {action_domain} vocabulary for TURN_ON/TURN_OFF/SET_* target resolution -
 # a union of _DOMAIN_SLOT_LIST's light/switch/cover/fan and
@@ -241,8 +247,41 @@ class AutomationActionParser:
         return TriggerTarget(domain=domain_value, area_id=area_id)
 
     @staticmethod
+    def _build_pronoun_target(context: ParseContext) -> TriggerTarget | None:
+        """V5 Wave 5 (V5.18) - mirrors AutomationTriggerParser's/
+        AutomationConditionParser's own ``_build_pronoun_target``
+        byte-for-byte (Regel 6). "es" resolves against
+        ``context.last_entities``; refuses on nothing remembered or a mixed
+        remembered set."""
+        last_entities = context.last_entities
+        if not last_entities:
+            return None
+        if len(last_entities) == 1:
+            entity = last_entities[0]
+            candidates = resolve_candidates(
+                context.entities,
+                Constraints(domain=entity.domain, device_class=entity.device_class, area_id=entity.area_id),
+            )
+            if len(candidates) == 1:
+                return TriggerTarget(domain=entity.domain, device_class=entity.device_class, area_id=entity.area_id)
+            return TriggerTarget(
+                domain=entity.domain,
+                device_class=entity.device_class,
+                area_id=entity.area_id,
+                entity_id=entity.entity_id,
+            )
+        domains = {e.domain for e in last_entities}
+        device_classes = {e.device_class for e in last_entities}
+        area_ids = {e.area_id for e in last_entities}
+        if len(domains) != 1 or len(device_classes) != 1 or len(area_ids) != 1:
+            return None
+        return TriggerTarget(domain=next(iter(domains)), device_class=next(iter(device_classes)), area_id=next(iter(area_ids)))
+
+    @staticmethod
     def _build_named_target(name_slot, context: ParseContext) -> TriggerTarget | None:
         name = _strip_locative_prepositions(str(name_slot.value))
+        if name.strip().lower() in _PRONOUN_WORDS:
+            return AutomationActionParser._build_pronoun_target(context)
         resolved = resolve_entity_scored(name, context.entities, index=context.index)
         if resolved.status is not ResolutionStatus.RESOLVED or resolved.entity is None:
             return None  # not found or ambiguous - never guess (Regel 4)
@@ -345,6 +384,58 @@ class AutomationActionParser:
             exclude_entity_ids=exclude_entity_ids,
         )
 
+    # V5 Wave 5 (V5.20, "Capability Validation in Automations") - which
+    # Capability a SET_* action requires on every one of its target's
+    # concrete entities, same enum/precedent nlu/validator.py's own
+    # _PERCENT_CAPABILITY_BY_DOMAIN checks (Regel 6). Deliberately does NOT
+    # cover TURN_ON/TURN_OFF: capabilities.derive_capabilities() only ever
+    # grants Capability.TURN_ON/TURN_OFF for domain in
+    # ("light", "switch", "fan", "climate") - never "cover" - even though
+    # this parser's own TURN_ON/TURN_OFF reuses those two ActionTypes for
+    # cover open/close (see module docstring, "TURN_ON/TURN_OFF boundary
+    # decision"). Gating TURN_ON/TURN_OFF here would reject every legitimate
+    # cover automation ("fahr die Rollläden hoch"), so those two ActionTypes
+    # are intentionally absent from this map.
+    _CAPABILITY_BY_ACTION_TYPE = {
+        ActionType.SET_BRIGHTNESS: Capability.BRIGHTNESS,
+        ActionType.SET_POSITION: Capability.POSITION,
+        ActionType.SET_FAN_SPEED: Capability.FAN_SPEED,
+        ActionType.SET_COLOR: Capability.COLOR,
+        ActionType.SET_COLOR_TEMPERATURE: Capability.COLOR_TEMPERATURE,
+        ActionType.SET_TEMPERATURE: Capability.TEMPERATURE,
+    }
+
+    @staticmethod
+    def _candidates_for_target(target: TriggerTarget, context: ParseContext) -> list[EntitySnapshot]:
+        """The concrete entities ``target`` actually refers to - a single
+        already-resolved entity when ``entity_id`` is set (the common case,
+        every singular named/pronoun target), otherwise every entity
+        matching its domain/device_class/area (quantified "alle Lichter im
+        Wohnzimmer" targets), minus any "... außer {name}" exclusions.
+        Mirrors ``_build_quantified_target``'s own ``resolve_candidates()``
+        call, not a new search system (Regel 6)."""
+        if target.entity_id is not None:
+            return [e for e in context.entities if e.entity_id == target.entity_id]
+        candidates = resolve_candidates(
+            context.entities,
+            Constraints(domain=target.domain, device_class=target.device_class, area_id=target.area_id),
+        )
+        if target.exclude_entity_ids:
+            candidates = [e for e in candidates if e.entity_id not in target.exclude_entity_ids]
+        return candidates
+
+    def _check_capability(self, action_type: ActionType, target: TriggerTarget, context: ParseContext) -> bool:
+        """True iff every concrete entity ``target`` resolves to already has
+        the ``Capability`` ``action_type`` requires (V5.20) - an empty
+        candidate set (e.g. a quantified target with zero matches, already
+        refused earlier by ``_build_quantified_target``) is never silently
+        treated as "capable"."""
+        required = self._CAPABILITY_BY_ACTION_TYPE.get(action_type)
+        if required is None:
+            return True  # no capability requirement for this action type
+        candidates = self._candidates_for_target(target, context)
+        return bool(candidates) and all(required.name in e.capabilities for e in candidates)
+
     @staticmethod
     def _optional_duration_seconds(slots: dict) -> int | None:
         amount_slot = slots.get("amount")
@@ -387,6 +478,8 @@ class AutomationActionParser:
         action_type = self._PERCENTAGE_ACTION_TYPE_BY_DOMAIN.get(target.domain or "")
         if action_type is None:
             return None  # domain has no percent semantics - refuse, don't guess (Regel 4)
+        if not self._check_capability(action_type, target, context):
+            return None  # V5.20 - entity structurally can't do this, refuse rather than build a no-op automation
         return ActionModel(type=action_type, target=target, value=float(percent_slot.value))
 
     def _parse_set_temperature(self, slots: dict, context: ParseContext) -> ActionModel | None:
@@ -394,6 +487,8 @@ class AutomationActionParser:
         temperature_slot = slots.get("temperature")
         if target is None or temperature_slot is None:
             return None
+        if not self._check_capability(ActionType.SET_TEMPERATURE, target, context):
+            return None  # V5.20
         return ActionModel(type=ActionType.SET_TEMPERATURE, target=target, value=float(temperature_slot.value))
 
     def _parse_set_color(self, slots: dict, context: ParseContext) -> ActionModel | None:
@@ -401,6 +496,8 @@ class AutomationActionParser:
         color_slot = slots.get("color")
         if target is None or color_slot is None:
             return None
+        if not self._check_capability(ActionType.SET_COLOR, target, context):
+            return None  # V5.20
         return ActionModel(type=ActionType.SET_COLOR, target=target, color_name=str(color_slot.value))
 
     def _parse_set_color_temperature(self, slots: dict, context: ParseContext) -> ActionModel | None:
@@ -408,6 +505,8 @@ class AutomationActionParser:
         color_temp_slot = slots.get("color_temp")
         if target is None or color_temp_slot is None:
             return None
+        if not self._check_capability(ActionType.SET_COLOR_TEMPERATURE, target, context):
+            return None  # V5.20
         return ActionModel(type=ActionType.SET_COLOR_TEMPERATURE, target=target, color_temp_kelvin=int(color_temp_slot.value))
 
     @staticmethod

@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from ..areas import AreaSnapshot
 from ..entities import EntityIndex, EntitySnapshot
 from ..world_model import WorldModel
 from .frame import SemanticFrame
@@ -28,6 +29,17 @@ class ParseContext:
     # None keeps every existing caller unchanged; only query parsers that need
     # device/area-level lookups read this.
     world_model: WorldModel | None = None
+    # V5 Wave 5 (V5.18, "Context in Automations") - the previous turn's
+    # ConversationContext.last_entities/last_area (nlu/context.py), plumbed
+    # through as plain primitives rather than a ConversationContext object
+    # itself, same reasoning ReferenceParser's parse() already documents for
+    # taking these as parameters (parsers.py) - decouples this module from
+    # nlu/context.py. ()/None keeps every existing caller unchanged; only the
+    # automation trigger/condition/action parsers' pronoun handling ("es")
+    # reads these (Regel 6 - same context fields the command path already
+    # resolves pronouns against, not a second context system).
+    last_entities: tuple[EntitySnapshot, ...] = ()
+    last_area: AreaSnapshot | None = None
 
 
 @dataclass(frozen=True)

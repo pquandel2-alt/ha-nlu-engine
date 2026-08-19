@@ -71,6 +71,14 @@ from .parsers import StateQueryParser, _STATE_NAME_TO_SEMANTIC, _strip_locative_
 
 AUTOMATION_TRIGGER_DIR = Path(__file__).parent / "intents" / "de" / "automation_trigger"
 
+# V5 Wave 5 (V5.18, "Context in Automations") - the only pronoun this wave
+# resolves (see ``_build_pronoun_target``'s own docstring for the scope
+# decision). A bare {name} wildcard slot already captures "es" as spoken
+# text - this is the closed set of literal values that redirect
+# ``_build_named_target`` to context resolution instead of
+# ``resolve_entity_scored``.
+_PRONOUN_WORDS = frozenset({"es"})
+
 # Regex pre-selection scaffold for a future ``engine.py::_select_parser()``
 # wiring wave (not called from anywhere in this wave, see module docstring) -
 # mirrors the trigger-keyword/bare-time-phrase vocabulary the 7 grammars
@@ -189,8 +197,54 @@ class AutomationTriggerParser:
         return TriggerTarget(domain=domain, device_class=device_class, area_id=area_id)
 
     @staticmethod
+    def _build_pronoun_target(context: ParseContext) -> TriggerTarget | None:
+        """V5 Wave 5 (V5.18, "Context in Automations") - "es" resolves
+        against ``context.last_entities`` (the previous turn's
+        ``ConversationContext.last_entities``, plumbed through
+        ``ParseContext`` - see that field's own comment), the exact same
+        context the command path's ``ReferenceParser._resolve_pronoun``
+        already reads (Regel 6, no second context system). Refuses (never
+        guesses) when nothing is remembered, or when several remembered
+        entities don't share one domain/device_class/area - there is no
+        single coherent target to build from a mixed set.
+
+        Scope decision (stated plainly, not hidden): only entity-level
+        context is resolved here. The plan's own example ("Erstelle eine
+        Automation für das Wohnzimmer." -> "es") anchors purely on a
+        remembered *area* with no specific entity yet - that would require
+        inferring a domain from the action/trigger type itself (e.g. "mach
+        es auf 30 Prozent" implying "light"), a new kind of reasoning no
+        existing parser performs. Deferred, not attempted here.
+        """
+        last_entities = context.last_entities
+        if not last_entities:
+            return None
+        if len(last_entities) == 1:
+            entity = last_entities[0]
+            candidates = resolve_candidates(
+                context.entities,
+                Constraints(domain=entity.domain, device_class=entity.device_class, area_id=entity.area_id),
+            )
+            if len(candidates) == 1:
+                return TriggerTarget(domain=entity.domain, device_class=entity.device_class, area_id=entity.area_id)
+            return TriggerTarget(
+                domain=entity.domain,
+                device_class=entity.device_class,
+                area_id=entity.area_id,
+                entity_id=entity.entity_id,
+            )
+        domains = {e.domain for e in last_entities}
+        device_classes = {e.device_class for e in last_entities}
+        area_ids = {e.area_id for e in last_entities}
+        if len(domains) != 1 or len(device_classes) != 1 or len(area_ids) != 1:
+            return None  # mixed remembered entities - no single coherent target, never guess
+        return TriggerTarget(domain=next(iter(domains)), device_class=next(iter(device_classes)), area_id=next(iter(area_ids)))
+
+    @staticmethod
     def _build_named_target(name_slot, context: ParseContext) -> TriggerTarget | None:
         name = _strip_locative_prepositions(str(name_slot.value))
+        if name.strip().lower() in _PRONOUN_WORDS:
+            return AutomationTriggerParser._build_pronoun_target(context)
         resolved = resolve_entity_scored(name, context.entities, index=context.index)
         if resolved.status is not ResolutionStatus.RESOLVED or resolved.entity is None:
             return None  # not found or ambiguous - never guess (Regel 4)

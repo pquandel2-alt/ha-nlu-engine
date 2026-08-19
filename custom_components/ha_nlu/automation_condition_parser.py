@@ -73,6 +73,11 @@ from .parsers import StateQueryParser, _STATE_NAME_TO_SEMANTIC, _strip_locative_
 
 AUTOMATION_CONDITION_DIR = Path(__file__).parent / "intents" / "de" / "automation_condition"
 
+# V5 Wave 5 (V5.18, "Context in Automations") - same closed pronoun set
+# ``automation_trigger_parser.py`` establishes (Regel 6, not a second
+# vocabulary).
+_PRONOUN_WORDS = frozenset({"es"})
+
 # \b-anchored so "Grund"/"Sekunde"/"München" are never mis-split - neither
 # side of the embedded "und"/"nicht" substring in those words is itself a
 # word boundary (both neighbouring characters are word characters), so the
@@ -322,8 +327,42 @@ class AutomationConditionParser:
         return TriggerTarget(domain=domain, device_class=device_class, area_id=area_id)
 
     @staticmethod
+    def _build_pronoun_target(context: ParseContext) -> TriggerTarget | None:
+        """V5 Wave 5 (V5.18) - mirrors ``AutomationTriggerParser``'s own
+        ``_build_pronoun_target`` byte-for-byte (Regel 6, same architectural
+        precedent every other shared helper in this file already follows -
+        see the module docstring). "es" resolves against
+        ``context.last_entities``; refuses on nothing remembered or a mixed
+        remembered set."""
+        last_entities = context.last_entities
+        if not last_entities:
+            return None
+        if len(last_entities) == 1:
+            entity = last_entities[0]
+            candidates = resolve_candidates(
+                context.entities,
+                Constraints(domain=entity.domain, device_class=entity.device_class, area_id=entity.area_id),
+            )
+            if len(candidates) == 1:
+                return TriggerTarget(domain=entity.domain, device_class=entity.device_class, area_id=entity.area_id)
+            return TriggerTarget(
+                domain=entity.domain,
+                device_class=entity.device_class,
+                area_id=entity.area_id,
+                entity_id=entity.entity_id,
+            )
+        domains = {e.domain for e in last_entities}
+        device_classes = {e.device_class for e in last_entities}
+        area_ids = {e.area_id for e in last_entities}
+        if len(domains) != 1 or len(device_classes) != 1 or len(area_ids) != 1:
+            return None
+        return TriggerTarget(domain=next(iter(domains)), device_class=next(iter(device_classes)), area_id=next(iter(area_ids)))
+
+    @staticmethod
     def _build_named_target(name_slot, context: ParseContext) -> TriggerTarget | None:
         name = _strip_locative_prepositions(str(name_slot.value))
+        if name.strip().lower() in _PRONOUN_WORDS:
+            return AutomationConditionParser._build_pronoun_target(context)
         resolved = resolve_entity_scored(name, context.entities, index=context.index)
         if resolved.status is not ResolutionStatus.RESOLVED or resolved.entity is None:
             return None  # not found or ambiguous - never guess (Regel 4)
