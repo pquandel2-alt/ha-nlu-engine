@@ -10,6 +10,7 @@ a ``ServiceCallPlan``.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Callable
 
 from hassil import Intents, RangeSlotList, RangeType, WildcardSlotList, recognize
@@ -1923,3 +1924,66 @@ class AutomationQueryParser:
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=list(query_result.entities))
+
+
+@dataclass(frozen=True)
+class AutomationDeleteMatch:
+    """Result of ``AutomationDeleteParser.parse()`` - the entity the {name}
+    slot resolved to, plus every automation referencing it (0, 1, or more).
+    Cardinality is deliberately not decided here: turning a count into a
+    confirmation question vs. one of two different refusal messages is
+    ``engine.py``'s ``match_automation_delete()`` job, the same split
+    ``QueryExecutor``/``ResponseGenerator`` already keep for query results.
+    """
+
+    entity: EntitySnapshot
+    matched: tuple[AutomationSummary, ...]
+
+
+class AutomationDeleteParser:
+    """Wraps the {name} grammar ("lösche die Automation für X") - HomeIntent
+    V5 Teil 8/10, V5.28 "Automation Deletion", the 17th separately-compiled
+    hassil grammar.
+
+    Deliberately reuses ``AutomationQueryParser``'s own "entity-filtered"
+    resolution shape (resolve {name} -> filter automations by
+    ``referenced_entity_ids``) rather than inventing a second targeting
+    mechanism (Regel 6). Unlike the query parser, {name} is mandatory here
+    (see this grammar's own YAML docstring for why a target-less "lösche die
+    Automation" is refused, not treated as "delete every automation" -
+    niemals raten).
+
+    Same ``automations`` calling shape ``AutomationQueryParser.parse()``
+    already establishes: an explicit parameter, not folded into
+    ``ParseContext``, for the same "no per-turn automations.yaml read
+    unless the sentence plausibly needs it" reason (see ``engine.py``'s
+    ``_AUTOMATION_DELETE_RE`` pre-check).
+    """
+
+    def __init__(self, intents: Intents) -> None:
+        self._intents = intents
+
+    def parse(
+        self,
+        text: str,
+        context: ParseContext,
+        automations: tuple[AutomationSummary, ...],
+    ) -> AutomationDeleteMatch | None:
+        slot_lists = {"name": WildcardSlotList(name="name")}
+        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+        if result is None or result.intent is None or result.intent.name != "HassAutomationDelete":
+            return None
+
+        name_slot = result.entities.get("name")
+        if name_slot is None:
+            return None  # grammar requires {name} - structurally unreachable, defense only
+
+        name = _strip_locative_prepositions(str(name_slot.value))
+        resolved = resolve_entity_scored(name, context.entities, index=context.index)
+        if resolved.status is not ResolutionStatus.RESOLVED or resolved.entity is None:
+            return None  # entity itself not found or ambiguous - never guess (Regel 4)
+
+        matched = tuple(
+            a for a in automations if resolved.entity.entity_id in a.referenced_entity_ids
+        )
+        return AutomationDeleteMatch(entity=resolved.entity, matched=matched)

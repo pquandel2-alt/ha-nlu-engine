@@ -161,6 +161,66 @@ class AutomationExecutor:
 
         return automation_id
 
+    async def async_delete_automation(self, automation_id: str) -> None:
+        """V5 Teil 8/10 (V5.28, "Automation Deletion"): removes the
+        automation matching ``automation_id`` from ``automations.yaml``,
+        reloads the automation integration so the removal takes effect
+        immediately, and deletes its sidecar metadata entry (if any).
+
+        Mirrors upstream ``EditIdBasedConfigView``'s own delete path
+        (``homeassistant/components/config/view.py``: find the entry whose
+        ``CONF_ID`` matches, pop it, write the file back) with one
+        deliberate deviation, verified against real upstream source before
+        writing this (Regel 4): upstream's own HTTP delete endpoint does
+        *not* call ``automation.reload`` afterwards - its ``post_write_hook``
+        only removes the entity from the entity registry
+        (``homeassistant/components/config/automation.py``'s ``hook()``,
+        gated on ``action != ACTION_DELETE``). That alone does not stop the
+        automation from running: ``homeassistant/components/automation/
+        __init__.py``'s ``async_will_remove_from_hass()`` - the method that
+        actually unloads a running automation's triggers - is only invoked
+        by a reload's own add/remove diff, never by a bare entity-registry
+        removal. Relying on that upstream shortcut here would leave a
+        deleted automation's triggers silently still firing, exactly the
+        "file disagrees with what the user was told" outcome V5.36's own
+        rollback logic (see ``async_create_automation``) exists to prevent -
+        so this method calls ``automation.reload`` explicitly instead,
+        consistent with every other write this class already performs.
+
+        Same transactional shape as ``async_create_automation``: runs under
+        the shared lock, and a reload failure rolls ``automations.yaml``
+        back to what it was before this call. The metadata delete happens
+        last and is best-effort in the sense that ``AutomationMetadataStore.
+        async_delete()`` is itself a no-op for an id with no entry (e.g. a
+        hand-made automation this integration never recorded) - never an
+        error condition of its own.
+
+        Raises ``ValueError`` if no automation with ``automation_id`` exists
+        - the caller (``AutomationDeleteParser`` via ``match_automation_
+        delete()``) already resolved this id moments earlier from a live
+        ``async_list_automations()`` read, so this only fires on a genuine
+        race (deleted again from elsewhere between resolution and
+        confirmation), not on the ordinary path.
+        """
+        path = self._hass.config.path(AUTOMATIONS_YAML_FILENAME)
+        async with self._lock:
+            original_automations = await self._hass.async_add_executor_job(self._read_automations, path)
+            remaining = [a for a in original_automations if a.get("id") != automation_id]
+            if len(remaining) == len(original_automations):
+                raise ValueError(f"No automation with id {automation_id!r} found")
+
+            await self._hass.async_add_executor_job(self._write_automations, path, remaining)
+
+            try:
+                await self._hass.services.async_call("automation", "reload", {}, blocking=True)
+            except Exception:
+                await self._hass.async_add_executor_job(
+                    self._write_automations, path, original_automations
+                )
+                raise
+
+            await self._metadata_store.async_delete(automation_id)
+
     async def async_list_automations(self) -> tuple[AutomationSummary, ...]:
         """V5.29 (Automation Query): a read-only survey of every automation
         currently in ``automations.yaml``, cross-referenced against the

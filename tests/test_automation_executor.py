@@ -311,3 +311,113 @@ def test_a_second_reload_failure_during_rollback_still_surfaces_the_original_err
         # rolling back must not mask it.
         with pytest.raises(OSError, match="disk full"):
             asyncio.run(executor.async_create_automation(SAMPLE_CONFIG))
+
+
+# --- V5.28 (Wave 10): async_delete_automation() -------------------------------
+
+
+EXISTING_AUTOMATION = {"id": "abc123", "alias": "Bestehende Automation", "triggers": [], "actions": []}
+OTHER_AUTOMATION = {"id": "def456", "alias": "Andere Automation", "triggers": [], "actions": []}
+
+
+def test_delete_automation_removes_the_matching_entry_and_keeps_the_rest():
+    hass = _make_hass()
+    with (
+        patch.object(
+            automation_executor.yaml_util,
+            "load_yaml",
+            return_value=[EXISTING_AUTOMATION, OTHER_AUTOMATION],
+        ),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml") as dump_mock,
+        patch.object(automation_executor, "write_utf8_file_atomic") as write_mock,
+        _patch_metadata_write(),
+    ):
+        executor = AutomationExecutor(hass)
+        asyncio.run(executor.async_delete_automation("abc123"))
+
+    written_automations = dump_mock.call_args.args[0]
+    assert written_automations == [OTHER_AUTOMATION]
+    write_mock.assert_called_once_with("/config/automations.yaml", "dumped-yaml")
+
+
+def test_delete_automation_calls_automation_reload_with_no_arguments():
+    hass = _make_hass()
+    with (
+        patch.object(automation_executor.yaml_util, "load_yaml", return_value=[EXISTING_AUTOMATION]),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml"),
+        patch.object(automation_executor, "write_utf8_file_atomic"),
+        _patch_metadata_write(),
+    ):
+        executor = AutomationExecutor(hass)
+        asyncio.run(executor.async_delete_automation("abc123"))
+
+    hass.services.async_call.assert_awaited_once_with("automation", "reload", {}, blocking=True)
+
+
+def test_delete_automation_raises_value_error_when_the_id_is_not_found():
+    hass = _make_hass()
+    with (
+        patch.object(automation_executor.yaml_util, "load_yaml", return_value=[EXISTING_AUTOMATION]),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml") as dump_mock,
+        patch.object(automation_executor, "write_utf8_file_atomic"),
+        _patch_metadata_write(),
+    ):
+        executor = AutomationExecutor(hass)
+        with pytest.raises(ValueError, match="no-such-id"):
+            asyncio.run(executor.async_delete_automation("no-such-id"))
+
+    # Nothing was ever written - a not-found lookup must not touch the file.
+    dump_mock.assert_not_called()
+    hass.services.async_call.assert_not_awaited()
+
+
+def test_delete_automation_removes_the_metadata_entry():
+    hass = _make_hass()
+    with (
+        patch.object(automation_executor.yaml_util, "load_yaml", return_value=[EXISTING_AUTOMATION]),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml"),
+        patch.object(automation_executor, "write_utf8_file_atomic"),
+        patch.object(
+            automation_metadata_store.AutomationMetadataStore,
+            "async_delete",
+            new_callable=AsyncMock,
+        ) as delete_mock,
+    ):
+        executor = AutomationExecutor(hass)
+        asyncio.run(executor.async_delete_automation("abc123"))
+
+    delete_mock.assert_awaited_once_with("abc123")
+
+
+def test_a_delete_reload_failure_rolls_back_the_automations_yaml_write():
+    hass = _make_hass()
+    hass.services.async_call = AsyncMock(side_effect=RuntimeError("reload failed"))
+    with (
+        patch.object(
+            automation_executor.yaml_util,
+            "load_yaml",
+            return_value=[EXISTING_AUTOMATION, OTHER_AUTOMATION],
+        ),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml") as dump_mock,
+        patch.object(automation_executor, "write_utf8_file_atomic"),
+        patch.object(
+            automation_metadata_store.AutomationMetadataStore,
+            "async_delete",
+            new_callable=AsyncMock,
+        ) as delete_mock,
+    ):
+        executor = AutomationExecutor(hass)
+        with pytest.raises(RuntimeError, match="reload failed"):
+            asyncio.run(executor.async_delete_automation("abc123"))
+
+    # First dump removed the entry, second dump rolled back to the original
+    # two-automation list - the file must end up exactly as if the call had
+    # never happened.
+    assert [call.args[0] for call in dump_mock.call_args_list] == [
+        [OTHER_AUTOMATION],
+        [EXISTING_AUTOMATION, OTHER_AUTOMATION],
+    ]
+    # Metadata is only removed after a successful reload - a failed reload
+    # must never leave the metadata entry dangling out of sync with a file
+    # that (post-rollback) still has the automation.
+    delete_mock.assert_not_awaited()

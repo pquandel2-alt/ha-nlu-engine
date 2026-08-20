@@ -765,6 +765,96 @@ skipped (vorher 1472/14) – kein bestehender Test verändert.
 
 ⸻
 
+## 6i. V5 Teil 8/10 (Wave 10) – V5.28 "Automation Deletion" (Ergebnis, 2026-08-20)
+
+**Ziel:** V5.28 aus dem in 6g/6h zurückgestellten Rest von V5 Teil 8–10 –
+eine per Entity-Referenz eindeutig identifizierte Automation nach
+Sprachbestätigung löschen. Bewusst eng geschnitten: nur DELETE, nicht
+DISABLE/ENABLE (verifiziert gegen echten Upstream-Code – `automation.
+turn_on`/`turn_off` sind reine Runtime-Service-Calls ohne jede
+`automations.yaml`-Schreiboperation, ein grundlegend anderer Mechanismus als
+dieser Wave YAML-mutierender Delete-Pfad, siehe `automation_executor.py`s
+`async_delete_automation()`-Docstring). Ebenfalls **nicht** in Scope:
+Area-basiertes Löschziel, mehrdeutige Namen werden abgelehnt statt
+geraten – dieselbe Single-Entity-Referenzauflösung, die V5.29s
+`AutomationQueryParser` bereits etabliert hat, nicht ein zweiter,
+eigenständig erfundener Targeting-Mechanismus. Diese Grenzen waren eine
+autonome Scope-Entscheidung zu Beginn der Wave, nicht vorab mit dem Nutzer
+abgestimmt.
+
+**Bausteine:**
+
+- `automation_executor.py::AutomationExecutor.async_delete_automation()`
+  (NEU): entfernt die Automation mit passender `id` aus
+  `automations.yaml`, ruft `automation.reload`, löscht den
+  Metadata-Sidecar-Eintrag (`AutomationMetadataStore.async_delete()`, war
+  aus Wave 8a bereits vorhanden und wurde direkt wiederverwendet). Läuft
+  unter demselben Instanz-Lock wie `async_create_automation()`, mit
+  identischem Rollback-bei-Reload-Fehler-Verhalten (V5.35/36-Prinzip "keine
+  YAML-Datei, die von dem abweicht, was dem Nutzer gesagt wurde", jetzt auch
+  für den Lösch-Pfad). Bewusste, dokumentierte Abweichung von Upstreams
+  eigenem HTTP-Delete-Endpunkt (`EditIdBasedConfigView`/`post_write_hook`),
+  der nach dem Löschen *nicht* neu lädt und nur die Entity-Registry bereinigt
+  – verifiziert gegen `homeassistant/components/automation/__init__.py`,
+  dass das die laufenden Trigger einer gelöschten Automation nicht stoppt.
+  `ValueError` bei unbekannter `id` (nur bei echter Race zwischen Auflösung
+  und Bestätigung erreichbar, da die `id` Sekunden zuvor aus einem frischen
+  `async_list_automations()`-Read stammt).
+- `nlu/context.py::PendingAutomationDeletion` (NEU) + neues Feld
+  `pending_automation_deletion` auf `ConversationContext`: Gegenstück zu
+  `PendingAutomationConfirmation`, gleiches Muster (frozen Dataclass, in
+  `ConversationContextStore` gehalten, per gemeinsamer
+  `classify_confirmation_reply()`-Vokabular aufgelöst – Regel 6, kein
+  zweites Ja/Nein-Vokabular).
+- `parsers.py::AutomationDeleteParser` + neuer Intent
+  `HassAutomationDelete` (17. separat kompilierte Grammatik,
+  `intents/de/automation_delete/automation_delete.yaml`): `{name}` ist hier
+  pflicht (anders als V5.29s "welche Automationen gibt es?" ohne Ziel) – ein
+  zielloses "lösche die Automation" hieße "lösche alle", das wird nie
+  geraten. Wiederverwendet `AutomationQueryParser`s
+  entity-gefilterte Auflösung (`resolve_entity_scored` → Filter auf
+  `entity_id in referenced_entity_ids`), keine zweite Targeting-Logik.
+  Liefert `AutomationDeleteMatch` (Entity + alle Treffer, 0/1/2+) – die
+  Kardinalitäts-Entscheidung selbst liegt bei `engine.py`, nicht beim
+  Parser (gleicher Split wie `QueryExecutor`/`ResponseGenerator`).
+- `engine.py::match_automation_delete()` + `AutomationDeletionMatchResult`
+  (NEU): `_AUTOMATION_DELETE_RE` als billiges Regex-Gate. Bewusst **nicht**
+  die bestehende Query-Pipeline (`QueryCommand`/`QueryExecutor`)
+  wiederverwendet – deren Kardinalitäts-Handling behandelt jeden Treffer
+  ≥1 als `MATCHED` (richtig zum Auflisten, falsch für ein eindeutiges
+  Löschziel). Stattdessen eine parallele, aber einfachere
+  Ergebnis-Form: 0 Treffer → Ablehnung ("Ich habe keine Automation
+  gefunden, die X steuert."), 2+ Treffer → eigene Ablehnung ("Das kann ich
+  nicht eindeutig löschen."), genau 1 Treffer → gesprochene Bestätigungsfrage
+  mit `_automation_label()` (aus `nlu/response_generator.py`
+  importiert/wiederverwendet, nicht dupliziert).
+- `conversation.py`: neuer Match-Cascade-Schritt für
+  `_AUTOMATION_DELETE_RE`, bewusst **vor** dem bestehenden
+  `_AUTOMATION_QUERY_RE`-Schritt platziert – Lösch-Sätze enthalten auch das
+  Wort "Automation" und würden sonst unnötig zuerst einen zweiten,
+  erfolglosen Query-Pfad-Read auslösen. Dieselbe lazily-konstruierte,
+  Entity-Lifetime-`AutomationExecutor`-Instanz wie Query/Creation.
+  `_async_handle_automation_deletion_confirmation_reply()` spiegelt
+  `_async_handle_automation_confirmation_reply()`s Form 1:1 (UNCLEAR
+  re-asked mit erhaltenem Pending-State, NO/Fehler löschen den Context und
+  löschen nichts, nur ein klares YES ruft
+  `async_delete_automation()` auf).
+
+**Tests:** 21 neue Tests über 3 Dateien (`test_automation_executor.py`: +5
+für `async_delete_automation()` inkl. Not-Found, Reload-Rollback,
+Metadata-Löschung; `test_engine_automation_delete.py`, NEU: 8 direkte
+`match_automation_delete()`-Tests inkl. Regex-Gate, 0/1/2+-Kardinalität,
+"niemals raten"-Ablehnung bei unaufgelöstem/mehrdeutigem Namen, Fallback auf
+`alias` ohne `source_text`; `test_conversation_automation_delete.py`, NEU: 8
+E2E-Tests über die echte `_async_handle_message()`-Orchestrierung – Ja/Nein/
+Unclear-Rundlauf, 0/2+-Treffer-Ablehnung ohne Pending-State, sowie ein Test,
+der beweist, dass `async_list_automations()` für eine gewöhnliche
+Steuerungs-Anweisung gar nicht erst aufgerufen wird). Vollständige
+Regression: 1523 passed, 14 skipped (vorher 1502/14) – kein bestehender Test
+verändert.
+
+⸻
+
 ## 7. Sicherheitsregeln
 
 - **Niemals bei echter Ambiguität raten.** Je unsicherer die

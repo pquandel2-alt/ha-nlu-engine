@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from ..areas import AreaSnapshot
+from ..automation_summary import AutomationSummary
 from ..entities import EntitySnapshot
 from ..floors import FloorSnapshot
 from .automation_model import AutomationModel
@@ -36,6 +37,7 @@ __all__ = [
     "ConversationContextStore",
     "DEFAULT_CONTEXT_TTL_SECONDS",
     "PendingAutomationConfirmation",
+    "PendingAutomationDeletion",
 ]
 
 
@@ -62,6 +64,25 @@ class PendingAutomationConfirmation:
     """
 
     model: AutomationModel
+
+
+@dataclass(frozen=True)
+class PendingAutomationDeletion:
+    """A pending "Soll die Automation X gelöscht werden?" gate (HomeIntent
+    V5 Teil 8/10, V5.28 "Automation Deletion") - the deletion counterpart to
+    ``PendingAutomationConfirmation`` above, stored on ``ConversationContext``
+    the same way and resolved through the exact same yes/no reply
+    classification (``nlu/automation_confirmation.py``) - Regel 6, one
+    confirmation vocabulary, not a second one for deletion.
+
+    Carries the already-resolved ``AutomationSummary`` to delete (from a
+    live ``AutomationExecutor.async_list_automations()`` read at match time,
+    see ``engine.py``'s ``match_automation_delete()``) rather than just its
+    ``automation_id`` - so the confirmation reply's own response text can
+    still name the automation without a second read.
+    """
+
+    automation: AutomationSummary
 
 # No TTL value is specified anywhere in the plan (only the test case name
 # "context expiration", brain node 9ced4390, section 26). 30s covers a
@@ -115,6 +136,10 @@ class ConversationContext:
     # "ja"/"nein" confirmation before it may ever be persisted to Home
     # Assistant (see PendingAutomationConfirmation's own docstring).
     pending_automation_confirmation: PendingAutomationConfirmation | None = None
+    # V5 Teil 8/10 (V5.28, "Automation Deletion") - a spoken deletion request
+    # awaiting its own "ja"/"nein" confirmation before anything is removed
+    # from Home Assistant (see PendingAutomationDeletion's own docstring).
+    pending_automation_deletion: PendingAutomationDeletion | None = None
 
 
 class ConversationContextStore:

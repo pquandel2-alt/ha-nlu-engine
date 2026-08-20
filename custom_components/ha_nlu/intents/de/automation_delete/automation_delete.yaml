@@ -1,0 +1,28 @@
+language: "de"
+intents:
+  # HomeIntent V5 Teil 8/10, V5.28 "Automation Deletion" - the 17th
+  # separately-compiled hassil grammar (see parsers.py's
+  # AutomationDeleteParser docstring). DELETE only, not DISABLE/ENABLE: the
+  # plan text explicitly names these as different operations, and enabling/
+  # disabling is a pure runtime ``automation.turn_on``/``automation.
+  # turn_off`` service call with no automations.yaml write at all (verified
+  # against real upstream ``homeassistant/components/automation/__init__.py``)
+  # - a fundamentally different mechanism than this grammar's YAML-mutating
+  # delete path, deliberately deferred to a later wave.
+  #
+  # {name} is mandatory here (unlike automation_query.yaml's bare "welche
+  # automationen gibt es") - a target-less "lösche die automation" would
+  # mean "delete all of them", which this integration must never guess
+  # (Regel 4). Identifies the automation to delete by which entity it
+  # references, the same "entity-filtered" resolution
+  # AutomationQueryParser's "was schaltet {name}" already uses - not a
+  # second, separately-invented targeting mechanism.
+  HassAutomationDelete:
+    data:
+      - sentences:
+          - "lösche die automation für {name}"
+          - "lösche die automation die {name} schaltet"
+          - "lösche die automation die {name} steuert"
+          - "entferne die automation für {name}"
+          - "entferne die automation die {name} schaltet"
+          - "entferne die automation die {name} steuert"

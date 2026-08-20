@@ -39,7 +39,7 @@ from .nlu.normalize import normalize
 from .nlu.parser import AmbiguousReference, ClarificationRequest, ParseContext, ParseResult
 from .nlu.reasoning import ReasoningEngine, ResolvedSemanticIntent
 from .nlu.response import NluError, NluResponse
-from .nlu.response_generator import ResponseGenerator
+from .nlu.response_generator import ResponseGenerator, _automation_label
 from .nlu.service_mapper import map_to_service_call
 from .nlu.validator import validate_command
 from .automation_action_parser import AutomationActionParser
@@ -51,6 +51,8 @@ from .nlu.automation_validator import AutomationValidationError, validate_automa
 from .nlu.condition_model import ConditionNode
 from .parsers import (
     AreaQueryParser,
+    AutomationDeleteMatch,
+    AutomationDeleteParser,
     AutomationQueryParser,
     ClimateExtendedParser,
     CommandFollowupParser,
@@ -98,6 +100,7 @@ AUTOMATION_TRIGGER_DIR = INTENTS_DIR / "automation_trigger"
 AUTOMATION_CONDITION_DIR = INTENTS_DIR / "automation_condition"
 AUTOMATION_ACTION_DIR = INTENTS_DIR / "automation_action"
 AUTOMATION_QUERY_DIR = INTENTS_DIR / "automation_query"
+AUTOMATION_DELETE_DIR = INTENTS_DIR / "automation_delete"
 
 # Sentences containing a temporal-modifier keyword ("Minute(n)"/"Stunde(n)"/
 # "Uhr"/"morgen früh"/"heute Abend"/...) are routed to TemporalParser's
@@ -293,6 +296,15 @@ _AUTOMATION_QUERY_RE = re.compile(
     r"\bautomation(en)?\b|\bwas schaltet\b|\bwas steuert\b|\bwarum ist\b|\bwarum geht\b", re.IGNORECASE
 )
 
+# "lösch(e)"/"entfern(e)" + "automation" routes to AutomationDeleteParser's
+# separately-compiled grammar (HomeIntent plan V5.28, "Automation Deletion")
+# - same cheap-pre-check role as ``_AUTOMATION_QUERY_RE`` one wave earlier,
+# gating the real, blocking ``automations.yaml``/metadata-sidecar read in
+# ``conversation.py`` before ``match_automation_delete()`` is even called.
+# Grepped empirically against every existing intent YAML (see this module's
+# git history) - no other grammar uses "lösch"/"entfern" for anything else.
+_AUTOMATION_DELETE_RE = re.compile(r"\blösch\w*\b|\bentfern\w*\b", re.IGNORECASE)
+
 # Per-domain question word for the clarification round-trip (v2 plan Phase
 # 25). Same kind of small, explicit German-grammar lookup as
 # service_call.py's ``_DOMAIN_PLURAL_DE`` - only covers the domains
@@ -405,6 +417,28 @@ class AutomationMatchResult:
     validation_error: AutomationValidationError | None
 
 
+@dataclass(frozen=True)
+class AutomationDeletionMatchResult:
+    """Result of ``NluEngine.match_automation_delete()`` (HomeIntent V5 Teil
+    8/10, V5.28 "Automation Deletion") - deliberately shaped like
+    ``AutomationMatchResult`` above (a spoken response plus a not-yet-acted-
+    on payload, never a direct HA write on this turn) rather than like the
+    plain ``MatchResult``: deletion needs the same "speak it back, wait for
+    ja/nein" confirmation gate creation already established (``context.py``'s
+    ``PendingAutomationDeletion``), since it is exactly as hard to reverse.
+
+    ``automation`` is ``None`` for both refusal shapes - zero matches ("kenne
+    diese Automation nicht") and 2+ matches ("welche davon genau?", never
+    guessed, Regel 4) - collapsed into one field the same way
+    ``AutomationMatchResult.validation_error`` collapses "valid" vs. "invalid"
+    into one type: ``conversation.py`` only needs to check ``is None`` to
+    decide whether a confirmation should be offered.
+    """
+
+    automation: AutomationSummary | None
+    response_text: str
+
+
 class NluEngine:
     """Loads all intent YAML files once at construction; ``match()`` is
     stateless per call (entities are passed in fresh each time since HA
@@ -430,6 +464,7 @@ class NluEngine:
         automation_condition_dir: Path = AUTOMATION_CONDITION_DIR,
         automation_action_dir: Path = AUTOMATION_ACTION_DIR,
         automation_query_dir: Path = AUTOMATION_QUERY_DIR,
+        automation_delete_dir: Path = AUTOMATION_DELETE_DIR,
     ) -> None:
         yaml_files = sorted(intents_dir.glob("*.yaml"))
         if not yaml_files:
@@ -521,6 +556,11 @@ class NluEngine:
             raise FileNotFoundError(f"No intent YAML files found in {automation_query_dir}")
         automation_query_intents: Intents = Intents.from_files(automation_query_yaml_files)
 
+        automation_delete_yaml_files = sorted(automation_delete_dir.glob("*.yaml"))
+        if not automation_delete_yaml_files:
+            raise FileNotFoundError(f"No intent YAML files found in {automation_delete_dir}")
+        automation_delete_intents: Intents = Intents.from_files(automation_delete_yaml_files)
+
         self._single_parser = SingleTargetParser(intents)
         self._quantifier_parser = QuantifierParser(quantifier_intents)
         self._percentage_parser = PercentageParser(percentage_intents)
@@ -545,6 +585,7 @@ class NluEngine:
             automation_action_intents, self._automation_condition_parser
         )
         self._automation_query_parser = AutomationQueryParser(automation_query_intents)
+        self._automation_delete_parser = AutomationDeleteParser(automation_delete_intents)
 
     def _select_parser(self, text: str):
         if _TEMPORAL_RE.search(text):
@@ -818,6 +859,68 @@ class NluEngine:
         if result is None:
             return None
         return self._build_match_result(result, entities, context)
+
+    def match_automation_delete(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        automations: tuple[AutomationSummary, ...],
+    ) -> AutomationDeletionMatchResult | None:
+        """Match "Lösche/Entferne die Automation für X" (HomeIntent plan
+        V5.28, "Automation Deletion") into an ``AutomationDeletionMatchResult``
+        - never a direct deletion on this turn, only ever a spoken
+        confirmation prompt or refusal (see that type's own docstring for
+        why). ``conversation.py`` stores a successful resolution as a
+        ``PendingAutomationDeletion`` and only calls
+        ``AutomationExecutor.async_delete_automation()`` once the user
+        confirms with "ja" - same two-step gate ``match_automation()``'s own
+        creation path already established, and for the identical reason
+        (V5.36's "no half-created/half-deleted automations" applies to
+        deletion just as much as creation).
+
+        Gated by ``_AUTOMATION_DELETE_RE`` first, the same role
+        ``_AUTOMATION_QUERY_RE`` plays for ``match_automation_query()`` -
+        letting ``conversation.py`` skip the real, blocking
+        ``automations.yaml``/metadata-sidecar read on a turn that plausibly
+        can't need it.
+
+        Returns ``None`` only when the sentence doesn't match this grammar
+        at all, or when the named entity itself doesn't resolve (unknown or
+        ambiguous {name} - never guessed, same as ``AutomationQueryParser``).
+        A resolved entity with zero or 2+ referencing automations still
+        returns a result (a spoken refusal), not ``None`` - the sentence was
+        understood, it just can't be acted on.
+        """
+        if not _AUTOMATION_DELETE_RE.search(text):
+            return None
+
+        normalized = normalize(text)
+        parse_context = ParseContext(entities=entities, index=build_entity_index(entities))
+        match: AutomationDeleteMatch | None = self._automation_delete_parser.parse(
+            normalized, parse_context, automations
+        )
+        if match is None:
+            return None
+
+        if not match.matched:
+            return AutomationDeletionMatchResult(
+                automation=None,
+                response_text=f"Ich habe keine Automation gefunden, die {match.entity.friendly_name} steuert.",
+            )
+        if len(match.matched) > 1:
+            return AutomationDeletionMatchResult(
+                automation=None,
+                response_text=(
+                    f"Es gibt mehrere Automationen, die {match.entity.friendly_name} steuern. "
+                    "Das kann ich nicht eindeutig löschen."
+                ),
+            )
+
+        automation = match.matched[0]
+        return AutomationDeletionMatchResult(
+            automation=automation,
+            response_text=f'Soll die Automation "{_automation_label(automation)}" gelöscht werden?',
+        )
 
     def match_automation(
         self,

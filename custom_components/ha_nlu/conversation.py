@@ -27,7 +27,14 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .automation_executor import AutomationExecutor
 from .const import DOMAIN, NOT_UNDERSTOOD_TEXT
-from .engine import AutomationMatchResult, CommandPlan, NluEngine, _AUTOMATION_QUERY_RE
+from .engine import (
+    AutomationDeletionMatchResult,
+    AutomationMatchResult,
+    CommandPlan,
+    NluEngine,
+    _AUTOMATION_DELETE_RE,
+    _AUTOMATION_QUERY_RE,
+)
 from .entities import EntitySnapshot
 from .hass_entities import build_device_snapshots, build_entity_snapshots
 from .nlu.automation_confirmation import ConfirmationReply, classify_confirmation_reply
@@ -36,6 +43,7 @@ from .nlu.context import (
     ConversationContext,
     ConversationContextStore,
     PendingAutomationConfirmation,
+    PendingAutomationDeletion,
 )
 from .nlu.ha_automation_generator import GenerationError, generate_ha_automation_config
 from .service_call import QUERY_INTENTS
@@ -55,6 +63,16 @@ AUTOMATION_CREATED_TEXT = "Automation wurde erstellt."
 AUTOMATION_CANCELLED_TEXT = "Abgebrochen. Die Automation wurde nicht erstellt."
 AUTOMATION_CONFIRMATION_UNCLEAR_TEXT = (
     "Das habe ich nicht verstanden. Soll die Automation erstellt werden? "
+    "Bitte antworte mit Ja oder Nein."
+)
+
+# V5 Teil 8/10 (V5.28, "Automation Deletion") - same "small closed
+# vocabulary" precedent as the creation texts above, mirrored one-to-one for
+# the deletion confirmation dialog.
+AUTOMATION_DELETED_TEXT = "Automation wurde gelöscht."
+AUTOMATION_DELETION_CANCELLED_TEXT = "Abgebrochen. Die Automation wurde nicht gelöscht."
+AUTOMATION_DELETION_CONFIRMATION_UNCLEAR_TEXT = (
+    "Das habe ich nicht verstanden. Soll die Automation gelöscht werden? "
     "Bitte antworte mit Ja oder Nein."
 )
 
@@ -183,6 +201,11 @@ class NluConversationEntity(
                 user_input, response, pending.pending_automation_confirmation, entities
             )
 
+        if pending is not None and pending.pending_automation_deletion is not None:
+            return await self._async_handle_automation_deletion_confirmation_reply(
+                user_input, response, pending.pending_automation_deletion
+            )
+
         if pending is not None and pending.pending_clarification is not None:
             result = self._engine.resolve_clarification(
                 user_input.text, pending.pending_clarification, entities
@@ -198,6 +221,18 @@ class NluConversationEntity(
                 )
             if result is None:
                 result = self._engine.match_command_followup(user_input.text, entities, pending)
+            if result is None and _AUTOMATION_DELETE_RE.search(user_input.text):
+                # V5.28 "Automation Deletion": checked before the query gate
+                # below - "Lösche die Automation für X" also contains the
+                # word "Automation" and would otherwise trigger an
+                # unnecessary second automations.yaml read via the query
+                # gate first (that grammar just wouldn't match it). Same
+                # lazily-constructed, entity-lifetime executor instance the
+                # query/creation paths already use.
+                if self._automation_executor is None:
+                    self._automation_executor = AutomationExecutor(self.hass)
+                automations = await self._automation_executor.async_list_automations()
+                result = self._engine.match_automation_delete(user_input.text, entities, automations)
             if result is None and _AUTOMATION_QUERY_RE.search(user_input.text):
                 # V5.29 "Automation Query": the same cheap pre-check
                 # ``match_automation_query()`` itself re-checks is applied
@@ -307,6 +342,33 @@ class NluConversationEntity(
             else:
                 self._context_store.clear(user_input.conversation_id)
                 response.async_set_speech(result.response_text)
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        if isinstance(result, AutomationDeletionMatchResult):
+            # V5 Teil 8/10 (V5.28, "Automation Deletion"): mirrors the
+            # AutomationMatchResult branch above - nothing is ever deleted
+            # on this turn. A resolved single match is spoken back as a
+            # "ja"/"nein" question and held as a PendingAutomationDeletion
+            # (handled at the top of this method); a refusal (no match, or
+            # 2+ matches) just speaks result.response_text and stores
+            # nothing, same "niemals raten" stance the query path already
+            # takes for ambiguous automation names.
+            if result.automation is not None:
+                self._context_store.set(
+                    user_input.conversation_id,
+                    ConversationContext(
+                        last_command=None,
+                        last_entities=(),
+                        last_area=None,
+                        pending_clarification=None,
+                        pending_automation_deletion=PendingAutomationDeletion(automation=result.automation),
+                    ),
+                )
+            else:
+                self._context_store.clear(user_input.conversation_id)
+            response.async_set_speech(result.response_text)
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
             )
@@ -432,6 +494,57 @@ class NluConversationEntity(
             )
 
         response.async_set_speech(AUTOMATION_CREATED_TEXT)
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    async def _async_handle_automation_deletion_confirmation_reply(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        deletion: PendingAutomationDeletion,
+    ) -> conversation.ConversationResult:
+        """V5 Teil 8/10 (V5.28, "Automation Deletion"): the deletion
+        counterpart to ``_async_handle_automation_confirmation_reply()``
+        above - same closed yes/no vocabulary, same ``UNCLEAR``-keeps-
+        pending/``NO``-and-failure-clear-and-persist-nothing shape. No
+        ``entities`` parameter is needed here (unlike the creation reply):
+        deletion doesn't regenerate anything against live HA state, it just
+        removes the already-resolved ``deletion.automation`` by id.
+        """
+        reply = classify_confirmation_reply(user_input.text)
+
+        if reply is ConfirmationReply.UNCLEAR:
+            response.async_set_speech(AUTOMATION_DELETION_CONFIRMATION_UNCLEAR_TEXT)
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        self._context_store.clear(user_input.conversation_id)
+
+        if reply is ConfirmationReply.NO:
+            response.async_set_speech(AUTOMATION_DELETION_CANCELLED_TEXT)
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        if self._automation_executor is None:
+            self._automation_executor = AutomationExecutor(self.hass)
+        try:
+            await self._automation_executor.async_delete_automation(
+                deletion.automation.automation_id
+            )
+        except Exception as err:  # noqa: BLE001 - a YAML write + service call can fail in ways beyond HomeAssistantError; must not propagate as "Unexpected error during intent recognition"
+            _LOGGER.error("Automation deletion failed: %s", err)
+            response.async_set_error(
+                intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                f"Fehler beim Löschen der Automation: {err}",
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        response.async_set_speech(AUTOMATION_DELETED_TEXT)
         return conversation.ConversationResult(
             response=response, conversation_id=user_input.conversation_id
         )
