@@ -1,5 +1,5 @@
-"""Automation Executor (HomeIntent V5 Teil 7/10 + Teil 8/10 - V5.26, V5.35,
-V5.36): the sole persistence path from a confirmed ``AutomationModel`` into
+"""Automation Executor (HomeIntent V5 Teil 7/10 + Teil 8/10 - V5.26, V5.28,
+V5.35, V5.36): the sole persistence path from a confirmed ``AutomationModel`` into
 a real Home Assistant automation - kept structurally and physically
 separate from ``conversation.py``'s existing command-execution code
 (``hass.services.async_call()`` for TURN_ON/TURN_OFF/etc. plans), since
@@ -221,6 +221,68 @@ class AutomationExecutor:
 
             await self._metadata_store.async_delete(automation_id)
 
+    async def async_disable_automation(self, automation_id: str) -> None:
+        """V5 Teil 8/10 (Wave 11, "Automation Disable/Enable"): durably
+        disables the automation matching ``automation_id`` by setting its
+        ``initial_state`` key to ``False`` in ``automations.yaml`` and
+        reloading - **not** a runtime ``automation.turn_off`` service call.
+
+        Verified against real upstream source before writing this (Regel 4):
+        ``automation.turn_on``/``turn_off`` only flip the entity's runtime
+        ``_is_enabled`` flag (``homeassistant/components/automation/
+        __init__.py``) - that change does not survive a reload/restart, and
+        every other write this class performs already ends with
+        ``automation.reload``. Relying on the service call here would mean
+        this integration's own next reload (e.g. from an unrelated creation/
+        deletion moments later) silently re-enables an automation the user
+        was just told is disabled - exactly the "file disagrees with what
+        the user was told" outcome V5.36's rollback logic exists to prevent
+        elsewhere. ``initial_state`` (``CONF_INITIAL_STATE``, upstream
+        ``homeassistant/components/automation/config.py``), by contrast, is
+        read at setup/reload time and takes priority over any previously
+        persisted runtime state - the same durable, YAML-only mechanism
+        upstream's own docs describe for a config-defined enabled state.
+
+        Same transactional shape as ``async_delete_automation``: runs under
+        the shared lock, a reload failure rolls ``automations.yaml`` back.
+        Raises ``ValueError`` if no automation with ``automation_id`` exists
+        (same genuine-race-only caveat as ``async_delete_automation``).
+        """
+        await self._async_set_initial_state(automation_id, enabled=False)
+
+    async def async_enable_automation(self, automation_id: str) -> None:
+        """The ``async_disable_automation()`` counterpart - sets
+        ``initial_state`` back to ``True`` explicitly (not simply removing
+        the key) so a re-enable is just as durable and explicit as a
+        disable, rather than falling back on whatever HA's own default/
+        previously-persisted-state priority would otherwise pick.
+        """
+        await self._async_set_initial_state(automation_id, enabled=True)
+
+    async def _async_set_initial_state(self, automation_id: str, *, enabled: bool) -> None:
+        path = self._hass.config.path(AUTOMATIONS_YAML_FILENAME)
+        async with self._lock:
+            original_automations = await self._hass.async_add_executor_job(self._read_automations, path)
+            updated = []
+            found = False
+            for automation in original_automations:
+                if automation.get("id") == automation_id:
+                    found = True
+                    automation = {**automation, "initial_state": enabled}
+                updated.append(automation)
+            if not found:
+                raise ValueError(f"No automation with id {automation_id!r} found")
+
+            await self._hass.async_add_executor_job(self._write_automations, path, updated)
+
+            try:
+                await self._hass.services.async_call("automation", "reload", {}, blocking=True)
+            except Exception:
+                await self._hass.async_add_executor_job(
+                    self._write_automations, path, original_automations
+                )
+                raise
+
     async def async_list_automations(self) -> tuple[AutomationSummary, ...]:
         """V5.29 (Automation Query): a read-only survey of every automation
         currently in ``automations.yaml``, cross-referenced against the
@@ -253,6 +315,7 @@ class AutomationExecutor:
                     source_text=entry.get("source_text") if entry else None,
                     created_by=entry.get("created_by") if entry else None,
                     referenced_entity_ids=frozenset(_collect_entity_ids(automation)),
+                    enabled=automation.get("initial_state", True),
                 )
             )
         return tuple(summaries)

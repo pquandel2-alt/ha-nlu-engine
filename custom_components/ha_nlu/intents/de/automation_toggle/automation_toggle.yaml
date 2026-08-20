@@ -1,0 +1,30 @@
+language: "de"
+intents:
+  # HomeIntent V5 Teil 8/10 (Wave 11, "Automation Disable/Enable") - the
+  # 18th separately-compiled hassil grammar (see parsers.py's
+  # AutomationToggleParser docstring). The plan text names DISABLE/ENABLE
+  # as operations distinct from DELETE - unlike a deletion, disabling is
+  # trivially reversible (just enable it again), so this path never gates
+  # behind a "ja"/"nein" confirmation the way automation_delete.yaml does;
+  # it executes immediately, the same way an ordinary TURN_ON/TURN_OFF
+  # command already does.
+  #
+  # {name} is mandatory here, same "never guess a target-less bulk
+  # operation" reasoning automation_delete.yaml's own docstring already
+  # gives - a target-less "deaktiviere die automation" must never be read
+  # as "disable all of them". Identifies the automation the same
+  # entity-filtered way AutomationDeleteParser/AutomationQueryParser
+  # already do - not a third, separately-invented targeting mechanism
+  # (Regel 6).
+  HassAutomationDisable:
+    data:
+      - sentences:
+          - "deaktiviere die automation für {name}"
+          - "deaktiviere die automation die {name} schaltet"
+          - "deaktiviere die automation die {name} steuert"
+  HassAutomationEnable:
+    data:
+      - sentences:
+          - "aktiviere die automation für {name}"
+          - "aktiviere die automation die {name} schaltet"
+          - "aktiviere die automation die {name} steuert"

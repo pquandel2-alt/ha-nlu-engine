@@ -3,12 +3,10 @@ intents:
   # HomeIntent V5 Teil 8/10, V5.28 "Automation Deletion" - the 17th
   # separately-compiled hassil grammar (see parsers.py's
   # AutomationDeleteParser docstring). DELETE only, not DISABLE/ENABLE: the
-  # plan text explicitly names these as different operations, and enabling/
-  # disabling is a pure runtime ``automation.turn_on``/``automation.
-  # turn_off`` service call with no automations.yaml write at all (verified
-  # against real upstream ``homeassistant/components/automation/__init__.py``)
-  # - a fundamentally different mechanism than this grammar's YAML-mutating
-  # delete path, deliberately deferred to a later wave.
+  # plan text explicitly names these as different operations - see
+  # intents/de/automation_toggle/automation_toggle.yaml (Wave 11, the 18th
+  # grammar) for that operation's own YAML-mutating ``initial_state``
+  # mechanism, distinct from this file's delete path.
   #
   # {name} is mandatory here (unlike automation_query.yaml's bare "welche
   # automationen gibt es") - a target-less "lösche die automation" would

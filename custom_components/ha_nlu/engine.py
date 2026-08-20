@@ -54,6 +54,8 @@ from .parsers import (
     AutomationDeleteMatch,
     AutomationDeleteParser,
     AutomationQueryParser,
+    AutomationToggleMatch,
+    AutomationToggleParser,
     ClimateExtendedParser,
     CommandFollowupParser,
     ComparisonQueryParser,
@@ -101,6 +103,7 @@ AUTOMATION_CONDITION_DIR = INTENTS_DIR / "automation_condition"
 AUTOMATION_ACTION_DIR = INTENTS_DIR / "automation_action"
 AUTOMATION_QUERY_DIR = INTENTS_DIR / "automation_query"
 AUTOMATION_DELETE_DIR = INTENTS_DIR / "automation_delete"
+AUTOMATION_TOGGLE_DIR = INTENTS_DIR / "automation_toggle"
 
 # Sentences containing a temporal-modifier keyword ("Minute(n)"/"Stunde(n)"/
 # "Uhr"/"morgen früh"/"heute Abend"/...) are routed to TemporalParser's
@@ -305,6 +308,19 @@ _AUTOMATION_QUERY_RE = re.compile(
 # git history) - no other grammar uses "lösch"/"entfern" for anything else.
 _AUTOMATION_DELETE_RE = re.compile(r"\blösch\w*\b|\bentfern\w*\b", re.IGNORECASE)
 
+# "deaktivier(e)"/"aktivier(e)" + "automation" route to AutomationToggleParser's
+# separately-compiled grammar (HomeIntent plan V5.28 rest, Wave 11
+# "Automation Disable/Enable") - same cheap-pre-check role as
+# ``_AUTOMATION_DELETE_RE`` above. Two separate regexes (not one with an
+# optional "de" prefix) because each gates a different one of
+# ``match_automation_disable()``/``match_automation_enable()`` - the German
+# word boundary (``\b``) already keeps "deaktiviere" from matching
+# ``_AUTOMATION_ENABLE_RE`` (see AutomationToggleParser's own docstring).
+# Grepped empirically against every existing intent YAML - no other grammar
+# uses "aktivier"/"deaktivier" for anything else.
+_AUTOMATION_DISABLE_RE = re.compile(r"\bdeaktivier\w*\b", re.IGNORECASE)
+_AUTOMATION_ENABLE_RE = re.compile(r"\baktivier\w*\b", re.IGNORECASE)
+
 # Per-domain question word for the clarification round-trip (v2 plan Phase
 # 25). Same kind of small, explicit German-grammar lookup as
 # service_call.py's ``_DOMAIN_PLURAL_DE`` - only covers the domains
@@ -439,6 +455,34 @@ class AutomationDeletionMatchResult:
     response_text: str
 
 
+@dataclass(frozen=True)
+class AutomationToggleMatchResult:
+    """Result of ``NluEngine.match_automation_disable()``/
+    ``match_automation_enable()`` (HomeIntent V5 Teil 8/10, Wave 11
+    "Automation Disable/Enable") - deliberately shaped unlike
+    ``AutomationDeletionMatchResult``: no confirmation gate. Disabling (or
+    re-enabling) an automation is trivially reversible by saying the
+    opposite sentence, unlike a deletion or a creation - so a resolved
+    single match here executes immediately (``conversation.py`` calls
+    ``AutomationExecutor.async_disable_automation()``/
+    ``async_enable_automation()`` on this same turn), the same "match then
+    act, no ja/nein round-trip" shape an ordinary TURN_ON/TURN_OFF
+    ``MatchResult`` already has - not a second confirmation vocabulary for
+    an action that doesn't need one (Regel 6).
+
+    ``automation`` is ``None`` for both refusal shapes (0 matches, 2+
+    matches), same "one field collapses valid/invalid" precedent
+    ``AutomationDeletionMatchResult.automation`` already sets - ``enable``
+    still tells the caller which direction was requested even on a refusal,
+    so ``conversation.py`` never needs to re-parse the sentence to log/
+    react to *which* refusal this was.
+    """
+
+    automation: AutomationSummary | None
+    enable: bool
+    response_text: str
+
+
 class NluEngine:
     """Loads all intent YAML files once at construction; ``match()`` is
     stateless per call (entities are passed in fresh each time since HA
@@ -465,6 +509,7 @@ class NluEngine:
         automation_action_dir: Path = AUTOMATION_ACTION_DIR,
         automation_query_dir: Path = AUTOMATION_QUERY_DIR,
         automation_delete_dir: Path = AUTOMATION_DELETE_DIR,
+        automation_toggle_dir: Path = AUTOMATION_TOGGLE_DIR,
     ) -> None:
         yaml_files = sorted(intents_dir.glob("*.yaml"))
         if not yaml_files:
@@ -561,6 +606,11 @@ class NluEngine:
             raise FileNotFoundError(f"No intent YAML files found in {automation_delete_dir}")
         automation_delete_intents: Intents = Intents.from_files(automation_delete_yaml_files)
 
+        automation_toggle_yaml_files = sorted(automation_toggle_dir.glob("*.yaml"))
+        if not automation_toggle_yaml_files:
+            raise FileNotFoundError(f"No intent YAML files found in {automation_toggle_dir}")
+        automation_toggle_intents: Intents = Intents.from_files(automation_toggle_yaml_files)
+
         self._single_parser = SingleTargetParser(intents)
         self._quantifier_parser = QuantifierParser(quantifier_intents)
         self._percentage_parser = PercentageParser(percentage_intents)
@@ -586,6 +636,7 @@ class NluEngine:
         )
         self._automation_query_parser = AutomationQueryParser(automation_query_intents)
         self._automation_delete_parser = AutomationDeleteParser(automation_delete_intents)
+        self._automation_toggle_parser = AutomationToggleParser(automation_toggle_intents)
 
     def _select_parser(self, text: str):
         if _TEMPORAL_RE.search(text):
@@ -920,6 +971,78 @@ class NluEngine:
         return AutomationDeletionMatchResult(
             automation=automation,
             response_text=f'Soll die Automation "{_automation_label(automation)}" gelöscht werden?',
+        )
+
+    def match_automation_disable(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        automations: tuple[AutomationSummary, ...],
+    ) -> AutomationToggleMatchResult | None:
+        """Match "Deaktiviere die Automation für X" (HomeIntent plan V5.28
+        rest, Wave 11 "Automation Disable/Enable") into an
+        ``AutomationToggleMatchResult`` with ``enable=False`` - unlike
+        ``match_automation_delete()``, a resolved single match here is acted
+        on immediately by ``conversation.py`` on this same turn (see that
+        result type's own docstring for why no confirmation gate is needed).
+
+        Gated by ``_AUTOMATION_DISABLE_RE`` first, same role
+        ``_AUTOMATION_DELETE_RE`` plays for ``match_automation_delete()``.
+        """
+        return self._match_automation_toggle(text, entities, automations, gate=_AUTOMATION_DISABLE_RE)
+
+    def match_automation_enable(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        automations: tuple[AutomationSummary, ...],
+    ) -> AutomationToggleMatchResult | None:
+        """The ``match_automation_disable()`` counterpart - ``enable=True``,
+        gated by ``_AUTOMATION_ENABLE_RE`` instead."""
+        return self._match_automation_toggle(text, entities, automations, gate=_AUTOMATION_ENABLE_RE)
+
+    def _match_automation_toggle(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        automations: tuple[AutomationSummary, ...],
+        gate: re.Pattern[str],
+    ) -> AutomationToggleMatchResult | None:
+        if not gate.search(text):
+            return None
+
+        normalized = normalize(text)
+        parse_context = ParseContext(entities=entities, index=build_entity_index(entities))
+        match: AutomationToggleMatch | None = self._automation_toggle_parser.parse(
+            normalized, parse_context, automations
+        )
+        if match is None:
+            return None
+
+        verb = "aktivieren" if match.enable else "deaktivieren"
+        if not match.matched:
+            return AutomationToggleMatchResult(
+                automation=None,
+                enable=match.enable,
+                response_text=f"Ich habe keine Automation gefunden, die {match.entity.friendly_name} steuert.",
+            )
+        if len(match.matched) > 1:
+            return AutomationToggleMatchResult(
+                automation=None,
+                enable=match.enable,
+                response_text=(
+                    f"Es gibt mehrere Automationen, die {match.entity.friendly_name} steuern. "
+                    f"Das kann ich nicht eindeutig {verb}."
+                ),
+            )
+
+        automation = match.matched[0]
+        return AutomationToggleMatchResult(
+            automation=automation,
+            enable=match.enable,
+            response_text=(
+                f"Automation wurde {'aktiviert' if match.enable else 'deaktiviert'}."
+            ),
         )
 
     def match_automation(

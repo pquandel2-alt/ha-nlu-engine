@@ -1987,3 +1987,66 @@ class AutomationDeleteParser:
             a for a in automations if resolved.entity.entity_id in a.referenced_entity_ids
         )
         return AutomationDeleteMatch(entity=resolved.entity, matched=matched)
+
+
+@dataclass(frozen=True)
+class AutomationToggleMatch:
+    """Result of ``AutomationToggleParser.parse()`` - mirrors
+    ``AutomationDeleteMatch`` exactly (entity resolved, every automation
+    referencing it, cardinality decided by the caller), plus one extra
+    field: ``enable`` tells ``engine.py``'s ``match_automation_disable()``/
+    ``match_automation_enable()`` which of the two intents matched, since
+    both share this one parser/match type rather than two near-identical
+    copies (Regel 6)."""
+
+    entity: EntitySnapshot
+    matched: tuple[AutomationSummary, ...]
+    enable: bool
+
+
+class AutomationToggleParser:
+    """Wraps the {name} grammar ("deaktiviere/aktiviere die Automation für
+    X") - HomeIntent V5 Teil 8/10 (Wave 11, "Automation Disable/Enable"),
+    the 18th separately-compiled hassil grammar.
+
+    One parser for both ``HassAutomationDisable`` and ``HassAutomationEnable``
+    (compiled from the same YAML file, see intents/de/automation_toggle/
+    automation_toggle.yaml) - same "entity-filtered" resolution
+    ``AutomationDeleteParser`` already establishes, reused verbatim rather
+    than a third targeting mechanism (Regel 6). {name} is mandatory, same
+    "never guess a target-less bulk operation" reasoning.
+    """
+
+    def __init__(self, intents: Intents) -> None:
+        self._intents = intents
+
+    def parse(
+        self,
+        text: str,
+        context: ParseContext,
+        automations: tuple[AutomationSummary, ...],
+    ) -> AutomationToggleMatch | None:
+        slot_lists = {"name": WildcardSlotList(name="name")}
+        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+        if result is None or result.intent is None:
+            return None
+        if result.intent.name == "HassAutomationDisable":
+            enable = False
+        elif result.intent.name == "HassAutomationEnable":
+            enable = True
+        else:
+            return None
+
+        name_slot = result.entities.get("name")
+        if name_slot is None:
+            return None  # grammar requires {name} - structurally unreachable, defense only
+
+        name = _strip_locative_prepositions(str(name_slot.value))
+        resolved = resolve_entity_scored(name, context.entities, index=context.index)
+        if resolved.status is not ResolutionStatus.RESOLVED or resolved.entity is None:
+            return None  # entity itself not found or ambiguous - never guess (Regel 4)
+
+        matched = tuple(
+            a for a in automations if resolved.entity.entity_id in a.referenced_entity_ids
+        )
+        return AutomationToggleMatch(entity=resolved.entity, matched=matched, enable=enable)

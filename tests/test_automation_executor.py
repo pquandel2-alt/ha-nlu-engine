@@ -421,3 +421,134 @@ def test_a_delete_reload_failure_rolls_back_the_automations_yaml_write():
     # must never leave the metadata entry dangling out of sync with a file
     # that (post-rollback) still has the automation.
     delete_mock.assert_not_awaited()
+
+
+# --- Wave 11: async_disable_automation()/async_enable_automation() -----------
+
+
+def test_disable_automation_sets_initial_state_false_and_keeps_the_rest():
+    hass = _make_hass()
+    with (
+        patch.object(
+            automation_executor.yaml_util,
+            "load_yaml",
+            return_value=[EXISTING_AUTOMATION, OTHER_AUTOMATION],
+        ),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml") as dump_mock,
+        patch.object(automation_executor, "write_utf8_file_atomic") as write_mock,
+    ):
+        executor = AutomationExecutor(hass)
+        asyncio.run(executor.async_disable_automation("abc123"))
+
+    written_automations = dump_mock.call_args.args[0]
+    assert written_automations == [
+        {**EXISTING_AUTOMATION, "initial_state": False},
+        OTHER_AUTOMATION,
+    ]
+    write_mock.assert_called_once_with("/config/automations.yaml", "dumped-yaml")
+
+
+def test_enable_automation_sets_initial_state_true_explicitly():
+    hass = _make_hass()
+    disabled = {**EXISTING_AUTOMATION, "initial_state": False}
+    with (
+        patch.object(automation_executor.yaml_util, "load_yaml", return_value=[disabled]),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml") as dump_mock,
+        patch.object(automation_executor, "write_utf8_file_atomic"),
+    ):
+        executor = AutomationExecutor(hass)
+        asyncio.run(executor.async_enable_automation("abc123"))
+
+    written_automations = dump_mock.call_args.args[0]
+    assert written_automations == [{**EXISTING_AUTOMATION, "initial_state": True}]
+
+
+def test_disable_automation_calls_automation_reload_with_no_arguments():
+    hass = _make_hass()
+    with (
+        patch.object(automation_executor.yaml_util, "load_yaml", return_value=[EXISTING_AUTOMATION]),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml"),
+        patch.object(automation_executor, "write_utf8_file_atomic"),
+    ):
+        executor = AutomationExecutor(hass)
+        asyncio.run(executor.async_disable_automation("abc123"))
+
+    hass.services.async_call.assert_awaited_once_with("automation", "reload", {}, blocking=True)
+
+
+def test_disable_automation_raises_value_error_when_the_id_is_not_found():
+    hass = _make_hass()
+    with (
+        patch.object(automation_executor.yaml_util, "load_yaml", return_value=[EXISTING_AUTOMATION]),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml") as dump_mock,
+        patch.object(automation_executor, "write_utf8_file_atomic"),
+    ):
+        executor = AutomationExecutor(hass)
+        with pytest.raises(ValueError, match="no-such-id"):
+            asyncio.run(executor.async_disable_automation("no-such-id"))
+
+    # Nothing was ever written - a not-found lookup must not touch the file.
+    dump_mock.assert_not_called()
+    hass.services.async_call.assert_not_awaited()
+
+
+def test_a_disable_reload_failure_rolls_back_the_automations_yaml_write():
+    hass = _make_hass()
+    hass.services.async_call = AsyncMock(side_effect=RuntimeError("reload failed"))
+    with (
+        patch.object(
+            automation_executor.yaml_util,
+            "load_yaml",
+            return_value=[EXISTING_AUTOMATION, OTHER_AUTOMATION],
+        ),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml") as dump_mock,
+        patch.object(automation_executor, "write_utf8_file_atomic"),
+    ):
+        executor = AutomationExecutor(hass)
+        with pytest.raises(RuntimeError, match="reload failed"):
+            asyncio.run(executor.async_disable_automation("abc123"))
+
+    # First dump set initial_state False, second dump rolled back to the
+    # original two-automation list - the file must end up exactly as if the
+    # call had never happened.
+    assert [call.args[0] for call in dump_mock.call_args_list] == [
+        [{**EXISTING_AUTOMATION, "initial_state": False}, OTHER_AUTOMATION],
+        [EXISTING_AUTOMATION, OTHER_AUTOMATION],
+    ]
+
+
+def test_an_enable_reload_failure_rolls_back_the_automations_yaml_write():
+    hass = _make_hass()
+    hass.services.async_call = AsyncMock(side_effect=RuntimeError("reload failed"))
+    disabled = {**EXISTING_AUTOMATION, "initial_state": False}
+    with (
+        patch.object(automation_executor.yaml_util, "load_yaml", return_value=[disabled]),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml") as dump_mock,
+        patch.object(automation_executor, "write_utf8_file_atomic"),
+    ):
+        executor = AutomationExecutor(hass)
+        with pytest.raises(RuntimeError, match="reload failed"):
+            asyncio.run(executor.async_enable_automation("abc123"))
+
+    assert [call.args[0] for call in dump_mock.call_args_list] == [
+        [{**EXISTING_AUTOMATION, "initial_state": True}],
+        [disabled],
+    ]
+
+
+def test_async_list_automations_reports_the_enabled_field_from_initial_state():
+    hass = _make_hass()
+    disabled = {**OTHER_AUTOMATION, "initial_state": False}
+    with patch.object(
+        automation_executor.yaml_util,
+        "load_yaml",
+        return_value=[EXISTING_AUTOMATION, disabled],
+    ):
+        executor = AutomationExecutor(hass)
+        summaries = asyncio.run(executor.async_list_automations())
+
+    by_id = {s.automation_id: s for s in summaries}
+    # No ``initial_state`` key at all defaults to enabled, same default HA's
+    # own automation config schema uses.
+    assert by_id["abc123"].enabled is True
+    assert by_id["def456"].enabled is False

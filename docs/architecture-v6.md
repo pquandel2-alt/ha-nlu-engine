@@ -855,6 +855,88 @@ verändert.
 
 ⸻
 
+## 6j. V5 Teil 8/10 (Wave 11) – V5.28 Rest "Automation Disable/Enable" (Ergebnis, 2026-08-20)
+
+**Ziel:** der in Wave 10 (6i) bewusst zurückgestellte Rest von V5.28 –
+eine per Entity-Referenz eindeutig identifizierte Automation per Sprache
+dauerhaft deaktivieren/aktivieren.
+
+**Regel-4-Korrektur gegenüber Wave 10:** Wave 10s Doku (6i) behauptete,
+DISABLE/ENABLE brauche zwingend `automation.turn_on`/`turn_off`-
+Service-Calls ohne jede `automations.yaml`-Schreiboperation – korrekt für
+diese beiden Service-Calls selbst, aber nicht vollständig: gegen echten
+Upstream-Code verifiziert (`homeassistant/components/automation/
+config.py` + `homeassistant/components/automation/__init__.py`) existiert
+mit `initial_state` (`CONF_INITIAL_STATE`) ein YAML-Config-Key, der beim
+Setup/Reload gelesen wird und Vorrang vor jedem zuvor persistierten
+Runtime-Zustand hat – explizit bestätigt: ein `automation.turn_off` gefolgt
+von `automation.reload` reaktiviert die Automation wieder, sofern
+`initial_state` nicht explizit `false` gesetzt ist. Das macht `initial_state`
+den einzigen dauerhaften Deaktivierungsmechanismus ohne Service-Calls –
+und erlaubt, denselben Read-Modify-Write-Reload-Rollback-Pfad wie
+`async_delete_automation()` wiederzuverwenden, ganz ohne Entity-Registry-
+Mapping (das der Test-Stub ohnehin nicht unterstützt hätte).
+
+**Bausteine:**
+
+- `automation_summary.py::AutomationSummary.enabled` (NEU, Feld, Default
+  `True`): spiegelt den `initial_state`-Key 1:1.
+- `automation_executor.py::AutomationExecutor.async_disable_automation()`/
+  `async_enable_automation()` (NEU): beide delegieren an eine private
+  `_async_set_initial_state()`, die `initial_state` im passenden Eintrag
+  von `automations.yaml` setzt (Enable setzt ihn explizit auf `True`, statt
+  den Key nur zu entfernen – genauso ausdrücklich reversibel wie das
+  Deaktivieren) und danach `automation.reload` ruft. Gleiches
+  Transaktions-/Rollback-Muster wie `async_delete_automation()`: Lock,
+  Rollback bei Reload-Fehler, `ValueError` bei unbekannter `id`.
+  `async_list_automations()` liest `initial_state` (Default `True`) jetzt
+  mit in jede `AutomationSummary`.
+- `parsers.py::AutomationToggleParser` + zwei neue Intents
+  `HassAutomationDisable`/`HassAutomationEnable` (18. separat kompilierte
+  Grammatik, `intents/de/automation_toggle/automation_toggle.yaml`):
+  `{name}` ist pflicht (dieselbe "kein zielloses Massen-Kommando"-Regel wie
+  beim Löschen). Ein Parser für beide Intents, unterschieden durch ein
+  zusätzliches `enable: bool`-Feld auf `AutomationToggleMatch`. Identifiziert
+  die Automation über dieselbe entity-gefilterte Auflösung wie
+  `AutomationDeleteParser`/`AutomationQueryParser` – kein dritter,
+  eigenständig erfundener Targeting-Mechanismus.
+- `engine.py::match_automation_disable()`/`match_automation_enable()` +
+  gemeinsame private `_match_automation_toggle()` + `AutomationToggleMatchResult`
+  (NEU): zwei billige Regex-Gates, `_AUTOMATION_DISABLE_RE`
+  (`\bdeaktivier\w*\b`) und `_AUTOMATION_ENABLE_RE` (`\baktivier\w*\b`,
+  wortgrenzensicher – matcht nicht versehentlich in "deaktiviere"). 0/2+
+  Treffer → Ablehnung wie beim Löschen, genau 1 Treffer → sofortige
+  Ausführung, **keine** Ja/Nein-Bestätigung.
+- **Bewusste Design-Entscheidung – kein Bestätigungs-Rundlauf:** anders als
+  Erstellung/Löschung (die praktisch irreversibel bzw. schwer rückgängig
+  zu machen sind) ist ein Toggle trivial reversibel – einfach den
+  gegenteiligen Satz sagen. Deshalb wird hier kein drittes Pending-State-
+  Konstrukt neben `PendingAutomationConfirmation`/`PendingAutomationDeletion`
+  eingeführt (Regel 6); die Ausführung erfolgt direkt im selben Turn wie ein
+  gewöhnlicher TURN_ON/TURN_OFF-Befehl.
+- `conversation.py`: zwei neue Match-Cascade-Schritte für
+  `_AUTOMATION_DISABLE_RE`/`_AUTOMATION_ENABLE_RE`, platziert nach dem
+  Lösch-Gate und vor dem Query-Gate (gleicher Grund wie bei Delete: die
+  Sätze enthalten ebenfalls das Wort "Automation"). Neuer
+  `isinstance(result, AutomationToggleMatchResult)`-Zweig: löscht
+  vorsorglich den Context, führt bei genau einem Treffer sofort
+  `async_enable_automation()`/`async_disable_automation()` aus, fängt
+  Ausführungsfehler mit `FAILED_TO_HANDLE` ab.
+
+**Tests:** 26 neue Tests über 3 Dateien (`test_automation_executor.py`: +7
+für Disable/Enable inkl. Not-Found, Reload-Rollback in beide Richtungen,
+`enabled`-Feld in `async_list_automations()`; `test_engine_automation_toggle.py`,
+NEU: 13 direkte Tests für beide Richtungen inkl. Regex-Gates,
+Wortgrenzen-Test "deaktiviere" löst nicht auch das Enable-Gate aus, 0/1/2+-
+Kardinalität, "niemals raten"-Ablehnung; `test_conversation_automation_toggle.py`,
+NEU: 6 E2E-Tests über die echte `_async_handle_message()`-Orchestrierung –
+Disable/Enable ohne Bestätigungs-Rundlauf, Beweis dass ein "Ja" danach nur
+ein gewöhnlicher unmatchter Folgesatz ist, 0/2+-Treffer-Ablehnung ohne
+Datei-Mutation, sowie ein Kosten-Gate-Test). Vollständige Regression: 1549
+passed, 14 skipped (vorher 1523/14) – kein bestehender Test verändert.
+
+⸻
+
 ## 7. Sicherheitsregeln
 
 - **Niemals bei echter Ambiguität raten.** Je unsicherer die

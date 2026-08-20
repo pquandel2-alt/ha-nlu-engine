@@ -30,9 +30,12 @@ from .const import DOMAIN, NOT_UNDERSTOOD_TEXT
 from .engine import (
     AutomationDeletionMatchResult,
     AutomationMatchResult,
+    AutomationToggleMatchResult,
     CommandPlan,
     NluEngine,
     _AUTOMATION_DELETE_RE,
+    _AUTOMATION_DISABLE_RE,
+    _AUTOMATION_ENABLE_RE,
     _AUTOMATION_QUERY_RE,
 )
 from .entities import EntitySnapshot
@@ -75,6 +78,12 @@ AUTOMATION_DELETION_CONFIRMATION_UNCLEAR_TEXT = (
     "Das habe ich nicht verstanden. Soll die Automation gelöscht werden? "
     "Bitte antworte mit Ja oder Nein."
 )
+
+# HomeIntent V5 Teil 8/10 (Wave 11, "Automation Disable/Enable") - no
+# confirmation-round-trip vocabulary here (see ``AutomationToggleMatchResult``'s
+# own docstring for why): a single-match toggle executes immediately, so
+# only an error text is needed here, mirroring the ordinary command path's
+# own ``FAILED_TO_HANDLE`` wording.
 
 # One spoken sentence per GenerationError member (nlu/ha_automation_generator.py) -
 # every one of these is a "niemals raten" refusal Regel 4 already established
@@ -233,6 +242,20 @@ class NluConversationEntity(
                     self._automation_executor = AutomationExecutor(self.hass)
                 automations = await self._automation_executor.async_list_automations()
                 result = self._engine.match_automation_delete(user_input.text, entities, automations)
+            if result is None and _AUTOMATION_DISABLE_RE.search(user_input.text):
+                # Wave 11 "Automation Disable/Enable": same "checked before
+                # the query gate" reasoning as the delete gate above -
+                # "Deaktiviere die Automation für X" also contains the word
+                # "Automation".
+                if self._automation_executor is None:
+                    self._automation_executor = AutomationExecutor(self.hass)
+                automations = await self._automation_executor.async_list_automations()
+                result = self._engine.match_automation_disable(user_input.text, entities, automations)
+            if result is None and _AUTOMATION_ENABLE_RE.search(user_input.text):
+                if self._automation_executor is None:
+                    self._automation_executor = AutomationExecutor(self.hass)
+                automations = await self._automation_executor.async_list_automations()
+                result = self._engine.match_automation_enable(user_input.text, entities, automations)
             if result is None and _AUTOMATION_QUERY_RE.search(user_input.text):
                 # V5.29 "Automation Query": the same cheap pre-check
                 # ``match_automation_query()`` itself re-checks is applied
@@ -368,6 +391,43 @@ class NluConversationEntity(
                 )
             else:
                 self._context_store.clear(user_input.conversation_id)
+            response.async_set_speech(result.response_text)
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        if isinstance(result, AutomationToggleMatchResult):
+            # Wave 11 "Automation Disable/Enable": unlike the deletion
+            # branch above, a resolved single match is acted on immediately
+            # on this same turn - no pending state is ever stored (see
+            # ``AutomationToggleMatchResult``'s own docstring for why this
+            # action needs no ja/nein gate). A refusal (no match, or 2+
+            # matches) just speaks ``result.response_text`` with no action,
+            # same "niemals raten" stance the delete/query paths already
+            # take for ambiguous automation names.
+            self._context_store.clear(user_input.conversation_id)
+            if result.automation is not None:
+                if self._automation_executor is None:
+                    self._automation_executor = AutomationExecutor(self.hass)
+                try:
+                    if result.enable:
+                        await self._automation_executor.async_enable_automation(
+                            result.automation.automation_id
+                        )
+                    else:
+                        await self._automation_executor.async_disable_automation(
+                            result.automation.automation_id
+                        )
+                except Exception as err:  # noqa: BLE001 - a YAML write + service call can fail in ways beyond HomeAssistantError; must not propagate as "Unexpected error during intent recognition"
+                    verb = "Aktivieren" if result.enable else "Deaktivieren"
+                    _LOGGER.error("Automation %s failed: %s", verb.lower(), err)
+                    response.async_set_error(
+                        intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                        f"Fehler beim {verb} der Automation: {err}",
+                    )
+                    return conversation.ConversationResult(
+                        response=response, conversation_id=user_input.conversation_id
+                    )
             response.async_set_speech(result.response_text)
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id

@@ -44,3 +44,10 @@ class AutomationSummary:
     source_text: str | None = None
     created_by: str | None = None
     referenced_entity_ids: frozenset[str] = frozenset()
+    # HomeIntent V5 Teil 8/10 (Wave 11, "Automation Disable/Enable"): mirrors
+    # the automation's own ``initial_state`` YAML key (defaults to enabled
+    # when the key is absent, same default Home Assistant's own automation
+    # config schema uses - see ``AutomationExecutor``'s ``async_disable_automation()``
+    # docstring for why this key, not ``automation.turn_on``/``turn_off``,
+    # is this integration's actual enable/disable mechanism).
+    enabled: bool = True
