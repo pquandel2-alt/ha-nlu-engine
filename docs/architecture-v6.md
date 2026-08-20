@@ -14,11 +14,30 @@ abgeschlossen). v5 (Automation Engine, V5.1-V5.53) wurde inzwischen
 vollständig gebaut (Waves 1-5, Release 4.10.0) und über eine eigene
 Integration Wave (2026-08-18/19) in `engine.py::match_automation()`/
 `conversation.py` eingehängt: Sprache → `AutomationModel` → Validation →
-Response/Debug, bewusst ohne HA-Service-Aufruf und ohne persistierte
-HA-Automation (das bleibt eine spätere, eigene Phase). Die V6.28/V6.29-
-Zeilen in Abschnitt 6 unten spiegeln noch den Stand *vor* dieser
-Integration Wave und sind insofern historisch zu lesen, nicht als
-aktueller Status.
+Response/Debug. Die V6.28/V6.29-Zeilen in Abschnitt 6 unten spiegeln noch
+den Stand *vor* dieser Integration Wave und sind insofern historisch zu
+lesen, nicht als aktueller Status.
+
+**V5 Teil 7/10 ("Dry Run", 2026-08-20)** hat den bis dahin bewusst
+ausgesparten letzten Schritt nachgereicht: ein valides `AutomationModel`
+löst jetzt keinen HA-Service-Aufruf *auf demselben Turn* mehr aus, sondern
+wird als gesprochene Vorschau
+(`nlu/automation_preview.py::render_automation_preview()`, "Automation
+erkannt: Wenn …, dann … Soll diese Automation erstellt werden?") ausgegeben
+und als `PendingAutomationConfirmation` (`nlu/context.py`) auf dem
+`ConversationContext` gehalten – mit derselben Priorität wie
+`pending_clarification`. Die Antwort des nächsten Turns durchläuft
+`nlu/automation_confirmation.py::classify_confirmation_reply()` (geschlossenes
+Ja/Nein-Vokabular, `UNCLEAR` fragt erneut, rät nie). Erst ein klares "Ja"
+übersetzt das Modell über `nlu/ha_automation_generator.py::
+generate_ha_automation_config()` (reine Übersetzung, kein Hass-Import) in
+ein HA-natives Automation-Dict und übergibt es an `automation_executor.py::
+AutomationExecutor` – die einzige Stelle im gesamten Automation-Track, die
+tatsächlich `automations.yaml` beschreibt (Read-Modify-Write hinter einem
+`asyncio.Lock()`, danach `automation.reload`). `AutomationExecutor` liegt
+bewusst *außerhalb* von `nlu/` (Top-Level von `custom_components/ha_nlu/`,
+wie `hass_entities.py`) – `nlu/` bleibt vollständig Hass-frei, echte HA-I/O
+gehört eine Ebene höher.
 
 ⸻
 
@@ -517,6 +536,79 @@ keinen Executor).
 Numeric/Time/Presence/Weekday-Condition, Ambiguität, unauflösbares Ziel,
 Regressions-Fall ohne Condition). Vollständige Regression: 1376 passed, 14
 skipped (vorher 1360 passed) – kein bestehender Test verändert.
+
+⸻
+
+## 6f. V5 Teil 7/10 – "Dry Run" Automation-Erstellung (Ergebnis, 2026-08-20)
+
+**Ziel:** ein valides `AutomationModel` nicht länger nur beschreiben,
+sondern – nach expliziter Bestätigung durch den Nutzer – tatsächlich als
+HA-Automation persistieren. Vier neue/erweiterte Bausteine, strikt entlang
+bestehender Grenzen (Regel 6: kein zweites Resolution-/Rendering-System),
+Regel 4 ("niemals raten") auf jeder Stufe neu angewendet.
+
+**Bausteine:**
+
+- `nlu/automation_preview.py::render_automation_preview()` (V5.24): erste
+  gesprochene Zusammenfassung ("Automation erkannt: Wenn …, dann … Soll
+  diese Automation erstellt werden?") – getrennt von den bereits
+  bestehenden `render_automation_tree()`/`render_condition_tree()`/
+  `render_action_step()` Debug-Renderern. Erfindet nichts, was das Modell
+  nicht hergibt (z. B. bleibt `PRESENCE` absichtlich richtungsneutral, da
+  der Parser Ankunft/Verlassen nie unterscheidet).
+- `nlu/context.py::PendingAutomationConfirmation` (V5.23): auf
+  `ConversationContext` gehalten, mit höherer Priorität als
+  `pending_clarification` in `conversation.py::_async_handle_message()`.
+  Trägt nur das bereits validierte `AutomationModel` – Entities werden am
+  Bestätigungs-Turn frisch aufgelöst, nichts vom Preview-Turn wird
+  gecacht.
+- `nlu/automation_confirmation.py::classify_confirmation_reply()`:
+  geschlossenes Ja/Nein-Vokabular (`ConfirmationReply.YES/NO/UNCLEAR`) –
+  kein Substring-Matching, keine Heuristik. `UNCLEAR` fragt erneut und
+  behält die pending Confirmation; nur `NO` und jeder Generierungs-/
+  Persistenzfehler löschen sie.
+- `nlu/ha_automation_generator.py::generate_ha_automation_config()`
+  (V5.25): reiner Übersetzer `AutomationModel` → HA-natives Config-Dict
+  (moderne Plural-Schema-Keys `triggers`/`conditions`/`actions`, gegen den
+  echten HA-Upstream-Quellcode verifiziert, nicht geraten). Löst jedes
+  `TriggerTarget` frisch gegen die aktuelle Entity-Liste auf
+  (`constraint_resolver.py`, dieselbe Logik wie
+  `automation_action_parser.py`, dupliziert statt importiert – Grenze
+  `nlu/` bleibt Hass-frei). Verweigert explizit (`GenerationError`) statt
+  zu raten bei `TriggerType.DEVICE`/bare `WEEKDAY`, `ConditionType.DEVICE`/
+  `DATE` und `ActionType.WAIT` – für diese gibt es keine verlustfreie
+  native HA-Übersetzung.
+- `automation_executor.py::AutomationExecutor` (V5.26): der **einzige**
+  Ort im gesamten Automation-Track, der `automations.yaml` tatsächlich
+  beschreibt. Bewusst **außerhalb** von `nlu/` (Top-Level von
+  `custom_components/ha_nlu/`, wie `hass_entities.py`) – jedes `nlu/`-Modul
+  bleibt Hass-frei. Read-Modify-Write hinter einem instanzweiten
+  `asyncio.Lock()` (eine Instanz pro Config-Entry, lazy gebaut, da
+  `self.hass` beim `__init__` noch nicht gesetzt ist), Datei-I/O über
+  `hass.async_add_executor_job()`, danach `automation.reload` mit leeren
+  Service-Daten (bewusst die immer-korrekte, vollständig belegbare
+  Variante gewählt – ein `id`-scoped Reload-Argument ließ sich weder im
+  Repo noch im Brain verifizieren).
+
+**Turn-Ablauf:** Turn 1 (Automationssatz) → Preview + `PendingAutomation-
+Confirmation` gesetzt, **kein** `hass.services.async_call()`. Turn 2
+("Ja"/"Nein"/unklar) → `classify_confirmation_reply()` entscheidet; nur ein
+klares "Ja" durchläuft `generate_ha_automation_config()` →
+`AutomationExecutor.async_create_automation()` → `automation.reload`.
+
+**Tests:** 91 neue Tests über 5 Dateien (`test_automation_confirmation.py`,
+`test_automation_preview.py`, `test_ha_automation_generator.py` – jeder
+Trigger-/Condition-/Action-Typ inkl. jedes `GenerationError`-Falls,
+`test_automation_executor.py` – vollständig gemockte `hass`-I/O, keine
+echten Datei-/HA-Schreibzugriffe, inkl. Lock-Serialisierungstest mit
+erzwungenem Suspension Point, `test_conversation_automation_confirmation.py`
+– volles Ja/Nein/Unklar-Roundtrip über die echte
+`_async_handle_message()`-Orchestrierung inkl. echtem YAML-Roundtrip gegen
+`tmp_path`). Vollständige Regression: 1467 passed, 14 skipped (vorher 1376
+passed) – kein bestehender Test verändert außer der einen erwarteten
+Anpassung in `test_case_6_automation_sentence_never_calls_a_service`
+(prüft jetzt die gesprochene Preview statt des alten Debug-Baums, da genau
+das der beabsichtigte Verhaltenswechsel dieser Wave ist).
 
 ⸻
 

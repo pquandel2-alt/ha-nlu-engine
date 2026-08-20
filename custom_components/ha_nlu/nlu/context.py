@@ -24,6 +24,7 @@ from typing import Callable
 from ..areas import AreaSnapshot
 from ..entities import EntitySnapshot
 from ..floors import FloorSnapshot
+from .automation_model import AutomationModel
 from .command import SemanticCommand
 from .parser import ClarificationRequest
 from .primitives import SemanticProperty
@@ -34,7 +35,33 @@ __all__ = [
     "ConversationContext",
     "ConversationContextStore",
     "DEFAULT_CONTEXT_TTL_SECONDS",
+    "PendingAutomationConfirmation",
 ]
+
+
+@dataclass(frozen=True)
+class PendingAutomationConfirmation:
+    """A pending "Soll diese Automation erstellt werden?" Dry-Run gate
+    (HomeIntent V5 Teil 7/10, V5.23) - the automation-creation counterpart
+    to ``ClarificationRequest`` above, stored on ``ConversationContext`` the
+    same way and resolved the same way (a dedicated reply-classification
+    step, see ``nlu/automation_confirmation.py``, run before any fresh
+    sentence is even attempted - same priority ``pending_clarification``
+    already has in ``conversation.py``).
+
+    Carries only the already-``validate_automation()``-clean
+    ``AutomationModel`` itself - not a copy of the entities it was resolved
+    against. The confirming reply turn already re-fetches a fresh entity
+    list the same way every other turn does (``conversation.py``'s
+    ``build_entity_snapshots()``), so the later HA Generator (V5.25) always
+    resolves any still-abstract domain/area/quantifier target (see
+    ``automation_action_parser.py``'s ``_build_quantified_target()``
+    docstring: "re-validation against live HA state at execution time is a
+    future HA-generator wave's job") against current state, not a
+    confirmation-time snapshot that could already be stale.
+    """
+
+    model: AutomationModel
 
 # No TTL value is specified anywhere in the plan (only the test case name
 # "context expiration", brain node 9ced4390, section 26). 30s covers a
@@ -84,6 +111,10 @@ class ConversationContext:
     last_value: float | None = None
     last_state: SemanticState | None = None
     pending_reference: str | None = None
+    # V5 Teil 7/10 (V5.23, "Dry Run") - a spoken automation awaiting its
+    # "ja"/"nein" confirmation before it may ever be persisted to Home
+    # Assistant (see PendingAutomationConfirmation's own docstring).
+    pending_automation_confirmation: PendingAutomationConfirmation | None = None
 
 
 class ConversationContextStore:

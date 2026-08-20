@@ -31,6 +31,7 @@ import sys
 import types
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable
 from unittest.mock import AsyncMock
 
@@ -48,6 +49,9 @@ def install() -> None:
     )
     config_entries = types.ModuleType("homeassistant.config_entries")
     core = types.ModuleType("homeassistant.core")
+    util = types.ModuleType("homeassistant.util")
+    util_yaml = types.ModuleType("homeassistant.util.yaml")
+    util_file = types.ModuleType("homeassistant.util.file")
     helpers = types.ModuleType("homeassistant.helpers")
     helpers_area_registry = types.ModuleType("homeassistant.helpers.area_registry")
     helpers_device_registry = types.ModuleType("homeassistant.helpers.device_registry")
@@ -123,6 +127,14 @@ def install() -> None:
         def __init__(self) -> None:
             self.states = _States()
             self.services = types.SimpleNamespace(async_call=AsyncMock())
+            # V5.26 (AutomationExecutor): real HA's ``hass.config.path()``
+            # joins onto the config dir; ``/tmp`` here since tests never
+            # care about the real HA config directory, only that a real
+            # temp file gets read/written round-trip.
+            self.config = types.SimpleNamespace(path=lambda *parts: str(Path("/tmp", *parts)))
+
+        async def async_add_executor_job(self, func: Callable[..., Any], *args: Any) -> Any:
+            return func(*args)
 
     class State:
         def __init__(self, entity_id: str, state: str, attributes: dict | None = None) -> None:
@@ -132,6 +144,29 @@ def install() -> None:
 
     core.HomeAssistant = HomeAssistant
     core.State = State
+
+    # --- homeassistant.util.yaml / homeassistant.util.file -----------------
+    # V5.26 (AutomationExecutor): real HA's ``load_yaml``/``dump`` wrap
+    # PyYAML with HA-specific tag support (``!secret`` etc.) this project's
+    # automations.yaml never uses - plain PyYAML round-trips the exact same
+    # plain dicts/lists this integration ever writes, so it's a faithful
+    # enough stand-in for tests without the real ``homeassistant`` package.
+    import yaml as _pyyaml
+
+    def _load_yaml(path: str) -> Any:
+        with open(path, encoding="utf-8") as handle:
+            return _pyyaml.safe_load(handle)
+
+    def _dump_yaml(data: Any) -> str:
+        return _pyyaml.safe_dump(data, allow_unicode=True, sort_keys=False)
+
+    def _write_utf8_file_atomic(path: str, content: str, private: bool = False) -> None:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(content)
+
+    util_yaml.load_yaml = _load_yaml
+    util_yaml.dump = _dump_yaml
+    util_file.write_utf8_file_atomic = _write_utf8_file_atomic
 
     # --- homeassistant.helpers.device_registry ----------------------------
 
@@ -255,6 +290,9 @@ def install() -> None:
     components_homeassistant.exposed_entities = components_homeassistant_exposed_entities
     homeassistant.config_entries = config_entries
     homeassistant.core = core
+    homeassistant.util = util
+    util.yaml = util_yaml
+    util.file = util_file
     homeassistant.helpers = helpers
     helpers.area_registry = helpers_area_registry
     helpers.device_registry = helpers_device_registry
@@ -271,6 +309,9 @@ def install() -> None:
         components_homeassistant_exposed_entities
     )
     sys.modules["homeassistant.config_entries"] = config_entries
+    sys.modules["homeassistant.util"] = util
+    sys.modules["homeassistant.util.yaml"] = util_yaml
+    sys.modules["homeassistant.util.file"] = util_file
     sys.modules["homeassistant.core"] = core
     sys.modules["homeassistant.helpers"] = helpers
     sys.modules["homeassistant.helpers.area_registry"] = helpers_area_registry

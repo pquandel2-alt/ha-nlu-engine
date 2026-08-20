@@ -25,10 +25,19 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, intent
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .automation_executor import AutomationExecutor
 from .const import DOMAIN, NOT_UNDERSTOOD_TEXT
 from .engine import AutomationMatchResult, CommandPlan, NluEngine
+from .entities import EntitySnapshot
 from .hass_entities import build_device_snapshots, build_entity_snapshots
-from .nlu.context import ConversationContext, ConversationContextStore
+from .nlu.automation_confirmation import ConfirmationReply, classify_confirmation_reply
+from .nlu.automation_preview import render_automation_preview
+from .nlu.context import (
+    ConversationContext,
+    ConversationContextStore,
+    PendingAutomationConfirmation,
+)
+from .nlu.ha_automation_generator import GenerationError, generate_ha_automation_config
 from .service_call import QUERY_INTENTS
 from .world_model import WorldModel, build_world_model as assemble_world_model
 
@@ -38,6 +47,43 @@ _LOGGER = logging.getLogger(__name__)
 # and speak, never call a service - so Assist shows them as a QUERY_ANSWER
 # rather than the default ACTION_DONE.
 QUERY_INTENT_NAMES = frozenset(QUERY_INTENTS)
+
+# V5 Teil 7/10 (V5.23/V5.26) - the confirmation dialog's own fixed spoken
+# replies, same "small closed vocabulary" precedent NOT_UNDERSTOOD_TEXT
+# already sets in const.py.
+AUTOMATION_CREATED_TEXT = "Automation wurde erstellt."
+AUTOMATION_CANCELLED_TEXT = "Abgebrochen. Die Automation wurde nicht erstellt."
+AUTOMATION_CONFIRMATION_UNCLEAR_TEXT = (
+    "Das habe ich nicht verstanden. Soll die Automation erstellt werden? "
+    "Bitte antworte mit Ja oder Nein."
+)
+
+# One spoken sentence per GenerationError member (nlu/ha_automation_generator.py) -
+# every one of these is a "niemals raten" refusal Regel 4 already established
+# one stage earlier (automation_validator.py); a validate_automation()-clean
+# model can still hit one of these at confirmation time (e.g. the target
+# entity disappeared between preview and "ja", or the model uses a
+# TriggerType/ConditionType/ActionType the validator itself never rejects
+# but the HA-native schema has no faithful translation for - see that
+# module's own docstring for the full "why" per member).
+_GENERATION_ERROR_SPOKEN_DE = {
+    GenerationError.ENTITY_NOT_FOUND: (
+        "Das passende Gerät wurde nicht mehr gefunden. Die Automation wurde nicht erstellt."
+    ),
+    GenerationError.UNSUPPORTED_STATE: (
+        "Dieser Zustand lässt sich für dieses Gerät nicht in eine Automation übersetzen. "
+        "Die Automation wurde nicht erstellt."
+    ),
+    GenerationError.UNSUPPORTED_TRIGGER_TYPE: (
+        "Dieser Auslöser wird von Home Assistant nicht unterstützt. Die Automation wurde nicht erstellt."
+    ),
+    GenerationError.UNSUPPORTED_CONDITION_TYPE: (
+        "Diese Bedingung wird von Home Assistant nicht unterstützt. Die Automation wurde nicht erstellt."
+    ),
+    GenerationError.UNSUPPORTED_ACTION_TYPE: (
+        "Diese Aktion wird von Home Assistant nicht unterstützt. Die Automation wurde nicht erstellt."
+    ),
+}
 
 
 async def async_setup_entry(
@@ -74,6 +120,15 @@ class NluConversationEntity(
         # Rebuilt every turn in _async_handle_message() (World Model Wave,
         # 2026-08-14); None only until the first turn.
         self._world_model: WorldModel | None = None
+        # Lazily constructed on first use in _async_handle_message() (V5.26)
+        # rather than here: self.hass isn't set yet at __init__ time (HA's
+        # entity platform assigns it before async_added_to_hass() runs, not
+        # before __init__()). Built once and kept for this entity's whole
+        # lifetime, not per-turn - its asyncio.Lock() must persist across
+        # turns to actually guard automations.yaml's read-modify-write cycle
+        # against two concurrent confirmations (see AutomationExecutor's own
+        # docstring).
+        self._automation_executor: AutomationExecutor | None = None
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -122,6 +177,11 @@ class NluConversationEntity(
         devices = build_device_snapshots(self.hass, self.entry)
         self._world_model = assemble_world_model(entities, devices)
         pending = self._context_store.get(user_input.conversation_id)
+
+        if pending is not None and pending.pending_automation_confirmation is not None:
+            return await self._async_handle_automation_confirmation_reply(
+                user_input, response, pending.pending_automation_confirmation, entities
+            )
 
         if pending is not None and pending.pending_clarification is not None:
             result = self._engine.resolve_clarification(
@@ -199,16 +259,37 @@ class NluConversationEntity(
             )
 
         if isinstance(result, AutomationMatchResult):
-            # Integration Wave scope boundary (Migration Step 4, Integration
-            # Plan Section 9): Sprache -> AutomationModel -> Validation ->
-            # Response/Debug only - never a HA service call, never persisted
-            # as a real HA automation (that's a separate, later,
-            # separately-approved phase). No context is stored either: a
-            # follow-up onto a just-described automation is out of scope
-            # this wave (Integration Plan Section 12), same as CommandPlan's
-            # "follow-ups start fresh" precedent above.
-            self._context_store.clear(user_input.conversation_id)
-            response.async_set_speech(result.response_text)
+            # V5 Teil 7/10 (V5.23, "Dry Run"): a structurally- and
+            # semantically-valid AutomationModel is never persisted on this
+            # turn - it's spoken back as a preview and held as a
+            # PendingAutomationConfirmation awaiting the user's "ja"/"nein"
+            # (handled at the top of this method, same priority
+            # pending_clarification already has - see PendingAutomationConfirmation's
+            # own docstring). Still never a HA service call/write on *this*
+            # turn - that only happens once the confirmation reply resolves
+            # to YES.
+            #
+            # A validation_error result can never be confirmed (Integration
+            # Wave Migration Step 4's original scope boundary still applies
+            # to this branch unchanged): spoken back as the same debug tree
+            # + error name as before, no context stored, no follow-up
+            # possible - "niemals raten" extends to not offering to persist
+            # something already known to be invalid.
+            if result.validation_error is None:
+                self._context_store.set(
+                    user_input.conversation_id,
+                    ConversationContext(
+                        last_command=None,
+                        last_entities=(),
+                        last_area=None,
+                        pending_clarification=None,
+                        pending_automation_confirmation=PendingAutomationConfirmation(model=result.model),
+                    ),
+                )
+                response.async_set_speech(render_automation_preview(result.model, entities))
+            else:
+                self._context_store.clear(user_input.conversation_id)
+                response.async_set_speech(result.response_text)
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
             )
@@ -268,6 +349,72 @@ class NluConversationEntity(
         if result.command is not None and result.command.intent in QUERY_INTENT_NAMES:
             response.response_type = intent.IntentResponseType.QUERY_ANSWER
         response.async_set_speech(result.response_text)
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    async def _async_handle_automation_confirmation_reply(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        confirmation: PendingAutomationConfirmation,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult:
+        """V5 Teil 7/10 (V5.23/V5.25/V5.26): resolves this turn's text
+        against the closed yes/no vocabulary (see
+        ``nlu/automation_confirmation.py``) instead of parsing it as a fresh
+        sentence - a reply like "Ja" isn't itself a command.
+
+        ``UNCLEAR`` keeps the same pending confirmation in place (re-asks,
+        never guesses) rather than clearing it - same "caller decides how to
+        re-ask" split ``resolve_clarification()``'s own ``None`` case
+        already uses. ``NO`` and any generation/persistence failure both
+        clear the pending state and persist nothing; only a clean ``YES`` ->
+        ``generate_ha_automation_config()`` -> ``AutomationExecutor`` path
+        ever reaches Home Assistant.
+        """
+        reply = classify_confirmation_reply(user_input.text)
+
+        if reply is ConfirmationReply.UNCLEAR:
+            response.async_set_speech(AUTOMATION_CONFIRMATION_UNCLEAR_TEXT)
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        self._context_store.clear(user_input.conversation_id)
+
+        if reply is ConfirmationReply.NO:
+            response.async_set_speech(AUTOMATION_CANCELLED_TEXT)
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        generation_result = generate_ha_automation_config(confirmation.model, entities)
+        if generation_result.error is not None:
+            response.async_set_error(
+                intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                _GENERATION_ERROR_SPOKEN_DE[generation_result.error],
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+        assert generation_result.config is not None
+
+        if self._automation_executor is None:
+            self._automation_executor = AutomationExecutor(self.hass)
+        try:
+            await self._automation_executor.async_create_automation(generation_result.config)
+        except Exception as err:  # noqa: BLE001 - a YAML write + service call can fail in ways beyond HomeAssistantError; must not propagate as "Unexpected error during intent recognition"
+            _LOGGER.error("Automation creation failed: %s", err)
+            response.async_set_error(
+                intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                f"Fehler beim Erstellen der Automation: {err}",
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        response.async_set_speech(AUTOMATION_CREATED_TEXT)
         return conversation.ConversationResult(
             response=response, conversation_id=user_input.conversation_id
         )

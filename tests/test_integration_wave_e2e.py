@@ -13,10 +13,12 @@ already use for these exact sentences - Regel 6, no new test scaffolding
 invented where an existing one already fits.
 
 Case 6 ("Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht
-ein.") doubles as the Definition of Done's mock-assertion: automation
-turns must never call ``hass.services.async_call()`` - this wave's hard
-scope boundary (Sprache -> AutomationModel -> Validation -> Response/Debug
-only, never a real HA automation write).
+ein.") doubles as a mock-assertion for the *first* turn of a spoken
+automation: ``hass.services.async_call()`` is still never called on the
+turn that only describes and previews an automation (V5.23/V5.26, "Dry
+Run") - a real HA write only ever happens after an explicit "ja" reply on a
+later turn (see ``test_conversation_automation_confirmation.py`` for that
+full confirm/cancel/unclear round-trip).
 """
 
 from __future__ import annotations
@@ -176,7 +178,8 @@ def test_case_5_wohnzimmerlicht_on_then_mach_es_wieder_aus_same_target(monkeypat
 
 
 # --- Case 6: "Wenn das Küchenfenster geöffnet wird, schalte das ----------
-# --- Küchenlicht ein." -> valid AutomationModel, never a service call ----
+# --- Küchenlicht ein." -> valid AutomationModel, spoken preview, never a --
+# --- service call on this (the describing, not yet confirming) turn -----
 
 
 def test_case_6_automation_sentence_never_calls_a_service(monkeypatch):
@@ -191,9 +194,8 @@ def test_case_6_automation_sentence_never_calls_a_service(monkeypatch):
     entity.hass.services.async_call.assert_not_awaited()
     assert result.response.error_code is None
     assert "validation_error" not in result.response.speech
-    assert "AutomationModel" in result.response.speech
-    assert "STATE" in result.response.speech
-    assert "TURN_ON" in result.response.speech
+    assert "Automation erkannt" in result.response.speech
+    assert "Soll diese Automation erstellt werden?" in result.response.speech
 
 
 # --- Case 7: ambiguous target -> AMBIGUOUS (clarification, no guess) -----
