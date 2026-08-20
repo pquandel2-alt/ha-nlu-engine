@@ -372,7 +372,9 @@ def _generate_action_step(
     return _generate_action_leaf(step, entities)
 
 
-def generate_ha_automation_config(model: AutomationModel, entities: list[EntitySnapshot]) -> GenerationResult:
+def generate_ha_automation_config(
+    model: AutomationModel, entities: list[EntitySnapshot], automation_id: str | None = None
+) -> GenerationResult:
     """Translates an already-validated ``AutomationModel`` into a Home
     Assistant-native automation config dict (no ``id`` - the Executor's job,
     see ``GenerationResult``'s own docstring). Re-resolves every target
@@ -385,6 +387,20 @@ def generate_ha_automation_config(model: AutomationModel, entities: list[EntityS
     Exactly one ``TriggerModel`` is ever present today (``match_automation()``
     never builds more than one) - iterated as a list regardless, so this
     function keeps working unchanged if that ever stops being true.
+
+    ``automation_id`` (new feature, Wave 12 "Einmalige Automation"): when
+    ``model.once`` is set, the generated config's own actions end with a
+    call to the custom ``ha_nlu.delete_automation`` service, reusing the
+    already-existing ``AutomationExecutor.async_delete_automation()`` (Wave
+    10) rather than a parallel deletion mechanism (Regel 6). That service
+    call needs to know the automation's own future ``automation_id`` - a
+    chicken-and-egg problem, since ``AutomationExecutor.async_create_automation()``
+    normally only generates that id at persist time, *after* this config
+    already exists. The caller (``conversation.py``) resolves this by
+    pre-generating the id and passing it in here *and* into
+    ``async_create_automation()`` for the same automation, so both sides
+    agree. ``automation_id`` is ``None``/ignored for every other (non-once)
+    automation - fully backward compatible with every existing caller.
     """
     triggers: list[dict[str, Any]] = []
     triggers_delay_action: dict[str, Any] | None = None
@@ -419,6 +435,10 @@ def generate_ha_automation_config(model: AutomationModel, entities: list[EntityS
             return GenerationResult(config=None, error=error)
         assert step_config is not None
         actions.append(step_config)
+
+    if model.once:
+        assert automation_id is not None
+        actions.append({"action": "ha_nlu.delete_automation", "data": {"automation_id": automation_id}})
 
     config: dict[str, Any] = {"alias": model.source_text, "triggers": triggers, "actions": actions}
     if conditions:

@@ -937,6 +937,107 @@ passed, 14 skipped (vorher 1523/14) – kein bestehender Test verändert.
 
 ⸻
 
+## 6k. Wave 12 – "Einmalige Automation" (fire-once, dann Selbstlöschung) (Ergebnis, 2026-08-20)
+
+**Kein V5.x-Unterpunkt, sondern ein neues, separat vom Nutzer freigegebenes
+Feature** ("Ja baue das als nächste Wave die einmalige Feuerung. Aber nicht
+nur zeitbasiert sondern auch wenn sich der Zustand von einem Sensor
+ändert."): eine Automation, die sich nach ihrer ersten Ausführung selbst
+löscht – ausdrücklich sowohl für zeitbasierte als auch zustandsbasierte
+Trigger, nicht nur für Zeit.
+
+**Regel-6-Kern:** die Selbstlöschung baut auf keinem zweiten
+Lösch-Mechanismus auf, sondern ruft `AutomationExecutor.
+async_delete_automation()` (Wave 10) unverändert über einen neuen,
+selbst-registrierten HA-Service `ha_nlu.delete_automation` auf. Die
+Trigger-Erzeugung nutzt jeden bestehenden `TriggerType` unverändert weiter –
+"einmalig" ist rein additiv (eine zusätzliche Action, kein neuer
+Trigger-Typ), funktioniert daher aus der Box heraus mit jedem Trigger, den
+`AutomationTriggerParser` bereits unterstützt (state, time, sun, ...).
+
+**Bausteine:**
+
+- `nlu/automation_model.py::AutomationModel.once` (NEU, Feld, Default
+  `False`): gesetzt von `engine.py`, gelesen von
+  `ha_automation_generator.py`.
+- `engine.py::match_automation()`: neues Regex-Gate `_AUTOMATION_ONCE_RE`
+  (`\beinmalig\w*\b|\bnur einmal\b`), kollisionsfrei gegen bestehende
+  Grammatik/Lexikon/Filler-Wort-Behandlung verifiziert. Der Qualifier wird
+  aus dem normalisierten Satz herausgeschnitten (gleiches
+  Whitespace-Squeeze-Muster wie `normalize()`), bevor
+  `split_trigger_action()` den Satz in Trigger-/Action-Klausel teilt – "nur
+  einmal schalte X ein" bleibt so ein normal parsbarer Action-Satz.
+- `nlu/automation_preview.py`: die gesprochene Vorschau nennt das
+  Selbstlöschungsverhalten explizit ("Diese Automation wird nach der ersten
+  Ausführung automatisch gelöscht.") – "niemals raten" gilt auch fürs
+  Verschweigen einer dauerhaften Seiteneffekt-Eigenschaft.
+- `nlu/ha_automation_generator.py::generate_ha_automation_config()`: neuer
+  optionaler Parameter `automation_id: str | None`. Ist `model.once`
+  gesetzt, wird als letzter Schritt `{"action": "ha_nlu.delete_automation",
+  "data": {"automation_id": automation_id}}` angehängt; `assert
+  automation_id is not None` statt eines stillen No-Op, falls der Aufrufer
+  hier eine ID vergisst (Regel 4).
+- **Henne-Ei-Problem gelöst durch Vorab-Generierung:** die Automation muss
+  ihre eigene, künftige `id` referenzieren, bevor sie überhaupt persistiert
+  ist. `conversation.py`s Bestätigungs-Handler generiert die UUID deshalb
+  selbst (`uuid.uuid4().hex`) *vor* dem Aufruf von
+  `generate_ha_automation_config()`/`async_create_automation()` und reicht
+  sie an beide durch (`automation_id`-Parameter, Default `None` – jeder
+  bestehende Aufruf/Test bleibt unverändert).
+- `automation_executor.py::async_create_automation()`: neuer optionaler
+  Parameter `automation_id`; nur wenn `None`, generiert die Methode wie
+  bisher selbst eine UUID.
+- `custom_components/ha_nlu/__init__.py` (NEU: erster Custom-Service dieser
+  Integration): registriert `ha_nlu.delete_automation` in
+  `async_setup_entry()` (idempotent, `has_service`-Guard), entfernt ihn in
+  `async_unload_entry()`. Der Handler validiert `automation_id` manuell
+  (kein `voluptuous`-Schema – wird sonst nirgends in diesem Repo getestet),
+  erstellt eine eigene `AutomationExecutor`-Instanz und ruft
+  `async_delete_automation()` auf; ein bereits durch etwas anderes
+  gelöschtes `automation_id` (dokumentiertes `ValueError`-Race) wird
+  stillschweigend geschluckt – nichts mehr zu tun.
+- **Wichtige Layering-Korrektur während der Umsetzung:** ein erster Entwurf
+  importierte `AutomationExecutor` auf Modulebene in `__init__.py`. Da
+  `ha_nlu/__init__.py` bei *jedem* Import eines beliebigen
+  `ha_nlu.*`-Submoduls automatisch mitläuft (auch in reinen
+  Engine-Unit-Tests ohne installiertes `homeassistant`-Paket), brach das
+  die komplette HA-freie Testsuite (`ModuleNotFoundError: homeassistant`).
+  Fix: der Import wurde funktionslokal in den Service-Handler verschoben –
+  dasselbe Muster, das `render_automation_tree()` bereits nutzt, um
+  Import-Zyklen zu vermeiden, hier angewendet um `ha_nlu/__init__.py`s
+  Modulebene HA-frei zu halten.
+- **Bewusster, offen benannter Trade-off:** der Service-Handler erzeugt pro
+  Aufruf eine *eigene* `AutomationExecutor`-Instanz statt die der
+  Conversation-Entity wiederzuverwenden (die lazy pro Entity erzeugt und
+  von hier aus nicht erreichbar ist). Beide teilen sich dieselbe
+  `automations.yaml`/Metadata-Persistenz auf Disk, das ist korrekt – aber
+  nicht Lock-geteilt mit einem gleichzeitig laufenden
+  Bestätigungs-Schreibvorgang der Conversation-Entity. Akzeptierter,
+  schmaler Trade-off (Wahrscheinlichkeit einer echten Race ist bei einem
+  Single-User-Sprachassistenten gering), nicht versteckt.
+
+**Tests:** 27 neue Tests über 5 Dateien – `test_automation_model.py` (+3,
+`once`-Feld inkl. `render_automation_tree()`-Ausgabe),
+`test_engine_match_automation.py` (+4, beide Qualifier-Formen, Default
+`False`, explizit ein zustandsbasierter Trigger-Testfall),
+`test_ha_automation_generator.py` (+3, mit/ohne Selbstlöschung, `assert`
+statt stillem No-Op ohne `automation_id`), `test_automation_executor.py`
+(+2, vorgegebene vs. selbst generierte `automation_id`),
+`test_init_delete_automation_service.py` (NEU, 5 Tests: Service-Registrierung,
+Idempotenz, Deregistrierung, echte Löschung + `automation.reload`, No-Op
+ohne/mit bereits gelöschter `automation_id`), sowie
+`test_conversation_automation_once.py` (NEU, 9 E2E-Tests über die echte
+`_async_handle_message()`-Orchestrierung: gesprochene Vorschau nennt/verschweigt
+die Selbstlöschung korrekt, Bestätigung hängt die Selbstlöschungs-Action mit
+passender `id` an – sowohl für einen zustandsbasierten als auch einen
+zeitbasierten Trigger –, das Feuern der Selbstlöschungs-Action entfernt
+genau die richtige Automation und ruft `automation.reload`, eine
+gewöhnliche Automation bleibt davon komplett unberührt). Vollständige
+Regression: 1576 passed, 14 skipped (vorher 1549/14) – kein bestehender
+Test verändert.
+
+⸻
+
 ## 7. Sicherheitsregeln
 
 - **Niemals bei echter Ambiguität raten.** Je unsicherer die

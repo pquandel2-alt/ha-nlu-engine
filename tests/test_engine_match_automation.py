@@ -228,3 +228,47 @@ def test_condition_result_is_validated_the_same_way_as_triggers_and_actions(engi
 
 def test_plain_command_is_unaffected_by_the_condition_fallback(engine):
     assert engine.match_automation("Schalte das Wohnzimmerlicht ein.", CONDITIONS_ENTITIES) is None
+
+
+# --- Wave 12, "Einmalige Automation" (fire-once, then self-delete) ---------
+
+
+def test_einmalig_qualifier_sets_once_true_and_is_stripped_from_the_sentence(engine):
+    result = engine.match_automation(
+        "Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht einmalig ein.", ENTITIES
+    )
+    assert isinstance(result, AutomationMatchResult)
+    assert result.validation_error is None
+    assert result.model.once is True
+    assert len(result.model.actions) == 1
+
+
+def test_nur_einmal_qualifier_also_sets_once_true(engine):
+    result = engine.match_automation(
+        "Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht nur einmal ein.", ENTITIES
+    )
+    assert isinstance(result, AutomationMatchResult)
+    assert result.validation_error is None
+    assert result.model.once is True
+
+
+def test_without_the_qualifier_once_defaults_to_false(engine):
+    result = engine.match_automation(
+        "Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht ein.", ENTITIES
+    )
+    assert isinstance(result, AutomationMatchResult)
+    assert result.model.once is False
+
+
+def test_einmalig_qualifier_works_on_a_state_based_trigger_not_just_time(engine):
+    # The user's own explicit scope for Wave 12: "nicht nur zeitbasiert
+    # sondern auch wenn sich der Zustand von einem Sensor ändert" - any
+    # trigger type already supported by match_automation() must support
+    # "einmalig" too, since the qualifier is stripped independently of the
+    # trigger clause's own grammar.
+    result = engine.match_automation(
+        "Wenn das Küchenfenster geöffnet wird, schalte einmalig das Küchenlicht ein.", ENTITIES
+    )
+    assert isinstance(result, AutomationMatchResult)
+    assert result.model.once is True
+    assert len(result.model.triggers) == 1

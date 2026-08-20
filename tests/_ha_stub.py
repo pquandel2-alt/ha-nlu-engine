@@ -109,6 +109,13 @@ def install() -> None:
             self.title = title
             self.options = options or {}
             self.data = data or {}
+            self._on_unload: list[Callable[[], Any]] = []
+
+        def add_update_listener(self, listener: Callable[..., Any]) -> Callable[[], None]:
+            return lambda: None
+
+        def async_on_unload(self, func: Callable[[], Any]) -> None:
+            self._on_unload.append(func)
 
     config_entries.ConfigEntry = ConfigEntry
 
@@ -124,10 +131,41 @@ def install() -> None:
         def async_all(self) -> list[Any]:
             return list(self._states.values())
 
+    class ServiceCall:
+        """Minimal stand-in for ``homeassistant.core.ServiceCall`` - only
+        ``data`` is ever read by this integration's own service handler
+        (see ``__init__.py``'s ``_async_delete_automation``)."""
+
+        def __init__(self, data: dict | None = None) -> None:
+            self.data = data or {}
+
+    class _Services:
+        """Fake ``hass.services``: keeps the pre-existing ``async_call``
+        ``AsyncMock`` every existing test already asserts against
+        unchanged, and additionally supports ``async_register``/
+        ``async_remove``/``has_service`` (new feature, Wave 12) so
+        ``__init__.py``'s ``ha_nlu.delete_automation`` service registration
+        can be exercised directly - tests invoke the stored handler
+        themselves (``hass.services._handlers[(domain, service)](call)``),
+        the same way HA itself would dispatch a real service call."""
+
+        def __init__(self) -> None:
+            self.async_call = AsyncMock()
+            self._handlers: dict[tuple[str, str], Callable[..., Any]] = {}
+
+        def async_register(self, domain: str, service: str, handler: Callable[..., Any], schema: Any = None) -> None:
+            self._handlers[(domain, service)] = handler
+
+        def async_remove(self, domain: str, service: str) -> None:
+            self._handlers.pop((domain, service), None)
+
+        def has_service(self, domain: str, service: str) -> bool:
+            return (domain, service) in self._handlers
+
     class HomeAssistant:
         def __init__(self) -> None:
             self.states = _States()
-            self.services = types.SimpleNamespace(async_call=AsyncMock())
+            self.services = _Services()
             # V5.26 (AutomationExecutor): real HA's ``hass.config.path()``
             # joins onto the config dir; ``/tmp`` here since tests never
             # care about the real HA config directory, only that a real
@@ -145,6 +183,7 @@ def install() -> None:
 
     core.HomeAssistant = HomeAssistant
     core.State = State
+    core.ServiceCall = ServiceCall
 
     # --- homeassistant.util.yaml / homeassistant.util.file -----------------
     # V5.26 (AutomationExecutor): real HA's ``load_yaml``/``dump`` wrap

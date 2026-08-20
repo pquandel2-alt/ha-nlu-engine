@@ -103,7 +103,9 @@ class AutomationExecutor:
         self._lock = asyncio.Lock()
         self._metadata_store = AutomationMetadataStore(hass)
 
-    async def async_create_automation(self, config: dict[str, Any]) -> str:
+    async def async_create_automation(
+        self, config: dict[str, Any], automation_id: str | None = None
+    ) -> str:
         """Appends ``config`` (a ``GenerationResult.config`` dict, no ``id``
         key yet - see ``ha_automation_generator.py``'s ``GenerationResult``
         docstring) as a new automation, persists it to ``automations.yaml``,
@@ -122,8 +124,17 @@ class AutomationExecutor:
         File I/O runs off the event loop via ``hass.async_add_executor_job``
         (``load_yaml``/``write_utf8_file_atomic`` are both blocking calls),
         same as every other filesystem-touching HA core code path.
+
+        ``automation_id`` (new feature, Wave 12 "Einmalige Automation"):
+        normally ``None`` and generated here as before. A caller building a
+        self-deleting ("once") automation must instead pre-generate the id
+        and pass it in, since that automation's own action list (embedded in
+        ``config`` already) needs to reference its future id before it
+        exists - see ``ha_automation_generator.py``'s
+        ``generate_ha_automation_config()`` docstring for the full picture.
         """
-        automation_id = uuid.uuid4().hex
+        if automation_id is None:
+            automation_id = uuid.uuid4().hex
         path = self._hass.config.path(AUTOMATIONS_YAML_FILENAME)
         async with self._lock:
             original_automations = await self._hass.async_add_executor_job(self._read_automations, path)

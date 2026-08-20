@@ -321,6 +321,18 @@ _AUTOMATION_DELETE_RE = re.compile(r"\blösch\w*\b|\bentfern\w*\b", re.IGNORECAS
 _AUTOMATION_DISABLE_RE = re.compile(r"\bdeaktivier\w*\b", re.IGNORECASE)
 _AUTOMATION_ENABLE_RE = re.compile(r"\baktivier\w*\b", re.IGNORECASE)
 
+# "einmalig(e)"/"nur einmal" marks a fire-once automation (new feature, Wave
+# 12 "Einmalige Automation") - matched and *stripped* from the normalized
+# text inside ``match_automation()`` itself (not a separate pre-check gate
+# like the regexes above, since this qualifier can appear anywhere in an
+# otherwise ordinary trigger+action sentence, not just at the very start).
+# Verified collision-free: "einmal"/"einmalig" has zero existing usages
+# anywhere in intents/lexicon/parsers/engine, and ``normalize()``'s filler-
+# word stripping (``\b(ein bisschen|mal|doch|kurz|etwas)\b``) has no word
+# boundary at "mal" inside "einmal"/"einmalig", so it never fires on this
+# qualifier by accident.
+_AUTOMATION_ONCE_RE = re.compile(r"\beinmalig\w*\b|\bnur einmal\b", re.IGNORECASE)
+
 # Per-domain question word for the clarification round-trip (v2 plan Phase
 # 25). Same kind of small, explicit German-grammar lookup as
 # service_call.py's ``_DOMAIN_PLURAL_DE`` - only covers the domains
@@ -1096,6 +1108,15 @@ class NluEngine:
             return None
 
         normalized = normalize(text)
+        once = bool(_AUTOMATION_ONCE_RE.search(normalized))
+        if once:
+            # Strip the qualifier itself before trigger/action splitting -
+            # it is not part of either clause's own grammar (mirrors
+            # ``normalize()``'s own filler-word-then-whitespace-squeeze
+            # pattern, see nlu/normalize.py).
+            normalized = _AUTOMATION_ONCE_RE.sub(" ", normalized)
+            normalized = re.sub(r"\s+", " ", normalized).strip()
+
         split = split_trigger_action(normalized)
         if split is None:
             return None
@@ -1124,7 +1145,9 @@ class NluEngine:
             return None
 
         conditions = (condition_node,) if condition_node is not None else ()
-        model = AutomationModel(triggers=(trigger,), conditions=conditions, actions=actions, source_text=text)
+        model = AutomationModel(
+            triggers=(trigger,), conditions=conditions, actions=actions, source_text=text, once=once
+        )
         validation_error = validate_automation(model)
         response_text = render_automation_tree(model)
         if validation_error is not None:

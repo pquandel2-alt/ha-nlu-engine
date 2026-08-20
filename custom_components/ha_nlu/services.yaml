@@ -1,0 +1,13 @@
+delete_automation:
+  name: Delete automation
+  description: >-
+    Internal service: deletes an ha_nlu-generated automation by id. Used by
+    self-deleting ("einmalig"/"nur einmal") generated automations as their
+    own last action step - not meant to be called directly.
+  fields:
+    automation_id:
+      name: Automation ID
+      description: The id of the automation to delete.
+      required: true
+      selector:
+        text:

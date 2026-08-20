@@ -469,3 +469,45 @@ def test_config_alias_is_the_source_text_and_has_no_id_key():
     assert result.error is None
     assert result.config["alias"] == "Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht ein."
     assert "id" not in result.config
+
+
+# --- Wave 12, "Einmalige Automation" (fire-once, then self-delete) --------
+
+
+def test_once_false_appends_no_delete_action():
+    model = _model(_trigger())
+    result = generate_ha_automation_config(model, ALL_ENTITIES)
+    assert result.error is None
+    assert all(a.get("action") != "ha_nlu.delete_automation" for a in result.config["actions"])
+
+
+def test_once_true_appends_the_self_delete_action_as_the_last_step():
+    model = AutomationModel(
+        triggers=(_trigger(),),
+        actions=(ActionModel(type=ActionType.TURN_ON, target=TriggerTarget(entity_id="light.kueche_licht")),),
+        source_text="Testsatz",
+        once=True,
+    )
+    result = generate_ha_automation_config(model, ALL_ENTITIES, automation_id="abc123")
+    assert result.error is None
+    assert result.config["actions"][-1] == {
+        "action": "ha_nlu.delete_automation",
+        "data": {"automation_id": "abc123"},
+    }
+    # The automation's own real action(s) still run first, unaffected.
+    assert result.config["actions"][0]["action"] == "homeassistant.turn_on"
+
+
+def test_once_true_without_an_automation_id_asserts_rather_than_silently_omitting_it():
+    model = AutomationModel(
+        triggers=(_trigger(),),
+        actions=(ActionModel(type=ActionType.TURN_ON, target=TriggerTarget(entity_id="light.kueche_licht")),),
+        source_text="Testsatz",
+        once=True,
+    )
+    try:
+        generate_ha_automation_config(model, ALL_ENTITIES)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("expected an AssertionError when once=True but automation_id is None")

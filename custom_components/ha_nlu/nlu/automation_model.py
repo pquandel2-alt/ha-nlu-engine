@@ -150,6 +150,13 @@ class AutomationModel:
     conditions: tuple["ConditionNode", ...] = ()
     actions: tuple["ActionModel | ActionGroup", ...] = ()
     source_text: str = ""
+    # New feature (Wave 12, "Einmalige Automation"): "wenn ... dann ... -
+    # einmalig"/"nur einmal" - the generated HA automation deletes itself via
+    # a trailing ha_nlu.delete_automation action step after it fires once,
+    # instead of persisting forever like every other automation. Set by
+    # engine.py's _AUTOMATION_ONCE_RE detection; read by
+    # ha_automation_generator.py to append the self-delete action.
+    once: bool = False
 
 
 def _render_target(target: TriggerTarget) -> str:
@@ -203,7 +210,7 @@ def render_automation_tree(model: AutomationModel) -> str:
     """Plain-text debug tree, not a spoken preview (V5.23's Dry-Run text is
     a later, separate wave with its own German wording) - only for logs/
     tests/manual inspection."""
-    lines = [f"AutomationModel(source_text={model.source_text!r})"]
+    lines = [f"AutomationModel(source_text={model.source_text!r}, once={model.once})"]
     if not model.triggers:
         lines.append("  triggers: (none)")
     else:

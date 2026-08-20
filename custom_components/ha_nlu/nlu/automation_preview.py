@@ -292,4 +292,6 @@ def render_automation_preview(model: AutomationModel, entities: list[EntitySnaps
         condition_text = " und ".join(_speak_condition_node(c, entity_by_id, area_name_by_id) for c in model.conditions)
         sentence = f"{sentence} und {condition_text}"
     sentence = f"{sentence}, dann {action_text}."
+    if model.once:
+        sentence = f"{sentence} Diese Automation wird nach der ersten Ausführung automatisch gelöscht."
     return f"Automation erkannt: {sentence} Soll diese Automation erstellt werden?"

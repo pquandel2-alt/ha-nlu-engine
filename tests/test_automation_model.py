@@ -157,6 +157,9 @@ def test_automation_model_defaults_to_no_triggers_conditions_or_actions():
     assert model.conditions == ()
     assert model.actions == ()
     assert model.source_text == ""
+    # New feature (Wave 12, "Einmalige Automation"): defaults to a normal,
+    # persistent automation - never fire-once unless explicitly requested.
+    assert model.once is False
 
 
 def test_automation_model_carries_its_triggers_and_source_text():
@@ -292,3 +295,21 @@ def test_render_automation_tree_renders_a_quantified_exclusion_target():
     tree = render_automation_tree(AutomationModel(triggers=(trigger,)))
     assert "quantifier=all" in tree
     assert "exclude_entity_ids=light.flur_lampe" in tree
+
+
+# --- Wave 12, "Einmalige Automation" (fire-once, then self-delete) ---------
+
+
+def test_automation_model_carries_the_once_flag():
+    model = AutomationModel(once=True)
+    assert model.once is True
+
+
+def test_render_automation_tree_reports_once_true():
+    tree = render_automation_tree(AutomationModel(source_text="einmalig", once=True))
+    assert "once=True" in tree
+
+
+def test_render_automation_tree_reports_once_false_by_default():
+    tree = render_automation_tree(AutomationModel(source_text="normal"))
+    assert "once=False" in tree

@@ -552,3 +552,39 @@ def test_async_list_automations_reports_the_enabled_field_from_initial_state():
     # own automation config schema uses.
     assert by_id["abc123"].enabled is True
     assert by_id["def456"].enabled is False
+
+
+# --- Wave 12, "Einmalige Automation" (fire-once, then self-delete) --------
+
+
+def test_create_automation_uses_the_provided_automation_id_when_given():
+    hass = _make_hass()
+    with (
+        patch.object(automation_executor.yaml_util, "load_yaml", return_value=[]),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml") as dump_mock,
+        patch.object(automation_executor, "write_utf8_file_atomic"),
+        _patch_metadata_write(),
+    ):
+        executor = AutomationExecutor(hass)
+        automation_id = asyncio.run(
+            executor.async_create_automation(SAMPLE_CONFIG, automation_id="preassigned-id")
+        )
+
+    assert automation_id == "preassigned-id"
+    written_automations = dump_mock.call_args.args[0]
+    assert written_automations == [{"id": "preassigned-id", **SAMPLE_CONFIG}]
+
+
+def test_create_automation_still_generates_its_own_id_when_none_is_given():
+    hass = _make_hass()
+    with (
+        patch.object(automation_executor.yaml_util, "load_yaml", return_value=[]),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml"),
+        patch.object(automation_executor, "write_utf8_file_atomic"),
+        _patch_metadata_write(),
+    ):
+        executor = AutomationExecutor(hass)
+        automation_id = asyncio.run(executor.async_create_automation(SAMPLE_CONFIG))
+
+    assert automation_id != "preassigned-id"
+    assert isinstance(automation_id, str) and automation_id

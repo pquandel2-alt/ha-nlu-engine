@@ -16,6 +16,7 @@ default conversation agent does it.
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Literal
 
 from homeassistant.components import conversation
@@ -528,7 +529,17 @@ class NluConversationEntity(
                 response=response, conversation_id=user_input.conversation_id
             )
 
-        generation_result = generate_ha_automation_config(confirmation.model, entities)
+        # Wave 12 ("Einmalige Automation"): a self-deleting automation's own
+        # action list needs to reference its own future id (see
+        # ha_automation_generator.py's generate_ha_automation_config()
+        # docstring for why) - pre-generated here, before persistence, and
+        # threaded into both the generator and the executor so they agree.
+        # None/unused for every ordinary (non-once) automation.
+        once_automation_id = uuid.uuid4().hex if confirmation.model.once else None
+
+        generation_result = generate_ha_automation_config(
+            confirmation.model, entities, automation_id=once_automation_id
+        )
         if generation_result.error is not None:
             response.async_set_error(
                 intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
@@ -542,7 +553,9 @@ class NluConversationEntity(
         if self._automation_executor is None:
             self._automation_executor = AutomationExecutor(self.hass)
         try:
-            await self._automation_executor.async_create_automation(generation_result.config)
+            await self._automation_executor.async_create_automation(
+                generation_result.config, automation_id=once_automation_id
+            )
         except Exception as err:  # noqa: BLE001 - a YAML write + service call can fail in ways beyond HomeAssistantError; must not propagate as "Unexpected error during intent recognition"
             _LOGGER.error("Automation creation failed: %s", err)
             response.async_set_error(
