@@ -1,10 +1,10 @@
-"""Automation Executor (HomeIntent V5 Teil 7/10, V5.26): the sole
-persistence path from a confirmed ``AutomationModel`` into a real Home
-Assistant automation - kept structurally and physically separate from
-``conversation.py``'s existing command-execution code (``hass.services.
-async_call()`` for TURN_ON/TURN_OFF/etc. plans), since writing
-``automations.yaml`` is a categorically different, far harder to reverse
-action than a single service call (see ``context.py``'s
+"""Automation Executor (HomeIntent V5 Teil 7/10 + Teil 8/10 - V5.26, V5.35,
+V5.36): the sole persistence path from a confirmed ``AutomationModel`` into
+a real Home Assistant automation - kept structurally and physically
+separate from ``conversation.py``'s existing command-execution code
+(``hass.services.async_call()`` for TURN_ON/TURN_OFF/etc. plans), since
+writing ``automations.yaml`` is a categorically different, far harder to
+reverse action than a single service call (see ``context.py``'s
 ``PendingAutomationConfirmation`` docstring: "the single most hard-to-
 reverse action anywhere in this engine").
 
@@ -31,6 +31,18 @@ deliberately stays hass-free, and this module's entire job is real
 ``homeassistant.core``/``homeassistant.util`` I/O - same layering precedent
 ``hass_entities.py`` already sets for "real HA access lives one package
 level up from the pure NLU code".
+
+V5.35 (Automation Transactions)/V5.36 (Rollback): the whole
+write-reload-record_metadata sequence runs under one lock as a single
+unit - if the reload or the metadata write fails partway through, the
+YAML change is rolled back (and, if it was the metadata step that failed,
+HA is reloaded a second time to make its live state match the rolled-back
+file) before the exception propagates. Before this wave, a reload failure
+left a silently orphaned entry in ``automations.yaml`` - the file said the
+automation existed even though the user was told creation failed and HA
+itself may never have picked it up. "No half-created automations" (the
+plan's own V5.36 wording) means the file must never disagree with what the
+user was actually told.
 """
 
 from __future__ import annotations
@@ -42,6 +54,8 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.util import yaml as yaml_util
 from homeassistant.util.file import write_utf8_file_atomic
+
+from .automation_metadata_store import AutomationMetadata, AutomationMetadataStore, utcnow_isoformat
 
 AUTOMATIONS_YAML_FILENAME = "automations.yaml"
 
@@ -59,15 +73,23 @@ class AutomationExecutor:
     def __init__(self, hass: HomeAssistant) -> None:
         self._hass = hass
         self._lock = asyncio.Lock()
+        self._metadata_store = AutomationMetadataStore(hass)
 
     async def async_create_automation(self, config: dict[str, Any]) -> str:
         """Appends ``config`` (a ``GenerationResult.config`` dict, no ``id``
         key yet - see ``ha_automation_generator.py``'s ``GenerationResult``
         docstring) as a new automation, persists it to ``automations.yaml``,
-        and reloads the automation integration so it takes effect
-        immediately - the same three steps Home Assistant's own
-        config/automation UI editor performs. Returns the freshly assigned
-        automation id.
+        reloads the automation integration so it takes effect immediately,
+        and records its identity/metadata (V5.30/V5.31) in the sidecar
+        store - the same three HA-facing steps Home Assistant's own
+        config/automation UI editor performs, plus this integration's own
+        bookkeeping. Returns the freshly assigned automation id.
+
+        Every step runs inside the same lock, and a failure at the reload or
+        metadata step rolls the YAML file back to what it was before this
+        call (V5.35/V5.36) - either every step succeeds and all three pieces
+        of state (file, HA's live config, metadata) agree, or none of them
+        change.
 
         File I/O runs off the event loop via ``hass.async_add_executor_job``
         (``load_yaml``/``write_utf8_file_atomic`` are both blocking calls),
@@ -76,10 +98,39 @@ class AutomationExecutor:
         automation_id = uuid.uuid4().hex
         path = self._hass.config.path(AUTOMATIONS_YAML_FILENAME)
         async with self._lock:
-            automations = await self._hass.async_add_executor_job(self._read_automations, path)
-            automations.append({"id": automation_id, **config})
+            original_automations = await self._hass.async_add_executor_job(self._read_automations, path)
+            automations = [*original_automations, {"id": automation_id, **config}]
             await self._hass.async_add_executor_job(self._write_automations, path, automations)
-        await self._hass.services.async_call("automation", "reload", {}, blocking=True)
+
+            try:
+                await self._hass.services.async_call("automation", "reload", {}, blocking=True)
+            except Exception:
+                await self._hass.async_add_executor_job(
+                    self._write_automations, path, original_automations
+                )
+                raise
+
+            metadata = AutomationMetadata(
+                automation_id=automation_id,
+                source_text=config.get("alias", ""),
+                created_at=utcnow_isoformat(),
+            )
+            try:
+                await self._metadata_store.async_save(metadata)
+            except Exception:
+                await self._hass.async_add_executor_job(
+                    self._write_automations, path, original_automations
+                )
+                # Best-effort: HA's live config should reflect the rollback
+                # too, but a second reload failure must not mask the
+                # original metadata error, which is what actually caused
+                # this rollback - the file is already correct either way.
+                try:
+                    await self._hass.services.async_call("automation", "reload", {}, blocking=True)
+                except Exception:  # noqa: BLE001 - see comment above
+                    pass
+                raise
+
         return automation_id
 
     @staticmethod

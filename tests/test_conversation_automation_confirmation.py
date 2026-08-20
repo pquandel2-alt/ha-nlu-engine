@@ -24,6 +24,7 @@ second (confirming) turn.
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -93,6 +94,14 @@ def _automations_yaml(tmp_path: Path) -> list[dict]:
         return pyyaml.safe_load(handle) or []
 
 
+def _metadata_json(tmp_path: Path) -> dict:
+    path = tmp_path / "ha_nlu_automation_metadata.json"
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
 # --- full YES round-trip: preview turn, then "Ja" persists + reloads -------
 
 
@@ -113,6 +122,26 @@ def test_yes_reply_creates_the_automation_and_calls_automation_reload(monkeypatc
     assert len(automations) == 1
     assert automations[0]["alias"] == AUTOMATION_SENTENCE
     assert "id" in automations[0]
+
+
+def test_yes_reply_also_records_a_metadata_entry_for_the_new_automation(monkeypatch, tmp_path):
+    """V5.30/V5.31: the sidecar metadata written by ``AutomationExecutor``
+    (see ``test_automation_executor.py`` for its own dedicated, mocked-I/O
+    tests) must actually reach disk through the real conversation turn too -
+    not just when the executor is driven directly."""
+    entity = _make_entity(monkeypatch, tmp_path)
+
+    _run(entity, AUTOMATION_SENTENCE, conversation_id="wave8a")
+    _run(entity, "Ja", conversation_id="wave8a")
+
+    automation_id = _automations_yaml(tmp_path)[0]["id"]
+    metadata = _metadata_json(tmp_path)
+    assert set(metadata) == {automation_id}
+    entry = metadata[automation_id]
+    assert entry["automation_id"] == automation_id
+    assert entry["source_text"] == AUTOMATION_SENTENCE
+    assert entry["created_by"] == "homeintent"
+    assert entry["version"] == 1
 
 
 def test_a_stray_ja_with_no_pending_confirmation_is_a_fresh_not_understood(monkeypatch, tmp_path):

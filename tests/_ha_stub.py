@@ -52,6 +52,7 @@ def install() -> None:
     util = types.ModuleType("homeassistant.util")
     util_yaml = types.ModuleType("homeassistant.util.yaml")
     util_file = types.ModuleType("homeassistant.util.file")
+    util_dt = types.ModuleType("homeassistant.util.dt")
     helpers = types.ModuleType("homeassistant.helpers")
     helpers_area_registry = types.ModuleType("homeassistant.helpers.area_registry")
     helpers_device_registry = types.ModuleType("homeassistant.helpers.device_registry")
@@ -167,6 +168,19 @@ def install() -> None:
     util_yaml.load_yaml = _load_yaml
     util_yaml.dump = _dump_yaml
     util_file.write_utf8_file_atomic = _write_utf8_file_atomic
+
+    # --- homeassistant.util.dt ---------------------------------------------
+    # V5 Teil 8/10 (automation_metadata_store.py): only ``utcnow()`` is used
+    # (for the metadata sidecar's ``created_at`` field) - real HA's own
+    # ``dt_util.utcnow()`` returns a timezone-aware UTC datetime, faithfully
+    # mirrored here rather than a naive ``datetime.utcnow()``.
+
+    from datetime import datetime, timezone
+
+    def _utcnow() -> datetime:
+        return datetime.now(timezone.utc)
+
+    util_dt.utcnow = _utcnow
 
     # --- homeassistant.helpers.device_registry ----------------------------
 
@@ -293,6 +307,7 @@ def install() -> None:
     homeassistant.util = util
     util.yaml = util_yaml
     util.file = util_file
+    util.dt = util_dt
     homeassistant.helpers = helpers
     helpers.area_registry = helpers_area_registry
     helpers.device_registry = helpers_device_registry
@@ -312,6 +327,7 @@ def install() -> None:
     sys.modules["homeassistant.util"] = util
     sys.modules["homeassistant.util.yaml"] = util_yaml
     sys.modules["homeassistant.util.file"] = util_file
+    sys.modules["homeassistant.util.dt"] = util_dt
     sys.modules["homeassistant.core"] = core
     sys.modules["homeassistant.helpers"] = helpers
     sys.modules["homeassistant.helpers.area_registry"] = helpers_area_registry

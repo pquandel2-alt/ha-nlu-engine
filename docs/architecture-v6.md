@@ -612,6 +612,75 @@ das der beabsichtigte Verhaltenswechsel dieser Wave ist).
 
 ⸻
 
+## 6g. V5 Teil 8/10 (Wave 8a) – Identity, Metadata, Transaktionen, Rollback (Ergebnis, 2026-08-20)
+
+**Ziel:** V5 Teil 8/10 umfasst zehn Punkte (V5.27–V5.36: Modification,
+Deletion, Query, Identity, Metadata, Versioning, Conflict Detection, Safety
+Classes, Transactions, Rollback). Modification/Deletion/Query brauchen
+jeweils einen eigenen vollständigen Parser-/Grammatik-/Resolver-Stack,
+vergleichbar mit einer ganzen früheren Wave – Conflict Detection und Safety
+Classes setzen auf ihnen auf. Bewusste Scope-Einschränkung (Wave 8a): nur
+das aktuell tragfähige Fundament umgesetzt – **V5.30 (Identity), V5.31
+(Metadata), V5.32 (Versioning-Grundlage), V5.35 (Transactions), V5.36
+(Rollback)**. V5.27–V5.29 (Modification/Deletion/Query) und V5.33/V5.34
+(Conflict Detection/Safety Classes) bleiben ausdrücklich zukünftigen Waves
+vorbehalten – sie brauchen ohnehin erst eine Möglichkeit, existierende
+Automationen wiederzufinden (V5.29), bevor sie modifiziert/gelöscht werden
+können.
+
+**Kernfrage vorab (Regel 4, gegen den echten HA-Upstream-Quellcode
+verifiziert, nicht geraten):** kann Metadata als zusätzliche Top-Level-Keys
+direkt im Automation-Dict in `automations.yaml` mitgeführt werden? Nein –
+`homeassistant/components/automation/config.py`'s `PLATFORM_SCHEMA` wird
+über `script.make_script_schema({...}, script.SCRIPT_MODE_SINGLE)`
+aufgebaut (`homeassistant/helpers/script.py`), und dieser Aufruf übergibt
+kein `extra=vol.ALLOW_EXTRA` – der Default ist `vol.PREVENT_EXTRA`. Ein
+unbekannter Top-Level-Key lässt `PLATFORM_SCHEMA(config)` mit `vol.Invalid`
+fehlschlagen, und HA deaktiviert die Automation mit
+`ValidationStatus.FAILED_SCHEMA` statt sie zu laden – genau das
+"unbemerkt falsch" Ergebnis, das Regel 4 verhindern soll. Deshalb eine
+physisch getrennte Sidecar-Datei statt Extra-Keys.
+
+**Bausteine:**
+
+- `automation_metadata_store.py::AutomationMetadataStore` (V5.30/V5.31/
+  V5.32, NEU, Top-Level von `custom_components/ha_nlu/` wie
+  `automation_executor.py` – bleibt aus demselben Grund außerhalb von
+  `nlu/`): sidecar-JSON-Datei `ha_nlu_automation_metadata.json` im
+  HA-Config-Verzeichnis, keyed nach der `automation_id` (dieselbe id, die
+  `AutomationExecutor` auch als `id`-Feld in `automations.yaml` vergibt –
+  Regel 6, kein zweites paralleles Id-Schema). Pro Eintrag: `created_by`
+  (immer `"homeintent"` – v1 kennt keine andere Quelle), `version` (startet
+  bei 1 – ohne V5.27/Modification gibt es noch nichts, was ihn je erhöht),
+  `source_language` (immer `"de"` – v1 ist Deutsch-only), `source_text`,
+  `created_at` (ISO-8601-UTC-String über `homeassistant.util.dt.utcnow()`).
+- `automation_executor.py::AutomationExecutor.async_create_automation()`
+  (V5.35/V5.36, erweitert): der komplette Ablauf
+  Read → Append → Write → Reload → Metadata speichern läuft jetzt als eine
+  Transaktion unter demselben `asyncio.Lock()`. Schlägt der Reload fehl,
+  wird `automations.yaml` sofort auf den Stand vor dem Aufruf
+  zurückgeschrieben. Schlägt stattdessen erst das Metadata-Speichern fehl,
+  wird zusätzlich zum YAML-Rollback ein zweiter (best-effort,
+  Exception-geschluckter) `automation.reload`-Aufruf ausgelöst, damit HAs
+  Live-Zustand wieder zur zurückgerollten Datei passt. Der ursprünglich
+  auslösende Fehler propagiert in beiden Fällen unverändert – ein
+  Folgefehler beim Rollback-Reload maskiert ihn nie. Vor dieser Änderung
+  konnte ein Reload-Fehler einen verwaisten Eintrag in `automations.yaml`
+  hinterlassen, obwohl dem Nutzer ein Fehlschlag gemeldet wurde ("no
+  half-created automations", V5.36s eigene Formulierung im Plan).
+
+**Tests:** 5 neue Tests (`test_automation_executor.py`: erfolgreiche
+Metadata-Aufzeichnung, Rollback bei Reload-Fehler, Rollback + zweiter
+Reload bei Metadata-Fehler, Original-Fehler übersteht einen zweiten
+Rollback-Reload-Fehler – alles mit vollständig gemocktem `hass`-I/O;
+`test_conversation_automation_confirmation.py`: ein Metadata-Eintrag mit
+der richtigen `automation_id` existiert nach einer echten "Ja"-Bestätigung
+über die reale `_async_handle_message()`-Orchestrierung, mit echtem
+JSON-Roundtrip gegen `tmp_path`). Vollständige Regression: 1472 passed, 14
+skipped (vorher 1467/14) – kein bestehender Test verändert.
+
+⸻
+
 ## 7. Sicherheitsregeln
 
 - **Niemals bei echter Ambiguität raten.** Je unsicherer die
