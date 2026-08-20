@@ -56,8 +56,36 @@ from homeassistant.util import yaml as yaml_util
 from homeassistant.util.file import write_utf8_file_atomic
 
 from .automation_metadata_store import AutomationMetadata, AutomationMetadataStore, utcnow_isoformat
+from .automation_summary import AutomationSummary
 
 AUTOMATIONS_YAML_FILENAME = "automations.yaml"
+
+
+def _collect_entity_ids(value: Any) -> set[str]:
+    """Every ``entity_id`` value found anywhere in ``value`` (a raw
+    automation config dict/list node) - deliberately shape-blind (walks
+    every dict/list node instead of hand-enumerating known trigger/
+    condition/action shapes), since automation YAML has enough structural
+    variety (single trigger dict vs. list of triggers, service-call target
+    blocks, nested conditions) that enumerating every shape risks silently
+    missing one. See ``AutomationSummary``'s own docstring for why this
+    shallow "mentions X somewhere" collection - not a re-derivation of
+    trigger/condition/action semantics - is enough for V5.29's scope.
+    """
+    found: set[str] = set()
+    if isinstance(value, dict):
+        for key, val in value.items():
+            if key == "entity_id":
+                if isinstance(val, str):
+                    found.add(val)
+                elif isinstance(val, list):
+                    found.update(v for v in val if isinstance(v, str))
+            else:
+                found.update(_collect_entity_ids(val))
+    elif isinstance(value, list):
+        for item in value:
+            found.update(_collect_entity_ids(item))
+    return found
 
 
 class AutomationExecutor:
@@ -132,6 +160,42 @@ class AutomationExecutor:
                 raise
 
         return automation_id
+
+    async def async_list_automations(self) -> tuple[AutomationSummary, ...]:
+        """V5.29 (Automation Query): a read-only survey of every automation
+        currently in ``automations.yaml``, cross-referenced against the
+        metadata sidecar - the read half of this class's job, mirroring
+        ``async_create_automation``'s write half but with none of its
+        locking (nothing here writes, so concurrent reads never race each
+        other or a write; a read started just before a concurrent
+        ``async_create_automation`` simply may or may not see the new
+        automation yet, the same eventually-consistent guarantee any other
+        read of live HA state already has - see ``matches_semantic_state``'s
+        "never cached" precedent for entity state).
+
+        Callers gate this behind a cheap sentence pre-check first (see
+        ``engine.py``'s ``_AUTOMATION_QUERY_RE``) - reading and parsing
+        ``automations.yaml`` on every single conversation turn regardless of
+        its content would be real, unnecessary per-turn I/O cost.
+        """
+        path = self._hass.config.path(AUTOMATIONS_YAML_FILENAME)
+        automations = await self._hass.async_add_executor_job(self._read_automations, path)
+        metadata = await self._metadata_store.async_load_all()
+
+        summaries = []
+        for automation in automations:
+            automation_id = automation.get("id", "")
+            entry = metadata.get(automation_id)
+            summaries.append(
+                AutomationSummary(
+                    automation_id=automation_id,
+                    alias=automation.get("alias", ""),
+                    source_text=entry.get("source_text") if entry else None,
+                    created_by=entry.get("created_by") if entry else None,
+                    referenced_entity_ids=frozenset(_collect_entity_ids(automation)),
+                )
+            )
+        return tuple(summaries)
 
     @staticmethod
     def _read_automations(path: str) -> list[dict[str, Any]]:

@@ -29,6 +29,7 @@ from pathlib import Path
 from hassil import Intents
 
 from .areas import AreaResolveStatus, resolve_area_name
+from .automation_summary import AutomationSummary
 from .entities import EntitySnapshot, ResolveStatus, build_entity_index, resolve_entity
 from .nlu.command import SemanticCommand, build_semantic_command
 from .nlu.context import ConversationContext
@@ -50,6 +51,7 @@ from .nlu.automation_validator import AutomationValidationError, validate_automa
 from .nlu.condition_model import ConditionNode
 from .parsers import (
     AreaQueryParser,
+    AutomationQueryParser,
     ClimateExtendedParser,
     CommandFollowupParser,
     ComparisonQueryParser,
@@ -95,6 +97,7 @@ COMMAND_FOLLOWUP_DIR = INTENTS_DIR / "command_followup"
 AUTOMATION_TRIGGER_DIR = INTENTS_DIR / "automation_trigger"
 AUTOMATION_CONDITION_DIR = INTENTS_DIR / "automation_condition"
 AUTOMATION_ACTION_DIR = INTENTS_DIR / "automation_action"
+AUTOMATION_QUERY_DIR = INTENTS_DIR / "automation_query"
 
 # Sentences containing a temporal-modifier keyword ("Minute(n)"/"Stunde(n)"/
 # "Uhr"/"morgen früh"/"heute Abend"/...) are routed to TemporalParser's
@@ -276,6 +279,20 @@ _AND_SPLIT_RE = re.compile(r"\s+und\s+", re.IGNORECASE)
 # already follows.
 _AREA_QUERY_RE = re.compile(r"\bist\s+es\b", re.IGNORECASE)
 
+# "automation(en)"/"was schaltet"/"was steuert"/"warum ist"/"warum geht"
+# routes to AutomationQueryParser's separately-compiled grammar (HomeIntent
+# plan V5.29, "Automation Query") - checked as its own cheap pre-check
+# (mirroring ``_AUTOMATION_TRIGGER_RE``'s own role one wave earlier) since
+# this is what gates the real, blocking ``automations.yaml``/metadata-
+# sidecar read in ``conversation.py`` before ``match_automation_query()``
+# is even called - an ordinary command/query turn must never pay that I/O
+# cost. "warum ist"/"warum geht" are deliberately narrow (not a bare
+# "warum") - grepped empirically against every existing live grammar, no
+# collision found.
+_AUTOMATION_QUERY_RE = re.compile(
+    r"\bautomation(en)?\b|\bwas schaltet\b|\bwas steuert\b|\bwarum ist\b|\bwarum geht\b", re.IGNORECASE
+)
+
 # Per-domain question word for the clarification round-trip (v2 plan Phase
 # 25). Same kind of small, explicit German-grammar lookup as
 # service_call.py's ``_DOMAIN_PLURAL_DE`` - only covers the domains
@@ -412,6 +429,7 @@ class NluEngine:
         automation_trigger_dir: Path = AUTOMATION_TRIGGER_DIR,
         automation_condition_dir: Path = AUTOMATION_CONDITION_DIR,
         automation_action_dir: Path = AUTOMATION_ACTION_DIR,
+        automation_query_dir: Path = AUTOMATION_QUERY_DIR,
     ) -> None:
         yaml_files = sorted(intents_dir.glob("*.yaml"))
         if not yaml_files:
@@ -498,6 +516,11 @@ class NluEngine:
             raise FileNotFoundError(f"No intent YAML files found in {automation_action_dir}")
         automation_action_intents: Intents = Intents.from_files(automation_action_yaml_files)
 
+        automation_query_yaml_files = sorted(automation_query_dir.glob("*.yaml"))
+        if not automation_query_yaml_files:
+            raise FileNotFoundError(f"No intent YAML files found in {automation_query_dir}")
+        automation_query_intents: Intents = Intents.from_files(automation_query_yaml_files)
+
         self._single_parser = SingleTargetParser(intents)
         self._quantifier_parser = QuantifierParser(quantifier_intents)
         self._percentage_parser = PercentageParser(percentage_intents)
@@ -521,6 +544,7 @@ class NluEngine:
         self._automation_action_parser = AutomationActionParser(
             automation_action_intents, self._automation_condition_parser
         )
+        self._automation_query_parser = AutomationQueryParser(automation_query_intents)
 
     def _select_parser(self, text: str):
         if _TEMPORAL_RE.search(text):
@@ -751,6 +775,46 @@ class NluEngine:
 
         normalized = normalize(text)
         result = self._command_followup_parser.parse(normalized, entities, context.last_command)
+        if result is None:
+            return None
+        return self._build_match_result(result, entities, context)
+
+    def match_automation_query(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        context: ConversationContext | None,
+        automations: tuple[AutomationSummary, ...],
+    ) -> MatchResult | None:
+        """Match "Welche Automationen gibt es?"/"Was schaltet/steuert X?"/
+        "Warum ist/geht X ...?" (HomeIntent plan V5.29, "Automation Query")
+        into a ``QueryResult`` built from ``automations`` - a read-only
+        survey of ``automations.yaml`` plus its metadata sidecar
+        (``AutomationExecutor.async_list_automations()``), same
+        ``AutomationSummary``-tuple shape ``AutomationQueryParser``/
+        ``QueryExecutor._execute_automation()`` already consume.
+
+        Gated by ``_AUTOMATION_QUERY_RE`` first, same cheap-pre-check role
+        ``_AUTOMATION_TRIGGER_RE`` already plays for ``match_automation()``
+        - but here the gate matters even more: it is what lets
+        ``conversation.py`` decide whether to await the real, blocking
+        ``automations.yaml``/metadata-sidecar read at all *before* calling
+        this method, so ``automations`` is only ever non-empty-by-actual-
+        content on a turn that plausibly needs it. An ordinary command/query
+        turn never pays that I/O cost.
+
+        Called from ``conversation.py`` alongside ``match_automation()`` -
+        both are independent entry points ``_select_parser()`` never routes
+        to internally, same "new grammar, new top-level method" precedent
+        every other separately-compiled grammar in this module already
+        follows.
+        """
+        if not _AUTOMATION_QUERY_RE.search(text):
+            return None
+
+        normalized = normalize(text)
+        parse_context = ParseContext(entities=entities, index=build_entity_index(entities))
+        result = self._automation_query_parser.parse(normalized, parse_context, automations)
         if result is None:
             return None
         return self._build_match_result(result, entities, context)

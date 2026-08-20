@@ -18,6 +18,7 @@ nothing in ``engine.py``/``parsers.py`` constructs a ``QueryExecutor``.
 
 from __future__ import annotations
 
+from ..automation_summary import AutomationSummary
 from ..entities import EntitySnapshot
 from ..world_model import WorldModel
 from .query_command import QueryCommand, QueryResult, QueryResultStatus, QueryScope, QueryTargetKind
@@ -36,12 +37,50 @@ class QueryExecutor:
         command: QueryCommand,
         candidates: list[EntitySnapshot],
         world_model: WorldModel | None = None,
+        automations: tuple[AutomationSummary, ...] = (),
     ) -> QueryResult:
         if command.target.kind is QueryTargetKind.DEVICE:
             return self._execute_device(command, world_model)
+        if command.target.kind is QueryTargetKind.AUTOMATION:
+            return self._execute_automation(command, candidates, automations)
         if command.scope is QueryScope.SINGLE:
             return self._execute_single(command, candidates)
         return self._execute_plural(command, candidates)
+
+    @staticmethod
+    def _execute_automation(
+        command: QueryCommand,
+        candidates: list[EntitySnapshot],
+        automations: tuple[AutomationSummary, ...],
+    ) -> QueryResult:
+        """AUTOMATION-scope queries (HassAutomationQuery/HassAutomationWhyQuery,
+        V5.29). No ``target.entity_id`` ("welche Automationen gibt es?")
+        lists every automation the caller read; a resolved ``entity_id``
+        ("was schaltet X?"/"warum geht X an?") narrows to automations whose
+        ``referenced_entity_ids`` mention it - see ``AutomationSummary``'s
+        own docstring for why that's a deliberately shallow "mentions X
+        somewhere", not a re-derivation of actual trigger/action causation.
+
+        ``candidates`` carries the already-resolved target entity (same
+        calling shape ``_execute_single`` uses for its own ``entity_id``
+        membership check) purely so the response can name it - membership
+        itself is decided by ``entity_id in referenced_entity_ids`` alone.
+        Zero matches is EMPTY, not an error - same "0 is a normal answer"
+        precedent ``_execute_plural`` already establishes.
+        """
+        entity_id = command.target.entity_id
+        if entity_id is None:
+            matched = automations
+        else:
+            matched = tuple(a for a in automations if entity_id in a.referenced_entity_ids)
+        status = QueryResultStatus.MATCHED if matched else QueryResultStatus.EMPTY
+        entity = candidates[0] if entity_id is not None and candidates else None
+        return QueryResult(
+            status=status,
+            entities=(entity,) if entity is not None else (),
+            automations=tuple(matched),
+            command=command,
+        )
 
     @staticmethod
     def _execute_device(command: QueryCommand, world_model: WorldModel | None) -> QueryResult:

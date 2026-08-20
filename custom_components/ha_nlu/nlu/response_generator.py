@@ -47,6 +47,17 @@ _DEVICE_CLASS_PLURAL_DE = {
 _DOMAIN_PLURAL_DE = {"light": "Lichter", "switch": "Schalter", "fan": "Ventilatoren", "cover": "Rollläden"}
 
 
+def _automation_label(automation) -> str:
+    """The spoken name for one automation (V5.29) - its own ``source_text``
+    (the exact sentence that created it, HomeIntent-made automations only)
+    when available, since that's more recognizable to the user than an
+    auto-generated ``alias``; falls back to ``alias`` for automations this
+    integration didn't create (every HA automation has one, whether made by
+    hand in the UI or by HomeIntent - see ``AutomationSummary``'s docstring).
+    """
+    return automation.source_text or automation.alias
+
+
 def _join_names(names: list[str]) -> str:
     """Natural German list-joining ("A und B" for 2, "A, B und C" for 3+)
     instead of a pure comma-join - shared by every multi-result branch below
@@ -78,6 +89,8 @@ class ResponseGenerator:
 
         if command.target.kind is QueryTargetKind.DEVICE:
             return self._respond_device_list(result)
+        if command.target.kind is QueryTargetKind.AUTOMATION:
+            return self._respond_automation(result)
         if command.scope is QueryScope.SINGLE:
             return self._respond_single(result)
         if command.scope is QueryScope.EXISTS:
@@ -145,6 +158,41 @@ class ResponseGenerator:
         if len(devices) == 1:
             return f"{devices[0].name} ist im {area_name}."
         return _join_names([d.name for d in devices]) + f" sind im {area_name}."
+
+    def _respond_automation(self, result: QueryResult) -> str:
+        """AUTOMATION-scope queries (HassAutomationQuery/HassAutomationWhyQuery,
+        V5.29). Three shapes: a bare "welche Automationen gibt es?" listing
+        (no ``target.entity_id``), and two entity-filtered phrasings sharing
+        the exact same ``QueryResult`` shape but different wording depending
+        on ``command.intent`` - HassAutomationQuery's plain "wird gesteuert
+        von" vs. HassAutomationWhyQuery's hedged "könnte beeinflusst werden"
+        (deliberately non-committal: this only reports automations that
+        *mention* the entity somewhere, see ``AutomationSummary``'s
+        docstring - it is not a causation proof).
+        """
+        command = result.command
+        labels = [_automation_label(a) for a in result.automations]
+
+        if command.target.entity_id is None:
+            if not labels:
+                return "Es sind keine Automationen vorhanden."
+            return f"Es gibt folgende Automationen: {_join_names(labels)}."
+
+        entity_name = result.entities[0].friendly_name if result.entities else "das"
+        causal = command.intent == "HassAutomationWhyQuery"
+        if not labels:
+            if causal:
+                return f"Ich habe keine Automation gefunden, die {entity_name} beeinflussen könnte."
+            return f"Ich habe keine Automation gefunden, die {entity_name} steuert."
+
+        joined = _join_names(labels)
+        plural = len(labels) > 1
+        if causal:
+            noun = "Automationen" if plural else "Automation"
+            return f"{entity_name} könnte durch folgende {noun} beeinflusst werden: {joined}."
+        if plural:
+            return f"{entity_name} wird von folgenden Automationen gesteuert: {joined}."
+        return f"{entity_name} wird von folgender Automation gesteuert: {joined}."
 
     def _respond_exists(self, result: QueryResult) -> str:
         noun = self._noun(result)

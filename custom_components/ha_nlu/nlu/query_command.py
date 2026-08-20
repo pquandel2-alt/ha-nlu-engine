@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from ..areas import AreaSnapshot
+from ..automation_summary import AutomationSummary
 from ..devices import DeviceSnapshot
 from ..entities import EntitySnapshot
 from .semantic_state import SemanticState
@@ -46,23 +47,32 @@ class QueryTargetKind(Enum):
     """What kind of object a query searches over - ``ENTITY`` (the only kind
     before the WorldModelQuery wave) vs. ``DEVICE`` (HassDeviceQuery, "welche
     Geräte sind im Büro?" - answered from the WorldModel's device list, not
-    an entity/state filter). Cut so a future third value (e.g. ``AREA``)
-    could be added without restructuring ``QueryExecutor``/``ResponseGenerator``.
+    an entity/state filter) vs. ``AUTOMATION`` (HassAutomationQuery/
+    HassAutomationWhyQuery, V5.29 - answered from ``automations.yaml`` plus
+    its metadata sidecar, not an entity/state filter either). Cut so a
+    future further value could be added without restructuring
+    ``QueryExecutor``/``ResponseGenerator`` - the ``DEVICE`` case already
+    proved this extension point out before ``AUTOMATION`` reused it.
     """
 
     ENTITY = auto()
     DEVICE = auto()
+    AUTOMATION = auto()
 
 
 @dataclass(frozen=True)
 class QueryTarget:
     """What a query searches over, before any state filter is applied.
 
-    ``entity_id`` is only set for ``QueryScope.SINGLE`` (HassCheckState's
-    resolved ``{name}``); ``device_class`` narrows ``domain`` further, same
-    "domain:device_class" split ``StateQueryParser._device_class_candidates``
-    already performs. ``domain`` is ``None`` for ``QueryTargetKind.DEVICE``
-    targets - devices are cross-domain, there is no single domain to name.
+    ``entity_id`` is set for ``QueryScope.SINGLE`` (HassCheckState's resolved
+    ``{name}``) and, optionally, for ``QueryTargetKind.AUTOMATION`` targets
+    (HassAutomationQuery/HassAutomationWhyQuery's resolved ``{name}`` - "was
+    schaltet X?"/"warum geht X an?" - filters to automations referencing
+    that entity; unset means "list every automation", V5.29).
+    ``device_class`` narrows ``domain`` further, same "domain:device_class"
+    split ``StateQueryParser._device_class_candidates`` already performs.
+    ``domain`` is ``None`` for ``QueryTargetKind.DEVICE``/``AUTOMATION``
+    targets - both are cross-domain, there is no single domain to name.
     """
 
     domain: str | None = None
@@ -111,4 +121,5 @@ class QueryResult:
     status: QueryResultStatus
     entities: tuple[EntitySnapshot, ...] = ()
     devices: tuple[DeviceSnapshot, ...] = ()
+    automations: tuple[AutomationSummary, ...] = ()
     command: QueryCommand | None = None

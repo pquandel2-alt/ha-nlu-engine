@@ -89,6 +89,16 @@ class AutomationMetadataStore:
         entries[metadata.automation_id] = asdict(metadata)
         await self._hass.async_add_executor_job(self._write, path, entries)
 
+    async def async_load_all(self) -> dict[str, Any]:
+        """Every stored entry, keyed by ``automation_id`` - the read half of
+        this store's job (V5.29, Automation Query), same "no lock needed"
+        reasoning ``AutomationExecutor.async_list_automations()`` documents
+        for its own read: nothing here writes, so this can never race
+        ``async_save``/``async_delete`` into a torn read (each of those is
+        itself a single atomic file write)."""
+        path = self._hass.config.path(METADATA_FILENAME)
+        return await self._hass.async_add_executor_job(self._read, path)
+
     async def async_delete(self, automation_id: str) -> None:
         """Removes ``automation_id``'s entry if present - a no-op otherwise
         (rollback calling this for an id whose metadata write never

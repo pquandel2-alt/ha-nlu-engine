@@ -15,6 +15,7 @@ from typing import Callable
 from hassil import Intents, RangeSlotList, RangeType, WildcardSlotList, recognize
 
 from .areas import AreaResolutionStatus, AreaResolveStatus, AreaSnapshot, resolve_area_name, resolve_area_scored
+from .automation_summary import AutomationSummary
 from .entities import (
     EntitySnapshot,
     ResolutionStatus,
@@ -1810,3 +1811,115 @@ class StateQueryParser:
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=[])
+
+
+# --- V5.29 "Automation Query" ------------------------------------------------
+
+
+class AutomationQueryParser:
+    """Wraps the {name}/{state} grammar ("welche Automationen gibt es",
+    "was schaltet das Küchenlicht", "warum ist das Küchenlicht an") -
+    HomeIntent V5 Teil 9/10, V5.29 "Automation Query", the 16th separately-
+    compiled hassil grammar.
+
+    Unlike every other query parser here, its ``QueryResult`` is built from
+    ``automations.yaml``/the metadata sidecar (``AutomationSummary``), not
+    live entity state - data this class has no way to fetch itself (``nlu``-
+    adjacent parsers stay hass-free, same boundary ``StateQueryParser``
+    already documents). So ``automations`` is an explicit parameter to
+    ``parse()``, supplied by the caller, rather than folded into
+    ``ParseContext`` like ``world_model`` - ``ParseContext`` otherwise holds
+    only cheap, always-available per-turn data every parser can rely on;
+    this one field would need an async file read on every single turn to
+    keep that promise, which is exactly the per-turn I/O cost this design
+    avoids (see ``engine.py``'s ``_AUTOMATION_QUERY_RE`` pre-check, mirroring
+    ``match_automation()``'s own ``_AUTOMATION_TRIGGER_RE`` gate).
+
+    No {area}/{device_class} slots - see this grammar's own YAML docstring
+    for why area-scoping automations is out of scope. An unresolved or
+    ambiguous {name} is refused (``None``, no clarification round-trip),
+    same "never guess" precedent ``StateQueryParser._parse_check_state``
+    already sets for its own singular {name} resolution.
+    """
+
+    def __init__(self, intents: Intents) -> None:
+        self._intents = intents
+
+    def parse(
+        self,
+        text: str,
+        context: ParseContext,
+        automations: tuple[AutomationSummary, ...],
+    ) -> ParseResult | None:
+        slot_lists = {
+            "state": _STATE_SLOT_LIST,
+            "name": WildcardSlotList(name="name"),
+        }
+        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+        if result is None or result.intent is None:
+            return None
+
+        if result.intent.name == "HassAutomationQuery":
+            return self._parse_query(text, result.entities, context, automations, causal=False)
+        if result.intent.name == "HassAutomationWhyQuery":
+            return self._parse_query(text, result.entities, context, automations, causal=True)
+        return None
+
+    @staticmethod
+    def _parse_query(
+        text: str,
+        slots: dict,
+        context: ParseContext,
+        automations: tuple[AutomationSummary, ...],
+        causal: bool,
+    ) -> ParseResult | None:
+        intent_name = "HassAutomationWhyQuery" if causal else "HassAutomationQuery"
+        name_slot = slots.get("name")
+
+        if name_slot is None:
+            # "welche Automationen gibt es" - no entity filter, list every
+            # automation the caller read.
+            query_command = QueryCommand(
+                intent=intent_name,
+                scope=QueryScope.LIST,
+                target=QueryTarget(kind=QueryTargetKind.AUTOMATION),
+                filter=QueryFilter(),
+            )
+            query_result = _QUERY_EXECUTOR.execute(query_command, candidates=[], automations=automations)
+            frame = SemanticFrame(
+                intent=intent_name,
+                target=None,
+                area=None,
+                parameters={"query_command": query_command, "query_result": query_result},
+                source_text=text,
+            )
+            return ParseResult(frame=frame, resolved_entities=[])
+
+        name = _strip_locative_prepositions(str(name_slot.value))
+        resolved = resolve_entity_scored(name, context.entities, index=context.index)
+        if resolved.status is not ResolutionStatus.RESOLVED or resolved.entity is None:
+            return None  # not found or ambiguous - never guess, no clarification round-trip
+
+        query_command = QueryCommand(
+            intent=intent_name,
+            scope=QueryScope.LIST,
+            target=QueryTarget(
+                domain=resolved.entity.domain,
+                device_class=resolved.entity.device_class,
+                entity_id=resolved.entity.entity_id,
+                kind=QueryTargetKind.AUTOMATION,
+            ),
+            filter=QueryFilter(),
+        )
+        query_result = _QUERY_EXECUTOR.execute(
+            query_command, candidates=[resolved.entity], automations=automations
+        )
+
+        frame = SemanticFrame(
+            intent=intent_name,
+            target=TargetReference(text=name, entity_id=resolved.entity.entity_id, domain=resolved.entity.domain),
+            area=None,
+            parameters={"query_command": query_command, "query_result": query_result},
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=list(query_result.entities))

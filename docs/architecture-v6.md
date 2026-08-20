@@ -681,6 +681,90 @@ skipped (vorher 1467/14) – kein bestehender Test verändert.
 
 ⸻
 
+## 6h. V5 Teil 9/10 (Wave 9) – V5.29 "Automation Query" (Ergebnis, 2026-08-20)
+
+**Ziel:** V5.29 aus dem in 6g zurückgestellten Rest von V5 Teil 8–10 –
+existierende Automationen wiederfinden, als Voraussetzung für die dort
+ebenfalls zurückgestellten V5.27/V5.28 (Modification/Deletion). Bewusst
+enger Scope als der Name suggeriert – drei Query-Formen abgedeckt: "Welche
+Automationen gibt es?" (Bare Listing), "Was schaltet/steuert X?"
+(entity-gefiltert), "Warum ist/geht X …?" (dieselbe Filterung, nur
+kausal-vorsichtiger formulierte Antwort). Ausdrücklich **nicht** in Scope:
+Area-Filterung von Automationen, vollständige Trigger-/Condition-/
+Action-Semantik-Rückableitung (nur flaches "entity_id irgendwo erwähnt"),
+sowie COUNT/EXISTS-Scopes (nur LIST). Diese Grenzen waren eine autonome
+Scope-Entscheidung zu Beginn der Wave, nicht vorab mit dem Nutzer
+abgestimmt.
+
+**Bausteine:**
+
+- `automation_summary.py::AutomationSummary` (NEU, hass-frei): `automation_id`,
+  `alias`, `source_text` (optional), `created_by` (optional),
+  `referenced_entity_ids` (`frozenset[str]`) – bewusst nur "kommt diese
+  entity_id irgendwo im Automation-Dict vor", keine Re-Interpretation von
+  Trigger/Condition/Action-Semantik (siehe Scope-Grenze oben).
+- `nlu/query_command.py::QueryTargetKind.AUTOMATION` (NEU, zweiter
+  Extension-Point nach `DEVICE`): `QueryExecutor.execute()` nimmt einen
+  zusätzlichen optionalen `automations`-Parameter, spiegelt das bestehende
+  `world_model`-Muster für `DEVICE`.
+- `nlu/query_executor.py::QueryExecutor._execute_automation()`: ohne
+  `entity_id` werden alle übergebenen Automationen gelistet, mit
+  `entity_id` gefiltert auf `entity_id in referenced_entity_ids`. 0 Treffer
+  ist `EMPTY`, kein Fehler – dasselbe "0 ist eine normale Antwort"-Prinzip
+  wie bei `_execute_plural`.
+- `nlu/response_generator.py::ResponseGenerator._respond_automation()`:
+  spricht `source_text` wenn vorhanden, sonst `alias` als Fallback. Kausale
+  Formulierung (`HassAutomationWhyQuery`) hedged mit "könnte" statt
+  Tatsachenbehauptung – die flache Entity-Referenz-Erkennung beweist keine
+  echte Kausalität.
+- `automation_executor.py::AutomationExecutor.async_list_automations()`
+  (NEU): liest `automations.yaml` + Metadata-Sidecar, baut daraus die
+  `AutomationSummary`-Liste. Rein lesend, kein Lock nötig (siehe Docstring
+  dort zur Nebenläufigkeits-Begründung).
+- `parsers.py::AutomationQueryParser` + zwei neue Intents
+  (`HassAutomationQuery`/`HassAutomationWhyQuery`, 16. separat kompilierte
+  Grammatik): unaufgelöster oder mehrdeutiger `{name}` wird abgelehnt
+  (`None`, kein Klarstellungs-Roundtrip) – dasselbe "niemals raten"-Prinzip,
+  das `StateQueryParser._parse_check_state` bereits für seine eigene
+  `{name}`-Auflösung setzt.
+- `engine.py`/`conversation.py`: `_AUTOMATION_QUERY_RE` als billiges
+  Regex-Gate vor dem echten, blockierenden `automations.yaml`-Read –
+  spiegelt `_AUTOMATION_TRIGGER_RE`s bereits bestehende Rolle für
+  `match_automation()`. `automations` wird als expliziter Parameter an
+  `match_automation_query()`/`AutomationQueryParser.parse()` durchgereicht,
+  bewusst **nicht** in `ParseContext` aufgenommen (das würde einen
+  Async-I/O-Read auf jedem Turn erzwingen, im Gegensatz zum billigen/
+  synchronen `WorldModel`). `conversation.py` nutzt für den Read dieselbe
+  lazily-konstruierte `AutomationExecutor`-Instanz, die die
+  Automation-Erstellung bereits verwendet.
+- `service_call.py::QUERY_INTENTS`: beide neuen Intents brauchten dort
+  einen Eintrag – ein während der Implementierung übersehener Schritt
+  (`nlu/validator.py`s Schritt 1 lehnt jeden nicht registrierten Intent mit
+  `UNKNOWN_INTENT` ab), durch die Tests in dieser Wave selbst gefunden und
+  gefixt. `allowed_domains` ist dabei bewusst **nicht** leer wie bei
+  `HassDeviceQuery` – anders als DEVICE-Queries befüllt die
+  entity-gefilterte AUTOMATION-Form `command.entities` mit der aufgelösten
+  Ziel-Entity (damit die Antwort sie benennen kann), eine leere Menge hätte
+  Schritt 5 (Domain-Check) jeden echten Treffer verwerfen lassen. Verwendet
+  stattdessen `_AUTOMATION_QUERY_ALLOWED_DOMAINS` – die Vereinigung aller
+  Domains, die diese Datei an anderer Stelle bereits als gültig behandelt
+  (`light`, `switch`, `fan`, `climate`, `cover`, `sensor`, `binary_sensor`),
+  statt einer neu erfundenen Liste (Regel 4).
+
+**Tests:** 30 neue Tests über 5 Dateien (`test_automation_summary.py`: 3;
+`test_query_executor.py`: +4 AUTOMATION-Fälle; `test_response_generator.py`:
++9 für jeden Antwort-Zweig von `_respond_automation()`;
+`test_engine_automation_query.py`, NEU: 8 direkte
+`match_automation_query()`-Tests inkl. Regex-Gate und "niemals
+raten"-Ablehnung bei unaufgelöstem/mehrdeutigem Namen;
+`test_conversation_automation_query.py`, NEU: 6 E2E-Tests über die echte
+`_async_handle_message()`-Orchestrierung, inkl. eines Tests, der beweist,
+dass `async_list_automations()` für eine gewöhnliche Steuerungs-Anweisung
+gar nicht erst aufgerufen wird). Vollständige Regression: 1502 passed, 14
+skipped (vorher 1472/14) – kein bestehender Test verändert.
+
+⸻
+
 ## 7. Sicherheitsregeln
 
 - **Niemals bei echter Ambiguität raten.** Je unsicherer die

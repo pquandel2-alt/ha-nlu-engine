@@ -219,6 +219,15 @@ def _speak_comparison_matches(entities: list[EntitySnapshot]) -> str:
     return ", ".join(f"{e.friendly_name} ({_speak_comparison_value(e)})" for e in entities) + "."
 
 
+# The union of every domain this file already treats as valid somewhere
+# else (INTENTS/PERCENT_INTENTS/the other QUERY_INTENTS entries) - not a
+# new, separately-invented "all domains" list (Regel 4: never guess). Used
+# only by the two AUTOMATION-kind query intents below, see their comment.
+_AUTOMATION_QUERY_ALLOWED_DOMAINS = frozenset(
+    {"light", "switch", "fan", "climate", "cover", "sensor", "binary_sensor"}
+)
+
+
 QUERY_INTENTS: dict[str, QueryIntentSpec] = {
     "HassGetState": QueryIntentSpec(
         allowed_domains=frozenset({"sensor", "light"}),
@@ -252,6 +261,27 @@ QUERY_INTENTS: dict[str, QueryIntentSpec] = {
     ),
     "HassDeviceQuery": QueryIntentSpec(
         allowed_domains=frozenset(),
+        response=lambda es, params: "Das habe ich nicht verstanden.",
+        allows_empty=True,
+    ),
+    # V5.29 "Automation Query": unlike every other QUERY_INTENTS entry, the
+    # resolved entity's domain has no bearing on this query's behaviour at
+    # all - "was schaltet {name}" only checks entity_id membership in an
+    # automation's referenced_entity_ids (see QueryExecutor._execute_automation),
+    # the same way HassDeviceQuery's domain check is inert by construction.
+    # But unlike HassDeviceQuery, the entity-filtered shape here *does*
+    # populate command.entities with the resolved target (so its response
+    # can name it) - an empty allowed_domains would make step 5 of
+    # validate_command() reject every entity-filtered match. So this uses
+    # _AUTOMATION_QUERY_ALLOWED_DOMAINS (every domain already treated as
+    # valid somewhere else in this file) rather than an empty set.
+    "HassAutomationQuery": QueryIntentSpec(
+        allowed_domains=_AUTOMATION_QUERY_ALLOWED_DOMAINS,
+        response=lambda es, params: "Das habe ich nicht verstanden.",
+        allows_empty=True,
+    ),
+    "HassAutomationWhyQuery": QueryIntentSpec(
+        allowed_domains=_AUTOMATION_QUERY_ALLOWED_DOMAINS,
         response=lambda es, params: "Das habe ich nicht verstanden.",
         allows_empty=True,
     ),

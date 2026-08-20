@@ -6,8 +6,16 @@ engine.py/parsers.py (Phase 7 does that) - exercised directly here.
 
 from __future__ import annotations
 
+from ha_nlu.automation_summary import AutomationSummary
 from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.query_command import QueryCommand, QueryFilter, QueryResultStatus, QueryScope, QueryTarget
+from ha_nlu.nlu.query_command import (
+    QueryCommand,
+    QueryFilter,
+    QueryResultStatus,
+    QueryScope,
+    QueryTarget,
+    QueryTargetKind,
+)
 from ha_nlu.nlu.query_executor import QueryExecutor
 from ha_nlu.nlu.semantic_state import SemanticState
 
@@ -168,3 +176,59 @@ def test_single_without_pre_resolved_entity_id_and_exactly_one_candidate_matches
     result = executor.execute(command, [a])
     assert result.status is QueryResultStatus.MATCHED
     assert result.entities == (a,)
+
+
+# --- AUTOMATION (V5.29, "Automation Query") --------------------------------
+
+
+KUECHE_AUTOMATION = AutomationSummary(
+    automation_id="a1",
+    alias="Küchenlicht-Automation",
+    referenced_entity_ids=frozenset({"light.kueche_licht"}),
+)
+BUERO_AUTOMATION = AutomationSummary(
+    automation_id="a2",
+    alias="Büro-Automation",
+    referenced_entity_ids=frozenset({"switch.buero_steckdose"}),
+)
+
+
+def _automation_command(entity_id: str | None) -> QueryCommand:
+    return QueryCommand(
+        intent="HassAutomationQuery",
+        scope=QueryScope.LIST,
+        target=QueryTarget(kind=QueryTargetKind.AUTOMATION, entity_id=entity_id),
+        filter=QueryFilter(),
+    )
+
+
+def test_automation_query_with_no_entity_id_lists_every_automation():
+    command = _automation_command(None)
+    result = executor.execute(command, [], automations=(KUECHE_AUTOMATION, BUERO_AUTOMATION))
+    assert result.status is QueryResultStatus.MATCHED
+    assert result.automations == (KUECHE_AUTOMATION, BUERO_AUTOMATION)
+
+
+def test_automation_query_with_no_automations_at_all_is_empty():
+    command = _automation_command(None)
+    result = executor.execute(command, [], automations=())
+    assert result.status is QueryResultStatus.EMPTY
+    assert result.automations == ()
+
+
+def test_automation_query_filters_by_referenced_entity_id():
+    command = _automation_command("light.kueche_licht")
+    result = executor.execute(
+        command, [_window("light.kueche_licht", "on")], automations=(KUECHE_AUTOMATION, BUERO_AUTOMATION)
+    )
+    assert result.status is QueryResultStatus.MATCHED
+    assert result.automations == (KUECHE_AUTOMATION,)
+
+
+def test_automation_query_with_no_matching_automation_is_empty():
+    command = _automation_command("light.schlafzimmer")
+    result = executor.execute(
+        command, [_window("light.schlafzimmer", "on")], automations=(KUECHE_AUTOMATION, BUERO_AUTOMATION)
+    )
+    assert result.status is QueryResultStatus.EMPTY
+    assert result.automations == ()

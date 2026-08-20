@@ -12,6 +12,7 @@ source.
 from __future__ import annotations
 
 from ha_nlu.areas import AreaSnapshot
+from ha_nlu.automation_summary import AutomationSummary
 from ha_nlu.devices import DeviceSnapshot
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.query_command import (
@@ -206,6 +207,145 @@ def test_device_list_multiple_devices():
 
 
 # --- stateless listing (HassStateQuery without a {state} slot) -----------
+
+
+# --- AUTOMATION scope (V5.29, "Automation Query") -------------------------
+
+
+KUECHE_LICHT = EntitySnapshot("light.kueche_licht", "Küchenlicht", "light", "off")
+
+KUECHE_AUTOMATION_WITH_SOURCE = AutomationSummary(
+    automation_id="a1",
+    alias="ha_nlu_a1",
+    source_text="Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht ein.",
+    referenced_entity_ids=frozenset({"light.kueche_licht"}),
+)
+BUERO_AUTOMATION_NO_SOURCE = AutomationSummary(
+    automation_id="a2",
+    alias="Von Hand erstellte Automation",
+    referenced_entity_ids=frozenset({"switch.buero_steckdose"}),
+)
+
+
+def _automation_list_command() -> QueryCommand:
+    return QueryCommand(
+        intent="HassAutomationQuery",
+        scope=QueryScope.LIST,
+        target=QueryTarget(kind=QueryTargetKind.AUTOMATION),
+        filter=QueryFilter(),
+    )
+
+
+def _automation_entity_command(intent: str) -> QueryCommand:
+    return QueryCommand(
+        intent=intent,
+        scope=QueryScope.LIST,
+        target=QueryTarget(kind=QueryTargetKind.AUTOMATION, entity_id="light.kueche_licht"),
+        filter=QueryFilter(),
+    )
+
+
+def test_automation_list_empty():
+    command = _automation_list_command()
+    result = QueryResult(status=QueryResultStatus.EMPTY, automations=(), command=command)
+    assert respond(result) == "Es sind keine Automationen vorhanden."
+
+
+def test_automation_list_prefers_source_text_over_alias():
+    command = _automation_list_command()
+    result = QueryResult(
+        status=QueryResultStatus.MATCHED,
+        automations=(KUECHE_AUTOMATION_WITH_SOURCE,),
+        command=command,
+    )
+    assert respond(result) == (
+        "Es gibt folgende Automationen: Wenn das Küchenfenster geöffnet wird, "
+        "schalte das Küchenlicht ein.."
+    )
+
+
+def test_automation_list_falls_back_to_alias_when_no_source_text():
+    command = _automation_list_command()
+    result = QueryResult(
+        status=QueryResultStatus.MATCHED,
+        automations=(BUERO_AUTOMATION_NO_SOURCE,),
+        command=command,
+    )
+    assert respond(result) == "Es gibt folgende Automationen: Von Hand erstellte Automation."
+
+
+def test_automation_list_multiple_automations_are_joined():
+    command = _automation_list_command()
+    result = QueryResult(
+        status=QueryResultStatus.MATCHED,
+        automations=(KUECHE_AUTOMATION_WITH_SOURCE, BUERO_AUTOMATION_NO_SOURCE),
+        command=command,
+    )
+    assert respond(result) == (
+        "Es gibt folgende Automationen: Wenn das Küchenfenster geöffnet wird, "
+        "schalte das Küchenlicht ein. und Von Hand erstellte Automation."
+    )
+
+
+def test_automation_by_entity_none_found_plain_query():
+    command = _automation_entity_command("HassAutomationQuery")
+    result = QueryResult(
+        status=QueryResultStatus.EMPTY, entities=(KUECHE_LICHT,), automations=(), command=command
+    )
+    assert respond(result) == "Ich habe keine Automation gefunden, die Küchenlicht steuert."
+
+
+def test_automation_by_entity_none_found_causal_query_is_hedged():
+    command = _automation_entity_command("HassAutomationWhyQuery")
+    result = QueryResult(
+        status=QueryResultStatus.EMPTY, entities=(KUECHE_LICHT,), automations=(), command=command
+    )
+    assert respond(result) == (
+        "Ich habe keine Automation gefunden, die Küchenlicht beeinflussen könnte."
+    )
+
+
+def test_automation_by_entity_single_match_plain_query():
+    command = _automation_entity_command("HassAutomationQuery")
+    result = QueryResult(
+        status=QueryResultStatus.MATCHED,
+        entities=(KUECHE_LICHT,),
+        automations=(KUECHE_AUTOMATION_WITH_SOURCE,),
+        command=command,
+    )
+    assert respond(result) == (
+        "Küchenlicht wird von folgender Automation gesteuert: Wenn das "
+        "Küchenfenster geöffnet wird, schalte das Küchenlicht ein.."
+    )
+
+
+def test_automation_by_entity_single_match_causal_query_is_hedged():
+    command = _automation_entity_command("HassAutomationWhyQuery")
+    result = QueryResult(
+        status=QueryResultStatus.MATCHED,
+        entities=(KUECHE_LICHT,),
+        automations=(KUECHE_AUTOMATION_WITH_SOURCE,),
+        command=command,
+    )
+    assert respond(result) == (
+        "Küchenlicht könnte durch folgende Automation beeinflusst werden: Wenn "
+        "das Küchenfenster geöffnet wird, schalte das Küchenlicht ein.."
+    )
+
+
+def test_automation_by_entity_multiple_matches_are_joined_plural():
+    command = _automation_entity_command("HassAutomationQuery")
+    result = QueryResult(
+        status=QueryResultStatus.MATCHED,
+        entities=(KUECHE_LICHT,),
+        automations=(KUECHE_AUTOMATION_WITH_SOURCE, BUERO_AUTOMATION_NO_SOURCE),
+        command=command,
+    )
+    assert respond(result) == (
+        "Küchenlicht wird von folgenden Automationen gesteuert: Wenn das "
+        "Küchenfenster geöffnet wird, schalte das Küchenlicht ein. und Von "
+        "Hand erstellte Automation."
+    )
 
 
 def test_list_no_state_empty_without_area():

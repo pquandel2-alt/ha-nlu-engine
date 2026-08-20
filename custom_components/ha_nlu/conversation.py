@@ -27,7 +27,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .automation_executor import AutomationExecutor
 from .const import DOMAIN, NOT_UNDERSTOOD_TEXT
-from .engine import AutomationMatchResult, CommandPlan, NluEngine
+from .engine import AutomationMatchResult, CommandPlan, NluEngine, _AUTOMATION_QUERY_RE
 from .entities import EntitySnapshot
 from .hass_entities import build_device_snapshots, build_entity_snapshots
 from .nlu.automation_confirmation import ConfirmationReply, classify_confirmation_reply
@@ -198,6 +198,23 @@ class NluConversationEntity(
                 )
             if result is None:
                 result = self._engine.match_command_followup(user_input.text, entities, pending)
+            if result is None and _AUTOMATION_QUERY_RE.search(user_input.text):
+                # V5.29 "Automation Query": the same cheap pre-check
+                # ``match_automation_query()`` itself re-checks is applied
+                # here first too, since it is what decides whether the real,
+                # blocking ``automations.yaml``/metadata-sidecar read below
+                # happens at all - an ordinary command/query turn must never
+                # pay that I/O cost. ``self._automation_executor`` is the
+                # same lazily-constructed, entity-lifetime instance
+                # ``_async_handle_automation_confirmation_reply`` already
+                # uses for automation creation (see below) - one executor,
+                # one lock, shared across both read and write paths.
+                if self._automation_executor is None:
+                    self._automation_executor = AutomationExecutor(self.hass)
+                automations = await self._automation_executor.async_list_automations()
+                result = self._engine.match_automation_query(
+                    user_input.text, entities, pending, automations
+                )
             if result is None:
                 result = self._engine.match_automation(
                     user_input.text, entities, self._world_model, pending

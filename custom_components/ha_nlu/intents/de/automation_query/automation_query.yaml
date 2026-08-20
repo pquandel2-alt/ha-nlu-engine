@@ -1,0 +1,36 @@
+language: "de"
+intents:
+  # HomeIntent V5 Teil 9/10, V5.29 "Automation Query" - the 16th separately-
+  # compiled hassil grammar (see parsers.py's AutomationQueryParser
+  # docstring). Two intents, not one merged intent: HassAutomationQuery's
+  # plain "wird gesteuert von" wording and HassAutomationWhyQuery's hedged
+  # "könnte beeinflusst werden" wording are different response shapes for
+  # the same underlying QueryCommand (a resolved-entity reference lookup),
+  # same "one intent per distinct response shape" precedent state_query.yaml
+  # already sets for HassStateQuery/HassCheckState/HassExistsQuery.
+  #
+  # No {area}/{device_class} slots: automations aren't area-scoped the way
+  # entities are (an automation can trigger on one room and act in another),
+  # and re-deriving an automation's "area" from its trigger/action entities
+  # would be exactly the "full trigger/condition/action semantics
+  # re-derivation" the plan deliberately keeps out of scope (see
+  # AutomationSummary's docstring) - so this grammar only ever lists all
+  # automations or filters by one resolved {name}.
+  HassAutomationQuery:
+    data:
+      - sentences:
+          - "welche automationen gibt es"
+          - "welche automationen sind [denn] vorhanden"
+          - "was schaltet {name}"
+          - "was steuert {name}"
+  # {state} is captured but semantically unused (AutomationQueryParser never
+  # reads its value) - it only lets "warum ist das Licht an"/"warum geht das
+  # Licht an" match grammatically; the answer is the same regardless of
+  # which state word was spoken, since this only reports automations that
+  # reference {name} somewhere (see QueryExecutor._execute_automation's own
+  # docstring for why - never a proof of actual causation).
+  HassAutomationWhyQuery:
+    data:
+      - sentences:
+          - "warum ist {name} [denn] {state}"
+          - "warum geht {name} [denn] {state}"
