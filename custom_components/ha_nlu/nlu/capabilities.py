@@ -62,6 +62,14 @@ def derive_capabilities(
         caps.add(Capability.TURN_ON)
         caps.add(Capability.TURN_OFF)
 
+    # "script" (Skript-Aktivierung, 2026-08-20): only TURN_ON - a script is
+    # *run*, not "switched off" in the same sense a light/switch is; the
+    # user's request was specifically activation, and HA's own
+    # script.turn_off (cancel a running script) is a distinct, unrequested
+    # operation not modelled here (see service_call.py's HassRunScript).
+    if domain == "script":
+        caps.add(Capability.TURN_ON)
+
     if domain == "light":
         color_modes = frozenset(attributes.get("supported_color_modes") or ())
         if color_modes & _LIGHT_BRIGHTNESS_MODES:

@@ -38,6 +38,14 @@ def test_switch_has_only_on_off():
     assert caps == {Capability.TURN_ON, Capability.TURN_OFF}
 
 
+def test_script_has_only_turn_on_not_turn_off():
+    # Skript-Aktivierung (2026-08-20): a script is *run*, not switched off
+    # the way a light/switch is - script.turn_off (cancel) is a distinct,
+    # unrequested operation, deliberately not modelled here.
+    caps = derive_capabilities("script", None, {})
+    assert caps == {Capability.TURN_ON}
+
+
 def test_cover_with_position_attribute_has_position():
     caps = derive_capabilities("cover", None, {"current_position": 40})
     assert caps == {Capability.POSITION}

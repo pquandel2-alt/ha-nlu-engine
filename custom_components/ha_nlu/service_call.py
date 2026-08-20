@@ -38,7 +38,10 @@ def _entity_id_field(entities: list[EntitySnapshot]) -> str | list[str]:
     return ids[0] if len(ids) == 1 else ids
 
 
-_DOMAIN_PLURAL_DE = {"light": "Lichter", "switch": "Schalter", "fan": "Ventilatoren", "cover": "Rollläden"}
+_DOMAIN_PLURAL_DE = {
+    "light": "Lichter", "switch": "Schalter", "fan": "Ventilatoren", "cover": "Rollläden",
+    "script": "Skripte",
+}
 
 
 def _plural_response(entities: list[EntitySnapshot], singular_suffix: str, plural_suffix: str) -> str:
@@ -75,6 +78,18 @@ INTENTS: dict[str, IntentSpec] = {
         allowed_domains=frozenset({"cover"}),
         build=lambda es: ServiceCallPlan("cover", "close_cover", _entity_id_field(es)),
         response=lambda es: _plural_response(es, "wird geschlossen.", "geschlossen."),
+    ),
+    # Skript-Aktivierung (2026-08-20): a dedicated intent rather than adding
+    # "script" to HassTurnOn's allowed_domains - mirrors xiaozhi_entity_mcp's
+    # own separation of a generic "turn_on" tool (light/switch/fan/cover)
+    # from its own distinct "run_script" tool (script.turn_on), the same
+    # precedent this module's docstring already cites. "script.turn_on" is
+    # HA's documented, stable way to run a script (see
+    # https://www.home-assistant.io/integrations/script/).
+    "HassRunScript": IntentSpec(
+        allowed_domains=frozenset({"script"}),
+        build=lambda es: ServiceCallPlan("script", "turn_on", _entity_id_field(es)),
+        response=lambda es: _plural_response(es, "ausgeführt.", "ausgeführt."),
     ),
 }
 

@@ -52,6 +52,11 @@ FANS = {
     "Ventilator": "fan.venti",
 }
 
+SCRIPTS = {
+    "Gute Nacht": "script.gute_nacht",
+    "Kaffee kochen": "script.kaffee_kochen",
+}
+
 TURN_ON_PHRASES = [
     "Mach {name} an",
     "Schalte {name} ein",
@@ -83,6 +88,13 @@ COVER_CLOSE_PHRASES = [
     "{name} runterfahren",
     "Mach {name} zu",
     "Mach {name} ganz zu",
+]
+RUN_SCRIPT_PHRASES = [
+    "Starte {name}",
+    "Aktiviere {name}",
+    "Führe {name} aus",
+    "{name} starten",
+    "{name} ausführen",
 ]
 
 
@@ -130,6 +142,12 @@ SENSOR_ENTITIES: list[EntitySnapshot] = [
     for name, (eid, state, unit, device_class) in SENSORS.items()
 ]
 
+# Kept out of ALL_ENTITIES (Skript-Aktivierung, 2026-08-20), same reasoning
+# SENSOR_ENTITIES already documents: a separate fixture rather than folding
+# into the shared list, so every existing test parametrized against
+# ``entities``/ALL_ENTITIES keeps its exact current entity set.
+SCRIPT_ENTITIES: list[EntitySnapshot] = _snapshots(SCRIPTS, "script", "off", capabilities=frozenset({"TURN_ON"}))
+
 
 @pytest.fixture(scope="session")
 def engine() -> NluEngine:
@@ -149,3 +167,8 @@ def quantifier_entities() -> list[EntitySnapshot]:
 @pytest.fixture(scope="session")
 def sensor_entities() -> list[EntitySnapshot]:
     return SENSOR_ENTITIES
+
+
+@pytest.fixture(scope="session")
+def script_entities() -> list[EntitySnapshot]:
+    return SCRIPT_ENTITIES

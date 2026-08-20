@@ -1038,6 +1038,89 @@ Test verändert.
 
 ⸻
 
+## 6l. Skript-Aktivierung (Ergebnis, 2026-08-20)
+
+**Kein V5.x-Unterpunkt, sondern ein vom Nutzer gemeldeter Bug/Feature-Wunsch**
+("Füge noch hinzu das er auch scripte aktivieren kann das geht anscheinend
+noch nicht"): HA-Skripte (`script.*`) waren über die Sprachsteuerung
+überhaupt nicht ansprechbar.
+
+**Root Cause:** kein fehlender Parser/Intent, sondern eine fehlende
+Domain-Freigabe. `const.py::SELECTABLE_DOMAINS` enthielt `"script"` nie, also
+lieferte `hass_entities.py::default_exposed_entities()` grundsätzlich null
+`script.*`-Entities an die gesamte Pipeline – jede noch so clevere
+Parser-Änderung hätte ohne diesen ersten Fix nichts bewirkt.
+
+**Architekturentscheidung (per Regel 4 gegen ein reales Referenzprojekt
+verifiziert, nicht geraten):** das lokal verfügbare Repo
+`xiaozhi_entity_mcp` – bereits in `service_call.py`s eigenem Modul-Docstring
+als verifizierte Präzedenz zitiert – bestätigte zwei Dinge: (1) HA-Skripte
+werden über den Service `script.turn_on` gestartet, und (2) dieses
+Referenzprojekt modelliert Skript-Ausführung als **eigenständiges,
+dediziertes Tool** (`run_script`), getrennt von seinen generischen
+`turn_on`/`turn_off`/`toggle`-Tools. Beides direkt übernommen: `"script"`
+wurde bewusst **nicht** zu `HassTurnOn`s `allowed_domains` hinzugefügt,
+sondern als neuer, eigener Intent `HassRunScript` modelliert.
+
+**Bausteine:**
+
+- `const.py::SELECTABLE_DOMAINS`: um `"script"` erweitert (der eigentliche
+  Bug-Fix).
+- `nlu/capabilities.py::derive_capabilities()`: `domain == "script"` →
+  ausschließlich `Capability.TURN_ON`.
+- `service_call.py::INTENTS["HassRunScript"]`: neuer `IntentSpec`-Eintrag,
+  `allowed_domains=frozenset({"script"})`, Service `script.turn_on`,
+  deutsche Pluralantwort ("... Skripte ausgeführt."). Nicht in
+  `ACTION_OPPOSITES` aufgenommen (kein sinnvolles semantisches Gegenteil,
+  gleiche Begründung wie bereits dort für `HassToggle` dokumentiert).
+- `intents/de/script.yaml` (NEU): fünf Satzmuster ("starte/aktiviere/führe
+  ... aus / ... starten/ausführen"), gleiche `[das]`-Artikel-Konvention wie
+  `light_switch.yaml`/`cover.yaml` – kein festes Substantiv "Skript" vor
+  `{name}`, da der `friendly_name` der Entity den Rest trägt. Da
+  `SingleTargetParser` (`parsers.py`) und das `INTENTS_DIR`-Glob-Loading
+  (`engine.py`) beide vollständig generisch sind, war für diesen neuen Intent
+  **keine einzige Zeile Parser-Code** nötig – nur Daten (Domain-Liste,
+  `IntentSpec`, Grammatik-YAML).
+- **Kollisionsrisiko mit Wave 11 geprüft und ausgeschlossen:**
+  `engine.py::_AUTOMATION_ENABLE_RE` (`\baktivier\w*\b`) lässt
+  `conversation.py` bei jedem "aktivier..."-Satz zuerst
+  `match_automation_enable()` versuchen, bevor der finale
+  `self._engine.match(...)`-Fallback greift. Für "Aktiviere Gute Nacht"
+  scheitert dieser Versuch strukturell (die Automation-Toggle-Grammatik
+  verlangt "die Automation für/die/steuert ..."), das `if result is None:`-
+  Gate lässt die Anfrage korrekt bis zum neuen Skript-Match durchfallen –
+  sowohl statisch als auch per echtem E2E-Test durch
+  `NluConversationEntity._async_handle_message()` bestätigt (siehe Tests).
+
+**Bewusst offen benannte Scope-Grenzen (nicht nur im Code dokumentiert):**
+
+1. **Nur Aktivierung, keine Deaktivierung.** `derive_capabilities()` vergibt
+   für `"script"` ausschließlich `TURN_ON`, nicht `TURN_OFF`. HAs eigener
+   Service `script.turn_off` (ein laufendes Skript abbrechen) ist eine
+   andere, vom Nutzer nicht angefragte Operation und wurde nicht gebaut.
+2. **Nur direkte Sprachbefehle, keine Automation-Actions.** Untersucht und
+   bewusst ausgeschlossen: Skripte als *Action-Schritt* innerhalb einer
+   Automation ("Wenn X, dann aktiviere Skript Y") über
+   `automation_action_parser.py`s `{action_domain}`-Vokabular. Der
+   Nutzerwortlaut ("aktivieren") bezog sich erkennbar auf einen direkten
+   gesprochenen Befehl, nicht auf Automation-Erstellung – letzteres wäre ein
+   separates, deutlich größeres, nicht angefragtes Feature (neues
+   Domain-Vokabular, `ha_automation_generator.py`-Änderungen, etc.).
+
+**Tests:** 16 neue Tests über 3 Dateien – `test_capabilities.py` (+1,
+`"script"` → nur `TURN_ON`), `test_engine_scripts.py` (NEU, 13 Tests: alle 5
+Satzmuster × 2 Skripte parametrisiert, Domain-Guard lehnt ein Licht ab,
+`HassTurnOn` akzeptiert kein Skript, sowie der gezielte Pin für den
+`_AUTOMATION_ENABLE_RE`-Fallthrough), `test_conversation_script.py` (NEU, 2
+E2E-Tests über die echte `_async_handle_message()`-Orchestrierung: "Starte
+Gute Nacht" und – als direkte Verifikation des Kollisionsrisikos –
+"Aktiviere Gute Nacht" rufen beide korrekt
+`hass.services.async_call("script", "turn_on", {"entity_id":
+"script.gute_nacht"}, blocking=True)` auf). Vollständige Regression: 1592
+passed, 14 skipped (vorher 1576/14) – kein bestehender Test verändert.
+
+⸻
+
 ## 7. Sicherheitsregeln
 
 - **Niemals bei echter Ambiguität raten.** Je unsicherer die
