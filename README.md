@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
 
-- Aktuelle Version: **4.20.0**
+- Aktuelle Version: **4.20.1**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 
@@ -322,10 +322,10 @@ Mit einer entsprechend vorbereiteten Python-Umgebung kann die komplette Testsuit
 python -m pytest -q
 ```
 
-Stand von Version 4.20.0:
+Stand von Version 4.20.1:
 
 ```text
-1605 passed, 14 skipped
+1606 passed, 14 skipped
 ```
 
 Neue Grammatik oder Ausführungslogik sollte immer mit positiven Fällen, Mehrdeutigkeitsfällen, Negativfällen und einem Regressionstest für bestehendes Verhalten ergänzt werden.

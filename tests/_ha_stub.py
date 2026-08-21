@@ -27,6 +27,7 @@ only helps imports that happen after it runs.
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import types
 from dataclasses import dataclass, field
@@ -167,6 +168,7 @@ def install() -> None:
         def __init__(self) -> None:
             self.states = _States()
             self.services = _Services()
+            self._tasks: list[asyncio.Task[Any]] = []
             # V5.26 (AutomationExecutor): real HA's ``hass.config.path()``
             # joins onto the config dir; ``/tmp`` here since tests never
             # care about the real HA config directory, only that a real
@@ -175,6 +177,13 @@ def install() -> None:
 
         async def async_add_executor_job(self, func: Callable[..., Any], *args: Any) -> Any:
             return func(*args)
+
+        def async_create_task(
+            self, target: Any, name: str | None = None
+        ) -> asyncio.Task[Any]:
+            task = asyncio.create_task(target, name=name)
+            self._tasks.append(task)
+            return task
 
     class State:
         def __init__(self, entity_id: str, state: str, attributes: dict | None = None) -> None:

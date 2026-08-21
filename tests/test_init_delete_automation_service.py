@@ -62,6 +62,13 @@ def _write_automations_yaml(tmp_path: Path, automations: list[dict]) -> None:
         pyyaml.safe_dump(automations, handle)
 
 
+async def _call_service_and_wait(hass, handler, call) -> None:
+    """Dispatch like HA, then wait for HomeIntent's scheduled delete task."""
+    await handler(call)
+    if hass._tasks:
+        await asyncio.gather(*hass._tasks)
+
+
 def test_async_setup_entry_registers_the_delete_automation_service(tmp_path):
     hass = _make_hass(tmp_path)
     entry = ConfigEntry()
@@ -94,7 +101,7 @@ def test_async_unload_entry_removes_the_service(tmp_path):
     assert hass.services.has_service(DOMAIN, "delete_automation") is False
 
 
-def test_calling_the_service_deletes_the_matching_automation(tmp_path):
+def test_calling_the_service_deletes_the_matching_automation(monkeypatch, tmp_path):
     hass = _make_hass(tmp_path)
     entry = ConfigEntry()
     asyncio.run(ha_nlu_init.async_setup_entry(hass, entry))
@@ -107,14 +114,15 @@ def test_calling_the_service_deletes_the_matching_automation(tmp_path):
     )
 
     handler = hass.services._handlers[(DOMAIN, "delete_automation")]
-    asyncio.run(handler(ServiceCall({"automation_id": "delete-me"})))
+    monkeypatch.setattr(ha_nlu_init, "SELF_DELETE_GRACE_SECONDS", 0)
+    asyncio.run(_call_service_and_wait(hass, handler, ServiceCall({"automation_id": "delete-me"})))
 
     remaining = _automations_yaml(tmp_path)
     assert [a["id"] for a in remaining] == ["keep-me"]
     hass.services.async_call.assert_awaited_once_with("automation", "reload", {}, blocking=True)
 
 
-def test_calling_the_service_for_an_already_gone_automation_id_does_not_raise(tmp_path):
+def test_calling_the_service_for_an_already_gone_automation_id_does_not_raise(monkeypatch, tmp_path):
     hass = _make_hass(tmp_path)
     entry = ConfigEntry()
     asyncio.run(ha_nlu_init.async_setup_entry(hass, entry))
@@ -124,7 +132,8 @@ def test_calling_the_service_for_an_already_gone_automation_id_does_not_raise(tm
     # Must not raise even though "already-gone" was never in the file -
     # the documented ValueError race is swallowed (see __init__.py's
     # _async_delete_automation docstring).
-    asyncio.run(handler(ServiceCall({"automation_id": "already-gone"})))
+    monkeypatch.setattr(ha_nlu_init, "SELF_DELETE_GRACE_SECONDS", 0)
+    asyncio.run(_call_service_and_wait(hass, handler, ServiceCall({"automation_id": "already-gone"})))
 
     remaining = _automations_yaml(tmp_path)
     assert [a["id"] for a in remaining] == ["still-here"]
@@ -141,3 +150,32 @@ def test_calling_the_service_without_an_automation_id_is_a_no_op(tmp_path):
 
     remaining = _automations_yaml(tmp_path)
     assert [a["id"] for a in remaining] == ["still-here"]
+
+
+def test_service_handler_returns_before_the_delete_starts(monkeypatch, tmp_path):
+    """The calling automation must be able to finish before reload begins."""
+    hass = _make_hass(tmp_path)
+    entry = ConfigEntry()
+
+    async def scenario() -> None:
+        await ha_nlu_init.async_setup_entry(hass, entry)
+        delete_started = asyncio.Event()
+
+        async def record_delete(_hass, _automation_id):
+            delete_started.set()
+
+        monkeypatch.setattr(
+            ha_nlu_init, "_async_delete_automation_by_id", record_delete
+        )
+        monkeypatch.setattr(ha_nlu_init, "SELF_DELETE_GRACE_SECONDS", 0)
+        handler = hass.services._handlers[(DOMAIN, "delete_automation")]
+
+        await handler(ServiceCall({"automation_id": "delete-me"}))
+
+        # The handler has returned, but the scheduled deletion has not run
+        # inline as part of the service action.
+        assert delete_started.is_set() is False
+        await asyncio.gather(*hass._tasks)
+        assert delete_started.is_set() is True
+
+    asyncio.run(scenario())

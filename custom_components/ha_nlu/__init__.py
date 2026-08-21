@@ -16,6 +16,7 @@ grammar for it, and it takes a raw ``automation_id``, not a spoken name).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -31,6 +32,12 @@ _LOGGER = logging.getLogger(__name__)
 
 SERVICE_DELETE_AUTOMATION = "delete_automation"
 
+# A self-deleting automation must finish the service action that requested
+# its deletion before ``automation.reload`` removes/unloads that automation.
+# Without this grace period the reload waits for the running action script,
+# while that script waits for this service handler: a circular wait.
+SELF_DELETE_GRACE_SECONDS = 0.1
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -43,7 +50,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not hass.services.has_service(DOMAIN, SERVICE_DELETE_AUTOMATION):
 
         async def _handle_delete_automation(call: ServiceCall) -> None:
-            await _async_delete_automation(hass, call)
+            automation_id = _automation_id_from_call(call)
+            if automation_id is None:
+                return
+            # Do not await the delete here. This handler is itself the last
+            # action of the automation being deleted. Returning lets that
+            # action script finish before the background task reloads HA's
+            # automation component and unloads it.
+            hass.async_create_task(
+                _async_delete_automation_after_action(hass, automation_id),
+                name=f"HomeIntent self-delete automation {automation_id}",
+            )
 
         hass.services.async_register(DOMAIN, SERVICE_DELETE_AUTOMATION, _handle_delete_automation)
 
@@ -85,6 +102,36 @@ async def _async_delete_automation(hass: HomeAssistant, call: ServiceCall) -> No
     already deleted by something else between generation and this call
     firing, there is nothing left to do.
     """
+    automation_id = _automation_id_from_call(call)
+    if automation_id is None:
+        return
+    await _async_delete_automation_by_id(hass, automation_id)
+
+
+def _automation_id_from_call(call: ServiceCall) -> str | None:
+    """Return a validated automation id from the custom service call."""
+    automation_id = call.data.get("automation_id")
+    if not isinstance(automation_id, str) or not automation_id:
+        _LOGGER.warning("ha_nlu.delete_automation called without a valid automation_id: %r", automation_id)
+        return None
+    return automation_id
+
+
+async def _async_delete_automation_after_action(
+    hass: HomeAssistant, automation_id: str
+) -> None:
+    """Delete after the calling automation has left its final action."""
+    await asyncio.sleep(SELF_DELETE_GRACE_SECONDS)
+    try:
+        await _async_delete_automation_by_id(hass, automation_id)
+    except Exception:  # noqa: BLE001 - background failures must be visible in HA's log
+        _LOGGER.exception("Delayed self-delete of automation %s failed", automation_id)
+
+
+async def _async_delete_automation_by_id(
+    hass: HomeAssistant, automation_id: str
+) -> None:
+    """Delete one automation immediately; callers decide when it is safe."""
     # Function-local import: automation_executor.py imports the real
     # ``homeassistant.core``/``homeassistant.util`` at module level (no
     # HA-free path exists there, see its own module docstring) - keeping
@@ -95,10 +142,6 @@ async def _async_delete_automation(hass: HomeAssistant, call: ServiceCall) -> No
     # before this wave.
     from .automation_executor import AutomationExecutor
 
-    automation_id = call.data.get("automation_id")
-    if not isinstance(automation_id, str) or not automation_id:
-        _LOGGER.warning("ha_nlu.delete_automation called without a valid automation_id: %r", automation_id)
-        return
     executor = AutomationExecutor(hass)
     try:
         await executor.async_delete_automation(automation_id)
