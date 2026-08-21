@@ -149,6 +149,8 @@ def _speak_trigger(
         text = f"es {clock} Uhr ist"
     elif trigger.type is TriggerType.RELATIVE_TIME:
         text = f"{_format_delay(trigger.relative_offset_seconds)} vergangen sind"
+    elif trigger.type is TriggerType.CALENDAR_TIME:
+        text = "der bestätigte Kalenderzeitpunkt erreicht ist"
     elif trigger.type is TriggerType.WEEKDAY:
         text = " oder ".join(_WEEKDAY_SPOKEN_DE.get(d, d) for d in trigger.weekdays) + " ist"
     else:
@@ -290,7 +292,12 @@ def render_automation_preview(model: AutomationModel, entities: list[EntitySnaps
     """
     entity_by_id = _entity_lookup(entities)
     area_name_by_id = _area_name_lookup(entities)
-    trigger_text = " und ".join(_speak_trigger(t, entity_by_id, area_name_by_id) for t in model.triggers)
+    if model.calendar_schedule is not None:
+        trigger_text = f"der Zeitpunkt „{model.calendar_schedule.spoken}“ erreicht ist"
+    else:
+        trigger_text = " und ".join(
+            _speak_trigger(t, entity_by_id, area_name_by_id) for t in model.triggers
+        )
     action_text = ", dann ".join(_speak_action_step(a, entity_by_id, area_name_by_id) for a in model.actions)
     sentence = f"Wenn {trigger_text}"
     if model.conditions:
@@ -299,4 +306,9 @@ def render_automation_preview(model: AutomationModel, entities: list[EntitySnaps
     sentence = f"{sentence}, dann {action_text}."
     if model.once:
         sentence = f"{sentence} Diese Automation wird nach der ersten Ausführung automatisch gelöscht."
+    elif model.max_runs is not None:
+        sentence = (
+            f"{sentence} Diese Automation wird nach {model.max_runs} "
+            "Ausführungen automatisch gelöscht."
+        )
     return f"Automation erkannt: {sentence} Soll diese Automation erstellt werden?"

@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from hassil import Intents, RangeSlotList, RangeType, WildcardSlotList, recognize
+from hassil import Intents, RangeSlotList, RangeType, TextSlotList, WildcardSlotList, recognize
 
 from .automation_action_parser import AutomationActionParser, _seconds_from_amount_unit
 from .nlu.action_model import ActionGroup, ActionModel
@@ -51,7 +51,16 @@ class RelativeTimeCommandParser:
         self._action_parser = action_parser
         self._slot_lists = {
             "amount": RangeSlotList(name="amount", start=1, stop=59, step=1, type=RangeType.NUMBER),
+            "amount_2": RangeSlotList(name="amount_2", start=1, stop=59, step=1, type=RangeType.NUMBER),
             "action_temporal_unit": _ACTION_TEMPORAL_UNIT_SLOT_LIST,
+            "action_temporal_unit_2": TextSlotList.from_tuples(
+                [
+                    ("Sekunden", "seconds"), ("Sekunde", "seconds"),
+                    ("Minuten", "minutes"), ("Minute", "minutes"),
+                    ("Stunden", "hours"), ("Stunde", "hours"),
+                ],
+                name="action_temporal_unit_2",
+            ),
             "command_prefix": WildcardSlotList(name="command_prefix"),
             "command_text": WildcardSlotList(name="command_text"),
         }
@@ -68,6 +77,14 @@ class RelativeTimeCommandParser:
         if amount_slot is None or unit_slot is None:
             return None  # grammar requires both - structurally unreachable, defense only
         offset_seconds = _seconds_from_amount_unit(int(amount_slot.value), str(unit_slot.value))
+        amount_2_slot = result.entities.get("amount_2")
+        unit_2_slot = result.entities.get("action_temporal_unit_2")
+        if (amount_2_slot is None) != (unit_2_slot is None):
+            return None
+        if amount_2_slot is not None and unit_2_slot is not None:
+            offset_seconds += _seconds_from_amount_unit(
+                int(amount_2_slot.value), str(unit_2_slot.value)
+            )
         command_text_slot = result.entities.get("command_text")
         if command_text_slot is None:
             return None  # grammar requires {command_text} in every sentence shape - defense only

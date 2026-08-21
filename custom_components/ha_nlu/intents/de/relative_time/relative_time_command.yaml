@@ -30,6 +30,9 @@ intents:
   HassRelativeTimeCommand:
     data:
       - sentences:
+          - "[kannst du|bitte] in {amount} {action_temporal_unit} und {amount_2} {action_temporal_unit_2} {command_text}"
+          - "[kannst du|bitte] {command_text} in {amount} {action_temporal_unit} und {amount_2} {action_temporal_unit_2}"
+          - "{command_prefix} in {amount} {action_temporal_unit} und {amount_2} {action_temporal_unit_2} {command_text}"
           - "[kannst du|bitte] in {amount} {action_temporal_unit} {command_text}"
           - "[kannst du|bitte] {command_text} in {amount} {action_temporal_unit}"
           - "{command_prefix} in {amount} {action_temporal_unit} {command_text}"

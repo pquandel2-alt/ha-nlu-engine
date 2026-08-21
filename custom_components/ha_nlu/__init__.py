@@ -4,14 +4,10 @@ Setup only forwards to the ``conversation`` platform - all matching logic
 lives in ``engine.py``/``entities.py``/``service_call.py`` and is loaded
 lazily by ``NluConversationEntity`` itself.
 
-New feature (Wave 12, "Einmalige Automation"): also registers the custom
-``ha_nlu.delete_automation`` service - the action step a self-deleting
-("once") generated automation calls on itself after it fires (see
-``nlu/ha_automation_generator.py``'s ``generate_ha_automation_config()``
-docstring). This is the only custom service this integration exposes; it
-exists purely so a generated automation's own action list has something to
-call - it is not meant to be invoked directly by a user (there is no NLU
-grammar for it, and it takes a raw ``automation_id``, not a spoken name).
+Generated one-shot and run-limited automations use the internal services
+``ha_nlu.delete_automation`` and ``ha_nlu.record_automation_run``. They exist
+so an automation can complete its own lifecycle; users manage automations
+through the conversation agent rather than raw automation ids.
 """
 
 from __future__ import annotations
@@ -31,6 +27,7 @@ PLATFORMS = ["conversation"]
 _LOGGER = logging.getLogger(__name__)
 
 SERVICE_DELETE_AUTOMATION = "delete_automation"
+SERVICE_RECORD_AUTOMATION_RUN = "record_automation_run"
 
 # A self-deleting automation must finish the service action that requested
 # its deletion before ``automation.reload`` removes/unloads that automation.
@@ -65,12 +62,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         hass.services.async_register(DOMAIN, SERVICE_DELETE_AUTOMATION, _handle_delete_automation)
 
-    # On a restart after a relative one-shot's due time, expire it instead
-    # of allowing HA's clock-only trigger to run the stale command tomorrow.
+    if not hass.services.has_service(DOMAIN, SERVICE_RECORD_AUTOMATION_RUN):
+
+        async def _handle_record_automation_run(call: ServiceCall) -> None:
+            automation_id = _automation_id_from_call(call)
+            if automation_id is None:
+                return
+            hass.async_create_task(
+                _async_record_automation_run_after_action(hass, automation_id),
+                name=f"HomeIntent record automation run {automation_id}",
+            )
+
+        hass.services.async_register(
+            DOMAIN, SERVICE_RECORD_AUTOMATION_RUN, _handle_record_automation_run
+        )
+
+    # Reconcile persistence before expiring missed one-shots. This recovers
+    # a crash-interrupted transaction, removes orphan sidecar metadata and
+    # repairs category assignments for every known HomeIntent automation.
     if hass.services.has_service("automation", "reload"):
         hass.async_create_task(
-            _async_cleanup_expired_scheduled_automations(hass),
-            name="HomeIntent cleanup expired scheduled automations",
+            _async_reconcile_and_cleanup_automations(hass),
+            name="HomeIntent reconcile automation persistence",
         )
 
     return True
@@ -80,6 +93,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded and hass.services.has_service(DOMAIN, SERVICE_DELETE_AUTOMATION):
         hass.services.async_remove(DOMAIN, SERVICE_DELETE_AUTOMATION)
+    if unloaded and hass.services.has_service(DOMAIN, SERVICE_RECORD_AUTOMATION_RUN):
+        hass.services.async_remove(DOMAIN, SERVICE_RECORD_AUTOMATION_RUN)
     return unloaded
 
 
@@ -99,12 +114,9 @@ async def _async_delete_automation(hass: HomeAssistant, call: ServiceCall) -> No
     integration already is.
 
     A fresh ``AutomationExecutor`` is created per call rather than sharing
-    the conversation entity's own instance (which is lazily constructed
-    per-entity and not stored anywhere reachable from here) - both share the
-    same on-disk ``automations.yaml``/metadata store, so this is correct,
-    just not lock-shared with a concurrent confirmation write from the
-    conversation entity. Accepted narrow trade-off, not hidden: see the
-    Wave 12 completion report.
+    the conversation entity's own instance. Executor instances belonging to
+    the same Home Assistant instance share their mutation lock and additionally
+    protect the file with optimistic fingerprint checks.
 
     Swallows the documented ``ValueError`` race (see
     ``async_delete_automation``'s own docstring): if the automation was
@@ -152,6 +164,34 @@ async def _async_delete_automation_after_action(
                 )
 
 
+async def _async_record_automation_run_after_action(
+    hass: HomeAssistant, automation_id: str
+) -> None:
+    """Record a successful run after its service action has returned."""
+    delays = (SELF_DELETE_GRACE_SECONDS, *SELF_DELETE_RETRY_SECONDS)
+    for attempt, delay in enumerate(delays, start=1):
+        await asyncio.sleep(delay)
+        try:
+            from .automation_executor import AutomationExecutor
+
+            await AutomationExecutor(hass).async_record_automation_run(automation_id)
+            return
+        except Exception:  # noqa: BLE001 - HA reload/file failures are heterogeneous
+            if attempt == len(delays):
+                _LOGGER.exception(
+                    "Recording run of automation %s failed after %d attempts",
+                    automation_id,
+                    attempt,
+                )
+            else:
+                _LOGGER.warning(
+                    "Recording run attempt %d for automation %s failed; retrying",
+                    attempt,
+                    automation_id,
+                    exc_info=True,
+                )
+
+
 async def _async_cleanup_expired_scheduled_automations(
     hass: HomeAssistant,
 ) -> None:
@@ -169,6 +209,27 @@ async def _async_cleanup_expired_scheduled_automations(
         return
     if expired:
         _LOGGER.info("Removed %d expired HomeIntent automations", len(expired))
+
+
+async def _async_reconcile_and_cleanup_automations(hass: HomeAssistant) -> None:
+    """Repair durable state first, then apply the missed-schedule policy."""
+    from .automation_executor import AutomationExecutor
+
+    executor = AutomationExecutor(hass)
+    try:
+        recovered = await executor.async_recover_incomplete_transaction()
+        orphan_metadata = await executor.async_reconcile_homeintent_state()
+    except Exception:  # noqa: BLE001 - startup recovery must not unload HomeIntent
+        _LOGGER.exception("HomeIntent automation persistence reconciliation failed")
+        return
+    if recovered:
+        _LOGGER.warning("Recovered an interrupted HomeIntent automation transaction")
+    if orphan_metadata:
+        _LOGGER.info(
+            "Removed %d orphan HomeIntent automation metadata entries",
+            len(orphan_metadata),
+        )
+    await _async_cleanup_expired_scheduled_automations(hass)
 
 
 async def _async_delete_automation_by_id(

@@ -18,7 +18,7 @@ breaking this shape - not used, not guessed, just reserved.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from enum import Enum, auto
 from typing import TYPE_CHECKING
 
@@ -56,7 +56,30 @@ class TriggerType(Enum):
     SUN = auto()
     TIME = auto()
     RELATIVE_TIME = auto()
+    CALENDAR_TIME = auto()
     WEEKDAY = auto()
+
+
+class CalendarReference(Enum):
+    TODAY = auto()
+    TOMORROW = auto()
+    DAY_AFTER_TOMORROW = auto()
+    WEEKDAY = auto()
+    DATE = auto()
+
+
+@dataclass(frozen=True)
+class CalendarSchedule:
+    """Unresolved local calendar date/time held until confirmation."""
+
+    reference: CalendarReference
+    hour: int
+    minute: int = 0
+    weekday: int | None = None
+    day: int | None = None
+    month: int | None = None
+    year: int | None = None
+    spoken: str = ""
 
 
 class NumericComparator(Enum):
@@ -173,9 +196,13 @@ class AutomationModel:
     # engine.py's _AUTOMATION_ONCE_RE detection; read by
     # ha_automation_generator.py to append the self-delete action.
     once: bool = False
+    # Delete after this many successful executions. ``None`` means unlimited;
+    # ``once`` remains the explicit one-run shorthand.
+    max_runs: int | None = None
     # Full target date/time of a confirmed relative one-shot. The generator
     # uses the date as an additional guard around HA's clock-only trigger.
     scheduled_for: datetime | None = None
+    calendar_schedule: CalendarSchedule | None = None
 
 
 def resolve_relative_schedule(model: AutomationModel, now: datetime) -> AutomationModel:
@@ -205,6 +232,75 @@ def resolve_relative_schedule(model: AutomationModel, now: datetime) -> Automati
         time_second=target.second,
     )
     return replace(model, triggers=(trigger,), scheduled_for=target)
+
+
+def resolve_calendar_schedule(model: AutomationModel, now: datetime) -> AutomationModel:
+    """Resolve one spoken calendar schedule against confirmation-local time."""
+    schedule = model.calendar_schedule
+    if schedule is None:
+        return model
+    if len(model.triggers) != 1 or model.triggers[0].type is not TriggerType.CALENDAR_TIME:
+        raise ValueError("Calendar one-shot automations require exactly one trigger")
+
+    today = now.date()
+    if schedule.reference is CalendarReference.TODAY:
+        target_date = today
+    elif schedule.reference is CalendarReference.TOMORROW:
+        target_date = today + timedelta(days=1)
+    elif schedule.reference is CalendarReference.DAY_AFTER_TOMORROW:
+        target_date = today + timedelta(days=2)
+    elif schedule.reference is CalendarReference.WEEKDAY:
+        if schedule.weekday is None:
+            raise ValueError("Calendar weekday is missing")
+        days = (schedule.weekday - today.weekday()) % 7
+        target_date = today + timedelta(days=days)
+    else:
+        if schedule.day is None or schedule.month is None:
+            raise ValueError("Calendar date is incomplete")
+        year = schedule.year or today.year
+        try:
+            target_date = date(year, schedule.month, schedule.day)
+        except ValueError as err:
+            raise ValueError("Ungültiges Kalenderdatum") from err
+        if schedule.year is None and target_date < today:
+            target_date = date(year + 1, schedule.month, schedule.day)
+
+    target = datetime.combine(
+        target_date,
+        time(schedule.hour, schedule.minute),
+        tzinfo=now.tzinfo,
+    )
+    if schedule.reference is CalendarReference.WEEKDAY and target <= now:
+        target += timedelta(days=7)
+    elif target <= now:
+        raise ValueError("Der gewünschte Zeitpunkt liegt bereits in der Vergangenheit")
+
+    if target.tzinfo is not None:
+        round_trip = target.astimezone(timezone.utc).astimezone(target.tzinfo)
+        if (round_trip.date(), round_trip.hour, round_trip.minute) != (
+            target.date(),
+            target.hour,
+            target.minute,
+        ):
+            raise ValueError("Der gewünschte Zeitpunkt existiert wegen der Zeitumstellung nicht")
+
+    trigger = TriggerModel(
+        type=TriggerType.TIME,
+        time_hour=target.hour,
+        time_minute=target.minute,
+        time_second=0,
+    )
+    return replace(
+        model,
+        triggers=(trigger,),
+        scheduled_for=target,
+        calendar_schedule=None,
+    )
+
+
+def resolve_pending_schedule(model: AutomationModel, now: datetime) -> AutomationModel:
+    """Resolve either supported preview-time schedule representation."""
+    return resolve_calendar_schedule(resolve_relative_schedule(model, now), now)
 
 
 def _render_target(target: TriggerTarget) -> str:
@@ -251,6 +347,8 @@ def _render_trigger(trigger: TriggerModel) -> str:
         parts.append(f"time_second={trigger.time_second}")
     if trigger.relative_offset_seconds is not None:
         parts.append(f"relative_offset_seconds={trigger.relative_offset_seconds}")
+    if trigger.type is TriggerType.CALENDAR_TIME:
+        parts.append("calendar_schedule=pending")
     if trigger.weekdays:
         parts.append(f"weekdays={','.join(trigger.weekdays)}")
     if trigger.delay_seconds is not None:
@@ -262,7 +360,10 @@ def render_automation_tree(model: AutomationModel) -> str:
     """Plain-text debug tree, not a spoken preview (V5.23's Dry-Run text is
     a later, separate wave with its own German wording) - only for logs/
     tests/manual inspection."""
-    lines = [f"AutomationModel(source_text={model.source_text!r}, once={model.once})"]
+    lines = [
+        f"AutomationModel(source_text={model.source_text!r}, once={model.once}, "
+        f"max_runs={model.max_runs})"
+    ]
     if not model.triggers:
         lines.append("  triggers: (none)")
     else:

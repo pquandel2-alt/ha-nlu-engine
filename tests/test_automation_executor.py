@@ -35,6 +35,7 @@ _ha_stub.install()
 
 import ha_nlu.automation_executor as automation_executor  # noqa: E402
 import ha_nlu.automation_metadata_store as automation_metadata_store  # noqa: E402
+import ha_nlu.automation_transaction as automation_transaction  # noqa: E402
 from ha_nlu.automation_executor import AutomationExecutor  # noqa: E402
 
 SAMPLE_CONFIG = {
@@ -66,6 +67,14 @@ def _patch_metadata_write():
     (see ``AutomationMetadataStore._read``), so a real, harmless failed open()
     against the mocked hass's fake path needs no separate patch."""
     return patch.object(automation_metadata_store, "write_utf8_file_atomic")
+
+
+@pytest.fixture(autouse=True)
+def _patch_transaction_journal_write(monkeypatch):
+    """Ordinary executor unit tests keep all journal I/O in memory."""
+    monkeypatch.setattr(
+        automation_transaction, "write_utf8_file_atomic", MagicMock()
+    )
 
 
 def test_create_automation_appends_to_an_empty_file_and_returns_the_new_id():
@@ -160,9 +169,10 @@ def test_file_io_runs_via_async_add_executor_job_not_directly_on_the_event_loop(
         executor = AutomationExecutor(hass)
         asyncio.run(executor.async_create_automation(SAMPLE_CONFIG))
 
-    # 2 for automations.yaml (read+write) + 2 for the metadata sidecar
-    # (read+write, V5.30/V5.31) - all four still off-event-loop.
-    assert hass.async_add_executor_job.await_count == 4
+    # Stable YAML snapshot + journal preflight + off-loop serialization + two
+    # durable journal writes + guarded YAML write + metadata read/write +
+    # journal cleanup: every blocking operation stays off the event loop.
+    assert hass.async_add_executor_job.await_count == 9
 
 
 def test_two_executor_instances_share_one_lock_and_serialize_creations():

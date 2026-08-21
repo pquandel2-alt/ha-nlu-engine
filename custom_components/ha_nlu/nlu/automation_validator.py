@@ -115,6 +115,16 @@ def _validate_semantic(model: AutomationModel) -> AutomationValidationError | No
     is a perfectly valid dataclass value, but never a usable automation."""
     if not model.triggers or not model.actions:
         return AutomationValidationError.INCOMPLETE_AUTOMATION
+    if model.max_runs is not None and not (2 <= model.max_runs <= 10):
+        return AutomationValidationError.INVALID_PARAMETER
+    if model.once and model.max_runs is not None:
+        return AutomationValidationError.INVALID_PARAMETER
+    if any(trigger.type is TriggerType.CALENDAR_TIME for trigger in model.triggers):
+        schedule = model.calendar_schedule
+        if schedule is None:
+            return AutomationValidationError.INVALID_TIME
+        if not (0 <= schedule.hour <= 23 and 0 <= schedule.minute <= 59):
+            return AutomationValidationError.INVALID_TIME
     return None
 
 
@@ -138,6 +148,7 @@ _TRIGGER_REQUIRED_FIELDS: dict[TriggerType, tuple[str, ...]] = {
     TriggerType.SUN: ("sun_event",),
     TriggerType.TIME: ("time_hour",),
     TriggerType.RELATIVE_TIME: ("relative_offset_seconds",),
+    TriggerType.CALENDAR_TIME: (),
     TriggerType.WEEKDAY: ("weekdays",),
 }
 

@@ -11,3 +11,22 @@ delete_automation:
       required: true
       selector:
         text:
+
+record_automation_run:
+  name: Automation-Ausführung erfassen
+  description: Interner Dienst für Automationen mit begrenzter Ausführungszahl.
+  fields:
+    automation_id:
+      name: Automation-ID
+      required: true
+      selector:
+        text:
+    max_runs:
+      name: Maximale Ausführungen
+      description: Im YAML mitgespeicherte Obergrenze für den Startabgleich.
+      required: false
+      selector:
+        number:
+          min: 2
+          max: 10
+          mode: box

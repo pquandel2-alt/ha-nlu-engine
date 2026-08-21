@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime
 from typing import Literal
 
 from homeassistant.components import conversation
@@ -28,7 +29,14 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .automation_executor import AutomationExecutor
+from .automation_management import (
+    AutomationManagementKind,
+    format_scheduled_time,
+    parse_automation_management,
+    select_automation_management,
+)
 from .const import DOMAIN, NOT_UNDERSTOOD_TEXT
+from .device_control import match_device_control
 from .engine import (
     AutomationDeletionMatchResult,
     AutomationMatchResult,
@@ -43,15 +51,17 @@ from .engine import (
 from .entities import EntitySnapshot
 from .hass_entities import build_device_snapshots, build_entity_snapshots
 from .nlu.automation_confirmation import ConfirmationReply, classify_confirmation_reply
-from .nlu.automation_model import resolve_relative_schedule
+from .nlu.automation_model import resolve_pending_schedule
 from .nlu.automation_preview import render_automation_preview
 from .nlu.context import (
     ConversationContext,
     ConversationContextStore,
     PendingAutomationConfirmation,
     PendingAutomationDeletion,
+    PendingServiceConfirmation,
 )
 from .nlu.ha_automation_generator import GenerationError, generate_ha_automation_config
+from .nlu.response_generator import _automation_label
 from .service_call import QUERY_INTENTS
 from .world_model import WorldModel, build_world_model as assemble_world_model
 
@@ -218,6 +228,60 @@ class NluConversationEntity(
                 user_input, response, pending.pending_automation_deletion
             )
 
+        if pending is not None and pending.pending_service_confirmation is not None:
+            return await self._async_handle_service_confirmation_reply(
+                user_input, response, pending.pending_service_confirmation
+            )
+
+        management_request = parse_automation_management(user_input.text)
+        if management_request is not None:
+            return await self._async_handle_automation_management(
+                user_input, response, management_request, entities
+            )
+
+        device_control = match_device_control(user_input.text, entities)
+        if device_control is not None:
+            self._context_store.clear(user_input.conversation_id)
+            if device_control.plan is None:
+                response.async_set_speech(device_control.response_text)
+            elif device_control.requires_confirmation:
+                self._context_store.set(
+                    user_input.conversation_id,
+                    ConversationContext(
+                        last_command=None,
+                        last_entities=(),
+                        last_area=None,
+                        pending_clarification=None,
+                        pending_service_confirmation=PendingServiceConfirmation(
+                            device_control.plan, device_control.response_text
+                        ),
+                    ),
+                )
+                response.async_set_speech(
+                    f"Soll ich wirklich {device_control.response_text.rstrip('.')}?"
+                )
+            else:
+                try:
+                    await self.hass.services.async_call(
+                        device_control.plan.domain,
+                        device_control.plan.service,
+                        {
+                            "entity_id": device_control.plan.entity_id,
+                            **device_control.plan.data,
+                        },
+                        blocking=True,
+                    )
+                except Exception as err:  # noqa: BLE001 - HA service failures are heterogeneous
+                    response.async_set_error(
+                        intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                        f"Fehler beim Ausführen: {err}",
+                    )
+                else:
+                    response.async_set_speech(device_control.response_text)
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
         if pending is not None and pending.pending_clarification is not None:
             result = self._engine.resolve_clarification(
                 user_input.text, pending.pending_clarification, entities
@@ -278,6 +342,10 @@ class NluConversationEntity(
                 )
             if result is None:
                 result = self._engine.match_automation(
+                    user_input.text, entities, self._world_model, pending
+                )
+            if result is None:
+                result = self._engine.match_calendar_time_automation(
                     user_input.text, entities, self._world_model, pending
                 )
             if result is None:
@@ -547,7 +615,16 @@ class NluConversationEntity(
                 response=response, conversation_id=user_input.conversation_id
             )
 
-        model = resolve_relative_schedule(confirmation.model, dt_util.now())
+        try:
+            model = resolve_pending_schedule(confirmation.model, dt_util.now())
+        except ValueError as err:
+            response.async_set_error(
+                intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                f"Der Zeitpunkt kann nicht geplant werden: {err}",
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
 
         # Wave 12 ("Einmalige Automation"): a self-deleting automation's own
         # action list needs to reference its own future id (see
@@ -555,7 +632,9 @@ class NluConversationEntity(
         # docstring for why) - pre-generated here, before persistence, and
         # threaded into both the generator and the executor so they agree.
         # None/unused for every ordinary (non-once) automation.
-        once_automation_id = uuid.uuid4().hex if model.once else None
+        once_automation_id = (
+            uuid.uuid4().hex if model.once or model.max_runs is not None else None
+        )
 
         generation_result = generate_ha_automation_config(
             model, entities, automation_id=once_automation_id
@@ -578,6 +657,7 @@ class NluConversationEntity(
                 automation_id=once_automation_id,
                 scheduled_for=model.scheduled_for,
                 once=model.once,
+                max_runs=model.max_runs,
             )
         except Exception as err:  # noqa: BLE001 - a YAML write + service call can fail in ways beyond HomeAssistantError; must not propagate as "Unexpected error during intent recognition"
             _LOGGER.error("Automation creation failed: %s", err)
@@ -590,6 +670,173 @@ class NluConversationEntity(
             )
 
         response.async_set_speech(AUTOMATION_CREATED_TEXT)
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    async def _async_handle_automation_management(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        request,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult:
+        """Execute the bounded query/reschedule/cleanup management language."""
+        self._context_store.clear(user_input.conversation_id)
+        if self._automation_executor is None:
+            self._automation_executor = AutomationExecutor(self.hass)
+        now = dt_util.now()
+        if request.kind is AutomationManagementKind.CLEAN_EXPIRED:
+            try:
+                removed = await self._automation_executor.async_cleanup_expired_scheduled_automations(
+                    now
+                )
+            except Exception as err:  # noqa: BLE001 - persistence failures are heterogeneous
+                response.async_set_error(
+                    intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                    f"Fehler beim Bereinigen der Aufträge: {err}",
+                )
+            else:
+                response.async_set_speech(
+                    "Es waren keine abgelaufenen HomeIntent-Aufträge vorhanden."
+                    if not removed
+                    else f"{len(removed)} abgelaufene HomeIntent-Aufträge wurden gelöscht."
+                )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        automations = await self._automation_executor.async_list_automations()
+        selection = select_automation_management(request, entities, automations, now)
+        if selection.error_text is not None:
+            response.async_set_speech(selection.error_text)
+        elif request.kind is AutomationManagementKind.LIST_HOMEINTENT:
+            labels = [_automation_label(item) for item in selection.automations]
+            response.async_set_speech(
+                "Es sind keine HomeIntent-Automationen vorhanden."
+                if not labels
+                else "HomeIntent-Automationen: " + ", ".join(labels) + "."
+            )
+        elif request.kind in (
+            AutomationManagementKind.LIST_SCHEDULED,
+            AutomationManagementKind.WHEN,
+        ):
+            if not selection.automations:
+                response.async_set_speech("Es sind keine passenden einmaligen Aufträge geplant.")
+            else:
+                details = [
+                    f"{_automation_label(item)} – {format_scheduled_time(item.scheduled_for)}"
+                    for item in selection.automations
+                    if item.scheduled_for is not None
+                ]
+                response.async_set_speech("Geplant sind: " + "; ".join(details) + ".")
+        elif request.kind is AutomationManagementKind.RESCHEDULE:
+            if not selection.automations:
+                response.async_set_speech("Ich habe keinen passenden geplanten Auftrag gefunden.")
+            elif len(selection.automations) > 1:
+                labels = ", ".join(_automation_label(item) for item in selection.automations)
+                response.async_set_speech(
+                    "Mehrere Aufträge passen. Bitte nenne das Gerät im Verschiebebefehl: "
+                    + labels
+                    + "."
+                )
+            else:
+                automation = selection.automations[0]
+                target = datetime.fromisoformat(automation.scheduled_for)
+                target = target.replace(hour=request.hour, minute=request.minute, second=0)
+                comparable_now = now
+                if target.tzinfo is None and now.tzinfo is not None:
+                    comparable_now = now.replace(tzinfo=None)
+                elif target.tzinfo is not None and now.tzinfo is None:
+                    comparable_now = now.replace(tzinfo=target.tzinfo)
+                if target <= comparable_now:
+                    response.async_set_speech(
+                        "Die neue Uhrzeit liegt am geplanten Tag bereits in der Vergangenheit."
+                    )
+                else:
+                    try:
+                        await self._automation_executor.async_reschedule_automation(
+                            automation.automation_id, target
+                        )
+                    except Exception as err:  # noqa: BLE001 - persistence failures are heterogeneous
+                        response.async_set_error(
+                            intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                            f"Fehler beim Verschieben des Auftrags: {err}",
+                        )
+                    else:
+                        response.async_set_speech(
+                            "Der Auftrag wurde auf "
+                            + format_scheduled_time(target.isoformat())
+                            + " verschoben."
+                        )
+        elif request.kind is AutomationManagementKind.SET_MAX_RUNS:
+            if not selection.automations:
+                response.async_set_speech(
+                    "Ich habe keine passende dauerhafte HomeIntent-Automation gefunden."
+                )
+            elif len(selection.automations) > 1:
+                labels = ", ".join(
+                    _automation_label(item) for item in selection.automations
+                )
+                response.async_set_speech(
+                    "Mehrere Automationen passen. Bitte nenne das Gerät: "
+                    + labels
+                    + "."
+                )
+            else:
+                automation = selection.automations[0]
+                try:
+                    await self._automation_executor.async_set_max_runs(
+                        automation.automation_id, request.max_runs
+                    )
+                except Exception as err:  # noqa: BLE001 - persistence failures are heterogeneous
+                    response.async_set_error(
+                        intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                        f"Fehler beim Begrenzen der Automation: {err}",
+                    )
+                else:
+                    response.async_set_speech(
+                        f"{_automation_label(automation)} wird nur noch "
+                        f"{request.max_runs} Mal ausgeführt."
+                    )
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    async def _async_handle_service_confirmation_reply(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        confirmation: PendingServiceConfirmation,
+    ) -> conversation.ConversationResult:
+        """Confirm a high-risk lock or garage movement before execution."""
+        reply = classify_confirmation_reply(user_input.text)
+        if reply is ConfirmationReply.UNCLEAR:
+            response.async_set_speech("Bitte antworte mit Ja oder Nein.")
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+        self._context_store.clear(user_input.conversation_id)
+        if reply is ConfirmationReply.NO:
+            response.async_set_speech("Abgebrochen. Es wurde nichts ausgeführt.")
+        else:
+            try:
+                await self.hass.services.async_call(
+                    confirmation.plan.domain,
+                    confirmation.plan.service,
+                    {
+                        "entity_id": confirmation.plan.entity_id,
+                        **confirmation.plan.data,
+                    },
+                    blocking=True,
+                )
+            except Exception as err:  # noqa: BLE001 - HA service failures are heterogeneous
+                response.async_set_error(
+                    intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                    f"Fehler beim Ausführen: {err}",
+                )
+            else:
+                response.async_set_speech(confirmation.success_text)
         return conversation.ConversationResult(
             response=response, conversation_id=user_input.conversation_id
         )

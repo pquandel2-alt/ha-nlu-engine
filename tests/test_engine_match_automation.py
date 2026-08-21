@@ -272,3 +272,14 @@ def test_einmalig_qualifier_works_on_a_state_based_trigger_not_just_time(engine)
     assert isinstance(result, AutomationMatchResult)
     assert result.model.once is True
     assert len(result.model.triggers) == 1
+
+
+def test_dreimal_qualifier_sets_a_bounded_run_count(engine):
+    result = engine.match_automation(
+        "Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht nur dreimal ein.",
+        ENTITIES,
+    )
+    assert isinstance(result, AutomationMatchResult)
+    assert result.validation_error is None
+    assert result.model.once is False
+    assert result.model.max_runs == 3

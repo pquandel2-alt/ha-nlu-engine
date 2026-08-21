@@ -15,6 +15,9 @@ CONF_SELECTED_ENTITIES = "selected_entities"
 # all before this, so build_entity_snapshots() silently produced zero
 # script.* entities - the root cause "aktiviere Skript X" never worked, not
 # a missing intent/parser (see service_call.py's HassRunScript).
-SELECTABLE_DOMAINS = ("light", "switch", "fan", "cover", "sensor", "binary_sensor", "script")
+SELECTABLE_DOMAINS = (
+    "light", "switch", "fan", "cover", "sensor", "binary_sensor", "script",
+    "climate", "media_player", "vacuum", "scene", "lock",
+)
 
 NOT_UNDERSTOOD_TEXT = "Das habe ich nicht verstanden."

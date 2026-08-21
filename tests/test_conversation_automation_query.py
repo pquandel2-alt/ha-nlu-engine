@@ -18,7 +18,10 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+
+import yaml as pyyaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "custom_components"))
 sys.path.insert(0, str(Path(__file__).parent))
@@ -49,7 +52,12 @@ BUERO_LICHT = EntitySnapshot(
     area_id="buero", area_name="Büro",
     capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
 )
-ALL_ENTITIES = [KUECHE_FENSTER_ZU, KUECHE_LICHT, BUERO_LICHT]
+BUERO_ROLLLADE = EntitySnapshot(
+    "cover.buero_rollladen", "Büro Rollladen", "cover", "closed",
+    area_id="buero", area_name="Büro",
+    capabilities=frozenset({"POSITION"}),
+)
+ALL_ENTITIES = [KUECHE_FENSTER_ZU, KUECHE_LICHT, BUERO_LICHT, BUERO_ROLLLADE]
 
 AUTOMATION_SENTENCE = "Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht ein."
 
@@ -149,3 +157,92 @@ def test_an_ordinary_command_never_triggers_the_automations_yaml_read(monkeypatc
 
     entity.hass.services.async_call.assert_awaited_once()
     assert result.response.speech != "Das habe ich nicht verstanden."
+
+
+def test_lists_only_homeintent_automations(monkeypatch, tmp_path):
+    entity = _make_entity(monkeypatch, tmp_path)
+    _run(entity, AUTOMATION_SENTENCE, conversation_id="create")
+    _run(entity, "Ja", conversation_id="create")
+
+    result = _run(entity, "Zeige nur HomeIntent-Automationen", conversation_id="query")
+
+    assert "HomeIntent-Automationen:" in result.response.speech
+    assert AUTOMATION_SENTENCE in result.response.speech
+
+
+def test_planned_query_when_query_and_reschedule_round_trip(monkeypatch, tmp_path):
+    entity = _make_entity(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        ha_conversation.dt_util,
+        "now",
+        lambda: datetime(2026, 8, 21, 12, 0, tzinfo=timezone.utc),
+    )
+    _run(
+        entity,
+        "Fahre in 5 Stunden die Büro Rolllade auf 40 Prozent",
+        conversation_id="create",
+    )
+    _run(entity, "Ja", conversation_id="create")
+
+    planned = _run(
+        entity,
+        "Welche einmaligen Aufträge sind noch geplant?",
+        conversation_id="planned",
+    )
+    when = _run(
+        entity,
+        "Wann wird Büro Rolllade gefahren?",
+        conversation_id="when",
+    )
+    moved = _run(
+        entity,
+        "Verschiebe den Auftrag für Büro Rolllade auf 20 Uhr",
+        conversation_id="move",
+    )
+
+    assert "21.08.2026 um 17:00 Uhr" in planned.response.speech
+    assert "21.08.2026 um 17:00 Uhr" in when.response.speech
+    assert "21.08.2026 um 20:00 Uhr" in moved.response.speech
+
+
+def test_targetless_reschedule_asks_for_device_when_multiple_jobs_match(
+    monkeypatch, tmp_path
+):
+    entity = _make_entity(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        ha_conversation.dt_util,
+        "now",
+        lambda: datetime(2026, 8, 21, 12, 0, tzinfo=timezone.utc),
+    )
+    for conversation_id, sentence in (
+        ("one", "In einer Stunde schalte das Küchenlicht ein"),
+        ("two", "In zwei Stunden schalte das Bürolicht ein"),
+    ):
+        _run(entity, sentence, conversation_id=conversation_id)
+        _run(entity, "Ja", conversation_id=conversation_id)
+
+    result = _run(entity, "Verschiebe den Auftrag auf 20 Uhr", conversation_id="move")
+
+    assert "Mehrere Aufträge passen" in result.response.speech
+    assert "Bitte nenne das Gerät" in result.response.speech
+
+
+def test_existing_automation_can_be_limited_to_three_runs(monkeypatch, tmp_path):
+    entity = _make_entity(monkeypatch, tmp_path)
+    _run(entity, AUTOMATION_SENTENCE, conversation_id="create")
+    _run(entity, "Ja", conversation_id="create")
+
+    result = _run(
+        entity,
+        "Wiederhole die Automation für Küchenlicht nur dreimal",
+        conversation_id="limit",
+    )
+
+    automations = pyyaml.safe_load(
+        (tmp_path / "automations.yaml").read_text(encoding="utf-8")
+    )
+    assert "nur noch 3 Mal" in result.response.speech
+    assert automations[0]["actions"][-1] == {
+        "action": "ha_nlu.record_automation_run",
+        "data": {"automation_id": automations[0]["id"], "max_runs": 3},
+    }

@@ -34,6 +34,7 @@ def test_trigger_type_covers_all_documented_types():
         "SUN",
         "TIME",
         "RELATIVE_TIME",
+        "CALENDAR_TIME",
         "WEEKDAY",
     }
 

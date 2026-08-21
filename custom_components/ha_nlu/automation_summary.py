@@ -25,6 +25,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+CREATED_BY_HOMEINTENT = "homeintent"
+
 
 @dataclass(frozen=True)
 class AutomationSummary:
@@ -51,3 +53,7 @@ class AutomationSummary:
     # docstring for why this key, not ``automation.turn_on``/``turn_off``,
     # is this integration's actual enable/disable mechanism).
     enabled: bool = True
+    scheduled_for: str | None = None
+    once: bool = False
+    max_runs: int | None = None
+    run_count: int = 0

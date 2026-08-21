@@ -76,6 +76,7 @@ def test_async_setup_entry_registers_the_delete_automation_service(tmp_path):
     asyncio.run(ha_nlu_init.async_setup_entry(hass, entry))
 
     assert hass.services.has_service(DOMAIN, "delete_automation") is True
+    assert hass.services.has_service(DOMAIN, "record_automation_run") is True
 
 
 def test_async_setup_entry_does_not_double_register_the_service(tmp_path):
@@ -119,6 +120,7 @@ def test_async_unload_entry_removes_the_service(tmp_path):
     asyncio.run(ha_nlu_init.async_unload_entry(hass, entry))
 
     assert hass.services.has_service(DOMAIN, "delete_automation") is False
+    assert hass.services.has_service(DOMAIN, "record_automation_run") is False
 
 
 def test_calling_the_service_deletes_the_matching_automation(monkeypatch, tmp_path):

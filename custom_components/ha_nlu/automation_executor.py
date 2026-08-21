@@ -48,7 +48,10 @@ user was actually told.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import re
 import uuid
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
@@ -58,12 +61,24 @@ from homeassistant.util import yaml as yaml_util
 from homeassistant.util.file import write_utf8_file_atomic
 
 from .automation_metadata_store import AutomationMetadata, AutomationMetadataStore, utcnow_isoformat
-from .automation_summary import AutomationSummary
+from .automation_summary import AutomationSummary, CREATED_BY_HOMEINTENT
+from .automation_transaction import (
+    AutomationTransaction,
+    AutomationTransactionJournal,
+    ConcurrentAutomationUpdateError,
+    TRANSACTION_JOURNAL_FILENAME,
+)
 
 AUTOMATIONS_YAML_FILENAME = "automations.yaml"
 AUTOMATION_CATEGORY_SCOPE = "automation"
 HOMEINTENT_CATEGORY_NAME = "Homeintent"
 AUTOMATION_LOCK_DATA_KEY = "ha_nlu_automation_write_lock"
+
+
+@dataclass(frozen=True)
+class _AutomationFileSnapshot:
+    automations: list[dict[str, Any]]
+    digest: str
 
 
 def _collect_entity_ids(value: Any) -> set[str]:
@@ -105,6 +120,86 @@ class AutomationExecutor:
         self._hass = hass
         self._lock = hass.data.setdefault(AUTOMATION_LOCK_DATA_KEY, asyncio.Lock())
         self._metadata_store = AutomationMetadataStore(hass)
+        self._journal = AutomationTransactionJournal(
+            hass.config.path(TRANSACTION_JOURNAL_FILENAME)
+        )
+
+    async def _async_read_snapshot(self, path: str) -> _AutomationFileSnapshot:
+        return await self._hass.async_add_executor_job(self._read_snapshot, path)
+
+    async def _async_begin_transaction(
+        self,
+        *,
+        operation: str,
+        automation_id: str,
+        path: str,
+        snapshot: _AutomationFileSnapshot,
+        updated: list[dict[str, Any]],
+    ) -> AutomationTransaction:
+        existing = await self._hass.async_add_executor_job(self._journal.read)
+        if existing is not None:
+            raise RuntimeError(
+                "Eine unvollständige HomeIntent-Transaktion muss zuerst wiederhergestellt werden"
+            )
+        content, expected_after_digest = await self._hass.async_add_executor_job(
+            self._serialize_automations, updated
+        )
+        transaction = AutomationTransaction(
+            operation=operation,
+            automation_id=automation_id,
+            created_at=utcnow_isoformat(),
+            before_digest=snapshot.digest,
+            # Persist the exact expected result *before* touching YAML. A
+            # crash after the atomic replace but before the second journal
+            # write can therefore still be recovered deterministically.
+            after_digest=expected_after_digest,
+            before_automations=snapshot.automations,
+            after_automations=updated,
+        )
+        await self._hass.async_add_executor_job(self._journal.write, transaction)
+        try:
+            after_digest = await self._hass.async_add_executor_job(
+                self._write_content_if_unchanged,
+                path,
+                content,
+                snapshot.digest,
+            )
+        except Exception as err:
+            current_digest = await self._hass.async_add_executor_job(
+                self._file_digest, path
+            )
+            # If no YAML write happened, the prepared journal has no work to
+            # recover. Any other state is retained for startup recovery or a
+            # deliberate conflict decision; never guess which writer won.
+            conflict_before_write = (
+                isinstance(err, ConcurrentAutomationUpdateError)
+                and not err.write_started
+            )
+            if current_digest == snapshot.digest or conflict_before_write:
+                await self._hass.async_add_executor_job(self._journal.clear)
+            raise
+        transaction = replace(
+            transaction, after_digest=after_digest, state="yaml_written"
+        )
+        await self._hass.async_add_executor_job(self._journal.write, transaction)
+        return transaction
+
+    async def _async_rollback_transaction(
+        self, path: str, transaction: AutomationTransaction
+    ) -> None:
+        if transaction.after_digest is None:
+            await self._hass.async_add_executor_job(self._journal.clear)
+            return
+        await self._hass.async_add_executor_job(
+            self._write_if_unchanged,
+            path,
+            transaction.before_automations,
+            transaction.after_digest,
+        )
+        await self._hass.async_add_executor_job(self._journal.clear)
+
+    async def _async_complete_transaction(self) -> None:
+        await self._hass.async_add_executor_job(self._journal.clear)
 
     def _assign_homeintent_category(self, automation_id: str) -> None:
         """Create/reuse the automation-scoped Homeintent category and assign
@@ -167,6 +262,7 @@ class AutomationExecutor:
         *,
         scheduled_for: datetime | None = None,
         once: bool = False,
+        max_runs: int | None = None,
     ) -> str:
         """Appends ``config`` (a ``GenerationResult.config`` dict, no ``id``
         key yet - see ``ha_automation_generator.py``'s ``GenerationResult``
@@ -200,16 +296,21 @@ class AutomationExecutor:
             automation_id = uuid.uuid4().hex
         path = self._hass.config.path(AUTOMATIONS_YAML_FILENAME)
         async with self._lock:
-            original_automations = await self._hass.async_add_executor_job(self._read_automations, path)
+            snapshot = await self._async_read_snapshot(path)
+            original_automations = snapshot.automations
             automations = [*original_automations, {"id": automation_id, **config}]
-            await self._hass.async_add_executor_job(self._write_automations, path, automations)
+            transaction = await self._async_begin_transaction(
+                operation="create",
+                automation_id=automation_id,
+                path=path,
+                snapshot=snapshot,
+                updated=automations,
+            )
 
             try:
                 await self._hass.services.async_call("automation", "reload", {}, blocking=True)
             except Exception:
-                await self._hass.async_add_executor_job(
-                    self._write_automations, path, original_automations
-                )
+                await self._async_rollback_transaction(path, transaction)
                 raise
 
             try:
@@ -222,12 +323,12 @@ class AutomationExecutor:
                         scheduled_for.isoformat() if scheduled_for is not None else None
                     ),
                     once=once,
+                    max_runs=max_runs,
                 )
                 await self._metadata_store.async_save(metadata)
             except Exception:
-                await self._hass.async_add_executor_job(
-                    self._write_automations, path, original_automations
-                )
+                await self._async_rollback_transaction(path, transaction)
+                await self._metadata_store.async_delete(automation_id)
                 # Best-effort: HA's live config should reflect the rollback
                 # too, but a second reload failure must not mask the
                 # original category/metadata error, which is what actually
@@ -238,6 +339,7 @@ class AutomationExecutor:
                 except Exception:  # noqa: BLE001 - see comment above
                     pass
                 raise
+            await self._async_complete_transaction()
 
         return automation_id
 
@@ -284,22 +386,34 @@ class AutomationExecutor:
         """
         path = self._hass.config.path(AUTOMATIONS_YAML_FILENAME)
         async with self._lock:
-            original_automations = await self._hass.async_add_executor_job(self._read_automations, path)
+            snapshot = await self._async_read_snapshot(path)
+            original_automations = snapshot.automations
             remaining = [a for a in original_automations if a.get("id") != automation_id]
             if len(remaining) == len(original_automations):
                 raise ValueError(f"No automation with id {automation_id!r} found")
 
-            await self._hass.async_add_executor_job(self._write_automations, path, remaining)
+            transaction = await self._async_begin_transaction(
+                operation="delete",
+                automation_id=automation_id,
+                path=path,
+                snapshot=snapshot,
+                updated=remaining,
+            )
 
             try:
                 await self._hass.services.async_call("automation", "reload", {}, blocking=True)
             except Exception:
-                await self._hass.async_add_executor_job(
-                    self._write_automations, path, original_automations
+                await self._async_rollback_transaction(path, transaction)
+                raise
+            try:
+                await self._metadata_store.async_delete(automation_id)
+            except Exception:
+                await self._async_rollback_transaction(path, transaction)
+                await self._hass.services.async_call(
+                    "automation", "reload", {}, blocking=True
                 )
                 raise
-
-            await self._metadata_store.async_delete(automation_id)
+            await self._async_complete_transaction()
 
     async def async_disable_automation(self, automation_id: str) -> None:
         """V5 Teil 8/10 (Wave 11, "Automation Disable/Enable"): durably
@@ -342,7 +456,8 @@ class AutomationExecutor:
     async def _async_set_initial_state(self, automation_id: str, *, enabled: bool) -> None:
         path = self._hass.config.path(AUTOMATIONS_YAML_FILENAME)
         async with self._lock:
-            original_automations = await self._hass.async_add_executor_job(self._read_automations, path)
+            snapshot = await self._async_read_snapshot(path)
+            original_automations = snapshot.automations
             updated = []
             found = False
             for automation in original_automations:
@@ -353,15 +468,20 @@ class AutomationExecutor:
             if not found:
                 raise ValueError(f"No automation with id {automation_id!r} found")
 
-            await self._hass.async_add_executor_job(self._write_automations, path, updated)
+            transaction = await self._async_begin_transaction(
+                operation="enable" if enabled else "disable",
+                automation_id=automation_id,
+                path=path,
+                snapshot=snapshot,
+                updated=updated,
+            )
 
             try:
                 await self._hass.services.async_call("automation", "reload", {}, blocking=True)
             except Exception:
-                await self._hass.async_add_executor_job(
-                    self._write_automations, path, original_automations
-                )
+                await self._async_rollback_transaction(path, transaction)
                 raise
+            await self._async_complete_transaction()
 
     async def async_list_automations(self) -> tuple[AutomationSummary, ...]:
         """V5.29 (Automation Query): a read-only survey of every automation
@@ -396,9 +516,180 @@ class AutomationExecutor:
                     created_by=entry.get("created_by") if entry else None,
                     referenced_entity_ids=frozenset(_collect_entity_ids(automation)),
                     enabled=automation.get("initial_state", True),
+                    scheduled_for=entry.get("scheduled_for") if entry else None,
+                    once=bool(entry.get("once")) if entry else False,
+                    max_runs=entry.get("max_runs") if entry else None,
+                    run_count=int(entry.get("run_count", 0)) if entry else 0,
                 )
             )
         return tuple(summaries)
+
+    async def async_reschedule_automation(
+        self, automation_id: str, scheduled_for: datetime
+    ) -> None:
+        """Move a known date-bound HomeIntent one-shot transactionally."""
+        path = self._hass.config.path(AUTOMATIONS_YAML_FILENAME)
+        async with self._lock:
+            metadata = await self._metadata_store.async_load_all()
+            entry = metadata.get(automation_id)
+            if not entry or not entry.get("once") or not entry.get("scheduled_for"):
+                raise ValueError("Die Automation ist kein geplanter HomeIntent-Einmalauftrag")
+            snapshot = await self._async_read_snapshot(path)
+            updated_automations: list[dict[str, Any]] = []
+            found = False
+            date_template = (
+                "{{ now().date().isoformat() == "
+                f"'{scheduled_for.date().isoformat()}' }}"
+            )
+            for automation in snapshot.automations:
+                if automation.get("id") != automation_id:
+                    updated_automations.append(automation)
+                    continue
+                found = True
+                triggers = list(automation.get("triggers") or [])
+                time_indexes = [
+                    index
+                    for index, trigger in enumerate(triggers)
+                    if isinstance(trigger, dict) and trigger.get("trigger") == "time"
+                ]
+                if len(time_indexes) != 1:
+                    raise ValueError("Der Zeittrigger kann nicht eindeutig verschoben werden")
+                triggers[time_indexes[0]] = {
+                    "trigger": "time",
+                    "at": scheduled_for.strftime("%H:%M:%S"),
+                }
+                conditions = list(automation.get("conditions") or [])
+                date_indexes = [
+                    index
+                    for index, condition in enumerate(conditions)
+                    if isinstance(condition, dict)
+                    and condition.get("condition") == "template"
+                    and "now().date().isoformat()" in str(
+                        condition.get("value_template", "")
+                    )
+                ]
+                if len(date_indexes) != 1:
+                    raise ValueError("Der Datumsschutz kann nicht eindeutig verschoben werden")
+                conditions[date_indexes[0]] = {
+                    "condition": "template",
+                    "value_template": date_template,
+                }
+                updated_automations.append(
+                    {**automation, "triggers": triggers, "conditions": conditions}
+                )
+            if not found:
+                raise ValueError(f"No automation with id {automation_id!r} found")
+
+            transaction = await self._async_begin_transaction(
+                operation="reschedule",
+                automation_id=automation_id,
+                path=path,
+                snapshot=snapshot,
+                updated=updated_automations,
+            )
+            try:
+                await self._hass.services.async_call(
+                    "automation", "reload", {}, blocking=True
+                )
+                await self._metadata_store.async_update(
+                    automation_id,
+                    scheduled_for=scheduled_for.isoformat(),
+                    version=int(entry.get("version", 1)) + 1,
+                )
+            except Exception:
+                await self._async_rollback_transaction(path, transaction)
+                await self._hass.services.async_call(
+                    "automation", "reload", {}, blocking=True
+                )
+                raise
+            await self._async_complete_transaction()
+
+    async def async_record_automation_run(self, automation_id: str) -> bool:
+        """Increment a bounded automation and delete it at its configured limit."""
+        delete_now = False
+        async with self._lock:
+            metadata = await self._metadata_store.async_load_all()
+            entry = metadata.get(automation_id)
+            if not entry or not isinstance(entry.get("max_runs"), int):
+                raise ValueError(f"No bounded HomeIntent automation {automation_id!r}")
+            max_runs = int(entry["max_runs"])
+            next_count = int(entry.get("run_count", 0)) + 1
+            if next_count >= max_runs:
+                delete_now = True
+            else:
+                await self._metadata_store.async_update(
+                    automation_id,
+                    run_count=next_count,
+                    version=int(entry.get("version", 1)) + 1,
+                )
+        if delete_now:
+            await self.async_delete_automation(automation_id)
+        return delete_now
+
+    async def async_set_max_runs(self, automation_id: str, max_runs: int) -> None:
+        """Limit an existing HomeIntent automation to a total run count."""
+        if not 2 <= max_runs <= 10:
+            raise ValueError("Die Ausführungszahl muss zwischen 2 und 10 liegen")
+        path = self._hass.config.path(AUTOMATIONS_YAML_FILENAME)
+        async with self._lock:
+            metadata = await self._metadata_store.async_load_all()
+            entry = metadata.get(automation_id)
+            if not entry or entry.get("created_by") != CREATED_BY_HOMEINTENT:
+                raise ValueError("Die Automation wurde nicht von HomeIntent erstellt")
+            if entry.get("once"):
+                raise ValueError("Ein Einmalauftrag kann nicht mehrfach ausgeführt werden")
+            snapshot = await self._async_read_snapshot(path)
+            updated_automations = []
+            found = False
+            for automation in snapshot.automations:
+                if automation.get("id") != automation_id:
+                    updated_automations.append(automation)
+                    continue
+                found = True
+                actions = [
+                    action
+                    for action in automation.get("actions") or []
+                    if not (
+                        isinstance(action, dict)
+                        and action.get("action") == "ha_nlu.record_automation_run"
+                    )
+                ]
+                actions.append(
+                    {
+                        "action": "ha_nlu.record_automation_run",
+                        "data": {
+                            "automation_id": automation_id,
+                            "max_runs": max_runs,
+                        },
+                    }
+                )
+                updated_automations.append({**automation, "actions": actions})
+            if not found:
+                raise ValueError(f"No automation with id {automation_id!r} found")
+            transaction = await self._async_begin_transaction(
+                operation="set_max_runs",
+                automation_id=automation_id,
+                path=path,
+                snapshot=snapshot,
+                updated=updated_automations,
+            )
+            try:
+                await self._hass.services.async_call(
+                    "automation", "reload", {}, blocking=True
+                )
+                await self._metadata_store.async_update(
+                    automation_id,
+                    max_runs=max_runs,
+                    run_count=0,
+                    version=int(entry.get("version", 1)) + 1,
+                )
+            except Exception:
+                await self._async_rollback_transaction(path, transaction)
+                await self._hass.services.async_call(
+                    "automation", "reload", {}, blocking=True
+                )
+                raise
+            await self._async_complete_transaction()
 
     async def async_cleanup_expired_scheduled_automations(
         self, now: datetime
@@ -412,9 +703,8 @@ class AutomationExecutor:
         """
         path = self._hass.config.path(AUTOMATIONS_YAML_FILENAME)
         async with self._lock:
-            original_automations = await self._hass.async_add_executor_job(
-                self._read_automations, path
-            )
+            snapshot = await self._async_read_snapshot(path)
+            original_automations = snapshot.automations
             metadata = await self._metadata_store.async_load_all()
             expired_ids: set[str] = set()
             for automation_id, entry in metadata.items():
@@ -445,21 +735,158 @@ class AutomationExecutor:
                 if automation.get("id") in expired_ids
             }
             if present_ids:
-                await self._hass.async_add_executor_job(
-                    self._write_automations, path, remaining
+                transaction = await self._async_begin_transaction(
+                    operation="expire",
+                    automation_id=",".join(sorted(present_ids)),
+                    path=path,
+                    snapshot=snapshot,
+                    updated=remaining,
                 )
                 try:
                     await self._hass.services.async_call(
                         "automation", "reload", {}, blocking=True
                     )
                 except Exception:
-                    await self._hass.async_add_executor_job(
-                        self._write_automations, path, original_automations
-                    )
+                    await self._async_rollback_transaction(path, transaction)
                     raise
             for automation_id in expired_ids:
                 await self._metadata_store.async_delete(automation_id)
+            if present_ids:
+                await self._async_complete_transaction()
             return tuple(sorted(expired_ids))
+
+    async def async_recover_incomplete_transaction(self) -> bool:
+        """Recover a crash-interrupted YAML transaction when still safe."""
+        path = self._hass.config.path(AUTOMATIONS_YAML_FILENAME)
+        async with self._lock:
+            transaction = await self._hass.async_add_executor_job(self._journal.read)
+            if transaction is None:
+                return False
+            current_digest = await self._hass.async_add_executor_job(
+                self._file_digest, path
+            )
+            if current_digest == transaction.before_digest:
+                await self._hass.async_add_executor_job(self._journal.clear)
+                return False
+            if (
+                transaction.after_digest is not None
+                and current_digest == transaction.after_digest
+            ):
+                # Do not resurrect a deleted automation after its metadata
+                # may already have been removed. The startup reconciliation
+                # directly after this call removes any orphan metadata.
+                if transaction.operation in {"delete", "expire"}:
+                    await self._hass.async_add_executor_job(self._journal.clear)
+                else:
+                    await self._async_rollback_transaction(path, transaction)
+                await self._hass.services.async_call(
+                    "automation", "reload", {}, blocking=True
+                )
+                return True
+            raise ConcurrentAutomationUpdateError(
+                "automations.yaml changed after an interrupted HomeIntent transaction"
+            )
+
+    async def async_reconcile_homeintent_state(self) -> tuple[str, ...]:
+        """Remove orphan metadata and repair categories for known entries."""
+        path = self._hass.config.path(AUTOMATIONS_YAML_FILENAME)
+        async with self._lock:
+            snapshot = await self._async_read_snapshot(path)
+            yaml_ids = {
+                automation.get("id")
+                for automation in snapshot.automations
+                if isinstance(automation.get("id"), str)
+            }
+            metadata = await self._metadata_store.async_load_all()
+            orphan_ids = sorted(set(metadata) - yaml_ids)
+            for automation_id in orphan_ids:
+                await self._metadata_store.async_delete(automation_id)
+            for automation_id in sorted(set(metadata) & yaml_ids):
+                self._assign_homeintent_category(automation_id)
+                entry = metadata[automation_id]
+                changes: dict[str, Any] = {}
+                scheduled_for = self._scheduled_for_from_yaml(
+                    snapshot.automations, automation_id, entry.get("scheduled_for")
+                )
+                if scheduled_for is not None and scheduled_for != entry.get(
+                    "scheduled_for"
+                ):
+                    changes["scheduled_for"] = scheduled_for
+                max_runs = self._max_runs_from_yaml(
+                    snapshot.automations, automation_id
+                )
+                if max_runs != entry.get("max_runs"):
+                    changes["max_runs"] = max_runs
+                    changes["run_count"] = 0
+                if changes:
+                    await self._metadata_store.async_update(
+                        automation_id,
+                        **changes,
+                        version=int(entry.get("version", 1)) + 1,
+                    )
+            return tuple(orphan_ids)
+
+    @staticmethod
+    def _scheduled_for_from_yaml(
+        automations: list[dict[str, Any]],
+        automation_id: str,
+        previous_value: str | None,
+    ) -> str | None:
+        """Derive the guarded one-shot timestamp from Home Assistant YAML."""
+        if not previous_value:
+            return None
+        automation = next(
+            (item for item in automations if item.get("id") == automation_id), None
+        )
+        if automation is None:
+            return None
+        times = [
+            trigger.get("at")
+            for trigger in automation.get("triggers") or []
+            if isinstance(trigger, dict) and trigger.get("trigger") == "time"
+        ]
+        date_values = []
+        for condition in automation.get("conditions") or []:
+            if not isinstance(condition, dict) or condition.get("condition") != "template":
+                continue
+            template = str(condition.get("value_template", ""))
+            match = re.search(
+                r"now\(\)\.date\(\)\.isoformat\(\)\s*==\s*['\"]"
+                r"(\d{4}-\d{2}-\d{2})['\"]",
+                template,
+            )
+            if match:
+                date_values.append(match.group(1))
+        if len(times) != 1 or len(date_values) != 1:
+            return None
+        try:
+            previous = datetime.fromisoformat(previous_value)
+            parsed = datetime.fromisoformat(f"{date_values[0]}T{times[0]}")
+        except (TypeError, ValueError):
+            return None
+        if previous.tzinfo is not None:
+            parsed = parsed.replace(tzinfo=previous.tzinfo)
+        return parsed.isoformat()
+
+    @staticmethod
+    def _max_runs_from_yaml(
+        automations: list[dict[str, Any]], automation_id: str
+    ) -> int | None:
+        automation = next(
+            (item for item in automations if item.get("id") == automation_id), None
+        )
+        if automation is None:
+            return None
+        values = [
+            action.get("data", {}).get("max_runs")
+            for action in automation.get("actions") or []
+            if isinstance(action, dict)
+            and action.get("action") == "ha_nlu.record_automation_run"
+            and isinstance(action.get("data"), dict)
+        ]
+        if len(values) == 1 and isinstance(values[0], int) and 2 <= values[0] <= 10:
+            return values[0]
+        return None
 
     @staticmethod
     def _read_automations(path: str) -> list[dict[str, Any]]:
@@ -471,6 +898,72 @@ class AutomationExecutor:
         except FileNotFoundError:
             return []
         return content if content else []
+
+    @classmethod
+    def _read_snapshot(cls, path: str) -> _AutomationFileSnapshot:
+        """Read YAML only when its byte fingerprint stays stable."""
+        for _attempt in range(3):
+            before = cls._file_digest(path)
+            automations = cls._read_automations(path)
+            after = cls._file_digest(path)
+            if before == after:
+                return _AutomationFileSnapshot(automations, after)
+        raise ConcurrentAutomationUpdateError(
+            "automations.yaml changed repeatedly while HomeIntent was reading it"
+        )
+
+    @classmethod
+    def _write_if_unchanged(
+        cls,
+        path: str,
+        automations: list[dict[str, Any]],
+        expected_digest: str,
+    ) -> str:
+        content, _content_digest = cls._serialize_automations(automations)
+        return cls._write_content_if_unchanged(path, content, expected_digest)
+
+    @staticmethod
+    def _serialize_automations(
+        automations: list[dict[str, Any]],
+    ) -> tuple[str, str]:
+        content = yaml_util.dump(automations)
+        digest = "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
+        return content, digest
+
+    @classmethod
+    def _write_content_if_unchanged(
+        cls,
+        path: str,
+        content: str,
+        expected_digest: str,
+    ) -> str:
+        current_digest = cls._file_digest(path)
+        if current_digest != expected_digest:
+            raise ConcurrentAutomationUpdateError(
+                "automations.yaml was modified outside HomeIntent",
+                write_started=False,
+            )
+        write_utf8_file_atomic(path, content)
+        after_digest = cls._file_digest(path)
+        content_digest = "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
+        # ``after_digest == expected_digest`` is retained for isolated unit
+        # tests whose atomic writer is mocked. In a real filesystem the new
+        # digest must equal the exact bytes HomeIntent just serialized.
+        if after_digest not in (content_digest, expected_digest):
+            raise ConcurrentAutomationUpdateError(
+                "automations.yaml changed while HomeIntent was writing it",
+                write_started=True,
+            )
+        return after_digest
+
+    @staticmethod
+    def _file_digest(path: str) -> str:
+        try:
+            with open(path, "rb") as handle:
+                content = handle.read()
+        except FileNotFoundError:
+            return "missing"
+        return "sha256:" + hashlib.sha256(content).hexdigest()
 
     @staticmethod
     def _write_automations(path: str, automations: list[dict[str, Any]]) -> None:

@@ -30,6 +30,11 @@ from hassil import Intents
 
 from .areas import AreaResolveStatus, resolve_area_name
 from .automation_summary import AutomationSummary
+from .automation_results import (
+    AutomationDeletionMatchResult,
+    AutomationMatchResult,
+    AutomationToggleMatchResult,
+)
 from .entities import EntitySnapshot, ResolveStatus, build_entity_index, resolve_entity
 from .nlu.command import SemanticCommand, build_semantic_command
 from .nlu.context import ConversationContext
@@ -46,9 +51,10 @@ from .automation_action_parser import AutomationActionParser
 from .automation_condition_parser import AutomationConditionParser, split_on_top_level_and
 from .automation_trigger_parser import _AUTOMATION_TRIGGER_RE, AutomationTriggerParser
 from .relative_time_command_parser import RelativeTimeCommandParser
+from .scheduled_time_command_parser import ScheduledTimeCommandParser
 from .nlu.automation_model import AutomationModel, TriggerModel, TriggerType, render_automation_tree
 from .nlu.automation_sentence_split import split_trigger_action
-from .nlu.automation_validator import AutomationValidationError, validate_automation
+from .nlu.automation_validator import validate_automation
 from .nlu.condition_model import ConditionNode
 from .parsers import (
     AreaQueryParser,
@@ -223,6 +229,10 @@ _BARE_PERCENT_RE = re.compile(r"\bauf\s+\d{1,3}\b")
 # still does the real, exhaustive matching, this only decides whether it's
 # worth trying.
 _RELATIVE_TIME_RE = re.compile(r"\bin\s+\S+\s+(sekunden?|minuten?|stunden?)\b", re.IGNORECASE)
+_CALENDAR_TIME_RE = re.compile(
+    r"\b(heute|morgen|übermorgen)\b|\bam\s+(montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonnabend|sonntag)\b|\bam\s+\d{1,2}\.(?=\s)",
+    re.IGNORECASE,
+)
 
 # Sentences containing "alle"/"beide[n/r]"/"nur"/a count word are routed to
 # QuantifierParser's separately-compiled grammar rather than mixed into the
@@ -345,6 +355,15 @@ _AUTOMATION_ENABLE_RE = re.compile(r"\baktivier\w*\b", re.IGNORECASE)
 # boundary at "mal" inside "einmal"/"einmalig", so it never fires on this
 # qualifier by accident.
 _AUTOMATION_ONCE_RE = re.compile(r"\beinmalig\w*\b|\bnur einmal\b", re.IGNORECASE)
+_AUTOMATION_REPEAT_RE = re.compile(
+    r"\bnur\s+(?P<separate>zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|[2-9]|10)\s*mal\b"
+    r"|\b(?P<joined>zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn)mal\b",
+    re.IGNORECASE,
+)
+_REPEAT_COUNTS = {
+    "zwei": 2, "drei": 3, "vier": 4, "fünf": 5, "sechs": 6,
+    "sieben": 7, "acht": 8, "neun": 9, "zehn": 10,
+}
 
 # Per-domain question word for the clarification round-trip (v2 plan Phase
 # 25). Same kind of small, explicit German-grammar lookup as
@@ -431,81 +450,6 @@ class CommandPlan:
     """
 
     commands: tuple[MatchResult, ...]
-
-
-@dataclass(frozen=True)
-class AutomationMatchResult:
-    """Result of ``NluEngine.match_automation()`` - the Integration Wave's
-    automation counterpart to ``MatchResult``, deliberately shaped
-    differently: no ``plan``/``ServiceCallPlan`` field, since this wave's
-    scope explicitly stops at "Sprache -> AutomationModel -> Validation ->
-    Response/Debug" (Integration Plan Section 9) - never
-    "AutomationModel -> HA Automation YAML -> HA speichern", that is a
-    separate, later, separately-approved phase. Nothing on this path ever
-    calls ``hass.services.async_call()``.
-
-    ``response_text`` reuses ``render_automation_tree()`` (a plain-text
-    debug rendering, not a new spoken-language generator - Regel 6, no
-    parallel response system) for both outcomes: the plain automation tree
-    when ``validation_error`` is ``None``, or that same tree plus the first
-    violated ``AutomationValidationError`` when it isn't - "niemals raten":
-    a structurally-parsed but semantically-invalid automation is still
-    surfaced, never silently dropped or silently treated as valid.
-    """
-
-    model: AutomationModel
-    response_text: str
-    validation_error: AutomationValidationError | None
-
-
-@dataclass(frozen=True)
-class AutomationDeletionMatchResult:
-    """Result of ``NluEngine.match_automation_delete()`` (HomeIntent V5 Teil
-    8/10, V5.28 "Automation Deletion") - deliberately shaped like
-    ``AutomationMatchResult`` above (a spoken response plus a not-yet-acted-
-    on payload, never a direct HA write on this turn) rather than like the
-    plain ``MatchResult``: deletion needs the same "speak it back, wait for
-    ja/nein" confirmation gate creation already established (``context.py``'s
-    ``PendingAutomationDeletion``), since it is exactly as hard to reverse.
-
-    ``automation`` is ``None`` for both refusal shapes - zero matches ("kenne
-    diese Automation nicht") and 2+ matches ("welche davon genau?", never
-    guessed, Regel 4) - collapsed into one field the same way
-    ``AutomationMatchResult.validation_error`` collapses "valid" vs. "invalid"
-    into one type: ``conversation.py`` only needs to check ``is None`` to
-    decide whether a confirmation should be offered.
-    """
-
-    automation: AutomationSummary | None
-    response_text: str
-
-
-@dataclass(frozen=True)
-class AutomationToggleMatchResult:
-    """Result of ``NluEngine.match_automation_disable()``/
-    ``match_automation_enable()`` (HomeIntent V5 Teil 8/10, Wave 11
-    "Automation Disable/Enable") - deliberately shaped unlike
-    ``AutomationDeletionMatchResult``: no confirmation gate. Disabling (or
-    re-enabling) an automation is trivially reversible by saying the
-    opposite sentence, unlike a deletion or a creation - so a resolved
-    single match here executes immediately (``conversation.py`` calls
-    ``AutomationExecutor.async_disable_automation()``/
-    ``async_enable_automation()`` on this same turn), the same "match then
-    act, no ja/nein round-trip" shape an ordinary TURN_ON/TURN_OFF
-    ``MatchResult`` already has - not a second confirmation vocabulary for
-    an action that doesn't need one (Regel 6).
-
-    ``automation`` is ``None`` for both refusal shapes (0 matches, 2+
-    matches), same "one field collapses valid/invalid" precedent
-    ``AutomationDeletionMatchResult.automation`` already sets - ``enable``
-    still tells the caller which direction was requested even on a refusal,
-    so ``conversation.py`` never needs to re-parse the sentence to log/
-    react to *which* refusal this was.
-    """
-
-    automation: AutomationSummary | None
-    enable: bool
-    response_text: str
 
 
 class NluEngine:
@@ -670,6 +614,9 @@ class NluEngine:
         self._automation_toggle_parser = AutomationToggleParser(automation_toggle_intents)
         self._relative_time_command_parser = RelativeTimeCommandParser(
             relative_time_intents, self._automation_action_parser
+        )
+        self._scheduled_time_command_parser = ScheduledTimeCommandParser(
+            self._automation_action_parser
         )
 
     def _select_parser(self, text: str):
@@ -1130,6 +1077,13 @@ class NluEngine:
             return None
 
         normalized = normalize(text)
+        repeat_match = _AUTOMATION_REPEAT_RE.search(normalized)
+        max_runs = None
+        if repeat_match is not None:
+            raw_count = (repeat_match.group("separate") or repeat_match.group("joined")).casefold()
+            max_runs = int(raw_count) if raw_count.isdigit() else _REPEAT_COUNTS[raw_count]
+            normalized = _AUTOMATION_REPEAT_RE.sub(" ", normalized)
+            normalized = re.sub(r"\s+", " ", normalized).strip()
         once = bool(_AUTOMATION_ONCE_RE.search(normalized))
         if once:
             # Strip the qualifier itself before trigger/action splitting -
@@ -1168,7 +1122,8 @@ class NluEngine:
 
         conditions = (condition_node,) if condition_node is not None else ()
         model = AutomationModel(
-            triggers=(trigger,), conditions=conditions, actions=actions, source_text=text, once=once
+            triggers=(trigger,), conditions=conditions, actions=actions, source_text=text,
+            once=once, max_runs=max_runs,
         )
         validation_error = validate_automation(model)
         response_text = render_automation_tree(model)
@@ -1237,6 +1192,45 @@ class NluEngine:
         if validation_error is not None:
             response_text = f"{response_text}\nvalidation_error: {validation_error.name}"
         return AutomationMatchResult(model=model, response_text=response_text, validation_error=validation_error)
+
+    def match_calendar_time_automation(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
+        context: ConversationContext | None = None,
+    ) -> AutomationMatchResult | None:
+        """Match a date-bound command such as "morgen um 8 Uhr ..."."""
+        if not _CALENDAR_TIME_RE.search(text):
+            return None
+        normalized = normalize(text)
+        parse_context = ParseContext(
+            entities=entities,
+            index=build_entity_index(entities),
+            world_model=world_model,
+            last_entities=tuple(context.last_entities) if context is not None else (),
+            last_area=context.last_area if context is not None else None,
+        )
+        parsed = self._scheduled_time_command_parser.parse(normalized, parse_context)
+        if parsed is None:
+            return None
+        actions, schedule = parsed
+        model = AutomationModel(
+            triggers=(TriggerModel(type=TriggerType.CALENDAR_TIME),),
+            actions=actions,
+            source_text=text,
+            once=True,
+            calendar_schedule=schedule,
+        )
+        validation_error = validate_automation(model)
+        response_text = render_automation_tree(model)
+        if validation_error is not None:
+            response_text = f"{response_text}\nvalidation_error: {validation_error.name}"
+        return AutomationMatchResult(
+            model=model,
+            response_text=response_text,
+            validation_error=validation_error,
+        )
 
     def _split_trigger_condition(
         self, trigger_text: str, parse_context: ParseContext

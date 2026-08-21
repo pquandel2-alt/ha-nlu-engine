@@ -37,13 +37,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 from homeassistant.util.file import write_utf8_file_atomic
 
+from .automation_summary import CREATED_BY_HOMEINTENT
+
 METADATA_FILENAME = "ha_nlu_automation_metadata.json"
 
 # The only value this integration itself ever writes - a future V5.29
 # (Automation Query) needs to tell "created by HomeIntent" apart from
 # "created by hand in the UI", which is exactly what ``created_by`` records.
-CREATED_BY_HOMEINTENT = "homeintent"
-
 # v1 intent YAMLs are German-only (see ``conversation.py``'s own
 # ``supported_languages`` property) - no language-detection mechanism
 # exists anywhere in this project, so this is the one truthful value,
@@ -67,6 +67,8 @@ class AutomationMetadata:
     source_language: str = SOURCE_LANGUAGE_DE
     scheduled_for: str | None = None
     once: bool = False
+    max_runs: int | None = None
+    run_count: int = 0
 
 
 class AutomationMetadataStore:
@@ -110,6 +112,18 @@ class AutomationMetadataStore:
         if automation_id in entries:
             del entries[automation_id]
             await self._hass.async_add_executor_job(self._write, path, entries)
+
+    async def async_update(self, automation_id: str, **changes: Any) -> dict[str, Any]:
+        """Update selected fields without discarding forward-compatible data."""
+        path = self._hass.config.path(METADATA_FILENAME)
+        entries = await self._hass.async_add_executor_job(self._read, path)
+        entry = entries.get(automation_id)
+        if not isinstance(entry, dict):
+            raise ValueError(f"No HomeIntent metadata for {automation_id!r}")
+        updated = {**entry, **changes}
+        entries[automation_id] = updated
+        await self._hass.async_add_executor_job(self._write, path, entries)
+        return updated
 
     @staticmethod
     def _read(path: str) -> dict[str, Any]:

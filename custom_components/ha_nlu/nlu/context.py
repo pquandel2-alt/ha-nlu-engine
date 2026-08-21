@@ -25,6 +25,7 @@ from ..areas import AreaSnapshot
 from ..automation_summary import AutomationSummary
 from ..entities import EntitySnapshot
 from ..floors import FloorSnapshot
+from ..service_call import ServiceCallPlan
 from .automation_model import AutomationModel
 from .command import SemanticCommand
 from .parser import ClarificationRequest
@@ -39,6 +40,7 @@ __all__ = [
     "AUTOMATION_CONFIRMATION_TTL_SECONDS",
     "PendingAutomationConfirmation",
     "PendingAutomationDeletion",
+    "PendingServiceConfirmation",
 ]
 
 
@@ -84,6 +86,14 @@ class PendingAutomationDeletion:
     """
 
     automation: AutomationSummary
+
+
+@dataclass(frozen=True)
+class PendingServiceConfirmation:
+    """A high-risk lock/garage service call awaiting explicit consent."""
+
+    plan: ServiceCallPlan
+    success_text: str
 
 # No TTL value is specified anywhere in the plan (only the test case name
 # "context expiration", brain node 9ced4390, section 26). 30s covers a
@@ -142,6 +152,7 @@ class ConversationContext:
     # awaiting its own "ja"/"nein" confirmation before anything is removed
     # from Home Assistant (see PendingAutomationDeletion's own docstring).
     pending_automation_deletion: PendingAutomationDeletion | None = None
+    pending_service_confirmation: PendingServiceConfirmation | None = None
 
 
 class ConversationContextStore:
@@ -181,6 +192,7 @@ class ConversationContextStore:
             self._automation_confirmation_ttl_seconds
             if context.pending_automation_confirmation is not None
             or context.pending_automation_deletion is not None
+            or context.pending_service_confirmation is not None
             else self._ttl_seconds
         )
         self._entries[conversation_id] = (self._clock(), ttl_seconds, context)

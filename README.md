@@ -2,9 +2,12 @@
 
 **Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
 
-- Aktuelle Version: **4.21.0**
+- Aktuelle Version: **4.22.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
+- Lizenz: **MIT**
+
+[![HomeIntent in HACS öffnen](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=pquandel2-alt&repository=ha-nlu-engine&category=integration)
 
 ## Was ist HomeIntent?
 
@@ -64,6 +67,11 @@ HomeIntent kann aktuell unter anderem folgende Home-Assistant-Domänen verwenden
 | `fan` | ein-/ausschalten, Geschwindigkeit setzen oder verändern |
 | `cover` | öffnen, schließen, Position in Prozent setzen |
 | `script` | Home-Assistant-Skripte starten |
+| `climate` | Solltemperatur und Betriebsmodus setzen |
+| `media_player` | Wiedergabe, Lautstärke und Quelle steuern |
+| `vacuum` | starten, pausieren, stoppen und zur Station schicken |
+| `scene` | Szenen aktivieren |
+| `lock` | ver- und entriegeln; Entriegeln nur nach Bestätigung |
 | `sensor` | Werte und Vergleiche abfragen (nur lesend) |
 | `binary_sensor` | Zustände abfragen, zum Beispiel Fenster oder Türen (nur lesend) |
 
@@ -77,7 +85,15 @@ Mach das Licht blau.
 Fahre die Rolllade im Wohnzimmer auf 30 Prozent.
 Stelle den Ventilator auf Stufe 3.
 Starte Gute Nacht.
+Stelle die Heizung im Wohnzimmer auf 21 Grad.
+Pausiere die Wiedergabe auf Wohnzimmer TV.
+Schicke den Saugroboter zur Ladestation.
+Aktiviere die Szene Filmabend.
 ```
+
+Sicherheitskritische direkte Aktionen werden nicht sofort ausgeführt. Das
+Entriegeln eines Schlosses sowie das Öffnen oder Schließen eines als Garage
+klassifizierten Tores erfordern eine ausdrückliche Bestätigung.
 
 ### Bereiche, Etagen und mehrere Geräte
 
@@ -194,16 +210,46 @@ Relative Zeitangaben erzeugen ebenfalls eine einmalige Automation:
 Fahre in 5 Minuten die Wohnzimmer Rolllade auf 30 Prozent.
 Fahre in 30 Sekunden die Wohnzimmer Rolllade auf 30 Prozent.
 In einer Stunde schalte das Küchenlicht ein.
+In zwei Stunden und 30 Minuten schalte das Küchenlicht ein.
 ```
 
 Der Countdown beginnt erst nach der Bestätigung mit „Ja“. HomeIntent berechnet dann aus der lokalen Home-Assistant-Zeit einen absoluten Zeitpunkt mit Sekundenpräzision und speichert zusätzlich das vollständige Zieldatum. Minuten-, Stunden- und Tageswechsel sowie Sommerzeitwechsel werden berücksichtigt. Nach der Aktion löscht sich die Automation selbst; vorübergehende Lösch- oder Reloadfehler werden begrenzt erneut versucht.
 
 Das ist **keine täglich wiederkehrende Automation**. Der intern verwendete Uhrzeit-Trigger wird durch eine Datumsbedingung geschützt und nach dem ersten Auslösen entfernt. War Home Assistant beim Zielzeitpunkt ausgeschaltet, wird der verpasste Auftrag beim nächsten Start sicher verworfen, statt am Folgetag eine veraltete Geräteaktion auszuführen.
 
+### Termine in Alltagssprache
+
+HomeIntent versteht zusätzlich kalendarische einmalige Aufträge:
+
+```text
+Morgen um 8 Uhr fahre die Rolllade im Büro hoch.
+Heute Abend um 20 Uhr schalte das Gartenlicht ein.
+Am Samstag um 10 Uhr starte Gute Nacht.
+Am 25. August um 18 Uhr schalte das Küchenlicht ein.
+Übermorgen früh fahre die Rolllade hoch.
+```
+
+Der Termin wird erst bei der Bestätigung in der lokalen Home-Assistant-Zeitzone
+aufgelöst. Nicht existierende Uhrzeiten bei einem Sommerzeitwechsel und bereits
+vergangene Termine werden abgelehnt. Für Tageszeiten ohne Uhrzeit gelten feste,
+reproduzierbare Standardwerte; „früh“ bedeutet derzeit 08:00 Uhr.
+
+### Eine Automation begrenzt wiederholen
+
+Mit Formulierungen wie „nur dreimal“ kann die Ausführungszahl einer Automation
+auf zwei bis zehn Läufe begrenzt werden. HomeIntent zählt erfolgreiche Läufe in
+seinen Metadaten und löscht die Automation nach dem letzten Lauf. Die Vorschau
+nennt die Begrenzung vor der Bestätigung.
+
 ### Automationen verwalten
 
 ```text
 Welche Automationen gibt es?
+Zeige nur HomeIntent-Automationen.
+Welche einmaligen Aufträge sind noch geplant?
+Wann wird die Rolllade gefahren?
+Verschiebe den Auftrag für die Rolllade auf 20 Uhr.
+Lösche alle abgelaufenen HomeIntent-Automationen.
 Was schaltet das Küchenlicht?
 Warum ist das Küchenlicht an?
 Deaktiviere die Automation für Küchenlicht.
@@ -211,7 +257,7 @@ Aktiviere die Automation für Küchenlicht.
 Lösche die Automation für Küchenlicht.
 ```
 
-Löschen erfordert eine Bestätigung. Aktivieren und Deaktivieren ändern den dauerhaften `initial_state` in `automations.yaml`; die Einstellung bleibt daher auch nach einem Reload oder Neustart erhalten.
+Löschen erfordert eine Bestätigung. Aktivieren und Deaktivieren ändern den dauerhaften `initial_state` in `automations.yaml`; die Einstellung bleibt daher auch nach einem Reload oder Neustart erhalten. Beim Verschieben muss genau ein noch geplanter einmaliger Auftrag passen. Bei mehreren Treffern nennt HomeIntent die Kandidaten und bittet um ein eindeutigeres Gerät, statt einen beliebigen Auftrag zu ändern.
 
 ## Installation über HACS
 
@@ -255,7 +301,7 @@ Alle ab Version 4.20.0 neu durch HomeIntent erzeugten Automationen werden automa
 - einmalige zustandsbasierte Automationen und
 - zeitversetzte Einmal-Automationen.
 
-Existiert die Kategorie bereits mit einer anderen Groß-/Kleinschreibung, wird sie wiederverwendet. Bereits vor Version 4.20.0 angelegte Automationen werden nicht rückwirkend einsortiert.
+Existiert die Kategorie bereits mit einer anderen Groß-/Kleinschreibung, wird sie wiederverwendet. Beim Start gleicht HomeIntent bekannte eigene Automationen, Metadaten und Kategorien ab. Dadurch werden fehlende Kategoriezuordnungen repariert und verwaiste HomeIntent-Metadaten entfernt.
 
 Die Kategorie dient nur der übersichtlichen Gruppierung in der Automationsansicht. Sie verändert nicht das Ausführungsverhalten.
 
@@ -275,7 +321,9 @@ Das Erkennen eines Automationssatzes verändert Home Assistant noch nicht. Erst 
 
 ### Transaktionales Schreiben
 
-Beim Erstellen werden `automations.yaml`, der Live-Zustand nach `automation.reload`, die Homeintent-Kategorie und die internen Metadaten aufeinander abgestimmt. Auch Löschen, Aktivieren und Deaktivieren verwenden geschützte Schreib-/Reload-Abläufe. Alle Executor-Instanzen einer Home-Assistant-Instanz teilen dafür dieselbe Schreibsperre. Schlägt ein erforderlicher Schritt fehl, wird die Datei nach Möglichkeit auf den vorherigen Zustand zurückgesetzt.
+Beim Erstellen werden `automations.yaml`, der Live-Zustand nach `automation.reload`, die Homeintent-Kategorie und die internen Metadaten aufeinander abgestimmt. Auch Löschen, Aktivieren, Deaktivieren, Verschieben und automatische Bereinigungen verwenden denselben geschützten Ablauf.
+
+Alle Executor-Instanzen einer Home-Assistant-Instanz teilen eine Schreibsperre. Zusätzlich vergleicht HomeIntent unmittelbar vor dem Speichern einen kryptografischen Fingerabdruck der gelesenen Datei. Hat Home Assistant oder ein Benutzer die Datei zwischenzeitlich geändert, wird der Vorgang mit einem Konflikt abgebrochen und die fremde Änderung nicht überschrieben. Ein kleines dauerhaftes Transaktionsjournal erlaubt nach einem Absturz die Wiederherstellung des vorherigen Zustands. Ein Rollback erfolgt nur, wenn die aktuelle Datei noch exakt dem von HomeIntent geschriebenen Stand entspricht.
 
 ### Lokal und privat
 
@@ -285,9 +333,10 @@ Die NLU-Verarbeitung läuft innerhalb von Home Assistant. HomeIntent sendet den 
 
 - Die mitgelieferten Grammatiken sind derzeit auf Deutsch ausgelegt.
 - HomeIntent ist absichtlich kein Chatbot und versteht nur unterstützte Smart-Home-Strukturen.
-- Relative Einmal-Befehle unterstützen aktuell Sekunden, Minuten und Stunden bis maximal 59 Stunden.
-- Formulierungen wie „morgen um 8 Uhr“ gehören noch nicht zum relativen Einmal-Befehlspfad.
+- Relative Einmal-Befehle unterstützen aktuell Sekunden, Minuten und Stunden bis maximal 59 Stunden sowie Kombinationen aus zwei Zeiteinheiten.
+- Kalendarische Formulierungen decken die dokumentierten Muster ab, sind aber noch kein allgemeiner Kalenderparser für beliebige deutsche Datumsangaben.
 - Ist Home Assistant beim berechneten Zeitpunkt ausgeschaltet, wird der verpasste Auftrag aus Sicherheitsgründen verworfen. Eine automatische verspätete Ausführung findet bewusst nicht statt.
+- Direkte Steuerung neuer Gerätedomänen unterstützt bewusst nur geprüfte Kernaktionen. Erweiterte Klima-, Medien- oder Staubsaugerfunktionen können je nach Gerät noch fehlen.
 - Nicht jeder intern modellierbare Trigger, jede Bedingung oder Aktion besitzt bereits eine sichere Home-Assistant-YAML-Abbildung. Nicht unterstützte Strukturen werden abgelehnt, statt angenähert zu werden.
 - Die Qualität der Zielauflösung hängt von sinnvollen Entity-Namen, Bereichen, Geräteklassen, Fähigkeiten und Assist-Freigaben ab.
 
@@ -298,19 +347,19 @@ Die wichtigsten Schichten sind bewusst getrennt:
 ```text
 Conversation Agent
       │
-      ├── Direktbefehl / Abfrage
+      ├── Router für Direktbefehl, Gerätesteuerung und Abfrage
       │       └── Semantic Frame → Resolver → Validator → Service Mapper
       │
       └── Automation
-              └── Trigger/Condition/Action Parser
+              └── Zeit-/Trigger-/Condition-/Action-Parser
                   → AutomationModel
                   → AutomationValidator
                   → Vorschau und Bestätigung
                   → HA Automation Generator
-                  → AutomationExecutor
+                  → AutomationExecutor + Transaktionsjournal
 ```
 
-Der Parser führt keine Home-Assistant-Dienste direkt aus. Dadurch können Sprachverständnis, Auflösung, Validierung, Vorschau und Ausführung unabhängig getestet werden.
+Der Parser führt keine Home-Assistant-Dienste direkt aus. Dadurch können Sprachverständnis, Auflösung, Validierung, Vorschau und Ausführung unabhängig getestet werden. Neue Zuständigkeiten sind in eigene Module für Gerätesteuerung, kalendarische Termine, Automationsverwaltung, Ergebnisobjekte und Dateitransaktionen ausgelagert. Die verbleibenden großen Kernmodule werden schrittweise und verhaltensneutral weiter zerlegt.
 
 Weiterführende technische Dokumentation liegt im Verzeichnis [`docs`](docs/).
 
@@ -328,10 +377,10 @@ Danach kann die komplette Testsuite so ausgeführt werden:
 python -m pytest -q
 ```
 
-Stand von Version 4.21.0:
+Stand von Version 4.22.0:
 
 ```text
-1614 passed, 14 skipped
+1651 passed, 14 skipped
 ```
 
 GitHub Actions prüft zusätzlich Python 3.12 und 3.13, Hassfest, HACS und den Import gegen das aktuelle stabile Home-Assistant-Containerimage.
@@ -350,3 +399,5 @@ Beiträge und Fehlermeldungen sind willkommen. Bitte beachte dabei die Grundprin
 - bestehendes Verhalten nicht stillschweigend verändern.
 
 Repository: [github.com/pquandel2-alt/ha-nlu-engine](https://github.com/pquandel2-alt/ha-nlu-engine)
+
+HomeIntent steht unter der [MIT-Lizenz](LICENSE).

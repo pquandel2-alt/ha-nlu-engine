@@ -66,6 +66,7 @@ STATE_BASED_ONCE_SENTENCE = (
 TIME_BASED_ONCE_SENTENCE = "Wenn es 20 Uhr ist, schalte das Küchenlicht nur einmal ein."
 ORDINARY_SENTENCE = "Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht ein."
 RELATIVE_TIME_SENTENCE = "Fahre in 5 Minuten die Wohnzimmer Rolllade auf 30%"
+CALENDAR_TIME_SENTENCE = "Morgen um 8 Uhr schalte das Küchenlicht ein"
 
 ONCE_NOTE = "Diese Automation wird nach der ersten Ausführung automatisch gelöscht."
 
@@ -287,4 +288,67 @@ def test_relative_time_countdown_starts_at_confirmation_and_is_date_guarded(
     )
     assert er.async_get(entity.hass).async_get(entity_id).categories == {
         "automation": categories[0].category_id
+    }
+
+
+def test_calendar_time_is_resolved_on_confirmation_and_date_guarded(
+    monkeypatch, tmp_path
+):
+    entity = _make_entity(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        ha_conversation.dt_util,
+        "now",
+        lambda: datetime(2026, 8, 21, 23, 59, 0, tzinfo=timezone.utc),
+    )
+
+    preview = _run(entity, CALENDAR_TIME_SENTENCE)
+    assert "morgen um 8 uhr" in preview.response.speech.casefold()
+    assert _automations_yaml(tmp_path) == []
+
+    created = _run(entity, "Ja")
+
+    assert created.response.speech == AUTOMATION_CREATED_TEXT
+    automation = _automations_yaml(tmp_path)[0]
+    assert automation["triggers"] == [{"trigger": "time", "at": "08:00:00"}]
+    assert automation["conditions"] == [
+        {
+            "condition": "template",
+            "value_template": "{{ now().date().isoformat() == '2026-08-22' }}",
+        }
+    ]
+
+
+def test_compound_relative_time_starts_after_confirmation(monkeypatch, tmp_path):
+    entity = _make_entity(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        ha_conversation.dt_util,
+        "now",
+        lambda: datetime(2026, 8, 21, 12, 0, 0, tzinfo=timezone.utc),
+    )
+    _run(entity, "In zwei Stunden und 30 Minuten schalte das Küchenlicht ein")
+
+    created = _run(entity, "Ja")
+
+    assert created.response.speech == AUTOMATION_CREATED_TEXT
+    assert _automations_yaml(tmp_path)[0]["triggers"] == [
+        {"trigger": "time", "at": "14:30:00"}
+    ]
+
+
+def test_bounded_automation_records_runs_instead_of_deleting_after_first(
+    monkeypatch, tmp_path
+):
+    entity = _make_entity(monkeypatch, tmp_path)
+    sentence = (
+        "Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht nur dreimal ein."
+    )
+
+    preview = _run(entity, sentence)
+    assert "nach 3 Ausführungen" in preview.response.speech
+    _run(entity, "Ja")
+
+    automation = _automations_yaml(tmp_path)[0]
+    assert automation["actions"][-1] == {
+        "action": "ha_nlu.record_automation_run",
+        "data": {"automation_id": automation["id"], "max_runs": 3},
     }

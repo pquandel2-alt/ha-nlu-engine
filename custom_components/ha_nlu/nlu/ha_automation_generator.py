@@ -456,6 +456,17 @@ def generate_ha_automation_config(
     if model.once:
         assert automation_id is not None
         actions.append({"action": "ha_nlu.delete_automation", "data": {"automation_id": automation_id}})
+    elif model.max_runs is not None:
+        assert automation_id is not None
+        actions.append(
+            {
+                "action": "ha_nlu.record_automation_run",
+                "data": {
+                    "automation_id": automation_id,
+                    "max_runs": model.max_runs,
+                },
+            }
+        )
 
     config: dict[str, Any] = {"alias": model.source_text, "triggers": triggers, "actions": actions}
     if conditions:
