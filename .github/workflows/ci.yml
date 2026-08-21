@@ -71,3 +71,6 @@ jobs:
         with:
           category: integration
           comment: "false"
+          # Lizenzwahl und Aufnahme ins HA-Brands-Repository sind eigenständige
+          # Veröffentlichungsentscheidungen; alle technischen HACS-Prüfungen laufen.
+          ignore: brands license
