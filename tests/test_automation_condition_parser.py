@@ -18,8 +18,8 @@ from hassil import Intents
 from ha_nlu.automation_condition_parser import AUTOMATION_CONDITION_DIR, AutomationConditionParser
 from ha_nlu.devices import DeviceSnapshot
 from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.automation_model import NumericComparator, SunEvent, TriggerTarget
-from ha_nlu.nlu.condition_model import ConditionModel, ConditionNode, ConditionType, LogicalOperator, condition_tree_depth
+from ha_nlu.nlu.automation_model import NumericComparator, SunEvent
+from ha_nlu.nlu.condition_model import ConditionType, LogicalOperator, condition_tree_depth
 from ha_nlu.nlu.parser import ParseContext
 from ha_nlu.nlu.semantic_state import SemanticState
 from ha_nlu.world_model import build_world_model

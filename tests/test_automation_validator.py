@@ -15,7 +15,6 @@ from ha_nlu.nlu.action_model import ActionGroup, ActionModel, ActionType, Execut
 from ha_nlu.nlu.automation_model import (
     AutomationModel,
     NumericComparator,
-    SunEvent,
     TriggerModel,
     TriggerTarget,
     TriggerType,
@@ -117,6 +116,17 @@ def test_structurally_empty_target_is_entity_not_found():
 def test_time_trigger_hour_out_of_range_is_invalid_time():
     bad_trigger = TriggerModel(type=TriggerType.TIME, time_hour=24, time_minute=0)
     model = AutomationModel(triggers=(bad_trigger,), actions=(VALID_ACTION,))
+    assert validate_automation(model) is AutomationValidationError.INVALID_TIME
+
+
+def test_time_trigger_second_out_of_range_is_invalid_time():
+    bad_trigger = TriggerModel(
+        type=TriggerType.TIME, time_hour=20, time_minute=0, time_second=60
+    )
+    model = AutomationModel(
+        triggers=(bad_trigger,),
+        actions=(ActionModel(type=ActionType.TURN_ON, target=TriggerTarget(entity_id="light.kueche")),),
+    )
     assert validate_automation(model) is AutomationValidationError.INVALID_TIME
 
 

@@ -11,7 +11,9 @@ from ha_nlu.nlu.context import (
     ClarificationRequest,
     ConversationContext,
     ConversationContextStore,
+    PendingAutomationConfirmation,
 )
+from ha_nlu.nlu.automation_model import AutomationModel
 
 LIGHT_WOHNZIMMER = EntitySnapshot("light.wohnzimmer", "Wohnzimmerlicht", "light", "on")
 LIGHT_KUECHE = EntitySnapshot("light.kueche", "Küchenlicht", "light", "on")
@@ -80,6 +82,30 @@ def test_store_keeps_separate_conversation_ids_independent():
     store.set("conv-b", context_b)
     assert store.get("conv-a") == context_a
     assert store.get("conv-b") == context_b
+
+
+def test_automation_confirmation_uses_a_longer_ttl():
+    fake_time = [0.0]
+    store = ConversationContextStore(
+        ttl_seconds=30.0,
+        automation_confirmation_ttl_seconds=120.0,
+        clock=lambda: fake_time[0],
+    )
+    context = ConversationContext(
+        last_command=None,
+        last_entities=(),
+        last_area=None,
+        pending_clarification=None,
+        pending_automation_confirmation=PendingAutomationConfirmation(
+            model=AutomationModel()
+        ),
+    )
+    store.set("automation", context)
+
+    fake_time[0] = 60.0
+    assert store.get("automation") == context
+    fake_time[0] = 121.0
+    assert store.get("automation") is None
 
 
 def test_v6_context_fields_default_to_none_for_existing_call_sites():

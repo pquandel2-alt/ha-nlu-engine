@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import datetime
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -62,6 +63,7 @@ from .automation_summary import AutomationSummary
 AUTOMATIONS_YAML_FILENAME = "automations.yaml"
 AUTOMATION_CATEGORY_SCOPE = "automation"
 HOMEINTENT_CATEGORY_NAME = "Homeintent"
+AUTOMATION_LOCK_DATA_KEY = "ha_nlu_automation_write_lock"
 
 
 def _collect_entity_ids(value: Any) -> set[str]:
@@ -94,16 +96,14 @@ def _collect_entity_ids(value: Any) -> set[str]:
 class AutomationExecutor:
     """One instance per config entry (same lifetime/ownership as
     ``NluEngine``/``ConversationContextStore`` on ``NluConversationEntity``),
-    owning the ``asyncio.Lock()`` that guards ``automations.yaml``'s
-    read-modify-write cycle against two concurrent confirmations racing each
-    other - a module-level lock would leak across config entries/tests, an
-    instance-level one matches every other piece of this integration's own
-    per-entry state.
+    sharing one ``asyncio.Lock()`` per Home Assistant instance. The custom
+    self-delete service creates fresh executor objects, so an instance-local
+    lock cannot protect its writes against conversation-driven writes.
     """
 
     def __init__(self, hass: HomeAssistant) -> None:
         self._hass = hass
-        self._lock = asyncio.Lock()
+        self._lock = hass.data.setdefault(AUTOMATION_LOCK_DATA_KEY, asyncio.Lock())
         self._metadata_store = AutomationMetadataStore(hass)
 
     def _assign_homeintent_category(self, automation_id: str) -> None:
@@ -161,7 +161,12 @@ class AutomationExecutor:
         entity_registry.async_update_entity(entity_id, categories=categories)
 
     async def async_create_automation(
-        self, config: dict[str, Any], automation_id: str | None = None
+        self,
+        config: dict[str, Any],
+        automation_id: str | None = None,
+        *,
+        scheduled_for: datetime | None = None,
+        once: bool = False,
     ) -> str:
         """Appends ``config`` (a ``GenerationResult.config`` dict, no ``id``
         key yet - see ``ha_automation_generator.py``'s ``GenerationResult``
@@ -213,6 +218,10 @@ class AutomationExecutor:
                     automation_id=automation_id,
                     source_text=config.get("alias", ""),
                     created_at=utcnow_isoformat(),
+                    scheduled_for=(
+                        scheduled_for.isoformat() if scheduled_for is not None else None
+                    ),
+                    once=once,
                 )
                 await self._metadata_store.async_save(metadata)
             except Exception:
@@ -390,6 +399,67 @@ class AutomationExecutor:
                 )
             )
         return tuple(summaries)
+
+    async def async_cleanup_expired_scheduled_automations(
+        self, now: datetime
+    ) -> tuple[str, ...]:
+        """Remove missed one-shots on startup instead of firing next day.
+
+        Relative automations have a full ``scheduled_for`` timestamp in the
+        sidecar and a date condition in HA YAML. If HA was offline when the
+        clock trigger was due, the safe policy is to expire the command, not
+        execute a stale physical action after restart.
+        """
+        path = self._hass.config.path(AUTOMATIONS_YAML_FILENAME)
+        async with self._lock:
+            original_automations = await self._hass.async_add_executor_job(
+                self._read_automations, path
+            )
+            metadata = await self._metadata_store.async_load_all()
+            expired_ids: set[str] = set()
+            for automation_id, entry in metadata.items():
+                if not entry.get("once") or not (raw_target := entry.get("scheduled_for")):
+                    continue
+                try:
+                    target = datetime.fromisoformat(raw_target)
+                except (TypeError, ValueError):
+                    continue
+                comparable_now = now
+                if target.tzinfo is not None and comparable_now.tzinfo is None:
+                    comparable_now = comparable_now.astimezone()
+                elif target.tzinfo is None and comparable_now.tzinfo is not None:
+                    comparable_now = comparable_now.replace(tzinfo=None)
+                if target < comparable_now:
+                    expired_ids.add(automation_id)
+            if not expired_ids:
+                return ()
+
+            remaining = [
+                automation
+                for automation in original_automations
+                if automation.get("id") not in expired_ids
+            ]
+            present_ids = {
+                automation.get("id")
+                for automation in original_automations
+                if automation.get("id") in expired_ids
+            }
+            if present_ids:
+                await self._hass.async_add_executor_job(
+                    self._write_automations, path, remaining
+                )
+                try:
+                    await self._hass.services.async_call(
+                        "automation", "reload", {}, blocking=True
+                    )
+                except Exception:
+                    await self._hass.async_add_executor_job(
+                        self._write_automations, path, original_automations
+                    )
+                    raise
+            for automation_id in expired_ids:
+                await self._metadata_store.async_delete(automation_id)
+            return tuple(sorted(expired_ids))
 
     @staticmethod
     def _read_automations(path: str) -> list[dict[str, Any]]:

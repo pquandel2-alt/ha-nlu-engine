@@ -25,7 +25,7 @@ from ha_nlu.nlu.automation_model import (
 from ha_nlu.nlu.semantic_state import SemanticState
 
 
-def test_trigger_type_covers_all_seven_documented_types():
+def test_trigger_type_covers_all_documented_types():
     assert {t.name for t in TriggerType} == {
         "STATE",
         "NUMERIC_STATE",
@@ -33,6 +33,7 @@ def test_trigger_type_covers_all_seven_documented_types():
         "PRESENCE",
         "SUN",
         "TIME",
+        "RELATIVE_TIME",
         "WEEKDAY",
     }
 

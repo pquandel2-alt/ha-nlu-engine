@@ -240,14 +240,16 @@ def test_a_stray_unmatched_reply_after_a_once_confirmation_is_not_swallowed(monk
     assert stray_result.response.error_code == intent.IntentResponseErrorCode.NO_INTENT_MATCH
 
 
-def test_relative_time_command_round_trip_writes_valid_time_action_and_self_delete(
+def test_relative_time_countdown_starts_at_confirmation_and_is_date_guarded(
     monkeypatch, tmp_path
 ):
     entity = _make_entity(monkeypatch, tmp_path)
     monkeypatch.setattr(
         ha_conversation.dt_util,
         "now",
-        lambda: datetime(2026, 8, 21, 12, 0, 42, tzinfo=timezone.utc),
+        # This is confirmation time. Parsing the preview no longer reads the
+        # clock, so time spent saying "Ja" cannot consume the delay.
+        lambda: datetime(2026, 8, 21, 12, 2, 42, tzinfo=timezone.utc),
     )
 
     preview_result = _run(entity, RELATIVE_TIME_SENTENCE)
@@ -259,7 +261,13 @@ def test_relative_time_command_round_trip_writes_valid_time_action_and_self_dele
 
     assert create_result.response.speech == AUTOMATION_CREATED_TEXT
     automation = _automations_yaml(tmp_path)[0]
-    assert automation["triggers"] == [{"trigger": "time", "at": "12:05:42"}]
+    assert automation["triggers"] == [{"trigger": "time", "at": "12:07:42"}]
+    assert automation["conditions"] == [
+        {
+            "condition": "template",
+            "value_template": "{{ now().date().isoformat() == '2026-08-21' }}",
+        }
+    ]
     assert automation["actions"][0] == {
         "action": "cover.set_cover_position",
         "target": {"entity_id": "cover.wohnzimmer_rollladen"},

@@ -122,6 +122,35 @@ def test_time_trigger():
     assert "07:30 Uhr" in text
 
 
+def test_time_trigger_with_seconds_speaks_seconds():
+    model = AutomationModel(
+        triggers=(
+            TriggerModel(
+                type=TriggerType.TIME,
+                time_hour=7,
+                time_minute=30,
+                time_second=42,
+            ),
+        ),
+        actions=(ActionModel(type=ActionType.TURN_ON, target=TriggerTarget(entity_id="light.kueche_licht")),),
+    )
+    assert "07:30:42 Uhr" in _preview(model)
+
+
+def test_relative_time_preview_keeps_the_spoken_offset():
+    model = AutomationModel(
+        triggers=(
+            TriggerModel(
+                type=TriggerType.RELATIVE_TIME,
+                relative_offset_seconds=30,
+            ),
+        ),
+        actions=(ActionModel(type=ActionType.TURN_ON, target=TriggerTarget(entity_id="light.kueche_licht")),),
+        once=True,
+    )
+    assert "30 Sekunden vergangen sind" in _preview(model)
+
+
 def test_weekday_trigger():
     model = AutomationModel(
         triggers=(TriggerModel(type=TriggerType.WEEKDAY, weekdays=("sat", "sun")),),

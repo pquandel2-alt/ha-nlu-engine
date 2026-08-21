@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
 
-- Aktuelle Version: **4.20.1**
+- Aktuelle Version: **4.21.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 
@@ -196,9 +196,9 @@ Fahre in 30 Sekunden die Wohnzimmer Rolllade auf 30 Prozent.
 In einer Stunde schalte das Küchenlicht ein.
 ```
 
-HomeIntent berechnet aus der lokalen Home-Assistant-Zeit einen absoluten Zeitpunkt mit Sekundenpräzision. Minuten-, Stunden- und Tageswechsel sowie Sommerzeitwechsel werden berücksichtigt. Nach der Aktion löscht sich die Automation selbst.
+Der Countdown beginnt erst nach der Bestätigung mit „Ja“. HomeIntent berechnet dann aus der lokalen Home-Assistant-Zeit einen absoluten Zeitpunkt mit Sekundenpräzision und speichert zusätzlich das vollständige Zieldatum. Minuten-, Stunden- und Tageswechsel sowie Sommerzeitwechsel werden berücksichtigt. Nach der Aktion löscht sich die Automation selbst; vorübergehende Lösch- oder Reloadfehler werden begrenzt erneut versucht.
 
-Das ist **keine täglich wiederkehrende Automation**. Der intern verwendete Zeittrigger wäre zwar grundsätzlich täglich, wird aber nach dem ersten Auslösen durch die Self-Delete-Aktion entfernt.
+Das ist **keine täglich wiederkehrende Automation**. Der intern verwendete Uhrzeit-Trigger wird durch eine Datumsbedingung geschützt und nach dem ersten Auslösen entfernt. War Home Assistant beim Zielzeitpunkt ausgeschaltet, wird der verpasste Auftrag beim nächsten Start sicher verworfen, statt am Folgetag eine veraltete Geräteaktion auszuführen.
 
 ### Automationen verwalten
 
@@ -275,7 +275,7 @@ Das Erkennen eines Automationssatzes verändert Home Assistant noch nicht. Erst 
 
 ### Transaktionales Schreiben
 
-Beim Erstellen werden `automations.yaml`, der Live-Zustand nach `automation.reload`, die Homeintent-Kategorie und die internen Metadaten aufeinander abgestimmt. Auch Löschen, Aktivieren und Deaktivieren verwenden geschützte Schreib-/Reload-Abläufe. Schlägt ein erforderlicher Schritt fehl, wird die Datei nach Möglichkeit auf den vorherigen Zustand zurückgesetzt.
+Beim Erstellen werden `automations.yaml`, der Live-Zustand nach `automation.reload`, die Homeintent-Kategorie und die internen Metadaten aufeinander abgestimmt. Auch Löschen, Aktivieren und Deaktivieren verwenden geschützte Schreib-/Reload-Abläufe. Alle Executor-Instanzen einer Home-Assistant-Instanz teilen dafür dieselbe Schreibsperre. Schlägt ein erforderlicher Schritt fehl, wird die Datei nach Möglichkeit auf den vorherigen Zustand zurückgesetzt.
 
 ### Lokal und privat
 
@@ -285,9 +285,9 @@ Die NLU-Verarbeitung läuft innerhalb von Home Assistant. HomeIntent sendet den 
 
 - Die mitgelieferten Grammatiken sind derzeit auf Deutsch ausgelegt.
 - HomeIntent ist absichtlich kein Chatbot und versteht nur unterstützte Smart-Home-Strukturen.
-- Relative Einmal-Befehle unterstützen aktuell Sekunden, Minuten und Stunden bis maximal 24 Stunden.
+- Relative Einmal-Befehle unterstützen aktuell Sekunden, Minuten und Stunden bis maximal 59 Stunden.
 - Formulierungen wie „morgen um 8 Uhr“ gehören noch nicht zum relativen Einmal-Befehlspfad.
-- Ist Home Assistant beim berechneten Zeitpunkt ausgeschaltet und startet erst danach wieder, kann ein reiner Uhrzeit-Trigger den verpassten Zeitpunkt nicht zuverlässig nachholen. Für solche Fälle ist künftig eine persistente Datum-/Zeitplanung nötig.
+- Ist Home Assistant beim berechneten Zeitpunkt ausgeschaltet, wird der verpasste Auftrag aus Sicherheitsgründen verworfen. Eine automatische verspätete Ausführung findet bewusst nicht statt.
 - Nicht jeder intern modellierbare Trigger, jede Bedingung oder Aktion besitzt bereits eine sichere Home-Assistant-YAML-Abbildung. Nicht unterstützte Strukturen werden abgelehnt, statt angenähert zu werden.
 - Die Qualität der Zielauflösung hängt von sinnvollen Entity-Namen, Bereichen, Geräteklassen, Fähigkeiten und Assist-Freigaben ab.
 
@@ -316,17 +316,25 @@ Weiterführende technische Dokumentation liegt im Verzeichnis [`docs`](docs/).
 
 ## Entwicklung und Tests
 
-Mit einer entsprechend vorbereiteten Python-Umgebung kann die komplette Testsuite so ausgeführt werden:
+Die reproduzierbaren Testabhängigkeiten stehen in `requirements-dev.txt`:
+
+```bash
+python -m pip install --requirement requirements-dev.txt
+```
+
+Danach kann die komplette Testsuite so ausgeführt werden:
 
 ```bash
 python -m pytest -q
 ```
 
-Stand von Version 4.20.1:
+Stand von Version 4.21.0:
 
 ```text
-1606 passed, 14 skipped
+1614 passed, 14 skipped
 ```
+
+GitHub Actions prüft zusätzlich Python 3.12 und 3.13, Hassfest, HACS und den Import gegen das aktuelle stabile Home-Assistant-Containerimage.
 
 Neue Grammatik oder Ausführungslogik sollte immer mit positiven Fällen, Mehrdeutigkeitsfällen, Negativfällen und einem Regressionstest für bestehendes Verhalten ergänzt werden.
 

@@ -68,16 +68,6 @@ class RelativeTimeCommandParser:
         if amount_slot is None or unit_slot is None:
             return None  # grammar requires both - structurally unreachable, defense only
         offset_seconds = _seconds_from_amount_unit(int(amount_slot.value), str(unit_slot.value))
-        # The generated HA trigger is a fixed wall-clock time and therefore
-        # repeats daily until Wave 12's trailing self-delete action runs.
-        # An offset beyond 24 hours would make that trigger fire on the first
-        # matching clock time (too early), so refuse it instead of silently
-        # scheduling the wrong day. Offsets of exactly 24 hours are safe: the
-        # next occurrence of the same local clock time is the requested one.
-        if offset_seconds > 24 * 60 * 60:
-            return None
-
-
         command_text_slot = result.entities.get("command_text")
         if command_text_slot is None:
             return None  # grammar requires {command_text} in every sentence shape - defense only

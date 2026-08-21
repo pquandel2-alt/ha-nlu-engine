@@ -143,7 +143,12 @@ def _speak_trigger(
         else:
             text = f"es {event} ist"
     elif trigger.type is TriggerType.TIME:
-        text = f"es {trigger.time_hour:02d}:{(trigger.time_minute or 0):02d} Uhr ist"
+        clock = f"{trigger.time_hour:02d}:{(trigger.time_minute or 0):02d}"
+        if trigger.time_second is not None:
+            clock = f"{clock}:{trigger.time_second:02d}"
+        text = f"es {clock} Uhr ist"
+    elif trigger.type is TriggerType.RELATIVE_TIME:
+        text = f"{_format_delay(trigger.relative_offset_seconds)} vergangen sind"
     elif trigger.type is TriggerType.WEEKDAY:
         text = " oder ".join(_WEEKDAY_SPOKEN_DE.get(d, d) for d in trigger.weekdays) + " ist"
     else:

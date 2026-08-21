@@ -11,7 +11,6 @@ Engine waves can extend ConditionModel without re-deriving what each field means
 
 from __future__ import annotations
 
-import pytest
 from ha_nlu.nlu.automation_model import NumericComparator, SunEvent, TriggerTarget
 from ha_nlu.nlu.condition_model import (
     ConditionModel,

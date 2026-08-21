@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from hassil import Intents
@@ -1181,25 +1180,20 @@ class NluEngine:
         self,
         text: str,
         entities: list[EntitySnapshot],
-        now: datetime,
         world_model: WorldModel | None = None,
         context: ConversationContext | None = None,
     ) -> AutomationMatchResult | None:
         """Match a single-clause spoken command carrying a relative-time
         offset ("Fahre in 5 Minuten die Wohnzimmer Rolllade auf 30 Prozent")
-        into an ``AutomationModel`` with one absolute ``TriggerType.TIME``
-        trigger (Wave 13, "Relative-Zeit-Automationen"). Called live from
+        into an ``AutomationModel`` with one semantic
+        ``TriggerType.RELATIVE_TIME`` trigger. The confirmation handler
+        anchors it to an absolute, date-guarded ``TIME`` trigger. Called live from
         ``conversation.py`` after ``match_automation()`` and before the plain
         ``match()`` fallback: this sentence shape has no comma, so
         ``split_trigger_action()`` can never split it into trigger+action
         clauses (see ``relative_time_command.yaml``'s own comment) - a
         structurally new, single-clause entry point, not a branch inside
         ``match_automation()``.
-
-        ``now`` is passed in rather than fetched here to keep this module
-        Home-Assistant-import-free (same boundary ``nlu/frame.py``'s
-        docstring documents for the ``nlu/`` package) - ``conversation.py``
-        is the only layer allowed to import ``homeassistant.util.dt``.
 
         Always ``once=True``: a relative "in N Minuten" offset is inherently
         a one-shot request - there is no spoken way to ask for a *recurring*
@@ -1232,20 +1226,9 @@ class NluEngine:
             return None
         actions, offset_seconds = parsed
 
-        # ``dt_util.now()`` is timezone-aware in production. Adding a
-        # timedelta directly to a zoneinfo-backed local datetime performs
-        # wall-clock arithmetic and can therefore land in a non-existent
-        # local time during the spring DST transition. Relative commands
-        # describe elapsed time, so add in UTC and convert back afterwards.
-        # Naive datetimes remain supported for pure unit tests/callers.
-        if now.tzinfo is not None and now.utcoffset() is not None:
-            target = (
-                now.astimezone(timezone.utc) + timedelta(seconds=offset_seconds)
-            ).astimezone(now.tzinfo)
-        else:
-            target = now + timedelta(seconds=offset_seconds)
         trigger = TriggerModel(
-            type=TriggerType.TIME, time_hour=target.hour, time_minute=target.minute, time_second=target.second
+            type=TriggerType.RELATIVE_TIME,
+            relative_offset_seconds=offset_seconds,
         )
 
         model = AutomationModel(triggers=(trigger,), actions=actions, source_text=text, once=True)

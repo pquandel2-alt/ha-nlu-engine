@@ -36,6 +36,7 @@ __all__ = [
     "ConversationContext",
     "ConversationContextStore",
     "DEFAULT_CONTEXT_TTL_SECONDS",
+    "AUTOMATION_CONFIRMATION_TTL_SECONDS",
     "PendingAutomationConfirmation",
     "PendingAutomationDeletion",
 ]
@@ -90,6 +91,7 @@ class PendingAutomationDeletion:
 # without keeping stale state around for unrelated later commands in the
 # same HA conversation_id. Revisit if Phase 26/27 wiring shows it's wrong.
 DEFAULT_CONTEXT_TTL_SECONDS = 30.0
+AUTOMATION_CONFIRMATION_TTL_SECONDS = 120.0
 
 
 @dataclass(frozen=True)
@@ -156,24 +158,32 @@ class ConversationContextStore:
     def __init__(
         self,
         ttl_seconds: float = DEFAULT_CONTEXT_TTL_SECONDS,
+        automation_confirmation_ttl_seconds: float = AUTOMATION_CONFIRMATION_TTL_SECONDS,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._ttl_seconds = ttl_seconds
+        self._automation_confirmation_ttl_seconds = automation_confirmation_ttl_seconds
         self._clock = clock
-        self._entries: dict[str, tuple[float, ConversationContext]] = {}
+        self._entries: dict[str, tuple[float, float, ConversationContext]] = {}
 
     def get(self, conversation_id: str) -> ConversationContext | None:
         entry = self._entries.get(conversation_id)
         if entry is None:
             return None
-        stored_at, context = entry
-        if self._clock() - stored_at > self._ttl_seconds:
+        stored_at, ttl_seconds, context = entry
+        if self._clock() - stored_at > ttl_seconds:
             del self._entries[conversation_id]
             return None
         return context
 
     def set(self, conversation_id: str, context: ConversationContext) -> None:
-        self._entries[conversation_id] = (self._clock(), context)
+        ttl_seconds = (
+            self._automation_confirmation_ttl_seconds
+            if context.pending_automation_confirmation is not None
+            or context.pending_automation_deletion is not None
+            else self._ttl_seconds
+        )
+        self._entries[conversation_id] = (self._clock(), ttl_seconds, context)
 
     def clear(self, conversation_id: str) -> None:
         self._entries.pop(conversation_id, None)

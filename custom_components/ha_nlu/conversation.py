@@ -43,6 +43,7 @@ from .engine import (
 from .entities import EntitySnapshot
 from .hass_entities import build_device_snapshots, build_entity_snapshots
 from .nlu.automation_confirmation import ConfirmationReply, classify_confirmation_reply
+from .nlu.automation_model import resolve_relative_schedule
 from .nlu.automation_preview import render_automation_preview
 from .nlu.context import (
     ConversationContext,
@@ -293,7 +294,7 @@ class NluConversationEntity(
                 # homeassistant.util.dt - and passed into the engine so it
                 # stays Home-Assistant-import-free.
                 result = self._engine.match_relative_time_automation(
-                    user_input.text, entities, dt_util.now(), self._world_model, pending
+                    user_input.text, entities, self._world_model, pending
                 )
             if result is None:
                 result = self._engine.match(user_input.text, entities, self._world_model)
@@ -546,16 +547,18 @@ class NluConversationEntity(
                 response=response, conversation_id=user_input.conversation_id
             )
 
+        model = resolve_relative_schedule(confirmation.model, dt_util.now())
+
         # Wave 12 ("Einmalige Automation"): a self-deleting automation's own
         # action list needs to reference its own future id (see
         # ha_automation_generator.py's generate_ha_automation_config()
         # docstring for why) - pre-generated here, before persistence, and
         # threaded into both the generator and the executor so they agree.
         # None/unused for every ordinary (non-once) automation.
-        once_automation_id = uuid.uuid4().hex if confirmation.model.once else None
+        once_automation_id = uuid.uuid4().hex if model.once else None
 
         generation_result = generate_ha_automation_config(
-            confirmation.model, entities, automation_id=once_automation_id
+            model, entities, automation_id=once_automation_id
         )
         if generation_result.error is not None:
             response.async_set_error(
@@ -571,7 +574,10 @@ class NluConversationEntity(
             self._automation_executor = AutomationExecutor(self.hass)
         try:
             await self._automation_executor.async_create_automation(
-                generation_result.config, automation_id=once_automation_id
+                generation_result.config,
+                automation_id=once_automation_id,
+                scheduled_for=model.scheduled_for,
+                once=model.once,
             )
         except Exception as err:  # noqa: BLE001 - a YAML write + service call can fail in ways beyond HomeAssistantError; must not propagate as "Unexpected error during intent recognition"
             _LOGGER.error("Automation creation failed: %s", err)

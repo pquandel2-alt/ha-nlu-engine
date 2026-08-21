@@ -182,6 +182,11 @@ def _generate_trigger(trigger: TriggerModel, entities: list[EntitySnapshot]) -> 
         second = trigger.time_second or 0
         return {"trigger": "time", "at": f"{trigger.time_hour:02d}:{minute:02d}:{second:02d}"}, None
 
+    if trigger.type is TriggerType.RELATIVE_TIME:
+        # Preview-only. conversation.py must anchor the offset to the
+        # confirmation time before generation.
+        return None, GenerationError.UNSUPPORTED_TRIGGER_TYPE
+
     # TriggerType.DEVICE / TriggerType.WEEKDAY - see module docstring.
     return None, GenerationError.UNSUPPORTED_TRIGGER_TYPE
 
@@ -426,6 +431,17 @@ def generate_ha_automation_config(
             return GenerationResult(config=None, error=error)
         assert condition_config is not None
         conditions.append(condition_config)
+
+    if model.scheduled_for is not None:
+        scheduled_date = model.scheduled_for.date().isoformat()
+        conditions.append(
+            {
+                "condition": "template",
+                "value_template": (
+                    "{{ now().date().isoformat() == '" + scheduled_date + "' }}"
+                ),
+            }
+        )
 
     actions: list[dict[str, Any]] = []
     if triggers_delay_action is not None:

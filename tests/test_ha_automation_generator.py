@@ -14,6 +14,8 @@ ENTITY_NOT_FOUND, UNSUPPORTED_STATE).
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.action_model import ActionGroup, ActionModel, ActionType, ExecutionMode
 from ha_nlu.nlu.automation_model import (
@@ -149,6 +151,23 @@ def test_time_trigger_without_explicit_second_still_emits_00_regression():
     result = generate_ha_automation_config(model, ALL_ENTITIES)
     assert result.error is None
     assert result.config["triggers"] == [{"trigger": "time", "at": "20:00:00"}]
+
+
+def test_confirmed_relative_time_adds_a_full_date_guard():
+    model = AutomationModel(
+        triggers=(TriggerModel(type=TriggerType.TIME, time_hour=0, time_minute=0, time_second=15),),
+        actions=(ActionModel(type=ActionType.TURN_ON, target=TriggerTarget(entity_id="light.kueche_licht")),),
+        scheduled_for=datetime(2026, 8, 22, 0, 0, 15, tzinfo=timezone.utc),
+    )
+    result = generate_ha_automation_config(model, ALL_ENTITIES)
+
+    assert result.error is None
+    assert result.config["conditions"] == [
+        {
+            "condition": "template",
+            "value_template": "{{ now().date().isoformat() == '2026-08-22' }}",
+        }
+    ]
 
 
 def test_trigger_delay_seconds_becomes_the_first_action():

@@ -65,14 +65,16 @@ class AutomationMetadata:
     created_by: str = CREATED_BY_HOMEINTENT
     version: int = 1
     source_language: str = SOURCE_LANGUAGE_DE
+    scheduled_for: str | None = None
+    once: bool = False
 
 
 class AutomationMetadataStore:
     """Owned exclusively by ``AutomationExecutor`` (private collaborator, not
     a second top-level entry point conversation.py talks to directly) -
-    mirrors that class's own instance-level ``asyncio.Lock()`` precedent so
-    two concurrent creations can't race each other's read-modify-write of
-    the metadata file either.
+    called under ``AutomationExecutor``'s HA-instance-wide lock so two
+    concurrent writes cannot race each other's read-modify-write of the
+    metadata file either.
     """
 
     def __init__(self, hass: HomeAssistant) -> None:

@@ -17,7 +17,8 @@ breaking this shape - not used, not guessed, just reserved.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta, timezone
 from enum import Enum, auto
 from typing import TYPE_CHECKING
 
@@ -39,7 +40,7 @@ if TYPE_CHECKING:
 
 
 class TriggerType(Enum):
-    """The 7 trigger types HomeIntent V5 Teil 2/10 (V5.3) names.
+    """The HomeIntent trigger types, including preview-only relative time.
 
     ``STATE`` vs. ``NUMERIC_STATE`` deliberately mirrors Home Assistant's own
     split between its ``state`` and ``numeric_state`` trigger platforms
@@ -54,6 +55,7 @@ class TriggerType(Enum):
     PRESENCE = auto()
     SUN = auto()
     TIME = auto()
+    RELATIVE_TIME = auto()
     WEEKDAY = auto()
 
 
@@ -133,6 +135,9 @@ class TriggerModel:
     # Uhr 15 Minuten und 30 Sekunden"), so it stays ``None`` there and the
     # generator keeps emitting ":00", unchanged.
     time_second: int | None = None  # TIME
+    # Preview-time representation. The absolute target is intentionally not
+    # calculated until the user confirms the automation.
+    relative_offset_seconds: int | None = None  # RELATIVE_TIME
     weekdays: tuple[str, ...] = ()  # WEEKDAY - HA weekday abbreviations, e.g. ("sat", "sun")
     # V5 Wave 4 (V5.14, "Relative Time" - "10 Minuten nachdem ich nach Hause
     # komme") - only ever set on an event-based trigger type (STATE/
@@ -168,6 +173,38 @@ class AutomationModel:
     # engine.py's _AUTOMATION_ONCE_RE detection; read by
     # ha_automation_generator.py to append the self-delete action.
     once: bool = False
+    # Full target date/time of a confirmed relative one-shot. The generator
+    # uses the date as an additional guard around HA's clock-only trigger.
+    scheduled_for: datetime | None = None
+
+
+def resolve_relative_schedule(model: AutomationModel, now: datetime) -> AutomationModel:
+    """Anchor one relative trigger to ``now`` after user confirmation."""
+    relative_triggers = [
+        trigger
+        for trigger in model.triggers
+        if trigger.type is TriggerType.RELATIVE_TIME
+    ]
+    if not relative_triggers:
+        return model
+    if len(relative_triggers) != 1 or len(model.triggers) != 1:
+        raise ValueError("Relative one-shot automations require exactly one trigger")
+    offset = relative_triggers[0].relative_offset_seconds
+    if offset is None or offset <= 0:
+        raise ValueError("Relative one-shot automation has no positive offset")
+    if now.tzinfo is not None and now.utcoffset() is not None:
+        target = (
+            now.astimezone(timezone.utc) + timedelta(seconds=offset)
+        ).astimezone(now.tzinfo)
+    else:
+        target = now + timedelta(seconds=offset)
+    trigger = TriggerModel(
+        type=TriggerType.TIME,
+        time_hour=target.hour,
+        time_minute=target.minute,
+        time_second=target.second,
+    )
+    return replace(model, triggers=(trigger,), scheduled_for=target)
 
 
 def _render_target(target: TriggerTarget) -> str:
@@ -210,6 +247,10 @@ def _render_trigger(trigger: TriggerModel) -> str:
         parts.append(f"offset_minutes={trigger.offset_minutes}")
     if trigger.time_hour is not None:
         parts.append(f"time={trigger.time_hour:02d}:{(trigger.time_minute or 0):02d}")
+    if trigger.time_second is not None:
+        parts.append(f"time_second={trigger.time_second}")
+    if trigger.relative_offset_seconds is not None:
+        parts.append(f"relative_offset_seconds={trigger.relative_offset_seconds}")
     if trigger.weekdays:
         parts.append(f"weekdays={','.join(trigger.weekdays)}")
     if trigger.delay_seconds is not None:

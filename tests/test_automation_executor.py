@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -45,6 +46,7 @@ SAMPLE_CONFIG = {
 
 def _make_hass(config_dir: str = "/config") -> MagicMock:
     hass = MagicMock()
+    hass.data = {}
     # Joins parts like the real ``hass.config.path()`` - automations.yaml
     # and the metadata sidecar file must resolve to distinct paths, same as
     # in a real HA config dir.
@@ -163,7 +165,7 @@ def test_file_io_runs_via_async_add_executor_job_not_directly_on_the_event_loop(
     assert hass.async_add_executor_job.await_count == 4
 
 
-def test_two_concurrent_creations_are_serialized_by_the_instance_lock():
+def test_two_executor_instances_share_one_lock_and_serialize_creations():
     hass = _make_hass()
     call_order: list[str] = []
     state: list[dict] = []
@@ -195,12 +197,14 @@ def test_two_concurrent_creations_are_serialized_by_the_instance_lock():
         patch.object(automation_executor, "write_utf8_file_atomic"),
         _patch_metadata_write(),
     ):
-        executor = AutomationExecutor(hass)
+        executor_a = AutomationExecutor(hass)
+        executor_b = AutomationExecutor(hass)
+        assert executor_a._lock is executor_b._lock
 
         async def _run_both():
             await asyncio.gather(
-                executor.async_create_automation(SAMPLE_CONFIG),
-                executor.async_create_automation(SAMPLE_CONFIG),
+                executor_a.async_create_automation(SAMPLE_CONFIG),
+                executor_b.async_create_automation(SAMPLE_CONFIG),
             )
 
         asyncio.run(_run_both())
@@ -215,7 +219,7 @@ def test_two_concurrent_creations_are_serialized_by_the_instance_lock():
 # --- V5.30/V5.31/V5.32: identity/metadata sidecar ---------------------------
 
 
-def test_a_successful_creation_records_metadata_keyed_by_the_automation_id():
+def test_a_successful_creation_records_schedule_metadata():
     hass = _make_hass()
     with (
         patch.object(automation_executor.yaml_util, "load_yaml", return_value=[]),
@@ -224,7 +228,12 @@ def test_a_successful_creation_records_metadata_keyed_by_the_automation_id():
         patch.object(automation_metadata_store, "write_utf8_file_atomic") as metadata_write_mock,
     ):
         executor = AutomationExecutor(hass)
-        automation_id = asyncio.run(executor.async_create_automation(SAMPLE_CONFIG))
+        target = datetime(2026, 8, 21, 12, 5, tzinfo=timezone.utc)
+        automation_id = asyncio.run(
+            executor.async_create_automation(
+                SAMPLE_CONFIG, scheduled_for=target, once=True
+            )
+        )
 
     metadata_write_mock.assert_called_once()
     written_path, written_json = metadata_write_mock.call_args.args
@@ -238,6 +247,53 @@ def test_a_successful_creation_records_metadata_keyed_by_the_automation_id():
     assert entry["version"] == 1
     assert entry["source_language"] == "de"
     assert "created_at" in entry and entry["created_at"]
+    assert entry["scheduled_for"] == "2026-08-21T12:05:00+00:00"
+    assert entry["once"] is True
+
+
+def test_cleanup_removes_expired_scheduled_once_but_keeps_future_and_ordinary():
+    hass = _make_hass()
+    expired = {"id": "expired", "alias": "expired", "triggers": [], "actions": []}
+    future = {"id": "future", "alias": "future", "triggers": [], "actions": []}
+    ordinary = {"id": "ordinary", "alias": "ordinary", "triggers": [], "actions": []}
+    with (
+        patch.object(
+            automation_executor.yaml_util,
+            "load_yaml",
+            return_value=[expired, future, ordinary],
+        ),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml") as dump_mock,
+        patch.object(automation_executor, "write_utf8_file_atomic"),
+        _patch_metadata_write(),
+    ):
+        executor = AutomationExecutor(hass)
+        executor._metadata_store.async_load_all = AsyncMock(
+            return_value={
+                "expired": {
+                    "once": True,
+                    "scheduled_for": "2026-08-21T11:59:00+00:00",
+                },
+                "future": {
+                    "once": True,
+                    "scheduled_for": "2026-08-21T12:01:00+00:00",
+                },
+                "ordinary": {"once": False},
+            }
+        )
+        executor._metadata_store.async_delete = AsyncMock()
+
+        removed = asyncio.run(
+            executor.async_cleanup_expired_scheduled_automations(
+                datetime(2026, 8, 21, 12, 0, tzinfo=timezone.utc)
+            )
+        )
+
+    assert removed == ("expired",)
+    assert dump_mock.call_args.args[0] == [future, ordinary]
+    executor._metadata_store.async_delete.assert_awaited_once_with("expired")
+    hass.services.async_call.assert_awaited_once_with(
+        "automation", "reload", {}, blocking=True
+    )
 
 
 # --- V5.35/V5.36: transactional creation with rollback -----------------------

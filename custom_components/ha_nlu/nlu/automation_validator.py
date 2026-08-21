@@ -137,6 +137,7 @@ _TRIGGER_REQUIRED_FIELDS: dict[TriggerType, tuple[str, ...]] = {
     TriggerType.PRESENCE: ("target", "zone_id"),
     TriggerType.SUN: ("sun_event",),
     TriggerType.TIME: ("time_hour",),
+    TriggerType.RELATIVE_TIME: ("relative_offset_seconds",),
     TriggerType.WEEKDAY: ("weekdays",),
 }
 
@@ -193,6 +194,10 @@ def _validate_trigger(trigger: TriggerModel) -> AutomationValidationError | None
     if trigger.time_hour is not None and not (0 <= trigger.time_hour <= 23):
         return AutomationValidationError.INVALID_TIME
     if trigger.time_minute is not None and not (0 <= trigger.time_minute <= 59):
+        return AutomationValidationError.INVALID_TIME
+    if trigger.time_second is not None and not (0 <= trigger.time_second <= 59):
+        return AutomationValidationError.INVALID_TIME
+    if trigger.relative_offset_seconds is not None and trigger.relative_offset_seconds <= 0:
         return AutomationValidationError.INVALID_TIME
     if trigger.weekdays and not set(trigger.weekdays) <= _VALID_WEEKDAYS:
         return AutomationValidationError.INVALID_PARAMETER

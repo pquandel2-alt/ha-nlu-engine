@@ -90,6 +90,26 @@ def test_async_setup_entry_does_not_double_register_the_service(tmp_path):
     assert handler_after_first is handler_after_second
 
 
+def test_setup_schedules_expired_automation_reconciliation_when_reload_exists(
+    monkeypatch, tmp_path
+):
+    hass = _make_hass(tmp_path)
+    entry = ConfigEntry()
+    hass.services.async_register("automation", "reload", AsyncMock())
+    cleanup = AsyncMock()
+    monkeypatch.setattr(
+        ha_nlu_init, "_async_cleanup_expired_scheduled_automations", cleanup
+    )
+
+    async def scenario() -> None:
+        await ha_nlu_init.async_setup_entry(hass, entry)
+        await asyncio.gather(*hass._tasks)
+
+    asyncio.run(scenario())
+
+    cleanup.assert_awaited_once_with(hass)
+
+
 def test_async_unload_entry_removes_the_service(tmp_path):
     hass = _make_hass(tmp_path)
     entry = ConfigEntry()
@@ -179,3 +199,22 @@ def test_service_handler_returns_before_the_delete_starts(monkeypatch, tmp_path)
         assert delete_started.is_set() is True
 
     asyncio.run(scenario())
+
+
+def test_delayed_self_delete_retries_transient_failures(monkeypatch):
+    hass = HomeAssistant()
+    delete = AsyncMock(
+        side_effect=[RuntimeError("reload 1"), RuntimeError("reload 2"), None]
+    )
+    sleep = AsyncMock()
+    monkeypatch.setattr(ha_nlu_init, "_async_delete_automation_by_id", delete)
+    monkeypatch.setattr(ha_nlu_init.asyncio, "sleep", sleep)
+    monkeypatch.setattr(ha_nlu_init, "SELF_DELETE_GRACE_SECONDS", 0.1)
+    monkeypatch.setattr(ha_nlu_init, "SELF_DELETE_RETRY_SECONDS", (1.0, 5.0))
+
+    asyncio.run(
+        ha_nlu_init._async_delete_automation_after_action(hass, "retry-me")
+    )
+
+    assert delete.await_count == 3
+    assert [call.args[0] for call in sleep.await_args_list] == [0.1, 1.0, 5.0]

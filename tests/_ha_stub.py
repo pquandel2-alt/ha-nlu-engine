@@ -166,6 +166,7 @@ def install() -> None:
 
     class HomeAssistant:
         def __init__(self) -> None:
+            self.data: dict[Any, Any] = {}
             self.states = _States()
             self.services = _Services()
             self._tasks: list[asyncio.Task[Any]] = []

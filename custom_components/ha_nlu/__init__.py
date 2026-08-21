@@ -37,6 +37,7 @@ SERVICE_DELETE_AUTOMATION = "delete_automation"
 # Without this grace period the reload waits for the running action script,
 # while that script waits for this service handler: a circular wait.
 SELF_DELETE_GRACE_SECONDS = 0.1
+SELF_DELETE_RETRY_SECONDS = (1.0, 5.0)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -63,6 +64,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
 
         hass.services.async_register(DOMAIN, SERVICE_DELETE_AUTOMATION, _handle_delete_automation)
+
+    # On a restart after a relative one-shot's due time, expire it instead
+    # of allowing HA's clock-only trigger to run the stale command tomorrow.
+    if hass.services.has_service("automation", "reload"):
+        hass.async_create_task(
+            _async_cleanup_expired_scheduled_automations(hass),
+            name="HomeIntent cleanup expired scheduled automations",
+        )
 
     return True
 
@@ -121,11 +130,45 @@ async def _async_delete_automation_after_action(
     hass: HomeAssistant, automation_id: str
 ) -> None:
     """Delete after the calling automation has left its final action."""
-    await asyncio.sleep(SELF_DELETE_GRACE_SECONDS)
+    delays = (SELF_DELETE_GRACE_SECONDS, *SELF_DELETE_RETRY_SECONDS)
+    for attempt, delay in enumerate(delays, start=1):
+        await asyncio.sleep(delay)
+        try:
+            await _async_delete_automation_by_id(hass, automation_id)
+            return
+        except Exception:  # noqa: BLE001 - HA reload/file failures are heterogeneous
+            if attempt == len(delays):
+                _LOGGER.exception(
+                    "Self-delete of automation %s failed after %d attempts",
+                    automation_id,
+                    attempt,
+                )
+            else:
+                _LOGGER.warning(
+                    "Self-delete attempt %d for automation %s failed; retrying",
+                    attempt,
+                    automation_id,
+                    exc_info=True,
+                )
+
+
+async def _async_cleanup_expired_scheduled_automations(
+    hass: HomeAssistant,
+) -> None:
+    """Reconcile date-bound one-shots after Home Assistant startup."""
+    from homeassistant.util import dt as dt_util
+
+    from .automation_executor import AutomationExecutor
+
     try:
-        await _async_delete_automation_by_id(hass, automation_id)
-    except Exception:  # noqa: BLE001 - background failures must be visible in HA's log
-        _LOGGER.exception("Delayed self-delete of automation %s failed", automation_id)
+        expired = await AutomationExecutor(
+            hass
+        ).async_cleanup_expired_scheduled_automations(dt_util.now())
+    except Exception:  # noqa: BLE001 - startup cleanup must not unload HomeIntent
+        _LOGGER.exception("Cleanup of expired HomeIntent automations failed")
+        return
+    if expired:
+        _LOGGER.info("Removed %d expired HomeIntent automations", len(expired))
 
 
 async def _async_delete_automation_by_id(
