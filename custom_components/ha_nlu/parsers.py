@@ -1601,6 +1601,8 @@ class StateQueryParser:
 
         if result.intent.name == "HassCheckState":
             return self._parse_check_state(text, result.entities, context, spec)
+        if result.intent.name == "HassEntityStateQuery":
+            return self._parse_entity_state_query(text, result.entities, context, spec)
         if result.intent.name == "HassExistsQuery":
             return self._parse_exists_query(text, result.entities, context, spec)
         if result.intent.name == "HassStateQuery":
@@ -1630,7 +1632,10 @@ class StateQueryParser:
 
     @staticmethod
     def _device_class_candidates(
-        device_class_value: str, entities: list[EntitySnapshot], area_id: str | None
+        device_class_value: str,
+        entities: list[EntitySnapshot],
+        area_id: str | None,
+        floor_id: str | None = None,
     ) -> tuple[str, str | None, list[EntitySnapshot]]:
         """Splits the "domain:device_class" composite slot value and returns
         the matching entities alongside the parsed (domain, device_class) -
@@ -1638,31 +1643,86 @@ class StateQueryParser:
         ``frame.parameters`` regardless of the candidate list itself."""
         domain, _, device_class_raw = device_class_value.partition(":")
         device_class = device_class_raw if device_class_raw != "None" else None
-        candidates = resolve_candidates(entities, Constraints(domain=domain, area_id=area_id, device_class=device_class))
+        candidates = resolve_candidates(
+            entities,
+            Constraints(
+                domain=domain,
+                area_id=area_id,
+                floor_id=floor_id,
+                device_class=device_class,
+            ),
+        )
         return domain, device_class, candidates
+
+    @staticmethod
+    def _resolve_plural_location(
+        slots: dict, entities: list[EntitySnapshot]
+    ) -> tuple[str | None, str | None, str | None, str | None] | None:
+        """Resolve the plural query's location as either room or floor."""
+        area_slot = slots.get("area")
+        if area_slot is None:
+            return None, None, None, None
+        location_name = _strip_locative_prepositions(str(area_slot.value))
+        if not location_name:
+            return None, None, None, None
+        area = resolve_area_name(location_name, entities)
+        if area.status is AreaResolveStatus.OK:
+            return area.area_id, location_name, None, None
+        if area.status is AreaResolveStatus.AMBIGUOUS:
+            return None
+        floor = resolve_floor_name(location_name, entities)
+        if floor.status is not FloorResolveStatus.OK:
+            return None
+        return None, None, floor.floor_id, location_name
 
     def _parse_state_query(self, text: str, slots: dict, context: ParseContext, spec) -> ParseResult | None:
         device_class_slot = slots.get("device_class")
-        state_slot = slots.get("state")
-        if device_class_slot is None:
+        state_slot = slots.get("state") or slots.get("state_adj")
+        cross_domain = device_class_slot is None and bool(
+            re.match(r"\s*was ist\b", text, re.IGNORECASE)
+        )
+        if device_class_slot is None and not cross_domain:
             return None
 
-        resolved_area = self._resolve_area(slots, context.entities)
-        if resolved_area is None:
+        resolved_location = self._resolve_plural_location(slots, context.entities)
+        if resolved_location is None:
             return None
-        area_id, area_name = resolved_area
+        area_id, area_name, floor_id, floor_name = resolved_location
 
-        device_class_value = str(device_class_slot.value)
-        domain, device_class, candidates = self._device_class_candidates(device_class_value, context.entities, area_id)
-        if domain not in spec.allowed_domains:
-            return None
+        if cross_domain:
+            device_class_value = "Geräte"
+            domain = device_class = None
+            candidates = resolve_candidates(
+                context.entities, Constraints(area_id=area_id, floor_id=floor_id)
+            )
+            candidates = [entity for entity in candidates if entity.domain in spec.allowed_domains]
+        else:
+            device_class_value = str(device_class_slot.value)
+            domain, device_class, candidates = self._device_class_candidates(
+                device_class_value, context.entities, area_id, floor_id
+            )
+            if domain not in spec.allowed_domains:
+                return None
 
         requested_state = _STATE_NAME_TO_SEMANTIC[str(state_slot.value)] if state_slot is not None else None
         count_only = bool(re.search(r"\bwie viele\b", text, re.IGNORECASE))
+        all_requested = bool(re.search(r"\b(alle|sämtliche|beide)\b", text, re.IGNORECASE))
+        none_requested = bool(re.search(r"\b(kein|keine)\b", text, re.IGNORECASE))
+        locations_requested = bool(
+            re.search(r"\b(wo|in welchen räumen|welche räume haben)\b", text, re.IGNORECASE)
+        )
+        if re.search(r"\bbeide\b", text, re.IGNORECASE) and len(candidates) != 2:
+            return None  # "beide" is only truthful when exactly two targets exist
         area_snapshot = AreaSnapshot(area_id=area_id, name=area_name) if area_id is not None else None
         query_command = QueryCommand(
             intent="HassStateQuery",
-            scope=QueryScope.COUNT if count_only else QueryScope.LIST,
+            scope=(
+                QueryScope.NONE
+                if none_requested
+                else QueryScope.LOCATIONS if locations_requested
+                else QueryScope.ALL if all_requested
+                else QueryScope.COUNT if count_only else QueryScope.LIST
+            ),
             target=QueryTarget(domain=domain, device_class=device_class, area=area_snapshot),
             filter=QueryFilter(state=requested_state),
         )
@@ -1677,8 +1737,13 @@ class StateQueryParser:
             parameters={
                 "semantic_state": requested_state,
                 "count_only": count_only,
+                "all_requested": all_requested,
+                "none_requested": none_requested,
+                "locations_requested": locations_requested,
                 "device_class": device_class,
                 "domain": domain,
+                "floor_id": floor_id,
+                "floor_name": floor_name,
                 "query_command": query_command,
                 "query_result": query_result,
             },
@@ -1691,13 +1756,15 @@ class StateQueryParser:
         if device_class_slot is None:
             return None
 
-        resolved_area = self._resolve_area(slots, context.entities)
-        if resolved_area is None:
+        resolved_location = self._resolve_plural_location(slots, context.entities)
+        if resolved_location is None:
             return None
-        area_id, area_name = resolved_area
+        area_id, area_name, floor_id, floor_name = resolved_location
 
         device_class_value = str(device_class_slot.value)
-        domain, device_class, candidates = self._device_class_candidates(device_class_value, context.entities, area_id)
+        domain, device_class, candidates = self._device_class_candidates(
+            device_class_value, context.entities, area_id, floor_id
+        )
         if domain not in spec.allowed_domains:
             return None
 
@@ -1729,6 +1796,8 @@ class StateQueryParser:
                 "semantic_state": requested_state,
                 "device_class": device_class,
                 "domain": domain,
+                "floor_id": floor_id,
+                "floor_name": floor_name,
                 "query_command": query_command,
                 "query_result": query_result,
             },
@@ -1736,22 +1805,48 @@ class StateQueryParser:
         )
         return ParseResult(frame=frame, resolved_entities=matches)
 
-    def _parse_check_state(self, text: str, slots: dict, context: ParseContext, spec) -> ParseResult | None:
-        name_slot = slots.get("name")
-        state_slot = slots.get("state")
-        if name_slot is None or state_slot is None:
-            return None
-
+    def _resolve_single_state_target(
+        self, slots: dict, context: ParseContext
+    ) -> tuple[EntitySnapshot, str, str | None, str | None] | None:
+        """Resolve either a spoken entity name or one device class in an area."""
         resolved_area = self._resolve_area(slots, context.entities)
         if resolved_area is None:
             return None
         area_id, area_name = resolved_area
 
+        device_class_slot = slots.get("device_class")
+        if device_class_slot is not None:
+            # The grammar only exposes this branch together with {area}.
+            if area_id is None:
+                return None
+            device_class_value = str(device_class_slot.value)
+            _domain, _device_class, candidates = self._device_class_candidates(
+                device_class_value, context.entities, area_id
+            )
+            if len(candidates) != 1:
+                return None
+            return candidates[0], device_class_value, area_id, area_name
+
+        name_slot = slots.get("name")
+        if name_slot is None:
+            return None
         name = _strip_locative_prepositions(str(name_slot.value))
-        resolved = resolve_entity_scored(name, context.entities, area_id=area_id, index=context.index)
+        resolved = resolve_entity_scored(
+            name, context.entities, area_id=area_id, index=context.index
+        )
         if resolved.status is not ResolutionStatus.RESOLVED or resolved.entity is None:
-            return None  # not found or ambiguous - never guess, no clarification round-trip (see class docstring)
-        if resolved.entity.domain not in spec.allowed_domains:
+            return None
+        return resolved.entity, name, area_id, area_name
+
+    def _parse_check_state(self, text: str, slots: dict, context: ParseContext, spec) -> ParseResult | None:
+        state_slot = slots.get("state")
+        if state_slot is None:
+            return None
+        target = self._resolve_single_state_target(slots, context)
+        if target is None:
+            return None
+        entity, target_text, area_id, area_name = target
+        if entity.domain not in spec.allowed_domains:
             return None
 
         requested_state = _STATE_NAME_TO_SEMANTIC[str(state_slot.value)]
@@ -1766,22 +1861,22 @@ class StateQueryParser:
             intent="HassCheckState",
             scope=QueryScope.SINGLE,
             target=QueryTarget(
-                domain=resolved.entity.domain,
-                device_class=resolved.entity.device_class,
+                domain=entity.domain,
+                device_class=entity.device_class,
                 area=area_snapshot,
-                entity_id=resolved.entity.entity_id,
+                entity_id=entity.entity_id,
             ),
             filter=QueryFilter(state=requested_state),
         )
         # resolve_entity_scored already did the ambiguity check (Regel 6) -
         # QueryExecutor.SINGLE with a pre-resolved entity_id only confirms
         # membership, it never re-decides cardinality here.
-        query_result = _QUERY_EXECUTOR.execute(query_command, [resolved.entity])
+        query_result = _QUERY_EXECUTOR.execute(query_command, [entity])
         matches = list(query_result.entities)
 
         frame = SemanticFrame(
             intent="HassCheckState",
-            target=TargetReference(text=name, entity_id=resolved.entity.entity_id, domain=resolved.entity.domain),
+            target=TargetReference(text=target_text, entity_id=entity.entity_id, domain=entity.domain),
             area=AreaReference(text=area_name, area_id=area_id, area_name=area_name) if area_id is not None else None,
             parameters={
                 "semantic_state": requested_state,
@@ -1791,6 +1886,53 @@ class StateQueryParser:
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=matches)
+
+    def _parse_entity_state_query(
+        self, text: str, slots: dict, context: ParseContext, spec
+    ) -> ParseResult | None:
+        target = self._resolve_single_state_target(slots, context)
+        if target is None:
+            return None
+        entity, target_text, area_id, area_name = target
+        if entity.domain not in spec.allowed_domains:
+            return None
+
+        area_snapshot = (
+            AreaSnapshot(area_id=area_id, name=area_name)
+            if area_id is not None and area_name is not None
+            else None
+        )
+        query_command = QueryCommand(
+            intent="HassEntityStateQuery",
+            scope=QueryScope.SINGLE,
+            target=QueryTarget(
+                domain=entity.domain,
+                device_class=entity.device_class,
+                area=area_snapshot,
+                entity_id=entity.entity_id,
+            ),
+            filter=QueryFilter(),
+        )
+        query_result = _QUERY_EXECUTOR.execute(query_command, [entity])
+        frame = SemanticFrame(
+            intent="HassEntityStateQuery",
+            target=TargetReference(
+                text=target_text,
+                entity_id=entity.entity_id,
+                domain=entity.domain,
+            ),
+            area=(
+                AreaReference(text=area_name, area_id=area_id, area_name=area_name)
+                if area_id is not None and area_name is not None
+                else None
+            ),
+            parameters={
+                "query_command": query_command,
+                "query_result": query_result,
+            },
+            source_text=text,
+        )
+        return ParseResult(frame=frame, resolved_entities=list(query_result.entities))
 
     def _parse_device_query(self, text: str, slots: dict, context: ParseContext) -> ParseResult | None:
         """HassDeviceQuery ("welche Geräte sind im Büro?") - devices are

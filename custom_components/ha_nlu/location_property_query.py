@@ -37,6 +37,16 @@ _LOCATION_PREFIX = r"(?:in\s+der|in\s+dem|im|am|beim|von|des|der|das|die)\s+"
 
 _PATTERNS = (
     re.compile(
+        rf"^wie\s*viele?\s+grad\s+(?:sind|hat)(?:\s+es)?\s+"
+        rf"{_LOCATION_PREFIX}(?P<location>.+?)\s*[?.!]*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf"^(?:wie|was)\s+ist\s+die\s+(?P<property>{_PROPERTY_WORDS})\s+"
+        rf"{_LOCATION_PREFIX}(?P<location>.+?)\s*[?.!]*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
         rf"^(?P<property>batterie|batterien|batteriestand)\s+"
         rf"(?:{_LOCATION_PREFIX})?(?P<location>.+?)\s+"
         rf"(?P<comparator>unter|über|höchstens|mindestens)\s+"
@@ -73,7 +83,7 @@ _PATTERNS = (
 
 def _default_property(text: str) -> str | None:
     folded = text.casefold()
-    if "warm" in folded or "kalt" in folded:
+    if "warm" in folded or "kalt" in folded or "grad" in folded:
         return "temperatur"
     if "feucht" in folded:
         return "luftfeuchtigkeit"

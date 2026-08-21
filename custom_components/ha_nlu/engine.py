@@ -188,10 +188,18 @@ _COMPARISON_QUERY_RE = re.compile(
 # "gibt es" anywhere, so this can't misroute an existing match.
 _STATE_QUERY_RE = re.compile(
     r"\bgibt es\b"
+    r"|\bhaben wir\b.*\b(offen\w*|geöffnet\w*|geschlossen\w*|eingeschaltet\w*|ausgeschaltet\w*)\b"
+    r"|\bwelchen\b.*\b(zustand|status)\b"
+    r"|\b(wie|zeige)\b.*\b(zustand|status)\b"
+    r"|\b(wo|in welchen räumen|welche räume haben|was ist)\b.*"
+    r"\b(offen|geöffnet|zu|geschlossen|an|aus|eingeschaltet|ausgeschaltet|"
+    r"hochgefahren|runtergefahren|heruntergefahren|oben|unten)\b"
+    r"|\bwas ist der\b.*\b(zustand|status)\b"
     r"|\bwelche\b.*\bsind\b"
-    r"|\b(welche|wie viele|ist|sind)\b.*"
+    r"|\b(welcher|welche|welches|wie viele|ist|sind)\b.*"
     r"\b(offen|geöffnet|offene|geöffnete|zu|geschlossen|geschlossene|"
     r"an|aus|eingeschaltet|angeschaltet|ausgeschaltet|"
+    r"hochgefahren|runtergefahren|heruntergefahren|oben|unten|"
     r"eingeschaltete|angeschaltete|ausgeschaltete)\b",
     re.IGNORECASE,
 )
@@ -202,7 +210,7 @@ _STATE_QUERY_RE = re.compile(
 # Phase 8). Deliberately excludes HassQueryComparison - see that method's
 # docstring.
 _QUERY_FOLLOWUP_INTENTS = frozenset(
-    {"HassGetState", "HassLocationPropertyQuery", "HassStateQuery", "HassCheckState", "HassExistsQuery", "HassDeviceQuery"}
+    {"HassGetState", "HassLocationPropertyQuery", "HassStateQuery", "HassCheckState", "HassEntityStateQuery", "HassExistsQuery", "HassDeviceQuery"}
 )
 
 # Sentences containing "Prozent" are routed to PercentageParser's separately-

@@ -46,6 +46,30 @@ WINDOWS = [FENSTER_KELLER, FENSTER_BAD]
 ALL_SENSORS = [FENSTER_KELLER, FENSTER_BAD, TUER_EINGANG, MOTION_FLUR]
 LIGHTS = [LICHT_WOHNZIMMER, LICHT_KUECHE]
 
+FENSTER_BADEZIMMER = EntitySnapshot(
+    "binary_sensor.fensterkontakt_dusche",
+    "Fensterkontakt Dusche",
+    "binary_sensor",
+    "off",
+    area_id="badezimmer",
+    area_name="Badezimmer",
+    device_class="window",
+)
+ROLLLADEN_BAD = EntitySnapshot(
+    "cover.rollladen_bad", "Rollladen Bad", "cover", "open",
+    area_id="badezimmer", area_name="Badezimmer",
+)
+ROLLLADEN_BUERO = EntitySnapshot(
+    "cover.rollladen_buero", "Rollladen Büro", "cover", "open",
+    area_id="buero", area_name="Büro",
+)
+
+TEMPERATUR_BAD = EntitySnapshot(
+    "sensor.temperatur_bad", "Temperatur Bad", "sensor", "21.5",
+    area_id="badezimmer", area_name="Badezimmer",
+    device_class="temperature", unit="°C",
+)
+
 
 # --- HassStateQuery (list/count) ------------------------------------------
 
@@ -56,6 +80,180 @@ def test_state_query_list_single_match(engine):
     assert result.plan is None  # query, never calls a service (Regel 3)
     assert result.command.entities == (FENSTER_KELLER,)
     assert result.response_text == "Fenster Keller ist geöffnet."
+
+
+def test_compound_area_window_question_does_not_require_exact_entity_name(engine):
+    result = engine.match(
+        "Ist das Badezimmer Fenster geschlossen?", [FENSTER_BADEZIMMER]
+    )
+
+    assert result is not None
+    assert result.plan is None
+    assert result.command.entities == (FENSTER_BADEZIMMER,)
+    assert result.response_text == "Ja, Fensterkontakt Dusche ist geschlossen."
+
+
+def test_open_entity_state_question_reports_the_live_semantic_state(engine):
+    result = engine.match(
+        "Welchen Zustand hat das Badezimmer Fenster?", [FENSTER_BADEZIMMER]
+    )
+
+    assert result is not None
+    assert result.plan is None
+    assert result.command.intent == "HassEntityStateQuery"
+    assert result.response_text == "Fensterkontakt Dusche ist geschlossen."
+
+
+def test_all_rolladen_hochgefahren_is_a_universal_state_question(engine):
+    result = engine.match(
+        "Sind alle Rolladen hochgefahren?", [ROLLLADEN_BAD, ROLLLADEN_BUERO]
+    )
+
+    assert result is not None
+    assert result.plan is None
+    assert result.response_text == "Ja, alle Rollläden sind geöffnet."
+
+
+def test_all_rolladen_question_answers_no_if_one_is_down(engine):
+    closed = EntitySnapshot(
+        "cover.rollladen_kueche", "Rollladen Küche", "cover", "closed",
+        area_id="kueche", area_name="Küche",
+    )
+    result = engine.match(
+        "Sind alle Rolladen hochgefahren?", [ROLLLADEN_BAD, closed]
+    )
+
+    assert result is not None
+    assert result.response_text == "Nein, nicht alle Rollläden sind geöffnet."
+
+
+def test_room_possessive_window_question_never_resolves_to_another_device(engine):
+    result = engine.match(
+        "Ist das Fenster vom Badezimmer geschlossen?",
+        [FENSTER_BADEZIMMER, ROLLLADEN_BAD],
+    )
+    assert result is not None
+    assert result.command.entities == (FENSTER_BADEZIMMER,)
+    assert result.response_text == "Ja, Fensterkontakt Dusche ist geschlossen."
+
+
+def test_common_open_state_question_wordings(engine):
+    questions = (
+        "Wie ist der Zustand vom Badezimmer Fenster?",
+        "Was ist der Status vom Badezimmer Fenster?",
+        "Zeige mir den Zustand vom Badezimmer Fenster.",
+    )
+    for question in questions:
+        result = engine.match(question, [FENSTER_BADEZIMMER])
+        assert result is not None, question
+        assert result.plan is None
+        assert result.response_text == "Fensterkontakt Dusche ist geschlossen."
+
+
+def test_universal_quantifier_wordings(engine):
+    for question in (
+        "Sind sämtliche Rollläden oben?",
+        "Sind beide Rollläden oben?",
+        "Sind die Rollläden alle oben?",
+    ):
+        result = engine.match(question, [ROLLLADEN_BAD, ROLLLADEN_BUERO])
+        assert result is not None, question
+        assert result.response_text == "Ja, alle Rollläden sind geöffnet."
+
+
+def test_beide_refuses_when_target_count_is_not_two(engine):
+    third = EntitySnapshot("cover.kueche", "Rollladen Küche", "cover", "open")
+    assert engine.match(
+        "Sind beide Rollläden oben?", [ROLLLADEN_BAD, ROLLLADEN_BUERO, third]
+    ) is None
+
+
+def test_exists_query_common_wordings(engine):
+    for question in (
+        "Ist irgendein Fenster offen?",
+        "Sind irgendwelche Fenster offen?",
+        "Gibt es ein offenes Fenster?",
+        "Haben wir offene Fenster?",
+    ):
+        result = engine.match(question, [FENSTER_KELLER, FENSTER_BAD])
+        assert result is not None, question
+        assert result.plan is None
+        assert result.response_text == "Ja, es gibt 1 Fenster."
+
+
+def test_negative_existence_query(engine):
+    result = engine.match("Ist kein Fenster offen?", [FENSTER_BAD])
+    assert result is not None
+    assert result.plan is None
+    assert result.response_text == "Ja, es sind keine Fenster geöffnet."
+
+
+def test_singular_interrogative_lists_matching_entity(engine):
+    result = engine.match("Welches Fenster ist offen?", WINDOWS)
+    assert result is not None
+    assert result.response_text == "Fenster Keller ist geöffnet."
+
+
+def test_floor_scoped_state_question(engine):
+    upstairs_open = EntitySnapshot(
+        "binary_sensor.fenster_oben", "Fenster Galerie", "binary_sensor", "on",
+        floor_id="og", floor_name="Obergeschoss", device_class="window",
+    )
+    downstairs_closed = EntitySnapshot(
+        "binary_sensor.fenster_unten", "Fenster Küche", "binary_sensor", "off",
+        floor_id="eg", floor_name="Erdgeschoss", device_class="window",
+    )
+    result = engine.match(
+        "Welche Fenster sind im Obergeschoss offen?",
+        [upstairs_open, downstairs_closed],
+    )
+    assert result is not None
+    assert result.command.entities == (upstairs_open,)
+
+
+def test_count_query_always_answers_with_a_number_for_one_match(engine):
+    result = engine.match("Wie viele Fenster sind offen?", WINDOWS)
+    assert result is not None
+    assert result.response_text == "1 Fenster ist geöffnet."
+
+
+def test_location_question_wordings_group_matches_by_room(engine):
+    for question in (
+        "Wo sind Fenster offen?",
+        "In welchen Räumen sind Fenster offen?",
+        "Welche Räume haben offene Fenster?",
+    ):
+        result = engine.match(question, WINDOWS)
+        assert result is not None, question
+        assert result.plan is None
+        assert result.response_text == "Im Raum Keller sind Fenster geöffnet."
+
+
+def test_cross_domain_room_state_question(engine):
+    light = EntitySnapshot(
+        "light.bad", "Badezimmerlicht", "light", "on",
+        area_id="badezimmer", area_name="Badezimmer",
+    )
+    result = engine.match(
+        "Was ist im Badezimmer eingeschaltet?", [FENSTER_BADEZIMMER, light]
+    )
+    assert result is not None
+    assert result.plan is None
+    assert result.command.entities == (light,)
+    assert result.response_text == "Badezimmerlicht ist eingeschaltet."
+
+
+def test_common_room_temperature_question_wordings(engine):
+    for question in (
+        "Wie viel Grad sind im Badezimmer?",
+        "Wie viele Grad hat das Badezimmer?",
+        "Wie ist die Temperatur im Badezimmer?",
+        "Was ist die Temperatur im Badezimmer?",
+    ):
+        result = engine.match(question, [TEMPERATUR_BAD])
+        assert result is not None, question
+        assert result.plan is None
+        assert result.response_text == "21.5 Grad."
 
 
 def test_state_query_list_multiple_matches(engine):

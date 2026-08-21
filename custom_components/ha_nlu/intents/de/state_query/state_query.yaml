@@ -32,12 +32,28 @@ intents:
   HassStateQuery:
     data:
       - sentences:
+          - "wo sind [denn] {device_class} [noch] {state}"
+          - "in welchen räumen sind [denn] {device_class} [noch] {state}"
+          - "welche räume haben [denn] {state_adj} {device_class}"
+          - "was ist (in der|in dem|im|am|beim) {area} [denn] [noch] {state}"
           - "welche {device_class} sind [denn] [noch] {state}"
-          - "welche {device_class} sind [in der|in dem|im|am|beim] {area} [denn] [noch] {state}"
+          - "welche {device_class} sind (in der|in dem|im|am|beim) {area} [denn] [noch] {state}"
           - "wie viele {device_class} sind [denn] [noch] {state}"
-          - "wie viele {device_class} sind [in der|in dem|im|am|beim] {area} [denn] [noch] {state}"
+          - "wie viele {device_class} sind (in der|in dem|im|am|beim) {area} [denn] [noch] {state}"
           - "sind [denn] {device_class} [noch] {state}"
-          - "sind [in der|in dem|im|am|beim] {area} [denn] {device_class} [noch] {state}"
+          - "sind [denn] alle {device_class} [noch] {state}"
+          - "sind [denn] (sämtliche|alle die) {device_class} [noch] {state}"
+          - "sind [denn] beide {device_class} [noch] {state}"
+          - "sind [denn] [die|der|das] {device_class} alle [noch] {state}"
+          - "sind [denn] alle {device_class} (in der|in dem|im|am|beim) {area} [noch] {state}"
+          - "sind [denn] sämtliche {device_class} (in der|in dem|im|am|beim) {area} [noch] {state}"
+          - "sind (in der|in dem|im|am|beim) {area} [denn] alle {device_class} [noch] {state}"
+          - "sind [denn] keine {device_class} [noch] {state}"
+          - "ist [denn] kein {device_class} [noch] {state}"
+          - "sind [denn] keine {device_class} (in der|in dem|im|am|beim) {area} [noch] {state}"
+          - "ist [denn] kein {device_class} (in der|in dem|im|am|beim) {area} [noch] {state}"
+          - "(welcher|welche|welches) {device_class} ist [denn] [noch] {state}"
+          - "sind (in der|in dem|im|am|beim) {area} [denn] {device_class} [noch] {state}"
           # WorldModelQuery wave: stateless listing ("Welche Lampen sind im
           # Wohnzimmer?") - no {state} slot at all, area-scoped only. Reuses
           # the exact same {device_class}/{area} slots as the sentences
@@ -45,7 +61,7 @@ intents:
           # variants) since a bare "welche Lampen sind" has no verb
           # complement to anchor on - "niemals raten" a scope that wasn't
           # spoken.
-          - "welche {device_class} sind [in der|in dem|im|am|beim] {area}"
+          - "welche {device_class} sind (in der|in dem|im|am|beim) {area}"
   # HassExistsQuery MUST be listed before HassCheckState: "ist ein {device_class}
   # ... {state}" (the new word-order variant below, spec gap #4 - "Ist im
   # Wohnzimmer ein Fenster offen?") structurally also matches HassCheckState's
@@ -65,11 +81,12 @@ intents:
     data:
       - sentences:
           - "gibt es [denn] [noch] {state_adj} {device_class}"
-          - "gibt es [denn] [noch] [in der|in dem|im|am|beim] {area} {state_adj} {device_class}"
-          - "gibt es [denn] [noch] {state_adj} {device_class} [in der|in dem|im|am|beim] {area}"
+          - "gibt es [denn] [noch] [ein|eine|einen] {state_adj} {device_class}"
+          - "gibt es [denn] [noch] (in der|in dem|im|am|beim) {area} {state_adj} {device_class}"
+          - "gibt es [denn] [noch] {state_adj} {device_class} (in der|in dem|im|am|beim) {area}"
           - "gibt es [denn] [noch] {device_class}"
-          - "gibt es [denn] [noch] [in der|in dem|im|am|beim] {area} {device_class}"
-          - "gibt es [denn] [noch] {device_class} [in der|in dem|im|am|beim] {area}"
+          - "gibt es [denn] [noch] (in der|in dem|im|am|beim) {area} {device_class}"
+          - "gibt es [denn] [noch] {device_class} (in der|in dem|im|am|beim) {area}"
           # "ist [im {area}] ein {device_class} [noch] {state}" (spec gap
           # #4): existence phrased with "ist"/indefinite article instead of
           # "gibt es" - still EXISTS semantics (no specific named entity),
@@ -77,6 +94,9 @@ intents:
           - "ist [in der|in dem|im|am|beim] {area} [denn] ein {device_class} [noch] {state}"
           - "ist [denn] ein {device_class} [in der|in dem|im|am|beim] {area} [noch] {state}"
           - "ist [denn] ein {device_class} [noch] {state}"
+          - "ist [denn] (irgendein|irgendeine|irgendeinen) {device_class} [noch] {state}"
+          - "sind [denn] irgendwelche {device_class} [noch] {state}"
+          - "haben wir [denn] [noch] {state_adj} {device_class}"
   # The area-scoped sentence MUST be listed before the bare one: {name} is
   # an open-ended WildcardSlotList (unlike {device_class} above, which is a
   # closed vocabulary), so when both templates are candidates hassil prefers
@@ -88,8 +108,32 @@ intents:
   HassCheckState:
     data:
       - sentences:
+          # A room plus device class must not depend on the entity's exact
+          # Friendly Name ("Badezimmer Fenster" may be named
+          # "Fensterkontakt Bad" in HA). These more specific forms stay
+          # before the open {name} wildcard variants below.
+          - "ist [die|der|das] {device_class} (in der|in dem|im|am|beim) {area} [denn] [noch] {state}"
+          - "ist (in der|in dem|im|am|beim) {area} [die|der|das] {device_class} [denn] [noch] {state}"
+          - "ist [die|der|das] {device_class} (von der|von dem|vom) {area} [denn] [noch] {state}"
+          - "ist [die|der|das] {area} {device_class} [denn] [noch] {state}"
           - "ist [die|der|das] {name} [in der|in dem|im|am|beim] {area} [denn] [noch] {state}"
           - "ist [die|der|das] {name} [denn] [noch] {state}"
+
+  # Open state question without a requested comparison state. This is still
+  # a strictly read-only SINGLE query; the response is derived from the
+  # entity's live semantic state.
+  HassEntityStateQuery:
+    data:
+      - sentences:
+          - "welchen (zustand|status) hat [die|der|das] {device_class} (in der|in dem|im|am|beim) {area}"
+          - "welchen (zustand|status) hat [die|der|das] {area} {device_class}"
+          - "welchen (zustand|status) hat [die|der|das] {name}"
+          - "wie ist der (zustand|status) (von der|von dem|vom) {area} {device_class}"
+          - "was ist der (zustand|status) (von der|von dem|vom) {area} {device_class}"
+          - "zeige [mir] den (zustand|status) (von der|von dem|vom) {area} {device_class}"
+          - "wie ist der (zustand|status) (von|von der|von dem|vom) [die|der|das] {name}"
+          - "was ist der (zustand|status) (von|von der|von dem|vom) [die|der|das] {name}"
+          - "zeige [mir] den (zustand|status) (von|von der|von dem|vom) [die|der|das] {name}"
   # WorldModelQuery wave: device-level query ("Welche Geräte sind im Büro?")
   # - no {device_class}/{state} slot, devices are cross-domain and answered
   # from the WorldModel's device list, not an entity/state filter (see

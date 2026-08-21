@@ -81,8 +81,10 @@ def test_query_result_status_members_cover_the_four_documented_cases():
     assert {s.name for s in QueryResultStatus} == {"MATCHED", "EMPTY", "TARGET_NOT_FOUND", "AMBIGUOUS"}
 
 
-def test_query_scope_members_cover_the_four_documented_cardinalities():
-    assert {s.name for s in QueryScope} == {"SINGLE", "LIST", "COUNT", "EXISTS"}
+def test_query_scope_members_cover_the_documented_cardinalities():
+    assert {s.name for s in QueryScope} == {
+        "SINGLE", "LIST", "COUNT", "EXISTS", "ALL", "NONE", "LOCATIONS"
+    }
 
 
 def test_dataclasses_are_frozen():

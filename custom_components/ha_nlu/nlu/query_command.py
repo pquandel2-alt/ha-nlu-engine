@@ -41,6 +41,9 @@ class QueryScope(Enum):
     LIST = auto()  # HassStateQuery "welche ..." - list every matching entity
     COUNT = auto()  # HassStateQuery "wie viele ..." - count matching entities
     EXISTS = auto()  # HassExistsQuery - existence only, no per-entity detail
+    ALL = auto()  # "Sind alle Rollläden oben?" - universal state check
+    NONE = auto()  # "Ist kein Fenster offen?" - negated existence check
+    LOCATIONS = auto()  # "Wo sind Fenster offen?" - unique matching rooms
 
 
 class QueryTargetKind(Enum):

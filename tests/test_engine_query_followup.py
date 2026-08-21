@@ -263,7 +263,7 @@ def test_query_followup_continues_state_query_count_scope(engine):
     assert result is not None
     # count_only must carry over too, not just the entity set.
     assert result.command.entities == (FENSTER_BAD_2,)
-    assert result.response_text == "Fenster Bad 2 ist geöffnet."
+    assert result.response_text == "1 Fenster ist geöffnet."
 
 
 def test_query_followup_continues_exists_query(engine):

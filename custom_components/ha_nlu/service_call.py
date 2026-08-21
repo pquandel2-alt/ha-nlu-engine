@@ -321,6 +321,11 @@ QUERY_INTENTS: dict[str, QueryIntentSpec] = {
         response=lambda es, params: "Das habe ich nicht verstanden.",
         allows_empty=False,
     ),
+    "HassEntityStateQuery": QueryIntentSpec(
+        allowed_domains=frozenset({"binary_sensor", "cover", "light", "switch"}),
+        response=lambda es, params: "Das habe ich nicht verstanden.",
+        allows_empty=False,
+    ),
     "HassExistsQuery": QueryIntentSpec(
         allowed_domains=frozenset({"binary_sensor", "cover", "light", "switch"}),
         response=lambda es, params: "Das habe ich nicht verstanden.",

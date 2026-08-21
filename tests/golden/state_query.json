@@ -69,19 +69,19 @@
     "text": "wie viele Fenster sind geschlossen",
     "expect_match": true,
     "plan": null,
-    "response_text": "Fenster Küche ist geschlossen."
+    "response_text": "1 Fenster ist geschlossen."
   },
   {
     "text": "wie viele Türen sind offen",
     "expect_match": true,
     "plan": null,
-    "response_text": "Tür Eingang ist geöffnet."
+    "response_text": "1 Tür ist geöffnet."
   },
   {
     "text": "wie viele Lichter sind eingeschaltet",
     "expect_match": true,
     "plan": null,
-    "response_text": "Flurlicht ist eingeschaltet."
+    "response_text": "1 Licht ist eingeschaltet."
   },
   {
     "text": "wie viele Rollläden sind geschlossen",

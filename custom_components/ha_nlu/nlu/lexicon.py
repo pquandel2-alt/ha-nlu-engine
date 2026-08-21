@@ -228,7 +228,10 @@ _DEVICE_CLASS_SLOT_LIST = TextSlotList.from_tuples(
 _STATE_SLOT_LIST = TextSlotList.from_tuples(
     [
         ("geöffnet", "OPEN"), ("offen", "OPEN"),
+        ("hochgefahren", "OPEN"), ("oben", "OPEN"),
         ("geschlossen", "CLOSED"), ("zu", "CLOSED"),
+        ("runtergefahren", "CLOSED"), ("heruntergefahren", "CLOSED"),
+        ("unten", "CLOSED"),
         ("eingeschaltet", "ON"), ("angeschaltet", "ON"), ("an", "ON"),
         ("ausgeschaltet", "OFF"), ("aus", "OFF"),
     ],
@@ -240,10 +243,12 @@ _STATE_SLOT_LIST = TextSlotList.from_tuples(
 # predicate form above, so this is its own slot rather than reusing {state}.
 _STATE_ADJ_SLOT_LIST = TextSlotList.from_tuples(
     [
-        ("geöffnete", "OPEN"), ("offene", "OPEN"),
-        ("geschlossene", "CLOSED"),
-        ("eingeschaltete", "ON"), ("angeschaltete", "ON"),
-        ("ausgeschaltete", "OFF"),
+        ("geöffnete", "OPEN"), ("geöffnetes", "OPEN"), ("geöffneter", "OPEN"), ("geöffneten", "OPEN"),
+        ("offene", "OPEN"), ("offenes", "OPEN"), ("offener", "OPEN"), ("offenen", "OPEN"),
+        ("geschlossene", "CLOSED"), ("geschlossenes", "CLOSED"), ("geschlossener", "CLOSED"), ("geschlossenen", "CLOSED"),
+        ("eingeschaltete", "ON"), ("eingeschaltetes", "ON"), ("eingeschalteter", "ON"), ("eingeschalteten", "ON"),
+        ("angeschaltete", "ON"), ("angeschaltetes", "ON"), ("angeschalteter", "ON"), ("angeschalteten", "ON"),
+        ("ausgeschaltete", "OFF"), ("ausgeschaltetes", "OFF"), ("ausgeschalteter", "OFF"), ("ausgeschalteten", "OFF"),
     ],
     name="state_adj",
 )

@@ -149,6 +149,28 @@ class QueryExecutor:
         "Keine Fenster sind offen." is a normal answer.
         """
         state = command.filter.state
+        if command.scope is QueryScope.ALL:
+            all_match = bool(candidates) and state is not None and all(
+                matches_semantic_state(entity, state) for entity in candidates
+            )
+            return QueryResult(
+                status=(
+                    QueryResultStatus.MATCHED
+                    if all_match
+                    else QueryResultStatus.EMPTY
+                ),
+                entities=tuple(candidates),
+                command=command,
+            )
+        if command.scope is QueryScope.NONE:
+            none_match = bool(candidates) and state is not None and not any(
+                matches_semantic_state(entity, state) for entity in candidates
+            )
+            return QueryResult(
+                status=QueryResultStatus.MATCHED if none_match else QueryResultStatus.EMPTY,
+                entities=tuple(candidates),
+                command=command,
+            )
         matched = (
             candidates
             if state is None

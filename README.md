@@ -126,6 +126,18 @@ Abfragen sind lesend aufgebaut und führen keinen Home-Assistant-Service aus.
 Welche Fenster sind offen?
 Gibt es offene Fenster im Keller?
 Ist das Schlafzimmerfenster geöffnet?
+Ist das Badezimmer Fenster geschlossen?
+Ist das Fenster vom Badezimmer geschlossen?
+Welchen Zustand hat das Badezimmer Fenster?
+Was ist der Status vom Badezimmer Fenster?
+Sind alle Rollläden hochgefahren?
+Sind sämtliche Rollläden oben?
+Ist irgendein Fenster offen?
+Ist kein Fenster offen?
+Wie viele Fenster sind im Erdgeschoss geöffnet?
+Wo sind Fenster offen?
+Was ist im Badezimmer eingeschaltet?
+Wie viel Grad sind im Badezimmer?
 Wie warm ist es im Wohnzimmer?
 Welche Lichter sind heller als 50 Prozent?
 Warum ist das Küchenlicht an?
@@ -479,7 +491,7 @@ python -m pytest -q
 Aktueller Entwicklungsstand:
 
 ```text
-1700 passed, 14 skipped
+1716 passed, 14 skipped
 ```
 
 Zusätzlich enthält `tests/eval/dialog_cases.json` ein datengetriebenes

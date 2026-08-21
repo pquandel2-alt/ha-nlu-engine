@@ -31,7 +31,7 @@ Never touches Home Assistant - it doesn't even see a ``hass`` object, only a
 from __future__ import annotations
 
 from .query_command import QueryResult, QueryResultStatus, QueryScope, QueryTargetKind
-from .semantic_state import SemanticState, matches_semantic_state
+from .semantic_state import SemanticState, derive_semantic_state, matches_semantic_state
 
 _SEMANTIC_STATE_SPOKEN_DE = {
     SemanticState.OPEN: "geöffnet",
@@ -44,7 +44,12 @@ _DEVICE_CLASS_PLURAL_DE = {
     "window": "Fenster", "door": "Türen", "garage_door": "Garagentore", "motion": "Bewegungsmelder",
 }
 
+_DEVICE_CLASS_SINGULAR_DE = {
+    "window": "Fenster", "door": "Tür", "garage_door": "Garagentor", "motion": "Bewegungsmelder",
+}
+
 _DOMAIN_PLURAL_DE = {"light": "Lichter", "switch": "Schalter", "fan": "Ventilatoren", "cover": "Rollläden"}
+_DOMAIN_SINGULAR_DE = {"light": "Licht", "switch": "Schalter", "fan": "Ventilator", "cover": "Rollladen"}
 
 
 def _automation_label(automation) -> str:
@@ -95,6 +100,12 @@ class ResponseGenerator:
             return self._respond_single(result)
         if command.scope is QueryScope.EXISTS:
             return self._respond_exists(result)
+        if command.scope is QueryScope.ALL:
+            return self._respond_all(result)
+        if command.scope is QueryScope.NONE:
+            return self._respond_none(result)
+        if command.scope is QueryScope.LOCATIONS:
+            return self._respond_locations(result)
         return self._respond_list_or_count(result)
 
     @staticmethod
@@ -103,6 +114,13 @@ class ResponseGenerator:
         if target.device_class is not None:
             return _DEVICE_CLASS_PLURAL_DE.get(target.device_class, "Geräte")
         return _DOMAIN_PLURAL_DE.get(target.domain, "Geräte")
+
+    @staticmethod
+    def _noun_singular(result: QueryResult) -> str:
+        target = result.command.target
+        if target.device_class is not None:
+            return _DEVICE_CLASS_SINGULAR_DE.get(target.device_class, "Gerät")
+        return _DOMAIN_SINGULAR_DE.get(target.domain, "Gerät")
 
     def _respond_list_or_count(self, result: QueryResult) -> str:
         state = result.command.filter.state
@@ -113,10 +131,12 @@ class ResponseGenerator:
         entities = result.entities
         if not entities:
             return f"Es sind keine {noun} {state_word}."
+        if result.command.scope is QueryScope.COUNT:
+            verb = "ist" if len(entities) == 1 else "sind"
+            count_noun = self._noun_singular(result) if len(entities) == 1 else noun
+            return f"{len(entities)} {count_noun} {verb} {state_word}."
         if len(entities) == 1:
             return f"{entities[0].friendly_name} ist {state_word}."
-        if result.command.scope is QueryScope.COUNT:
-            return f"{len(entities)} {noun} sind {state_word}."
         return _join_names([e.friendly_name for e in entities]) + f" sind {state_word}."
 
     def _respond_list_no_state(self, result: QueryResult) -> str:
@@ -200,10 +220,44 @@ class ResponseGenerator:
             return f"Nein, es gibt keine {noun}."
         return f"Ja, es gibt {len(result.entities)} {noun}."
 
+    def _respond_all(self, result: QueryResult) -> str:
+        noun = self._noun(result)
+        if not result.entities:
+            return f"Ich habe keine {noun} gefunden."
+        state = result.command.filter.state
+        state_word = _SEMANTIC_STATE_SPOKEN_DE[state]
+        if result.status is QueryResultStatus.MATCHED:
+            return f"Ja, alle {noun} sind {state_word}."
+        return f"Nein, nicht alle {noun} sind {state_word}."
+
+    def _respond_none(self, result: QueryResult) -> str:
+        noun = self._noun(result)
+        if not result.entities:
+            return f"Ich habe keine {noun} gefunden."
+        state_word = _SEMANTIC_STATE_SPOKEN_DE[result.command.filter.state]
+        if result.status is QueryResultStatus.MATCHED:
+            return f"Ja, es sind keine {noun} {state_word}."
+        return f"Nein, mindestens eines der {noun} ist {state_word}."
+
+    def _respond_locations(self, result: QueryResult) -> str:
+        noun = self._noun(result)
+        state_word = _SEMANTIC_STATE_SPOKEN_DE[result.command.filter.state]
+        areas = sorted({entity.area_name for entity in result.entities if entity.area_name})
+        if not areas:
+            return f"In keinem bekannten Raum sind {noun} {state_word}."
+        if len(areas) == 1:
+            return f"Im Raum {areas[0]} sind {noun} {state_word}."
+        return f"In {_join_names(areas)} sind {noun} {state_word}."
+
     @staticmethod
     def _respond_single(result: QueryResult) -> str:
         entity = result.entities[0]
         requested = result.command.filter.state
+        if requested is None:
+            current = derive_semantic_state(entity)
+            if current is SemanticState.UNKNOWN:
+                return f"Der Zustand von {entity.friendly_name} ist unbekannt."
+            return f"{entity.friendly_name} ist {_SEMANTIC_STATE_SPOKEN_DE[current]}."
         state_word = _SEMANTIC_STATE_SPOKEN_DE[requested]
         if matches_semantic_state(entity, requested):
             return f"Ja, {entity.friendly_name} ist {state_word}."

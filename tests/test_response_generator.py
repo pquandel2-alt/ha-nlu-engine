@@ -87,11 +87,11 @@ def test_list_multiple_matches_lists_names():
 # --- COUNT ------------------------------------------------------------------
 
 
-def test_count_single_match_still_names_the_entity():
+def test_count_single_match_answers_with_the_number():
     command = _list_command(QueryScope.COUNT)
     entity = _window("binary_sensor.a", "Küchenfenster", "on")
     result = QueryResult(status=QueryResultStatus.MATCHED, entities=(entity,), command=command)
-    assert respond(result) == "Küchenfenster ist geöffnet."
+    assert respond(result) == "1 Fenster ist geöffnet."
 
 
 def test_count_multiple_matches_speaks_a_count_not_names():
