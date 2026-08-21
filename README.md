@@ -1,610 +1,344 @@
-HomeIntent
+# HomeIntent
 
-Fast, local and deterministic Natural Language Understanding for Home Assistant.
+**Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
 
-HomeIntent is a lightweight Natural Language Understanding (NLU) engine for Home Assistant Assist.
+- Aktuelle Version: **4.20.0**
+- Sprache: **Deutsch**
+- Installation: **HACS Custom Repository**
 
-Its goal is simple:
+## Was ist HomeIntent?
 
-Understand natural language commands for your smart home quickly, locally and reliably — without requiring an LLM, cloud service or GPU.
+HomeIntent ist ein eigener Conversation Agent für Home Assistant Assist. Die Integration übersetzt deutsche Smart-Home-Sätze in geprüfte Home-Assistant-Befehle, Zustandsabfragen oder echte Automationen.
 
-HomeIntent is designed specifically for Home Assistant and therefore does not try to understand all of human language. Instead, it focuses on the much smaller and more structured problem of understanding smart-home commands.
+Anders als ein allgemeines Sprachmodell versucht HomeIntent nicht, beliebige Gespräche zu verstehen. Es konzentriert sich bewusst auf ein kleineres, klar definiertes Problem:
 
-⸻
+> Einen Smart-Home-Befehl zuverlässig verstehen, das richtige Gerät finden, die gewünschte Aktion prüfen und erst danach Home Assistant steuern.
 
-Why HomeIntent?
+HomeIntent benötigt dafür:
 
-Large Language Models are powerful, but they are not necessarily the best solution for everyday smart-home commands.
+- keine Cloud-API,
+- kein Large Language Model (LLM),
+- keine GPU,
+- keinen externen Server und
+- keine Internetverbindung für die Verarbeitung eines Sprachbefehls.
 
-A typical Home Assistant installation may run on:
+Die Erkennung basiert auf deutschen Hassil-Grammatiken, strukturierten semantischen Modellen und deterministischen Resolvern. Derselbe Satz führt bei demselben Home-Assistant-Zustand und Gesprächskontext zum selben Ergebnis.
 
-* Raspberry Pi
-* Home Assistant Green
-* small x86 systems
-* low-power home servers
-* other resource-constrained hardware
+## Warum ein deterministischer Ansatz?
 
-Running a local LLM on these systems can require significant RAM, CPU resources and sometimes additional hardware.
+Ein allgemeines LLM kann sehr flexibel formulierte Texte verstehen, sein Ergebnis ist aber nicht zwangsläufig reproduzierbar. Bei einem Smart Home ist Vorhersagbarkeit oft wichtiger als Kreativität: Eine mehrdeutige Anweisung soll nicht versehentlich das falsche Licht, die falsche Rolllade oder eine falsche Automation steuern.
 
-HomeIntent takes a different approach.
+HomeIntent verfolgt daher diese Reihenfolge:
 
-Instead of asking a general-purpose AI to understand everything, HomeIntent uses a deterministic NLU pipeline specifically designed for Home Assistant.
+```text
+Gesprochener oder geschriebener Satz
+                │
+                ▼
+       Normalisierung und Grammatik
+                │
+                ▼
+       Semantische Bedeutung (AST)
+                │
+                ▼
+     Geräte-, Bereichs- und Kontextauflösung
+                │
+                ▼
+      Fähigkeiten- und Sicherheitsprüfung
+                │
+                ▼
+    Home-Assistant-Service oder Automation
+```
 
-User
- │
- ▼
-Natural Language
- │
- ▼
-HomeIntent
- │
- ├── Intent Recognition
- ├── Entity Resolution
- ├── Area Resolution
- ├── Quantifiers
- ├── Capability Detection
- ├── Context
- └── Validation
- │
- ▼
-Semantic Command
- │
- ▼
-Home Assistant
+Wenn ein Ziel nicht eindeutig aufgelöst werden kann, rät HomeIntent nicht. Der Befehl wird abgelehnt oder es wird – sofern der jeweilige Dialogpfad dies unterstützt – nachgefragt.
 
-The result is intended to be:
+## Funktionsumfang
 
-* fast
-* local
-* deterministic
-* predictable
-* privacy-friendly
-* lightweight
-* safe
+### Direkte Gerätesteuerung
 
-No cloud connection is required.
+HomeIntent kann aktuell unter anderem folgende Home-Assistant-Domänen verwenden:
 
-No GPU is required.
+| Domäne | Beispiele |
+| --- | --- |
+| `light` | ein-/ausschalten, dimmen, Helligkeit, Farbe, Farbtemperatur |
+| `switch` | ein-/ausschalten, umschalten |
+| `fan` | ein-/ausschalten, Geschwindigkeit setzen oder verändern |
+| `cover` | öffnen, schließen, Position in Prozent setzen |
+| `script` | Home-Assistant-Skripte starten |
+| `sensor` | Werte und Vergleiche abfragen (nur lesend) |
+| `binary_sensor` | Zustände abfragen, zum Beispiel Fenster oder Türen (nur lesend) |
 
-No LLM is required.
+Beispiele:
 
-⸻
-
-Current Status
-
-HomeIntent has completed v1 (Deterministic NLU), v2 (Semantic NLU), v3 (Conversational NLU) and v4 (Advanced Natural Language) as defined in the roadmap below. v5 (Natural-Language Automation) is built and integrated: a spoken "wenn ... schalte ..." sentence is parsed into a validated `AutomationModel` and returned as a debug/confirmation response - it does not yet write a real Home Assistant automation (that generation step is a separate, later phase).
-
-Current functionality includes:
-
-* Home Assistant Conversation Agent integration
-* German language grammars (hassil-based, 16 separately compiled intent groups)
-* deterministic intent matching
-* Semantic Frame / Semantic Command pipeline with entity, area and capability resolution
-* alias-based entity resolution with deterministic candidate ranking
-* domain validation
-* percentage values, quantifiers (alle, beide, counted, "nur", "außer"-exclusion)
-* ambiguity detection (never guesses on an unresolved match)
-* Light, Cover, Fan and Climate control
-* query handling, including comparison filters ("heller als 50%"), area-scoped queries ("wie warm ist es im Wohnzimmer"), and state queries over binary_sensor/cover/light/switch ("welche Fenster sind offen", "gibt es offene Fenster", "ist das Fenster im Schlafzimmer geöffnet") - read-only by construction, never calls a service
-* conversation context: follow-up commands, clarification questions, pronoun/relative references, cross-sentence query follow-ups
-* implicit/relative targets ("oben"/"unten", "im selben Raum")
-* temporal expressions (delay, duration, relative/absolute time) - parsed and validated, execution deferred to a later layer
-* multi-step commands ("... und ...")
-* natural-language automation understanding ("wenn ... , schalte ... ein") - parsed into a validated `AutomationModel` (trigger + action, safety-checked), never a service call or a persisted HA automation
-* extensive regression tests (1360+ tests, including a generated golden test suite)
-
-⸻
-
-Example Commands
-
-HomeIntent is designed to understand different natural-language formulations of the same intent.
-
-For example:
-
-Mach das Licht an.
-Schalte das Licht ein.
-Kannst du bitte das Licht anschalten?
-
-All of these can represent:
-
-TURN_ON
-
-The language can vary while the semantic intent remains the same.
-
-⸻
-
-Multiple Devices
-
-For example:
-
-Mach alle Lichter im Wohnzimmer aus.
-
-The intended semantic structure is:
-
-Intent:     TURN_OFF
-Domain:     light
-Area:       Wohnzimmer
-Quantifier: ALL
-
-⸻
-
-Percentage Values
-
-Examples:
-
-Stell das Licht auf 50 Prozent.
-Mach die Rollläden auf 30 %.
-
-The percentage is interpreted as a semantic parameter rather than being tied directly to a specific Home Assistant service.
-
-⸻
-
-Ambiguity
-
-HomeIntent is designed to prefer not executing anything when a command cannot be resolved safely.
-
-For example, if several lights match:
-
-Mach das Licht an.
-
-the engine should not arbitrarily choose one.
-
-Instead, the system can identify the situation as:
-
-AMBIGUOUS_ENTITY
-
-This is an intentional design decision.
-
-A smart-home NLU should prefer asking over controlling the wrong device.
-
-⸻
-
-Architecture
-
-The long-term architecture is based on several separate stages.
-
-Natural Language
-       │
-       ▼
-Normalization
-       │
-       ▼
-Intent Parsing
-       │
-       ▼
-Semantic Frame
-       │
-       ▼
-Entity / Area Resolution
-       │
-       ▼
-Context Resolution
-       │
-       ▼
-Capability Resolution
-       │
-       ▼
-Validation
-       │
-       ▼
-Semantic Command
-       │
-       ▼
-Home Assistant Service Mapping
-       │
-       ▼
-Execution
-
-This separation is important.
-
-The language parser should not directly execute Home Assistant services.
-
-Instead:
-
-Language
-   ↓
-Meaning
-   ↓
-Validated Command
-   ↓
-Home Assistant Service
-
-This makes the system easier to test, extend and secure.
-
-⸻
-
-Semantic Understanding
-
-The long-term goal is to transform natural language into a structured semantic representation.
-
-For example:
-
-Mach bitte die beiden Wohnzimmerlampen etwas heller.
-
-could become:
-
-Intent:
-    ADJUST_BRIGHTNESS
-Target:
-    light
-Area:
-    Wohnzimmer
-Quantifier:
-    TWO
-Operation:
-    INCREASE
-Amount:
-    SMALL
-
-Only after resolving and validating these values should HomeIntent determine the appropriate Home Assistant service call.
-
-⸻
-
-Entity Resolution
-
-HomeIntent does not rely solely on exact string matching.
-
-The planned resolver considers information such as:
-
-* friendly names
-* normalized names
-* entity IDs
-* aliases
-* areas
-* domains
-* device classes
-* capabilities
-* conversation context
-
-A future resolver can therefore distinguish between:
-
-Wohnzimmer Deckenlicht
-Wohnzimmer Stehlampe
-Küchen Deckenlicht
-
-when the user says:
-
-Mach die Deckenlampe im Wohnzimmer an.
-
-The resolver should rank candidates deterministically and detect genuine ambiguity instead of guessing.
-
-⸻
-
-Capability Awareness
-
-Home Assistant entities do not all support the same operations.
-
-For example:
-
-Light A
-- on/off
-- brightness
-- color
-Light B
-- on/off
-- brightness
-
-The command:
-
-Mach Light A blau.
-
-can be valid.
-
-The same command for Light B should result in an unsupported-capability response rather than an invalid service call.
-
-This capability-based architecture allows HomeIntent to reason about what a device can actually do.
-
-⸻
-
-Roadmap
-
-v1 – Deterministic NLU
-
-Completed
-
-The foundation for deterministic natural-language understanding.
-
-Includes:
-
-* hassil
-* intent grammars
-* entity resolution
-* area resolution
-* quantifiers
-* percentage handling
-* domain validation
-* Home Assistant service execution
-* regression testing
-
-⸻
-
-v2 – Semantic NLU
-
-Completed
-
-Goals:
-
-* Semantic Frames
-* Semantic Commands
-* improved Entity Resolver
-* aliases
-* improved Area Resolver
-* deterministic candidate ranking
-* capability system
-* command validation
-* service mapping
-* query engine
-* expanded Light support
-* expanded Cover support
-* Fan support
-* Climate support
-* structured responses
-* extensive golden tests
-
-The key change:
-
-v1:
-Text
- ↓
-Intent
- ↓
-Service
-v2:
-Text
- ↓
-Semantic Frame
- ↓
-Resolution
- ↓
-Capabilities
- ↓
-Validation
- ↓
-Semantic Command
- ↓
-Service
-
-⸻
-
-v3 – Conversational NLU
-
-Completed
-
-The engine understands conversations rather than isolated commands.
-
-Goals:
-
-* conversation context
-* follow-up commands
-* clarification questions
-* pending commands
-* pronoun resolution
-* references to previous entities
-* context-aware targets
-* multi-turn interactions
-
-Example:
-
-User:
+```text
 Mach das Wohnzimmerlicht an.
-Assistant:
-Okay.
-User:
-Mach es etwas heller.
+Schalte alle Lichter im Erdgeschoss aus.
+Stell das Wohnzimmerlicht auf 40 Prozent.
+Mach das Licht blau.
+Fahre die Rolllade im Wohnzimmer auf 30 Prozent.
+Stelle den Ventilator auf Stufe 3.
+Starte Gute Nacht.
+```
 
-The second command can refer to the previously selected entity.
+### Bereiche, Etagen und mehrere Geräte
 
-⸻
+HomeIntent berücksichtigt nicht nur den Anzeigenamen einer Entität, sondern auch:
 
-v4 – Advanced Natural Language
+- Entity-ID und Friendly Name,
+- in Home Assistant hinterlegte Aliase,
+- Bereich und Bereichs-Aliase,
+- Etage,
+- Domäne und Geräteklasse,
+- unterstützte Fähigkeiten,
+- Quantifizierer wie „alle“, „beide“ oder Anzahlen,
+- Ausschlüsse mit „außer“ sowie
+- den bisherigen Gesprächskontext.
 
-Completed
+Beispiele:
 
-The focus shifted toward more natural German language without introducing an LLM requirement. See docs/architecture-v4.md for implementation details of each sub-section (V4.1-V4.9) and the deliberately deferred items (e.g. "hier", "nebenan", ordinal selection) that would have required guessing without a real data source. A later addition within v4, the Semantic Query Engine (state queries over binary_sensor/cover/light/switch, read-only by construction), is documented separately in docs/architecture-v4-query.md.
-
-Implemented capabilities:
-
-Implicit Targets
-
+```text
 Mach oben die Lichter aus.
-
-Relative Locations
-
-Mach die Lampe neben dem Sofa an.
-
-Complex Quantifiers
-
+Fahre beide Rollläden im Wohnzimmer hoch.
+Mach alle Lichter aus außer der Stehlampe.
 Mach die drei Lampen an.
-Alle außer der Stehlampe aus.
+```
 
-Better Number Understanding
+### Zustands- und Vergleichsabfragen
 
-fünfzig Prozent
-50 %
-auf 21 Grad
-Stufe drei
+Abfragen sind lesend aufgebaut und führen keinen Home-Assistant-Service aus.
 
-Comparisons
-
-Mindestens 50 Prozent.
-Nicht höher als 70 Prozent.
-
-Temporal Expressions
-
-Mach das Licht in fünf Minuten aus.
-Schalte die Heizung für eine Stunde ein.
-
-Multi-Step Commands
-
-Mach das Wohnzimmerlicht an und fahr gleichzeitig die Rollläden hoch.
-
-Cross-Sentence References
-
-Wie warm ist es im Wohnzimmer?
-Und in der Küche?
-Und oben?
-
-Semantic Query Engine (State Queries)
-
+```text
 Welche Fenster sind offen?
 Gibt es offene Fenster im Keller?
-Ist das Fenster im Schlafzimmer geöffnet?
-Und im Bad? (cross-sentence follow-up, same as above)
+Ist das Schlafzimmerfenster geöffnet?
+Wie warm ist es im Wohnzimmer?
+Welche Lichter sind heller als 50 Prozent?
+Warum ist das Küchenlicht an?
+```
 
-⸻
+Bei der „Warum“-Frage nennt HomeIntent passende Automationen als mögliche Ursache. Es behauptet nicht, einen vollständigen kausalen Ablauf beweisen zu können.
 
-v5 – Natural-Language Automation
+### Gesprächskontext und Rückfragen
 
-HomeIntent understands natural-language automation requests - a trigger clause and an action clause, separated by a comma, matched against the same deterministic grammars, entity resolution and capability/safety validation as every other command.
+HomeIntent speichert Kontext pro Assist-Konversation. Dadurch sind kurze Folgesätze möglich:
 
-For example:
+```text
+Du: Schalte das Wohnzimmerlicht ein.
+Assist: Wohnzimmerlicht eingeschaltet.
+Du: Und jetzt wieder aus.
+```
 
+Auch Pronomen und bereichsbezogene Folgefragen können – innerhalb der unterstützten Grammatik – auf zuvor aufgelöste Entitäten verweisen:
+
+```text
+Du: Wie warm ist es im Wohnzimmer?
+Du: Und in der Küche?
+```
+
+### Mehrteilige Befehle
+
+Mehrere direkte Aktionen können nacheinander formuliert werden. Vor der Ausführung werden alle Teilbefehle aufgelöst und validiert.
+
+```text
+Mach die Wohnzimmerlampe an und fahre den Rollladen Büro hoch.
+```
+
+## Natürlichsprachige Automationen
+
+HomeIntent kann Automationen nicht nur verstehen, sondern als echte Home-Assistant-Automationen anlegen, abfragen, aktivieren, deaktivieren und löschen.
+
+### Dauerhafte Automation erstellen
+
+```text
 Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht ein.
+```
 
-The result is a validated `AutomationModel` (trigger + action), returned as a debug-style confirmation. This is intentionally the full scope of v5 today: Sprache → AutomationModel → Validation → Response/Debug. It never calls a Home Assistant service and never writes a real HA automation - turning a validated `AutomationModel` into an actual HA automation (YAML, persisted, editable in the UI) is a separate, later, not-yet-started phase.
+Der Ablauf ist absichtlich zweistufig:
 
-Ambiguous or unresolvable trigger/action targets are never guessed - the sentence is simply not recognized as an automation (same "never guess" rule as every other command path).
+1. HomeIntent zerlegt den Satz in Trigger, optionale Bedingungen und Aktionen.
+2. Entitäten, Bereiche, Fähigkeiten, Werte und logische Struktur werden validiert.
+3. Assist zeigt eine verständliche Vorschau.
+4. Erst nach einer ausdrücklichen Bestätigung mit „Ja“ wird die Automation geschrieben.
+5. HomeIntent ergänzt `automations.yaml` atomar und ruft `automation.reload` auf.
+6. Die neue Automation erscheint in Home Assistant und erhält die Kategorie **Homeintent**.
 
-⸻
+Ein „Nein“ bricht die Erstellung ab, ohne etwas zu speichern.
 
-Design Principles
+### Bedingungen
 
-Local First
+Trigger können mit Bedingungen kombiniert werden:
 
-HomeIntent should work without:
+```text
+Wenn das Küchenfenster geöffnet wird und es nach 18 Uhr ist, schalte das Küchenlicht ein.
+Wenn das Küchenfenster geöffnet wird und niemand zuhause ist, schalte das Küchenlicht ein.
+Wenn das Küchenfenster geöffnet wird und Samstag ist, schalte das Küchenlicht ein.
+```
 
-* cloud APIs
-* external servers
-* GPU hardware
-* LLMs
+Die zentrale Struktur dafür ist das `AutomationModel`: ein validierter Syntaxbaum aus Triggern, Bedingungen und Aktionen. Erst der HA-Automation-Generator übersetzt dieses Modell in Home-Assistant-YAML.
 
-⸻
+### Einmalige Automation
 
-Deterministic First
+Mit „einmalig“ oder „nur einmal“ wird eine Automation nach ihrer ersten erfolgreichen Ausführung automatisch wieder gelöscht:
 
-Given the same:
+```text
+Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht einmalig ein.
+Wenn es 20 Uhr ist, schalte das Küchenlicht nur einmal ein.
+```
 
-input
-+
-Home Assistant state
-+
-context
+Technisch erhält die Automation als letzten Schritt einen internen Aufruf von `ha_nlu.delete_automation`. Dieser entfernt genau die betreffende Automation aus `automations.yaml` und lädt die Automationen neu.
 
-the engine should produce the same result.
+### Zeitversetzter Einmal-Befehl
 
-⸻
+Relative Zeitangaben erzeugen ebenfalls eine einmalige Automation:
 
-Safety First
+```text
+Fahre in 5 Minuten die Wohnzimmer Rolllade auf 30 Prozent.
+Fahre in 30 Sekunden die Wohnzimmer Rolllade auf 30 Prozent.
+In einer Stunde schalte das Küchenlicht ein.
+```
 
-The engine should never execute an uncertain command merely to produce a successful result.
+HomeIntent berechnet aus der lokalen Home-Assistant-Zeit einen absoluten Zeitpunkt mit Sekundenpräzision. Minuten-, Stunden- und Tageswechsel sowie Sommerzeitwechsel werden berücksichtigt. Nach der Aktion löscht sich die Automation selbst.
 
-Ambiguous commands should be:
+Das ist **keine täglich wiederkehrende Automation**. Der intern verwendete Zeittrigger wäre zwar grundsätzlich täglich, wird aber nach dem ersten Auslösen durch die Self-Delete-Aktion entfernt.
 
-AMBIGUOUS
+### Automationen verwalten
 
-not randomly resolved.
+```text
+Welche Automationen gibt es?
+Was schaltet das Küchenlicht?
+Warum ist das Küchenlicht an?
+Deaktiviere die Automation für Küchenlicht.
+Aktiviere die Automation für Küchenlicht.
+Lösche die Automation für Küchenlicht.
+```
 
-⸻
+Löschen erfordert eine Bestätigung. Aktivieren und Deaktivieren ändern den dauerhaften `initial_state` in `automations.yaml`; die Einstellung bleibt daher auch nach einem Reload oder Neustart erhalten.
 
-Semantic Separation
+## Installation über HACS
 
-Natural language understanding and Home Assistant execution are separate layers.
+HomeIntent wird aktuell als benutzerdefiniertes HACS-Repository installiert. Das Vorgehen entspricht der offiziellen Anleitung für [benutzerdefinierte HACS-Repositories](https://hacs.xyz/docs/faq/custom_repositories/).
 
-The parser should produce meaning.
+1. Öffne **HACS → Integrationen**.
+2. Öffne das Menü oben rechts und wähle **Benutzerdefinierte Repositories**.
+3. Trage dieses Repository ein:
 
-The validator should determine whether that meaning is valid.
+   ```text
+   https://github.com/pquandel2-alt/ha-nlu-engine
+   ```
 
-The service mapper should translate the validated command into Home Assistant operations.
+4. Wähle als Typ **Integration**.
+5. Suche anschließend in HACS nach **HA NLU Engine** und installiere die aktuelle Version.
+6. Starte Home Assistant neu.
+7. Öffne **Einstellungen → Geräte & Dienste → Integration hinzufügen** und füge **HA NLU Engine** hinzu.
 
-⸻
+## Einrichtung in Assist
 
-Lightweight
+Nach der Installation steht **HA NLU Engine** als Conversation Agent zur Verfügung.
 
-HomeIntent is designed with low-resource Home Assistant installations in mind.
+1. Öffne die Einstellungen deines Sprachassistenten beziehungsweise deiner Assist-Pipeline.
+2. Wähle **HA NLU Engine** als Conversation Agent.
+3. Prüfe unter den Assist-/Entitätseinstellungen, welche Entitäten für Assist freigegeben sind.
 
-The goal is that normal smart-home commands can be processed extremely quickly even on small systems such as a Raspberry Pi.
+Standardmäßig verwendet HomeIntent bei jedem Gesprächszug dynamisch die aktuell für Assist freigegebenen Entitäten aus den unterstützten Domänen. In den Optionen der Integration kann stattdessen eine feste Entitätsauswahl gespeichert werden.
 
-⸻
+Für eine zuverlässige Auflösung empfiehlt es sich:
 
-LLM Policy
+- verständliche und eindeutige Entity-Namen zu vergeben,
+- Geräte den richtigen Bereichen und Etagen zuzuordnen,
+- sinnvolle Aliase für Entitäten und Bereiche zu hinterlegen und
+- nur die tatsächlich per Sprache benötigten Entitäten für Assist freizugeben.
 
-HomeIntent does not require an LLM.
+## Kategorie „Homeintent“
 
-The core project deliberately follows a deterministic approach.
+Alle ab Version 4.20.0 neu durch HomeIntent erzeugten Automationen werden automatisch der Home-Assistant-Automationskategorie **Homeintent** zugeordnet. Das gilt für:
 
-An optional LLM integration may be considered in the future as an external adapter, but it must never bypass:
+- dauerhafte Automationen,
+- einmalige zustandsbasierte Automationen und
+- zeitversetzte Einmal-Automationen.
 
-Entity Resolution
-Capability Validation
-Parameter Validation
-Command Validation
+Existiert die Kategorie bereits mit einer anderen Groß-/Kleinschreibung, wird sie wiederverwendet. Bereits vor Version 4.20.0 angelegte Automationen werden nicht rückwirkend einsortiert.
 
-An LLM, if ever used, may help produce a semantic representation.
+Die Kategorie dient nur der übersichtlichen Gruppierung in der Automationsansicht. Sie verändert nicht das Ausführungsverhalten.
 
-It must never directly control Home Assistant.
+## Sicherheit und Datenhaltung
 
-The deterministic core remains the authoritative execution layer.
+### Keine Ausführung bei Mehrdeutigkeit
 
-⸻
+Wenn mehrere Entitäten gleich gut passen und kein Bereich oder Kontext die Auswahl eindeutig macht, führt HomeIntent nicht einfach die erste gefundene Entität aus.
 
-Project Philosophy
+### Fähigkeiten werden geprüft
 
-HomeIntent is based on a simple idea:
+Eine Aktion wird nur erzeugt, wenn die Zielentität die erforderliche Funktion unterstützt. Eine Rollladenposition benötigt beispielsweise Positionsunterstützung; eine Farbe wird nur für ein farbfähiges Licht akzeptiert.
 
-Smart-home commands are a much smaller language problem than general human language.
+### Automationen brauchen eine Bestätigung
 
-A user asking:
+Das Erkennen eines Automationssatzes verändert Home Assistant noch nicht. Erst die Bestätigung startet Generator und Executor.
 
-Mach das Wohnzimmerlicht auf 40 Prozent.
+### Transaktionales Schreiben
 
-does not require a general-purpose AI.
+Beim Erstellen werden `automations.yaml`, der Live-Zustand nach `automation.reload`, die Homeintent-Kategorie und die internen Metadaten aufeinander abgestimmt. Auch Löschen, Aktivieren und Deaktivieren verwenden geschützte Schreib-/Reload-Abläufe. Schlägt ein erforderlicher Schritt fehl, wird die Datei nach Möglichkeit auf den vorherigen Zustand zurückgesetzt.
 
-The system needs to reliably understand:
+### Lokal und privat
 
-intent
-target
-location
-value
+Die NLU-Verarbeitung läuft innerhalb von Home Assistant. HomeIntent sendet den gesprochenen Text nicht an einen eigenen Cloud-Dienst.
 
-and safely turn that into a Home Assistant command.
+## Bekannte Grenzen
 
-That makes a lightweight deterministic NLU a very attractive solution for local smart-home systems.
+- Die mitgelieferten Grammatiken sind derzeit auf Deutsch ausgelegt.
+- HomeIntent ist absichtlich kein Chatbot und versteht nur unterstützte Smart-Home-Strukturen.
+- Relative Einmal-Befehle unterstützen aktuell Sekunden, Minuten und Stunden bis maximal 24 Stunden.
+- Formulierungen wie „morgen um 8 Uhr“ gehören noch nicht zum relativen Einmal-Befehlspfad.
+- Ist Home Assistant beim berechneten Zeitpunkt ausgeschaltet und startet erst danach wieder, kann ein reiner Uhrzeit-Trigger den verpassten Zeitpunkt nicht zuverlässig nachholen. Für solche Fälle ist künftig eine persistente Datum-/Zeitplanung nötig.
+- Nicht jeder intern modellierbare Trigger, jede Bedingung oder Aktion besitzt bereits eine sichere Home-Assistant-YAML-Abbildung. Nicht unterstützte Strukturen werden abgelehnt, statt angenähert zu werden.
+- Die Qualität der Zielauflösung hängt von sinnvollen Entity-Namen, Bereichen, Geräteklassen, Fähigkeiten und Assist-Freigaben ab.
 
-⸻
+## Architektur
 
-Development
+Die wichtigsten Schichten sind bewusst getrennt:
 
-The project is being developed incrementally.
+```text
+Conversation Agent
+      │
+      ├── Direktbefehl / Abfrage
+      │       └── Semantic Frame → Resolver → Validator → Service Mapper
+      │
+      └── Automation
+              └── Trigger/Condition/Action Parser
+                  → AutomationModel
+                  → AutomationValidator
+                  → Vorschau und Bestätigung
+                  → HA Automation Generator
+                  → AutomationExecutor
+```
 
-The development roadmap prioritizes:
+Der Parser führt keine Home-Assistant-Dienste direkt aus. Dadurch können Sprachverständnis, Auflösung, Validierung, Vorschau und Ausführung unabhängig getestet werden.
 
-1. preserving existing behavior
-2. test coverage
-3. semantic separation
-4. deterministic resolution
-5. capability awareness
-6. conversational context
-7. advanced natural-language understanding
+Weiterführende technische Dokumentation liegt im Verzeichnis [`docs`](docs/).
 
-Each major architectural change should be backed by regression tests.
+## Entwicklung und Tests
 
-⸻
+Mit einer entsprechend vorbereiteten Python-Umgebung kann die komplette Testsuite so ausgeführt werden:
 
-Contributing
+```bash
+python -m pytest -q
+```
 
-Contributions are welcome.
+Stand von Version 4.20.0:
 
-When adding new language understanding:
+```text
+1605 passed, 14 skipped
+```
 
-* prefer deterministic rules,
-* avoid unnecessary complexity,
-* add regression tests,
-* do not bypass entity validation,
-* do not introduce direct service execution into parser code,
-* preserve the local-first architecture.
+Neue Grammatik oder Ausführungslogik sollte immer mit positiven Fällen, Mehrdeutigkeitsfällen, Negativfällen und einem Regressionstest für bestehendes Verhalten ergänzt werden.
 
-⸻
+## Mitwirken
 
-License
+Beiträge und Fehlermeldungen sind willkommen. Bitte beachte dabei die Grundprinzipien des Projekts:
 
-See the repository license for details.
+- deterministisch statt geraten,
+- lokal statt cloudabhängig,
+- Bedeutung und Ausführung getrennt halten,
+- Fähigkeiten und Parameter vor jeder Aktion validieren,
+- neue Formulierungen mit Tests absichern und
+- bestehendes Verhalten nicht stillschweigend verändern.
+
+Repository: [github.com/pquandel2-alt/ha-nlu-engine](https://github.com/pquandel2-alt/ha-nlu-engine)
