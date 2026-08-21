@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
 
-- Aktuelle Version: **4.23.0**
+- Aktuelle Version: **4.23.1**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Lizenz: **MIT**
@@ -169,6 +169,23 @@ Du: Und in der Küche?
 Du: Nein, ich meinte das Büro.
 Du: Wie sieht es oben aus?
 ```
+
+HomeIntent kann außerdem aus einer vorherigen Abfrage den sicheren räumlichen
+Kontext für einen anschließenden Stellbefehl ableiten:
+
+```text
+Du: Wie hoch ist die Temperatur im Erdgeschoss?
+Assist: 21,6 Grad.
+Du: Kannst du die Temperatur auf 22 Grad erhöhen?
+Assist: Erdgeschoss Heizung auf 22 Grad gestellt.
+```
+
+Dasselbe Prinzip gilt für bereits unterstützte Stellgrößen wie Lichthelligkeit,
+Rollladenposition und Ventilatorstufe. Gibt es im zuvor genannten Raum oder auf
+der Etage mehrere passende Geräte, fragt HomeIntent nach. Messwerte ohne sichere
+Aktionszuordnung – beispielsweise Batterie, Luftfeuchtigkeit, Leistung oder
+Energie – bleiben ausschließlich lesend und lösen niemals eine erfundene Aktion
+aus.
 
 ### Mehrteilige Befehle
 
@@ -411,10 +428,10 @@ Danach kann die komplette Testsuite so ausgeführt werden:
 python -m pytest -q
 ```
 
-Stand von Version 4.23.0:
+Stand von Version 4.23.1:
 
 ```text
-1665 passed, 14 skipped
+1670 passed, 14 skipped
 ```
 
 GitHub Actions prüft zusätzlich Python 3.12 und 3.13, Hassfest, HACS und den Import gegen das aktuelle stabile Home-Assistant-Containerimage.

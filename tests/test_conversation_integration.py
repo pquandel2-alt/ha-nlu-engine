@@ -153,6 +153,43 @@ def test_floor_temperature_question_lists_multiple_sensors(monkeypatch):
     )
 
 
+def test_temperature_query_then_contextual_setpoint_reaches_live_service(monkeypatch):
+    thermostat = EntitySnapshot(
+        "climate.erdgeschoss",
+        "Erdgeschoss Heizung",
+        "climate",
+        "heat",
+        area_id="kueche",
+        area_name="Küche",
+        floor_id="eg",
+        floor_name="Erdgeschoss",
+        floor_level=0,
+        attributes={"temperature": 21},
+        capabilities=frozenset({"TEMPERATURE"}),
+    )
+    entity = _make_entity(monkeypatch, [EG_TEMPERATUR, thermostat])
+
+    query = _run(
+        entity,
+        "Wie hoch ist die Temperatur im Erdgeschoss?",
+        conversation_id="logical-temperature",
+    )
+    command = _run(
+        entity,
+        "Kannst du die Temperatur auf 22 Grad erhöhen?",
+        conversation_id="logical-temperature",
+    )
+
+    assert query.response.speech == "22.4 Grad."
+    assert command.response.speech == "Erdgeschoss Heizung auf 22 Grad gestellt."
+    entity.hass.services.async_call.assert_awaited_once_with(
+        "climate",
+        "set_temperature",
+        {"entity_id": "climate.erdgeschoss", "temperature": 22},
+        blocking=True,
+    )
+
+
 def test_unmatched_sentence_returns_not_understood(monkeypatch):
     entity = _make_entity(monkeypatch, [FLUR_LICHT_OFF])
 

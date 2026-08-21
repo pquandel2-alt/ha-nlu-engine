@@ -46,6 +46,19 @@ ENTITIES = [
         area_id="kueche", area_name="Küche",
         capabilities=frozenset({"TURN_ON", "TURN_OFF", "BRIGHTNESS"}),
     ),
+    EntitySnapshot(
+        "climate.erdgeschoss", "Erdgeschoss Heizung", "climate", "heat",
+        area_id="wohnzimmer", area_name="Wohnzimmer", floor_id="eg",
+        floor_name="Erdgeschoss", floor_level=0,
+        attributes={"temperature": 21}, capabilities=frozenset({"TEMPERATURE"}),
+    ),
+    EntitySnapshot(
+        "fan.wohnzimmer", "Wohnzimmer Ventilator", "fan", "on",
+        area_id="wohnzimmer", area_name="Wohnzimmer", floor_id="eg",
+        floor_name="Erdgeschoss", floor_level=0,
+        attributes={"percentage_step": 10.0},
+        capabilities=frozenset({"FAN_SPEED"}),
+    ),
 ]
 
 
@@ -138,3 +151,83 @@ def test_action_first_and_every_time_automation_without_comma(engine):
 
     assert action_first is not None and action_first.validation_error is None
     assert recurring_wording is not None and recurring_wording.validation_error is None
+
+
+def test_temperature_query_can_drive_contextual_setpoint(engine):
+    query = engine.match("Wie hoch ist die Temperatur im Erdgeschoss?", ENTITIES)
+    result = engine.match_contextual_property_followup(
+        "Kannst du die Temperatur auf 22 Grad erhöhen?", ENTITIES, _context(query)
+    )
+
+    assert result is not None
+    assert result.plan.domain == "climate"
+    assert result.plan.service == "set_temperature"
+    assert result.plan.entity_id == "climate.erdgeschoss"
+    assert result.plan.data == {"temperature": 22}
+
+
+def test_contextual_property_inference_covers_light_cover_and_fan(engine):
+    light_query = engine.match("Wie hell ist es in der Küche?", ENTITIES)
+    brightness = engine.match_contextual_property_followup(
+        "Kannst du die Helligkeit auf 40 Prozent erhöhen?",
+        ENTITIES,
+        _context(light_query),
+    )
+
+    cover = next(entity for entity in ENTITIES if entity.entity_id == "cover.buero")
+    cover_context = ConversationContext(
+        last_command=None,
+        last_entities=(cover,),
+        last_area=None,
+        pending_clarification=None,
+    )
+    position = engine.match_contextual_property_followup(
+        "Kannst du die Position auf 60 Prozent stellen?", ENTITIES, cover_context
+    )
+
+    fan = next(entity for entity in ENTITIES if entity.entity_id == "fan.wohnzimmer")
+    fan_context = ConversationContext(
+        last_command=None,
+        last_entities=(fan,),
+        last_area=None,
+        pending_clarification=None,
+    )
+    level = engine.match_contextual_property_followup(
+        "Kannst du die Stufe auf drei stellen?", ENTITIES, fan_context
+    )
+
+    assert brightness.plan.service == "turn_on"
+    assert brightness.plan.data == {"brightness_pct": 40}
+    assert position.plan.service == "set_cover_position"
+    assert position.plan.data == {"position": 60}
+    assert level.plan.service == "turn_on"
+    assert level.plan.data == {"percentage": 30}
+
+
+def test_contextual_setpoint_clarifies_multiple_actuators_and_keeps_value(engine):
+    second = EntitySnapshot(
+        "climate.kueche", "Küche Heizung", "climate", "heat",
+        area_id="kueche", area_name="Küche", floor_id="eg",
+        floor_name="Erdgeschoss", floor_level=0,
+        attributes={"temperature": 21}, capabilities=frozenset({"TEMPERATURE"}),
+    )
+    entities = ENTITIES + [second]
+    query = engine.match("Wie hoch ist die Temperatur im Erdgeschoss?", entities)
+
+    ambiguous = engine.match_contextual_property_followup(
+        "Kannst du die Temperatur auf 22 Grad erhöhen?", entities, _context(query)
+    )
+    resolved = engine.resolve_clarification(
+        "Küche Heizung", ambiguous.clarification, entities
+    )
+
+    assert ambiguous.response_text == "Welche Heizung meinst du?"
+    assert resolved.plan.entity_id == "climate.kueche"
+    assert resolved.plan.data == {"temperature": 22}
+
+
+def test_read_only_measurement_never_implies_an_actuator(engine):
+    battery = engine.match("Batterien oben unter 20 Prozent", ENTITIES)
+    assert engine.match_contextual_property_followup(
+        "Kannst du die Batterie auf 80 Prozent stellen?", ENTITIES, _context(battery)
+    ) is None

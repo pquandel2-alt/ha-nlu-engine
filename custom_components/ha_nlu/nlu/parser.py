@@ -7,8 +7,8 @@ hassil/HA imports) and implement this Protocol.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from dataclasses import dataclass, field
+from typing import Any, Mapping, Protocol, runtime_checkable
 
 from ..areas import AreaSnapshot
 from ..entities import EntityIndex, EntitySnapshot
@@ -65,6 +65,10 @@ class ClarificationRequest:
     pending_intent: str
     pending_target: str | None
     candidates: tuple[EntitySnapshot, ...]
+    # Parameters already parsed before target disambiguation (for example
+    # the requested 22-degree setpoint). Empty for all older clarification
+    # paths, so existing callers remain unchanged.
+    pending_parameters: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

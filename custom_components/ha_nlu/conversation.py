@@ -290,6 +290,10 @@ class NluConversationEntity(
         else:
             result = self._engine.match_followup(user_input.text, pending)
             if result is None:
+                result = self._engine.match_contextual_property_followup(
+                    user_input.text, entities, pending
+                )
+            if result is None:
                 result = self._engine.match_reference(user_input.text, entities, pending)
             if result is None:
                 result = self._engine.match_query_followup(

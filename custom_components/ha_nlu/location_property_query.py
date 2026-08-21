@@ -183,7 +183,13 @@ class LocationPropertyQueryParser:
                 else None
             ),
             quantifier=Quantifier(kind="all") if len(matched) > 1 else None,
-            parameters={"property": property_name, "property_label": label, "average": average},
+            parameters={
+                "property": property_name,
+                "property_label": label,
+                "average": average,
+                "location_kind": "area" if area_id is not None else "floor",
+                "location_id": area_id if area_id is not None else floor_id,
+            },
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=matched)
