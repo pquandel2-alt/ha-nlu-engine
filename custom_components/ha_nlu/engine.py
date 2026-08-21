@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from hassil import Intents
@@ -45,7 +46,8 @@ from .nlu.validator import validate_command
 from .automation_action_parser import AutomationActionParser
 from .automation_condition_parser import AutomationConditionParser, split_on_top_level_and
 from .automation_trigger_parser import _AUTOMATION_TRIGGER_RE, AutomationTriggerParser
-from .nlu.automation_model import AutomationModel, TriggerModel, render_automation_tree
+from .relative_time_command_parser import RelativeTimeCommandParser
+from .nlu.automation_model import AutomationModel, TriggerModel, TriggerType, render_automation_tree
 from .nlu.automation_sentence_split import split_trigger_action
 from .nlu.automation_validator import AutomationValidationError, validate_automation
 from .nlu.condition_model import ConditionNode
@@ -104,6 +106,7 @@ AUTOMATION_ACTION_DIR = INTENTS_DIR / "automation_action"
 AUTOMATION_QUERY_DIR = INTENTS_DIR / "automation_query"
 AUTOMATION_DELETE_DIR = INTENTS_DIR / "automation_delete"
 AUTOMATION_TOGGLE_DIR = INTENTS_DIR / "automation_toggle"
+RELATIVE_TIME_DIR = INTENTS_DIR / "relative_time"
 
 # Sentences containing a temporal-modifier keyword ("Minute(n)"/"Stunde(n)"/
 # "Uhr"/"morgen früh"/"heute Abend"/...) are routed to TemporalParser's
@@ -210,6 +213,17 @@ _PERCENT_RE = re.compile(r"\bprozent\b", re.IGNORECASE)
 # "auf Stufe 3" and "auf 21 Grad" don't (there's always a word between "auf"
 # and the digit, or a unit word after it, in those two).
 _BARE_PERCENT_RE = re.compile(r"\bauf\s+\d{1,3}\b")
+
+# Wave 13 ("Relative-Zeit-Automationen") - the same cheap, collision-free
+# pre-check scaffold ``_AUTOMATION_TRIGGER_RE`` establishes for
+# ``match_automation()``, gating ``match_relative_time_automation()`` so an
+# ordinary command/query sentence never pays for a third hassil pass. Matches
+# "in <word> Minuten/Sekunden/Stunden" anywhere in the sentence - <word> is
+# deliberately a bare ``\S+`` (not ``\d+``) so spelled-out amounts ("in fünf
+# Minuten") aren't missed; the full grammar (relative_time_command.yaml)
+# still does the real, exhaustive matching, this only decides whether it's
+# worth trying.
+_RELATIVE_TIME_RE = re.compile(r"\bin\s+\S+\s+(sekunden?|minuten?|stunden?)\b", re.IGNORECASE)
 
 # Sentences containing "alle"/"beide[n/r]"/"nur"/a count word are routed to
 # QuantifierParser's separately-compiled grammar rather than mixed into the
@@ -522,6 +536,7 @@ class NluEngine:
         automation_query_dir: Path = AUTOMATION_QUERY_DIR,
         automation_delete_dir: Path = AUTOMATION_DELETE_DIR,
         automation_toggle_dir: Path = AUTOMATION_TOGGLE_DIR,
+        relative_time_dir: Path = RELATIVE_TIME_DIR,
     ) -> None:
         yaml_files = sorted(intents_dir.glob("*.yaml"))
         if not yaml_files:
@@ -623,6 +638,11 @@ class NluEngine:
             raise FileNotFoundError(f"No intent YAML files found in {automation_toggle_dir}")
         automation_toggle_intents: Intents = Intents.from_files(automation_toggle_yaml_files)
 
+        relative_time_yaml_files = sorted(relative_time_dir.glob("*.yaml"))
+        if not relative_time_yaml_files:
+            raise FileNotFoundError(f"No intent YAML files found in {relative_time_dir}")
+        relative_time_intents: Intents = Intents.from_files(relative_time_yaml_files)
+
         self._single_parser = SingleTargetParser(intents)
         self._quantifier_parser = QuantifierParser(quantifier_intents)
         self._percentage_parser = PercentageParser(percentage_intents)
@@ -649,6 +669,9 @@ class NluEngine:
         self._automation_query_parser = AutomationQueryParser(automation_query_intents)
         self._automation_delete_parser = AutomationDeleteParser(automation_delete_intents)
         self._automation_toggle_parser = AutomationToggleParser(automation_toggle_intents)
+        self._relative_time_command_parser = RelativeTimeCommandParser(
+            relative_time_intents, self._automation_action_parser
+        )
 
     def _select_parser(self, text: str):
         if _TEMPORAL_RE.search(text):
@@ -1148,6 +1171,84 @@ class NluEngine:
         model = AutomationModel(
             triggers=(trigger,), conditions=conditions, actions=actions, source_text=text, once=once
         )
+        validation_error = validate_automation(model)
+        response_text = render_automation_tree(model)
+        if validation_error is not None:
+            response_text = f"{response_text}\nvalidation_error: {validation_error.name}"
+        return AutomationMatchResult(model=model, response_text=response_text, validation_error=validation_error)
+
+    def match_relative_time_automation(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        now: datetime,
+        world_model: WorldModel | None = None,
+        context: ConversationContext | None = None,
+    ) -> AutomationMatchResult | None:
+        """Match a single-clause spoken command carrying a relative-time
+        offset ("Fahre in 5 Minuten die Wohnzimmer Rolllade auf 30 Prozent")
+        into an ``AutomationModel`` with one absolute ``TriggerType.TIME``
+        trigger (Wave 13, "Relative-Zeit-Automationen"). Called live from
+        ``conversation.py`` after ``match_automation()`` and before the plain
+        ``match()`` fallback: this sentence shape has no comma, so
+        ``split_trigger_action()`` can never split it into trigger+action
+        clauses (see ``relative_time_command.yaml``'s own comment) - a
+        structurally new, single-clause entry point, not a branch inside
+        ``match_automation()``.
+
+        ``now`` is passed in rather than fetched here to keep this module
+        Home-Assistant-import-free (same boundary ``nlu/frame.py``'s
+        docstring documents for the ``nlu/`` package) - ``conversation.py``
+        is the only layer allowed to import ``homeassistant.util.dt``.
+
+        Always ``once=True``: a relative "in N Minuten" offset is inherently
+        a one-shot request - there is no spoken way to ask for a *recurring*
+        "in 5 Minuten" automation - so this reuses Wave 12's self-delete
+        mechanism unconditionally (Regel 6, see
+        ``ha_automation_generator.py``'s ``once``-handling) rather than
+        detecting/stripping an "einmalig" qualifier like ``match_automation()``
+        does.
+
+        Gated by ``_RELATIVE_TIME_RE`` first, same cheap pre-check reasoning
+        ``_AUTOMATION_TRIGGER_RE`` documents for ``match_automation()``.
+        """
+        if not _RELATIVE_TIME_RE.search(text):
+            return None
+
+        normalized = normalize(text)
+
+        last_entities = context.last_entities if context is not None else ()
+        last_area = context.last_area if context is not None else None
+        parse_context = ParseContext(
+            entities=entities,
+            index=build_entity_index(entities),
+            world_model=world_model,
+            last_entities=tuple(last_entities),
+            last_area=last_area,
+        )
+
+        parsed = self._relative_time_command_parser.parse(normalized, parse_context)
+        if parsed is None:
+            return None
+        actions, offset_seconds = parsed
+
+        # ``dt_util.now()`` is timezone-aware in production. Adding a
+        # timedelta directly to a zoneinfo-backed local datetime performs
+        # wall-clock arithmetic and can therefore land in a non-existent
+        # local time during the spring DST transition. Relative commands
+        # describe elapsed time, so add in UTC and convert back afterwards.
+        # Naive datetimes remain supported for pure unit tests/callers.
+        if now.tzinfo is not None and now.utcoffset() is not None:
+            target = (
+                now.astimezone(timezone.utc) + timedelta(seconds=offset_seconds)
+            ).astimezone(now.tzinfo)
+        else:
+            target = now + timedelta(seconds=offset_seconds)
+        trigger = TriggerModel(
+            type=TriggerType.TIME, time_hour=target.hour, time_minute=target.minute, time_second=target.second
+        )
+
+        model = AutomationModel(triggers=(trigger,), actions=actions, source_text=text, once=True)
         validation_error = validate_automation(model)
         response_text = render_automation_tree(model)
         if validation_error is not None:

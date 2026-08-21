@@ -130,6 +130,27 @@ def test_time_trigger():
     assert result.config["triggers"] == [{"trigger": "time", "at": "07:30:00"}]
 
 
+def test_time_trigger_with_explicit_second_wave_13():
+    # Wave 13 ("Relative-Zeit-Automationen"): time_second is only ever set by
+    # match_relative_time_automation() (a spoken absolute clock time like "um
+    # 20 Uhr" never sets it, see TriggerModel's own comment) - real seconds
+    # must reach the generated YAML unchanged, not get silently rounded away.
+    model = _model(TriggerModel(type=TriggerType.TIME, time_hour=12, time_minute=5, time_second=42))
+    result = generate_ha_automation_config(model, ALL_ENTITIES)
+    assert result.error is None
+    assert result.config["triggers"] == [{"trigger": "time", "at": "12:05:42"}]
+
+
+def test_time_trigger_without_explicit_second_still_emits_00_regression():
+    # Regression guard for the Wave 13 edit: a spoken absolute-time sentence
+    # never populates time_second, so the generator must keep emitting ":00"
+    # for it exactly as before this wave.
+    model = _model(TriggerModel(type=TriggerType.TIME, time_hour=20, time_minute=None))
+    result = generate_ha_automation_config(model, ALL_ENTITIES)
+    assert result.error is None
+    assert result.config["triggers"] == [{"trigger": "time", "at": "20:00:00"}]
+
+
 def test_trigger_delay_seconds_becomes_the_first_action():
     model = _model(
         TriggerModel(type=TriggerType.STATE, target=TriggerTarget(entity_id="binary_sensor.kueche_fenster"), state=SemanticState.OPEN, delay_seconds=600),

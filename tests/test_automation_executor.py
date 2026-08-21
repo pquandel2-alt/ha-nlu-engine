@@ -588,3 +588,72 @@ def test_create_automation_still_generates_its_own_id_when_none_is_given():
 
     assert automation_id != "preassigned-id"
     assert isinstance(automation_id, str) and automation_id
+
+
+def test_every_created_automation_is_assigned_to_the_homeintent_category():
+    hass = _make_hass()
+    with (
+        patch.object(automation_executor.yaml_util, "load_yaml", return_value=[]),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml"),
+        patch.object(automation_executor, "write_utf8_file_atomic"),
+        _patch_metadata_write(),
+    ):
+        executor = AutomationExecutor(hass)
+        automation_id = asyncio.run(executor.async_create_automation(SAMPLE_CONFIG))
+
+    category_registry = automation_executor.cr.async_get(hass)
+    categories = list(category_registry.async_list_categories(scope="automation"))
+    assert [(category.name, category.category_id) for category in categories] == [
+        ("Homeintent", "category-1")
+    ]
+
+    entity_registry = automation_executor.er.async_get(hass)
+    entity_id = entity_registry.async_get_entity_id("automation", "automation", automation_id)
+    assert entity_registry.async_get(entity_id).categories == {
+        "automation": categories[0].category_id
+    }
+
+
+def test_existing_homeintent_category_is_reused_case_insensitively():
+    hass = _make_hass()
+    category_registry = automation_executor.cr.async_get(hass)
+    existing = category_registry.async_create(name="homeintent", scope="automation")
+    with (
+        patch.object(automation_executor.yaml_util, "load_yaml", return_value=[]),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml"),
+        patch.object(automation_executor, "write_utf8_file_atomic"),
+        _patch_metadata_write(),
+    ):
+        executor = AutomationExecutor(hass)
+        automation_id = asyncio.run(executor.async_create_automation(SAMPLE_CONFIG))
+
+    assert len(list(category_registry.async_list_categories(scope="automation"))) == 1
+    entity_registry = automation_executor.er.async_get(hass)
+    entity_id = entity_registry.async_get_entity_id("automation", "automation", automation_id)
+    assert entity_registry.async_get(entity_id).categories == {
+        "automation": existing.category_id
+    }
+
+
+def test_a_category_assignment_failure_rolls_back_yaml_and_live_automation():
+    hass = _make_hass()
+    with (
+        patch.object(automation_executor.yaml_util, "load_yaml", return_value=[]),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml") as dump_mock,
+        patch.object(automation_executor, "write_utf8_file_atomic"),
+        _patch_metadata_write(),
+        patch.object(
+            AutomationExecutor,
+            "_assign_homeintent_category",
+            side_effect=RuntimeError("category assignment failed"),
+        ),
+    ):
+        executor = AutomationExecutor(hass)
+        with pytest.raises(RuntimeError, match="category assignment failed"):
+            asyncio.run(executor.async_create_automation(SAMPLE_CONFIG))
+
+    assert [call.args[0] for call in dump_mock.call_args_list] == [
+        [{"id": dump_mock.call_args_list[0].args[0][0]["id"], **SAMPLE_CONFIG}],
+        [],
+    ]
+    assert hass.services.async_call.await_count == 2

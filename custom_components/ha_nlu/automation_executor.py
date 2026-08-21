@@ -33,11 +33,11 @@ deliberately stays hass-free, and this module's entire job is real
 level up from the pure NLU code".
 
 V5.35 (Automation Transactions)/V5.36 (Rollback): the whole
-write-reload-record_metadata sequence runs under one lock as a single
-unit - if the reload or the metadata write fails partway through, the
-YAML change is rolled back (and, if it was the metadata step that failed,
-HA is reloaded a second time to make its live state match the rolled-back
-file) before the exception propagates. Before this wave, a reload failure
+write-reload-categorize-record_metadata sequence runs under one lock as a
+single unit - if the reload, category assignment, or metadata write fails
+partway through, the YAML change is rolled back (and, if it was a later
+step that failed, HA is reloaded a second time to make its live state match
+the rolled-back file) before the exception propagates. Before this wave, a reload failure
 left a silently orphaned entry in ``automations.yaml`` - the file said the
 automation existed even though the user was told creation failed and HA
 itself may never have picked it up. "No half-created automations" (the
@@ -52,6 +52,7 @@ import uuid
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import category_registry as cr, entity_registry as er
 from homeassistant.util import yaml as yaml_util
 from homeassistant.util.file import write_utf8_file_atomic
 
@@ -59,6 +60,8 @@ from .automation_metadata_store import AutomationMetadata, AutomationMetadataSto
 from .automation_summary import AutomationSummary
 
 AUTOMATIONS_YAML_FILENAME = "automations.yaml"
+AUTOMATION_CATEGORY_SCOPE = "automation"
+HOMEINTENT_CATEGORY_NAME = "Homeintent"
 
 
 def _collect_entity_ids(value: Any) -> set[str]:
@@ -103,6 +106,60 @@ class AutomationExecutor:
         self._lock = asyncio.Lock()
         self._metadata_store = AutomationMetadataStore(hass)
 
+    def _assign_homeintent_category(self, automation_id: str) -> None:
+        """Create/reuse the automation-scoped Homeintent category and assign
+        the freshly reloaded automation entity to it. Categories are registry
+        metadata, not keys in automations.yaml: Home Assistant stores the
+        category itself in category_registry and the assignment in the
+        automation entity's RegistryEntry.categories mapping.
+        """
+        category_registry = cr.async_get(self._hass)
+        category = next(
+            (
+                item
+                for item in category_registry.async_list_categories(
+                    scope=AUTOMATION_CATEGORY_SCOPE
+                )
+                if item.name.casefold() == HOMEINTENT_CATEGORY_NAME.casefold()
+            ),
+            None,
+        )
+        if category is None:
+            try:
+                category = category_registry.async_create(
+                    name=HOMEINTENT_CATEGORY_NAME, scope=AUTOMATION_CATEGORY_SCOPE
+                )
+            except ValueError:
+                # Another config-entry executor may have created the same
+                # category between our list and create calls. Re-read it; a
+                # genuinely unrelated ValueError is still propagated below.
+                category = next(
+                    (
+                        item
+                        for item in category_registry.async_list_categories(
+                            scope=AUTOMATION_CATEGORY_SCOPE
+                        )
+                        if item.name.casefold() == HOMEINTENT_CATEGORY_NAME.casefold()
+                    ),
+                    None,
+                )
+                if category is None:
+                    raise
+
+        entity_registry = er.async_get(self._hass)
+        entity_id = entity_registry.async_get_entity_id(
+            "automation", "automation", automation_id
+        )
+        if entity_id is None or (entry := entity_registry.async_get(entity_id)) is None:
+            raise RuntimeError(
+                f"Reloaded automation {automation_id!r} has no entity-registry entry"
+            )
+        categories = entry.categories.copy()
+        if categories.get(AUTOMATION_CATEGORY_SCOPE) == category.category_id:
+            return
+        categories[AUTOMATION_CATEGORY_SCOPE] = category.category_id
+        entity_registry.async_update_entity(entity_id, categories=categories)
+
     async def async_create_automation(
         self, config: dict[str, Any], automation_id: str | None = None
     ) -> str:
@@ -110,16 +167,17 @@ class AutomationExecutor:
         key yet - see ``ha_automation_generator.py``'s ``GenerationResult``
         docstring) as a new automation, persists it to ``automations.yaml``,
         reloads the automation integration so it takes effect immediately,
+        assigns its entity to the automation-scoped Homeintent category,
         and records its identity/metadata (V5.30/V5.31) in the sidecar
-        store - the same three HA-facing steps Home Assistant's own
-        config/automation UI editor performs, plus this integration's own
-        bookkeeping. Returns the freshly assigned automation id.
+        store. This follows Home Assistant's own config/automation creation
+        path and adds this integration's category and metadata bookkeeping.
+        Returns the freshly assigned automation id.
 
-        Every step runs inside the same lock, and a failure at the reload or
-        metadata step rolls the YAML file back to what it was before this
-        call (V5.35/V5.36) - either every step succeeds and all three pieces
-        of state (file, HA's live config, metadata) agree, or none of them
-        change.
+        Every step runs inside the same lock, and a failure at the reload,
+        category, or metadata step rolls the YAML file back to what it was
+        before this call (V5.35/V5.36) - either every step succeeds and all
+        four pieces of state (file, HA's live config, category assignment,
+        metadata) agree, or none of them change.
 
         File I/O runs off the event loop via ``hass.async_add_executor_job``
         (``load_yaml``/``write_utf8_file_atomic`` are both blocking calls),
@@ -149,12 +207,13 @@ class AutomationExecutor:
                 )
                 raise
 
-            metadata = AutomationMetadata(
-                automation_id=automation_id,
-                source_text=config.get("alias", ""),
-                created_at=utcnow_isoformat(),
-            )
             try:
+                self._assign_homeintent_category(automation_id)
+                metadata = AutomationMetadata(
+                    automation_id=automation_id,
+                    source_text=config.get("alias", ""),
+                    created_at=utcnow_isoformat(),
+                )
                 await self._metadata_store.async_save(metadata)
             except Exception:
                 await self._hass.async_add_executor_job(
@@ -162,8 +221,9 @@ class AutomationExecutor:
                 )
                 # Best-effort: HA's live config should reflect the rollback
                 # too, but a second reload failure must not mask the
-                # original metadata error, which is what actually caused
-                # this rollback - the file is already correct either way.
+                # original category/metadata error, which is what actually
+                # caused this rollback - the file is already correct either
+                # way.
                 try:
                     await self._hass.services.async_call("automation", "reload", {}, blocking=True)
                 except Exception:  # noqa: BLE001 - see comment above

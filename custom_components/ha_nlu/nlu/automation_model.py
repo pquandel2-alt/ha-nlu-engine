@@ -122,6 +122,17 @@ class TriggerModel:
     offset_minutes: int | None = None  # SUN
     time_hour: int | None = None  # TIME
     time_minute: int | None = None  # TIME
+    # Wave 13 ("Relative-Zeit-Automationen") - only ever set when a TIME
+    # trigger was computed from "jetzt + Offset" (see
+    # relative_time_command_parser.py/engine.py's
+    # match_relative_time_automation()): a near-minute-boundary delay ("in
+    # 30 Sekunden") snapped to ":00" could already be in the past within
+    # the current minute, pushing HA's `time` trigger a full day late -
+    # carrying the real second closes that gap. Every spoken-absolute-
+    # clock-time sentence ("um 20 Uhr") never sets this (nobody says "um 20
+    # Uhr 15 Minuten und 30 Sekunden"), so it stays ``None`` there and the
+    # generator keeps emitting ":00", unchanged.
+    time_second: int | None = None  # TIME
     weekdays: tuple[str, ...] = ()  # WEEKDAY - HA weekday abbreviations, e.g. ("sat", "sun")
     # V5 Wave 4 (V5.14, "Relative Time" - "10 Minuten nachdem ich nach Hause
     # komme") - only ever set on an event-based trigger type (STATE/

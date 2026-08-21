@@ -55,6 +55,7 @@ def install() -> None:
     util_dt = types.ModuleType("homeassistant.util.dt")
     helpers = types.ModuleType("homeassistant.helpers")
     helpers_area_registry = types.ModuleType("homeassistant.helpers.area_registry")
+    helpers_category_registry = types.ModuleType("homeassistant.helpers.category_registry")
     helpers_device_registry = types.ModuleType("homeassistant.helpers.device_registry")
     helpers_entity_registry = types.ModuleType("homeassistant.helpers.entity_registry")
     helpers_floor_registry = types.ModuleType("homeassistant.helpers.floor_registry")
@@ -221,6 +222,21 @@ def install() -> None:
 
     util_dt.utcnow = _utcnow
 
+    # Wave 13 ("Relative-Zeit-Automationen"): conversation.py needs *local*
+    # wall-clock time (not UTC) to compute "jetzt + Offset" for a relative-
+    # time trigger's hour/minute/second - real HA's own ``dt_util.now()``
+    # returns a timezone-aware datetime in HA's configured local timezone;
+    # this stub has no timezone configuration to read, so it mirrors
+    # ``_utcnow()``'s own "faithful but simplified" shape (aware, just using
+    # the system's local timezone instead of a configured one - tests that
+    # care about a specific timezone pass ``now`` explicitly to
+    # ``engine.match_relative_time_automation()`` directly rather than going
+    # through this stub).
+    def _now() -> datetime:
+        return datetime.now().astimezone()
+
+    util_dt.now = _now
+
     # --- homeassistant.helpers.device_registry ----------------------------
 
     class DeviceEntryType:
@@ -248,18 +264,55 @@ def install() -> None:
     # every test, so these only need to exist for the module-level `import`
     # to succeed - their bodies are never actually exercised.
 
+    @dataclass
     class RegistryEntry:
         area_id: str | None = None
         device_id: str | None = None
-        aliases: set = set()
+        aliases: set = field(default_factory=set)
+        categories: dict[str, str] = field(default_factory=dict)
+
+    @dataclass(frozen=True)
+    class CategoryEntry:
+        category_id: str
+        name: str
+        icon: str | None = None
+
+    class _CategoryRegistry:
+        def __init__(self) -> None:
+            self.categories: dict[str, dict[str, CategoryEntry]] = {}
+
+        def async_list_categories(self, *, scope: str):
+            return self.categories.get(scope, {}).values()
+
+        def async_create(self, *, name: str, scope: str, icon: str | None = None):
+            scoped = self.categories.setdefault(scope, {})
+            if any(item.name.casefold() == name.casefold() for item in scoped.values()):
+                raise ValueError(f"The name {name!r} is already in use")
+            entry = CategoryEntry(f"category-{len(scoped) + 1}", name, icon)
+            scoped[entry.category_id] = entry
+            return entry
 
     class _AreaRegistry:
         def async_get_area(self, area_id: str) -> Any:
             return None
 
     class _EntityRegistry:
+        def __init__(self) -> None:
+            self.entries: dict[str, RegistryEntry] = {}
+
         def async_get(self, entity_id: str) -> Any:
-            return None
+            return self.entries.get(entity_id)
+
+        def async_get_entity_id(self, domain: str, platform: str, unique_id: str) -> str:
+            entity_id = f"{domain}.{unique_id}"
+            self.entries.setdefault(entity_id, RegistryEntry())
+            return entity_id
+
+        def async_update_entity(self, entity_id: str, **changes: Any) -> RegistryEntry:
+            entry = self.entries[entity_id]
+            for key, value in changes.items():
+                setattr(entry, key, value)
+            return entry
 
     class _DeviceRegistry:
         def async_get(self, device_id: str) -> Any:
@@ -272,8 +325,17 @@ def install() -> None:
     def ar_async_get(hass: Any) -> Any:
         return _AreaRegistry()
 
+    def cr_async_get(hass: Any) -> Any:
+        registry = hass.__dict__.get("_ha_stub_category_registry")
+        if registry is None:
+            registry = hass.__dict__["_ha_stub_category_registry"] = _CategoryRegistry()
+        return registry
+
     def er_async_get(hass: Any) -> Any:
-        return _EntityRegistry()
+        registry = hass.__dict__.get("_ha_stub_entity_registry")
+        if registry is None:
+            registry = hass.__dict__["_ha_stub_entity_registry"] = _EntityRegistry()
+        return registry
 
     def er_async_get_entity_aliases(hass: Any, registry_entry: Any) -> list[str]:
         return []
@@ -282,6 +344,8 @@ def install() -> None:
         return _FloorRegistry()
 
     helpers_area_registry.RegistryEntry = RegistryEntry  # unused but harmless
+    helpers_category_registry.CategoryEntry = CategoryEntry
+    helpers_category_registry.async_get = cr_async_get
     helpers_area_registry.async_get = ar_async_get
     helpers_entity_registry.RegistryEntry = RegistryEntry
     helpers_entity_registry.async_get = er_async_get
@@ -349,6 +413,7 @@ def install() -> None:
     util.dt = util_dt
     homeassistant.helpers = helpers
     helpers.area_registry = helpers_area_registry
+    helpers.category_registry = helpers_category_registry
     helpers.device_registry = helpers_device_registry
     helpers.entity_registry = helpers_entity_registry
     helpers.floor_registry = helpers_floor_registry
@@ -370,6 +435,7 @@ def install() -> None:
     sys.modules["homeassistant.core"] = core
     sys.modules["homeassistant.helpers"] = helpers
     sys.modules["homeassistant.helpers.area_registry"] = helpers_area_registry
+    sys.modules["homeassistant.helpers.category_registry"] = helpers_category_registry
     sys.modules["homeassistant.helpers.device_registry"] = helpers_device_registry
     sys.modules["homeassistant.helpers.entity_registry"] = helpers_entity_registry
     sys.modules["homeassistant.helpers.floor_registry"] = helpers_floor_registry

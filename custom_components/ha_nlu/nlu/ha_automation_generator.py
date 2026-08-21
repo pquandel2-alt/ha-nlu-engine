@@ -179,7 +179,8 @@ def _generate_trigger(trigger: TriggerModel, entities: list[EntitySnapshot]) -> 
     if trigger.type is TriggerType.TIME:
         assert trigger.time_hour is not None
         minute = trigger.time_minute or 0
-        return {"trigger": "time", "at": f"{trigger.time_hour:02d}:{minute:02d}:00"}, None
+        second = trigger.time_second or 0
+        return {"trigger": "time", "at": f"{trigger.time_hour:02d}:{minute:02d}:{second:02d}"}, None
 
     # TriggerType.DEVICE / TriggerType.WEEKDAY - see module docstring.
     return None, GenerationError.UNSUPPORTED_TRIGGER_TYPE

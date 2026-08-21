@@ -25,6 +25,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, intent
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from .automation_executor import AutomationExecutor
 from .const import DOMAIN, NOT_UNDERSTOOD_TEXT
@@ -277,6 +278,22 @@ class NluConversationEntity(
             if result is None:
                 result = self._engine.match_automation(
                     user_input.text, entities, self._world_model, pending
+                )
+            if result is None:
+                # Wave 13 ("Relative-Zeit-Automationen") - a single-clause
+                # command with a relative-time offset ("Fahre in 5 Minuten
+                # ..."), tried after the two-clause match_automation() (which
+                # can never split this comma-less sentence, see
+                # relative_time_command.yaml's own comment) and before the
+                # plain match() fallback (which would otherwise route it to
+                # TemporalParser, which only parses-and-discards the "in N
+                # Minuten" phrase and executes immediately - the original bug
+                # this wave fixes). ``dt_util.now()`` (local time, not UTC)
+                # is fetched here - the only layer allowed to import
+                # homeassistant.util.dt - and passed into the engine so it
+                # stays Home-Assistant-import-free.
+                result = self._engine.match_relative_time_automation(
+                    user_input.text, entities, dt_util.now(), self._world_model, pending
                 )
             if result is None:
                 result = self._engine.match(user_input.text, entities, self._world_model)

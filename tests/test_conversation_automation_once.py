@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml as pyyaml
@@ -41,7 +42,7 @@ from ha_nlu.entities import EntitySnapshot  # noqa: E402
 from homeassistant.components.conversation import ConversationInput  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
 from homeassistant.core import HomeAssistant, ServiceCall  # noqa: E402
-from homeassistant.helpers import intent  # noqa: E402
+from homeassistant.helpers import category_registry as cr, entity_registry as er, intent  # noqa: E402
 
 KUECHE_FENSTER_ZU = EntitySnapshot(
     "binary_sensor.kueche_fenster", "Küchenfenster", "binary_sensor", "off",
@@ -52,13 +53,19 @@ KUECHE_LICHT = EntitySnapshot(
     area_id="kueche", area_name="Küche",
     capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
 )
-ALL_ENTITIES = [KUECHE_FENSTER_ZU, KUECHE_LICHT]
+WOHNZIMMER_ROLLLADEN = EntitySnapshot(
+    "cover.wohnzimmer_rollladen", "Wohnzimmer Rollladen", "cover", "closed",
+    area_id="wohnzimmer", area_name="Wohnzimmer",
+    capabilities=frozenset({"POSITION"}),
+)
+ALL_ENTITIES = [KUECHE_FENSTER_ZU, KUECHE_LICHT, WOHNZIMMER_ROLLLADEN]
 
 STATE_BASED_ONCE_SENTENCE = (
     "Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht einmalig ein."
 )
 TIME_BASED_ONCE_SENTENCE = "Wenn es 20 Uhr ist, schalte das Küchenlicht nur einmal ein."
 ORDINARY_SENTENCE = "Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht ein."
+RELATIVE_TIME_SENTENCE = "Fahre in 5 Minuten die Wohnzimmer Rolllade auf 30%"
 
 ONCE_NOTE = "Diese Automation wird nach der ersten Ausführung automatisch gelöscht."
 
@@ -231,3 +238,45 @@ def test_a_stray_unmatched_reply_after_a_once_confirmation_is_not_swallowed(monk
     stray_result = _run(entity, "Wie ist das Wetter?")
 
     assert stray_result.response.error_code == intent.IntentResponseErrorCode.NO_INTENT_MATCH
+
+
+def test_relative_time_command_round_trip_writes_valid_time_action_and_self_delete(
+    monkeypatch, tmp_path
+):
+    entity = _make_entity(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        ha_conversation.dt_util,
+        "now",
+        lambda: datetime(2026, 8, 21, 12, 0, 42, tzinfo=timezone.utc),
+    )
+
+    preview_result = _run(entity, RELATIVE_TIME_SENTENCE)
+
+    assert ONCE_NOTE in preview_result.response.speech
+    assert _automations_yaml(tmp_path) == []
+
+    create_result = _run(entity, "Ja")
+
+    assert create_result.response.speech == AUTOMATION_CREATED_TEXT
+    automation = _automations_yaml(tmp_path)[0]
+    assert automation["triggers"] == [{"trigger": "time", "at": "12:05:42"}]
+    assert automation["actions"][0] == {
+        "action": "cover.set_cover_position",
+        "target": {"entity_id": "cover.wohnzimmer_rollladen"},
+        "data": {"position": 30},
+    }
+    assert automation["actions"][-1] == {
+        "action": "ha_nlu.delete_automation",
+        "data": {"automation_id": automation["id"]},
+    }
+    entity.hass.services.async_call.assert_awaited_once_with(
+        "automation", "reload", {}, blocking=True
+    )
+    categories = list(cr.async_get(entity.hass).async_list_categories(scope="automation"))
+    assert len(categories) == 1 and categories[0].name == "Homeintent"
+    entity_id = er.async_get(entity.hass).async_get_entity_id(
+        "automation", "automation", automation["id"]
+    )
+    assert er.async_get(entity.hass).async_get(entity_id).categories == {
+        "automation": categories[0].category_id
+    }

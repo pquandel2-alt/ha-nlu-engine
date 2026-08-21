@@ -1,0 +1,35 @@
+language: "de"
+intents:
+  # Wave 13 ("Relative-Zeit-Automationen") - a single spoken sentence with no
+  # comma ("Fahre in 5 Minuten die Wohnzimmer Rolllade auf 30 Prozent") asking
+  # for a *delayed* command. This is structurally NOT a two-clause automation
+  # (match_automation()/split_trigger_action() require a comma to split
+  # trigger from action, see automation_sentence_split.py) and NOT a
+  # TemporalParser sentence either (that parser only parses-and-discards
+  # relative-time phrases and executes immediately, see engine.py's
+  # _TEMPORAL_RE routing) - so it gets its own grammar and its own engine
+  # entry point (match_relative_time_automation()), tried in conversation.py
+  # after match_automation() and before the plain match() fallback.
+  #
+  # {amount}/{action_temporal_unit} reuse the exact same isolated action-only
+  # temporal vocabulary delay_action.yaml already established (Regel 6, see
+  # that file's own comment and lexicon.py's _ACTION_TEMPORAL_UNIT_SLOT_LIST).
+  #
+  # Three sentence shapes cover the German word-order variations:
+  #   1. prefix:     "in {amount} {unit} {command_text}"
+  #   2. suffix:      "{command_text} in {amount} {unit}"
+  #   3. verb-infix:  "{command_prefix} in {amount} {unit} {command_text}"
+  # Shape 3 is the one the originally reported bug sentence actually uses
+  # ("Fahre in 5 Minuten die Wohnzimmer Rolllade auf 30 Prozent" - the verb
+  # comes before "in N Minuten", the rest of the command after it).
+  # relative_time_command_parser.py reconstructs the full command text
+  # (concatenating {command_prefix} + " " + {command_text} for shape 3, or
+  # using {command_text} alone for shapes 1/2) and re-parses it through the
+  # already-existing AutomationActionParser instance (composition, not a
+  # second action grammar).
+  HassRelativeTimeCommand:
+    data:
+      - sentences:
+          - "[kannst du|bitte] in {amount} {action_temporal_unit} {command_text}"
+          - "[kannst du|bitte] {command_text} in {amount} {action_temporal_unit}"
+          - "{command_prefix} in {amount} {action_temporal_unit} {command_text}"
