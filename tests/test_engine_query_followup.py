@@ -94,11 +94,13 @@ def test_area_query_first_turn_variant_kalt(engine):
     assert result.command.entities[0].entity_id == "sensor.wohnzimmer_temp"
 
 
-def test_area_query_first_turn_asks_for_sensor_when_location_has_multiple(engine):
+def test_area_query_first_turn_lists_sensors_when_location_has_multiple(engine):
     entities = ENTITIES + [WOHNZIMMER_TEMP_2]
     result = engine.match("wie warm ist es im Wohnzimmer", entities)
-    assert result.clarification is not None
-    assert result.response_text == "Welchen Sensor meinst du?"
+    assert result.clarification is None
+    assert result.response_text == (
+        "Wohnzimmer Temperatur: 21,5 Grad; Wohnzimmer Temperatur 2: 21 Grad."
+    )
 
 
 def test_area_query_first_turn_returns_none_for_unresolvable_area(engine):
@@ -117,7 +119,7 @@ def test_temperature_query_resolves_erdgeschoss_as_a_floor(engine):
         assert result.response_text == "23.0 Grad."
 
 
-def test_floor_temperature_query_clarifies_multiple_sensors(engine):
+def test_floor_temperature_query_lists_multiple_sensors(engine):
     second_eg_sensor = EntitySnapshot(
         "sensor.wohnzimmer_eg_temp",
         "Wohnzimmer EG Temperatur",
@@ -134,14 +136,10 @@ def test_floor_temperature_query_clarifies_multiple_sensors(engine):
     entities = ENTITIES + [second_eg_sensor]
 
     preview = engine.match("Welche Temperatur hat das Erdgeschoss?", entities)
-    assert preview.clarification is not None
-    assert preview.response_text == "Welchen Sensor meinst du?"
-
-    resolved = engine.resolve_clarification(
-        "Küche Temperatur", preview.clarification, entities
+    assert preview.clarification is None
+    assert preview.response_text == (
+        "Küche Temperatur: 23 Grad; Wohnzimmer EG Temperatur: 21 Grad."
     )
-    assert resolved is not None
-    assert resolved.response_text == "23.0 Grad."
 
 
 def test_query_followup_area(engine):

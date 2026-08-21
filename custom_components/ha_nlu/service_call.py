@@ -202,6 +202,54 @@ def _speak_query(entity: EntitySnapshot) -> str:
     return _speak_state(entity)
 
 
+def _format_measurement_number(raw: str) -> str:
+    """Speak numeric HA states with a German decimal separator."""
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return str(raw)
+    rendered = f"{value:.2f}".rstrip("0").rstrip(".")
+    return rendered.replace(".", ",")
+
+
+def _speak_location_measurements(
+    entities: list[EntitySnapshot], params: Mapping[str, Any]
+) -> str:
+    """Speak every matching measurement; average only when requested."""
+    property_label = str(params.get("property_label", "Messwert"))
+    if params.get("average"):
+        numeric: list[float] = []
+        for entity in entities:
+            try:
+                numeric.append(float(entity.state))
+            except (TypeError, ValueError):
+                return f"Für {property_label} kann ich keinen Durchschnitt berechnen."
+        unit = entities[0].unit if entities else None
+        if not numeric or any(entity.unit != unit for entity in entities):
+            return f"Für {property_label} kann ich keinen eindeutigen Durchschnitt berechnen."
+        spoken_unit = _UNIT_SPOKEN_DE.get(unit, unit) if unit else ""
+        value = _format_measurement_number(str(sum(numeric) / len(numeric)))
+        suffix = f" {spoken_unit}" if spoken_unit else ""
+        return f"Der Durchschnitt für {property_label} beträgt {value}{suffix}."
+
+    readings: list[str] = []
+    if len(entities) == 1:
+        return _speak_query(entities[0])
+    for entity in entities:
+        if derive_query_type(entity) is QueryType.BRIGHTNESS:
+            readings.append(
+                f"{entity.friendly_name}: {_speak_brightness(entity).removesuffix('.')}"
+            )
+            continue
+        unit = _UNIT_SPOKEN_DE.get(entity.unit, entity.unit) if entity.unit else None
+        value = _format_measurement_number(entity.state)
+        suffix = f" {unit}" if unit else ""
+        readings.append(f"{entity.friendly_name}: {value}{suffix}")
+    if len(readings) == 1:
+        return readings[0] + "."
+    return "; ".join(readings) + "."
+
+
 # Which raw HA attribute a comparison-query match's current value is spoken
 # from, per domain (HomeIntent plan V4.6, "Comparisons", query-filter half -
 # user decision 2026-08-11). Deliberately a separate small read here rather
@@ -247,6 +295,10 @@ QUERY_INTENTS: dict[str, QueryIntentSpec] = {
     "HassGetState": QueryIntentSpec(
         allowed_domains=frozenset({"sensor", "light"}),
         response=lambda es, params: _speak_query(es[0]),
+    ),
+    "HassLocationPropertyQuery": QueryIntentSpec(
+        allowed_domains=frozenset({"sensor", "light"}),
+        response=_speak_location_measurements,
     ),
     "HassQueryComparison": QueryIntentSpec(
         allowed_domains=frozenset({"light", "cover", "climate"}),

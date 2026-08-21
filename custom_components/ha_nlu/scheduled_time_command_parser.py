@@ -44,11 +44,17 @@ _DAY_PERIOD_HOURS = {
     "abend": 20,
     "nachts": 23,
 }
+_CLOCK_HOURS = {
+    "eins": 1, "ein": 1, "zwei": 2, "drei": 3, "vier": 4,
+    "fünf": 5, "sechs": 6, "sieben": 7, "acht": 8, "neun": 9,
+    "zehn": 10, "elf": 11, "zwölf": 12,
+}
+_CLOCK_WORD = "|".join(_CLOCK_HOURS)
 
 _DATE_PART = rf"""
     (?P<relative_date>heute|morgen|übermorgen)
     |
-    am\s+(?P<weekday>{'|'.join(_WEEKDAYS)})
+    (?:am|nächsten?|kommenden?)\s+(?P<weekday>{'|'.join(_WEEKDAYS)})
     |
     am\s+(?P<day>\d{{1,2}})\.?\s+(?P<month>{'|'.join(_MONTHS)})
        (?:\s+(?P<year>\d{{4}}))?
@@ -58,7 +64,11 @@ _SCHEDULE_RE = re.compile(
     (?P<whole>
       (?:{_DATE_PART})
       (?:\s+(?P<period>{'|'.join(_DAY_PERIOD_HOURS)}))?
-      (?:\s+um\s+(?P<hour>\d{{1,2}})(?::(?P<minute>\d{{1,2}}))?\s*(?:uhr)?)?
+      (?:\s+(?:um\s+)?(?P<clock>
+          \d{{1,2}}(?::\d{{1,2}})?\s*(?:uhr)?
+          |halb\s+(?:{_CLOCK_WORD})
+          |viertel\s+(?:nach|vor)\s+(?:{_CLOCK_WORD})
+      ))?
     )
     """,
     re.IGNORECASE | re.VERBOSE,
@@ -78,11 +88,27 @@ class ScheduledTimeCommandParser:
         if match is None:
             return None
         period = (match.group("period") or "").casefold()
-        raw_hour = match.group("hour")
-        if raw_hour is None and not period:
+        raw_clock = (match.group("clock") or "").casefold().strip()
+        if not raw_clock and not period:
             return None
-        hour = int(raw_hour) if raw_hour is not None else _DAY_PERIOD_HOURS[period]
-        minute = int(match.group("minute") or 0)
+        if raw_clock:
+            clock = raw_clock.removesuffix("uhr").strip()
+            numeric = re.fullmatch(r"(?P<hour>\d{1,2})(?::(?P<minute>\d{1,2}))?", clock)
+            if numeric is not None:
+                hour = int(numeric.group("hour"))
+                minute = int(numeric.group("minute") or 0)
+            elif clock.startswith("halb "):
+                hour = (_CLOCK_HOURS[clock.removeprefix("halb ").strip()] - 1) % 24
+                minute = 30
+            elif clock.startswith("viertel nach "):
+                hour = _CLOCK_HOURS[clock.removeprefix("viertel nach ").strip()]
+                minute = 15
+            else:
+                hour = (_CLOCK_HOURS[clock.removeprefix("viertel vor ").strip()] - 1) % 24
+                minute = 45
+        else:
+            hour = _DAY_PERIOD_HOURS[period]
+            minute = 0
         if not (0 <= hour <= 23 and 0 <= minute <= 59):
             return None
 

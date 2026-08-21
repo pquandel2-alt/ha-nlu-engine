@@ -50,12 +50,19 @@ _DEGREE_SYMBOL_RE = re.compile(r"(\d)\s*°")
 # module docstring.
 _FILLER_RE = re.compile(r"\b(ein bisschen|mal|doch|kurz|etwas)\b", re.IGNORECASE)
 
+_POLITE_MODAL_RE = re.compile(
+    r"\b(?:könntest|koenntest|würdest|wuerdest)\s+du\b", re.IGNORECASE
+)
+_TRIGGER_DISCOURSE_RE = re.compile(r"\b(?:jedes\s+mal|immer)\s+wenn\b", re.IGNORECASE)
+
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
 def normalize(text: str) -> str:
     text = _PERCENT_SYMBOL_RE.sub(r"\1 Prozent", text)
     text = _DEGREE_SYMBOL_RE.sub(r"\1 Grad", text)
+    text = _POLITE_MODAL_RE.sub("kannst du", text)
+    text = _TRIGGER_DISCOURSE_RE.sub("wenn", text)
     text = _FILLER_RE.sub(" ", text)
     text = _WHITESPACE_RE.sub(" ", text)
     return text.strip()

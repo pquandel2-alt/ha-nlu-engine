@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
 
-- Aktuelle Version: **4.22.0**
+- Aktuelle Version: **4.23.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Lizenz: **MIT**
@@ -131,6 +131,24 @@ Welche Lichter sind heller als 50 Prozent?
 Warum ist das Küchenlicht an?
 ```
 
+Messwerte können über einen einzelnen Raum oder eine ganze Etage abgefragt
+werden. Unterstützt werden derzeit Temperatur, Luftfeuchtigkeit, Batteriestand,
+Leistung, Energieverbrauch und Helligkeit:
+
+```text
+Wie hoch ist die Temperatur im Erdgeschoss?
+Luftfeuchtigkeit im Wohnzimmer.
+Stromverbrauch Küche.
+Batterien oben unter 20 Prozent.
+Wie hell Wohnzimmer?
+```
+
+Gibt es mehrere passende Sensoren, nennt HomeIntent alle Einzelwerte mit ihrem
+Entitätsnamen. Es bildet niemals ungefragt einen Mittelwert. Nur eine
+ausdrückliche Formulierung wie „durchschnittliche Temperatur im Erdgeschoss“
+liefert einen berechneten Durchschnitt. Unbekannte Orte und Orte ohne passenden,
+für Assist freigegebenen Sensor erhalten eine konkrete Fehlermeldung.
+
 Bei der „Warum“-Frage nennt HomeIntent passende Automationen als mögliche Ursache. Es behauptet nicht, einen vollständigen kausalen Ablauf beweisen zu können.
 
 ### Gesprächskontext und Rückfragen
@@ -148,6 +166,8 @@ Auch Pronomen und bereichsbezogene Folgefragen können – innerhalb der unterst
 ```text
 Du: Wie warm ist es im Wohnzimmer?
 Du: Und in der Küche?
+Du: Nein, ich meinte das Büro.
+Du: Wie sieht es oben aus?
 ```
 
 ### Mehrteilige Befehle
@@ -227,12 +247,26 @@ Heute Abend um 20 Uhr schalte das Gartenlicht ein.
 Am Samstag um 10 Uhr starte Gute Nacht.
 Am 25. August um 18 Uhr schalte das Küchenlicht ein.
 Übermorgen früh fahre die Rolllade hoch.
+Morgen halb acht schalte das Küchenlicht ein.
+Morgen viertel vor neun schalte das Küchenlicht ein.
+Nächsten Samstag um 10 Uhr starte Gute Nacht.
 ```
 
 Der Termin wird erst bei der Bestätigung in der lokalen Home-Assistant-Zeitzone
 aufgelöst. Nicht existierende Uhrzeiten bei einem Sommerzeitwechsel und bereits
 vergangene Termine werden abgelehnt. Für Tageszeiten ohne Uhrzeit gelten feste,
 reproduzierbare Standardwerte; „früh“ bedeutet derzeit 08:00 Uhr.
+
+Bei zustandsbasierten Automationen darf das trennende Komma entfallen, sofern
+Trigger und Aktion durch ihre Grammatiken genau eine mögliche Trennstelle haben.
+Auch die umgekehrte Satzreihenfolge und wiederkehrende Umgangsformen werden
+verstanden:
+
+```text
+Wenn das Bürofenster geöffnet wird schalte das Küchenlicht ein.
+Schalte das Küchenlicht ein wenn das Bürofenster geöffnet wird.
+Jedes Mal wenn das Bürofenster geöffnet wird schalte das Küchenlicht ein.
+```
 
 ### Eine Automation begrenzt wiederholen
 
@@ -377,10 +411,10 @@ Danach kann die komplette Testsuite so ausgeführt werden:
 python -m pytest -q
 ```
 
-Stand von Version 4.22.0:
+Stand von Version 4.23.0:
 
 ```text
-1651 passed, 14 skipped
+1665 passed, 14 skipped
 ```
 
 GitHub Actions prüft zusätzlich Python 3.12 und 3.13, Hassfest, HACS und den Import gegen das aktuelle stabile Home-Assistant-Containerimage.

@@ -50,6 +50,7 @@ from .nlu.validator import validate_command
 from .automation_action_parser import AutomationActionParser
 from .automation_condition_parser import AutomationConditionParser, split_on_top_level_and
 from .automation_trigger_parser import _AUTOMATION_TRIGGER_RE, AutomationTriggerParser
+from .location_property_query import LocationPropertyQueryParser, LocationQueryFeedback
 from .relative_time_command_parser import RelativeTimeCommandParser
 from .scheduled_time_command_parser import ScheduledTimeCommandParser
 from .nlu.automation_model import AutomationModel, TriggerModel, TriggerType, render_automation_tree
@@ -197,7 +198,7 @@ _STATE_QUERY_RE = re.compile(
 # Phase 8). Deliberately excludes HassQueryComparison - see that method's
 # docstring.
 _QUERY_FOLLOWUP_INTENTS = frozenset(
-    {"HassGetState", "HassStateQuery", "HassCheckState", "HassExistsQuery", "HassDeviceQuery"}
+    {"HassGetState", "HassLocationPropertyQuery", "HassStateQuery", "HassCheckState", "HassExistsQuery", "HassDeviceQuery"}
 )
 
 # Sentences containing "Prozent" are routed to PercentageParser's separately-
@@ -230,7 +231,9 @@ _BARE_PERCENT_RE = re.compile(r"\bauf\s+\d{1,3}\b")
 # worth trying.
 _RELATIVE_TIME_RE = re.compile(r"\bin\s+\S+\s+(sekunden?|minuten?|stunden?)\b", re.IGNORECASE)
 _CALENDAR_TIME_RE = re.compile(
-    r"\b(heute|morgen|übermorgen)\b|\bam\s+(montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonnabend|sonntag)\b|\bam\s+\d{1,2}\.(?=\s)",
+    r"\b(heute|morgen|übermorgen)\b|\b(?:am|nächsten?|kommenden?)\s+"
+    r"(montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonnabend|sonntag)\b|"
+    r"\bam\s+\d{1,2}\.(?=\s)",
     re.IGNORECASE,
 )
 
@@ -623,6 +626,7 @@ class NluEngine:
         self._scheduled_time_command_parser = ScheduledTimeCommandParser(
             self._automation_action_parser
         )
+        self._location_property_query_parser = LocationPropertyQueryParser()
 
     def _select_parser(self, text: str):
         if _TEMPORAL_RE.search(text):
@@ -659,10 +663,19 @@ class NluEngine:
             return self._match_multi(segments, entities, world_model)
 
         text = normalize(text)
-        parser = self._select_parser(text)
-        result = parser.parse(
-            text, ParseContext(entities=entities, index=build_entity_index(entities), world_model=world_model)
+        location_query = self._location_property_query_parser.parse(text, entities)
+        if isinstance(location_query, LocationQueryFeedback):
+            return None
+        if location_query is not None:
+            return self._build_match_result(location_query, entities)
+        parse_context = ParseContext(
+            entities=entities, index=build_entity_index(entities), world_model=world_model
         )
+        # Location/property phrases are the explicit cross-router fallback
+        # above. Once a grammar is selected here, a semantic rejection must
+        # not fall through to a broader wildcard parser (for example,
+        # "beide" must never degrade into a singular command).
+        result = self._select_parser(text).parse(text, parse_context)
         if result is None:
             return None
         if isinstance(result, ClarificationRequest):
@@ -670,6 +683,24 @@ class NluEngine:
                 plan=None, response_text=_clarification_question(result), clarification=result,
             )
         return self._build_match_result(result, entities)
+
+    def failure_feedback(self, text: str, entities: list[EntitySnapshot] | None = None) -> str | None:
+        """Best-effort explanation after every deterministic parser failed."""
+        if entities is not None:
+            location = self._location_property_query_parser.parse(normalize(text), entities)
+            if isinstance(location, LocationQueryFeedback):
+                return location.response_text
+        if _AUTOMATION_TRIGGER_RE.search(text):
+            return "Ich konnte Trigger und Aktion der Automation nicht eindeutig erkennen."
+        if re.search(
+            r"\b(schalte|mach|fahre|öffne|schließe|stelle|setze|starte|aktiviere|drehe)\b",
+            text,
+            re.IGNORECASE,
+        ):
+            return "Ich konnte das angesprochene Gerät nicht eindeutig finden oder den Befehl nicht ausführen."
+        if re.search(r"\b(wie|welche|welcher|welches|was|ist|sind)\b", text, re.IGNORECASE):
+            return "Ich habe die Frage erkannt, aber die gewünschte Eigenschaft oder das Ziel nicht gefunden."
+        return None
 
     def _match_multi(
         self, segments: list[str], entities: list[EntitySnapshot], world_model: WorldModel | None = None
@@ -823,7 +854,37 @@ class NluEngine:
             return None
 
         normalized = normalize(text)
+        correction = re.match(
+            r"^(?:nein[, ]+)?(?:ich\s+meinte|gemeint\s+war)\s+(?P<location>.+?)[?.!]*$",
+            normalized,
+            re.IGNORECASE,
+        )
+        if correction is not None:
+            normalized = f"Und im {correction.group('location').strip()}?"
+        else:
+            natural = re.match(
+                r"^wie\s+sieht\s+es\s+(?P<location>oben|unten|(?:im|in der|in dem)\s+.+?)\s+aus[?.!]*$",
+                normalized,
+                re.IGNORECASE,
+            )
+            if natural is not None:
+                normalized = f"Und {natural.group('location')}?"
         previous_query_command = context.last_command.parameters.get("query_command")
+        if context.last_command.intent == "HassLocationPropertyQuery":
+            location_match = re.match(
+                r"^und\s+(?:(?:im|in der|in dem)\s+)?(?P<location>.+?)[?.!]*$",
+                normalized,
+                re.IGNORECASE,
+            )
+            property_name = context.last_command.parameters.get("property")
+            if location_match is not None and property_name:
+                query = self._location_property_query_parser.parse(
+                    f"{property_name} im {location_match.group('location').strip()}", entities
+                )
+                if isinstance(query, LocationQueryFeedback):
+                    return None
+                if query is not None:
+                    return self._build_match_result(query, entities, context)
         result = self._query_followup_parser.parse(
             normalized, entities, context.last_entities, previous_query_command, world_model
         )
@@ -1102,11 +1163,6 @@ class NluEngine:
             normalized = _AUTOMATION_ONCE_RE.sub(" ", normalized)
             normalized = re.sub(r"\s+", " ", normalized).strip()
 
-        split = split_trigger_action(normalized)
-        if split is None:
-            return None
-        trigger_text, action_text = split
-
         last_entities = context.last_entities if context is not None else ()
         last_area = context.last_area if context is not None else None
         parse_context = ParseContext(
@@ -1116,6 +1172,36 @@ class NluEngine:
             last_entities=tuple(last_entities),
             last_area=last_area,
         )
+
+        split = split_trigger_action(normalized)
+        if split is None:
+            candidates: list[tuple[str, str]] = []
+            for marker in re.finditer(
+                r"\b(schalte|mach|fahre|öffne|schließe|stelle|setze|starte|aktiviere|führe|drehe)\b",
+                normalized,
+                re.IGNORECASE,
+            ):
+                trigger_candidate = normalized[: marker.start()].strip(" ,")
+                action_candidate = normalized[marker.start() :].strip()
+                if (
+                    trigger_candidate
+                    and self._automation_trigger_parser.parse(trigger_candidate, parse_context) is not None
+                    and self._automation_action_parser.parse(action_candidate, parse_context)
+                ):
+                    candidates.append((trigger_candidate, action_candidate))
+            for marker in re.finditer(r"\s+(wenn|sobald|falls)\s+", normalized, re.IGNORECASE):
+                action_candidate = normalized[: marker.start()].strip(" ,")
+                trigger_candidate = normalized[marker.start() :].strip(" ,")
+                if (
+                    action_candidate
+                    and self._automation_trigger_parser.parse(trigger_candidate, parse_context) is not None
+                    and self._automation_action_parser.parse(action_candidate, parse_context)
+                ):
+                    candidates.append((trigger_candidate, action_candidate))
+            if len(candidates) != 1:
+                return None
+            split = candidates[0]
+        trigger_text, action_text = split
 
         condition_node: ConditionNode | None = None
         trigger = self._automation_trigger_parser.parse(trigger_text, parse_context)
@@ -1296,6 +1382,12 @@ class NluEngine:
         those five.
         """
         normalized = normalize(reply_text)
+        normalized = re.sub(
+            r"^(?:nein[, ]+)?(?:ich\s+meinte|gemeint\s+war)\s+",
+            "",
+            normalized,
+            flags=re.IGNORECASE,
+        ).strip()
 
         name_resolved = resolve_entity(normalized, list(clarification.candidates))
         entity = name_resolved.entity if name_resolved.status is ResolveStatus.OK else None

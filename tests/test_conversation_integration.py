@@ -127,7 +127,7 @@ def test_floor_temperature_question_reaches_live_conversation_query(
     assert result.response.speech == "22.4 Grad."
 
 
-def test_floor_temperature_question_clarifies_multiple_sensors(monkeypatch):
+def test_floor_temperature_question_lists_multiple_sensors(monkeypatch):
     second = EntitySnapshot(
         "sensor.wohnzimmer_temperatur",
         "Wohnzimmer Temperatur",
@@ -148,12 +148,9 @@ def test_floor_temperature_question_clarifies_multiple_sensors(monkeypatch):
         "Welche Temperatur hat das Erdgeschoss?",
         conversation_id="floor-temp",
     )
-    answer = _run(entity, "Küche Temperatur", conversation_id="floor-temp")
-
-    assert question.response.speech == "Welchen Sensor meinst du?"
-    assert answer.response.error_code is None
-    assert answer.response.response_type == intent.IntentResponseType.QUERY_ANSWER
-    assert answer.response.speech == "22.4 Grad."
+    assert question.response.speech == (
+        "Küche Temperatur: 22,4 Grad; Wohnzimmer Temperatur: 21,8 Grad."
+    )
 
 
 def test_unmatched_sentence_returns_not_understood(monkeypatch):

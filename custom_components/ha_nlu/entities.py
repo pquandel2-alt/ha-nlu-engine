@@ -10,6 +10,7 @@ Home Assistant instance.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Mapping
@@ -118,6 +119,25 @@ def generate_aliases(entity: EntitySnapshot) -> tuple[EntityAlias, ...]:
     for configured in entity.aliases:
         add(configured, "configured")
 
+    # Common spoken device words are derived from the entity's real name,
+    # preserving its distinguishing suffix (for example "Rollo Büro").
+    if entity.domain == "cover":
+        for source in (entity.friendly_name, *entity.aliases):
+            if re.search(r"\brolll?ad(?:e|en)\b", source, re.IGNORECASE):
+                for replacement in ("Rollladen", "Rollade", "Rollo", "Jalousie"):
+                    add(
+                        re.sub(r"\brolll?ad(?:e|en)\b", replacement, source, flags=re.IGNORECASE),
+                        "derived",
+                    )
+    elif entity.domain == "light":
+        for source in (entity.friendly_name, *entity.aliases):
+            if re.search(r"\b(?:lampe|leuchte|licht)\b", source, re.IGNORECASE):
+                for replacement in ("Lampe", "Leuchte", "Licht"):
+                    add(
+                        re.sub(r"\b(?:lampe|leuchte|licht)\b", replacement, source, flags=re.IGNORECASE),
+                        "derived",
+                    )
+
     return tuple(aliases)
 
 
@@ -162,7 +182,9 @@ def normalize_for_compare(text: str) -> str:
     normalization, but *guessing* a folding of "ß"/"ü" etc. would itself be
     exactly the kind of guess this project avoids).
     """
-    return " ".join(text.strip().lower().split())
+    folded = text.strip().casefold()
+    folded = folded.replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
+    return " ".join(folded.split())
 
 
 def _score_name_pair(spoken: str, spoken_norm: str, candidate_text: str, source: str) -> float | None:

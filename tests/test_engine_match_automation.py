@@ -51,9 +51,12 @@ def test_non_automation_sentence_is_rejected_by_the_regex_gate(engine):
     assert engine.match_automation("Schalte das Küchenlicht ein.", ENTITIES) is None
 
 
-def test_automation_keyword_without_a_comma_returns_none(engine):
-    # No trigger/action split point - never guess where the sentence breaks.
-    assert engine.match_automation("Wenn das Küchenfenster geöffnet wird schalte das Küchenlicht ein.", ENTITIES) is None
+def test_automation_keyword_without_a_comma_uses_unique_grammar_split(engine):
+    result = engine.match_automation(
+        "Wenn das Küchenfenster geöffnet wird schalte das Küchenlicht ein.", ENTITIES
+    )
+    assert result is not None
+    assert result.validation_error is None
 
 
 def test_valid_trigger_and_action_produces_a_validated_automation_model(engine):

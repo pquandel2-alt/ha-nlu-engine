@@ -370,7 +370,7 @@ class NluConversationEntity(
         if result is None:
             response.async_set_error(
                 intent.IntentResponseErrorCode.NO_INTENT_MATCH,
-                NOT_UNDERSTOOD_TEXT,
+                self._engine.failure_feedback(user_input.text, entities) or NOT_UNDERSTOOD_TEXT,
             )
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id

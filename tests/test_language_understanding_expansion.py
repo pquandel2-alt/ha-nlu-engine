@@ -1,0 +1,140 @@
+"""Regression corpus for the broader, still deterministic German NLU."""
+
+from __future__ import annotations
+
+from ha_nlu.entities import EntitySnapshot
+from ha_nlu.nlu.context import ConversationContext
+
+
+ENTITIES = [
+    EntitySnapshot(
+        "sensor.wohnzimmer_temp", "Wohnzimmer Temperatur", "sensor", "21.5",
+        area_id="wohnzimmer", area_name="Wohnzimmer", floor_id="eg",
+        floor_name="Erdgeschoss", floor_level=0, unit="°C", device_class="temperature",
+    ),
+    EntitySnapshot(
+        "sensor.kueche_temp", "Küche Temperatur", "sensor", "22.5",
+        area_id="kueche", area_name="Küche", floor_id="eg",
+        floor_name="Erdgeschoss", floor_level=0, unit="°C", device_class="temperature",
+    ),
+    EntitySnapshot(
+        "sensor.schlafzimmer_temp", "Schlafzimmer Temperatur", "sensor", "19",
+        area_id="schlafzimmer", area_name="Schlafzimmer", floor_id="og",
+        floor_name="Obergeschoss", floor_level=1, unit="°C", device_class="temperature",
+    ),
+    EntitySnapshot(
+        "sensor.wohnzimmer_humidity", "Wohnzimmer Luftfeuchtigkeit", "sensor", "51",
+        area_id="wohnzimmer", area_name="Wohnzimmer", floor_id="eg",
+        floor_name="Erdgeschoss", floor_level=0, unit="%", device_class="humidity",
+    ),
+    EntitySnapshot(
+        "sensor.kueche_energy", "Küche Energie", "sensor", "3.7",
+        area_id="kueche", area_name="Küche", floor_id="eg",
+        floor_name="Erdgeschoss", floor_level=0, unit="kWh", device_class="energy",
+    ),
+    EntitySnapshot(
+        "sensor.upstairs_battery", "Fenster Batterie", "sensor", "12",
+        area_id="schlafzimmer", area_name="Schlafzimmer", floor_id="og",
+        floor_name="Obergeschoss", floor_level=1, unit="%", device_class="battery",
+    ),
+    EntitySnapshot(
+        "cover.buero", "Rollladen Büro", "cover", "closed",
+        area_id="buero", area_name="Büro", capabilities=frozenset({"POSITION"}),
+    ),
+    EntitySnapshot(
+        "light.kueche", "Küchenlicht", "light", "off",
+        area_id="kueche", area_name="Küche",
+        capabilities=frozenset({"TURN_ON", "TURN_OFF", "BRIGHTNESS"}),
+    ),
+]
+
+
+def _context(result) -> ConversationContext:
+    return ConversationContext(
+        last_command=result.command,
+        last_entities=tuple(result.command.entities),
+        last_area=result.command.area,
+        pending_clarification=None,
+    )
+
+
+def test_general_location_properties(engine):
+    assert engine.match("Luftfeuchtigkeit im Wohnzimmer", ENTITIES).response_text == "51 Prozent."
+    assert engine.match("Stromverbrauch Küche", ENTITIES).response_text == "3.7 Kilowattstunden."
+    assert engine.match("Temperatur Obergeschoss", ENTITIES).response_text == "19 Grad."
+
+
+def test_multiple_measurements_are_listed_and_average_is_opt_in(engine):
+    listed = engine.match("Temperatur Erdgeschoss", ENTITIES)
+    averaged = engine.match("durchschnittliche Temperatur im Erdgeschoss", ENTITIES)
+
+    assert listed.response_text == "Küche Temperatur: 22,5 Grad; Wohnzimmer Temperatur: 21,5 Grad."
+    assert averaged.response_text == "Der Durchschnitt für Temperatur beträgt 22 Grad."
+
+
+def test_battery_threshold_on_floor(engine):
+    result = engine.match("Batterien oben unter 20 Prozent", ENTITIES)
+    assert result is not None
+    assert result.command.entities[0].entity_id == "sensor.upstairs_battery"
+    assert result.response_text == "12 Prozent."
+
+
+def test_precise_location_failures(engine):
+    assert engine.match("Temperatur im Partykeller", ENTITIES) is None
+    assert engine.failure_feedback("Temperatur im Partykeller", ENTITIES) == (
+        "Ich kenne keinen Raum und keine Etage namens Partykeller."
+    )
+    assert engine.failure_feedback("Luftfeuchtigkeit im Büro", ENTITIES) == (
+        "Für Luftfeuchtigkeit ist in Büro kein passender Sensor für Assist freigegeben."
+    )
+
+
+def test_query_correction_and_natural_floor_followup(engine):
+    first = engine.match("Wie warm ist es im Wohnzimmer", ENTITIES)
+    corrected = engine.match_query_followup("Nein, ich meinte Küche", ENTITIES, _context(first))
+    upstairs = engine.match_query_followup("Wie sieht es oben aus?", ENTITIES, _context(first))
+
+    assert corrected.response_text == "22.5 Grad."
+    assert upstairs.response_text == "19 Grad."
+
+
+def test_colloquial_device_alias_and_polite_stt_form(engine):
+    cover = engine.match("Mach Rollo Büro auf", ENTITIES)
+    light = engine.match("Könntest du Küchenlicht anmachen?", ENTITIES)
+
+    assert cover.plan.entity_id == "cover.buero"
+    assert light.plan.entity_id == "light.kueche"
+
+
+def test_natural_clock_phrases(engine):
+    half = engine.match_calendar_time_automation(
+        "Morgen halb acht schalte das Küchenlicht ein", ENTITIES
+    )
+    quarter = engine.match_calendar_time_automation(
+        "Morgen viertel vor neun schalte das Küchenlicht ein", ENTITIES
+    )
+    weekday = engine.match_calendar_time_automation(
+        "Nächsten Samstag um 10 Uhr schalte das Küchenlicht ein", ENTITIES
+    )
+
+    assert (half.model.calendar_schedule.hour, half.model.calendar_schedule.minute) == (7, 30)
+    assert (quarter.model.calendar_schedule.hour, quarter.model.calendar_schedule.minute) == (8, 45)
+    assert weekday.model.calendar_schedule.weekday == 5
+
+
+def test_action_first_and_every_time_automation_without_comma(engine):
+    window = EntitySnapshot(
+        "binary_sensor.buero_fenster", "Bürofenster", "binary_sensor", "off",
+        area_id="buero", area_name="Büro", device_class="window",
+    )
+    entities = ENTITIES + [window]
+
+    action_first = engine.match_automation(
+        "Schalte das Küchenlicht ein wenn das Bürofenster geöffnet wird", entities
+    )
+    recurring_wording = engine.match_automation(
+        "Jedes Mal wenn das Bürofenster geöffnet wird schalte das Küchenlicht ein", entities
+    )
+
+    assert action_first is not None and action_first.validation_error is None
+    assert recurring_wording is not None and recurring_wording.validation_error is None
