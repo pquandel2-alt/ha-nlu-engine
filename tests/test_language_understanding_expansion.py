@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.context import ConversationContext
+from ha_nlu.nlu.parse_outcome import ParseFailureReason
 
 
 ENTITIES = [
@@ -100,6 +101,9 @@ def test_precise_location_failures(engine):
     assert engine.failure_feedback("Luftfeuchtigkeit im Büro", ENTITIES) == (
         "Für Luftfeuchtigkeit ist in Büro kein passender Sensor für Assist freigegeben."
     )
+    assert engine.understanding_feedback(
+        "Temperatur im Partykeller", ENTITIES
+    ).reason is ParseFailureReason.UNKNOWN_LOCATION
 
 
 def test_query_correction_and_natural_floor_followup(engine):
@@ -114,6 +118,14 @@ def test_query_correction_and_natural_floor_followup(engine):
 def test_colloquial_device_alias_and_polite_stt_form(engine):
     cover = engine.match("Mach Rollo Büro auf", ENTITIES)
     light = engine.match("Könntest du Küchenlicht anmachen?", ENTITIES)
+
+    assert cover.plan.entity_id == "cover.buero"
+    assert light.plan.entity_id == "light.kueche"
+
+
+def test_common_stt_token_splits_are_normalized(engine):
+    cover = engine.match("Mach Roll Laden Büro auf", ENTITIES)
+    light = engine.match("Könntest du Küchenlicht an machen?", ENTITIES)
 
     assert cover.plan.entity_id == "cover.buero"
     assert light.plan.entity_id == "light.kueche"

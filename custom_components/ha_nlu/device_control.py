@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 
 from .entities import EntitySnapshot, ResolveStatus, resolve_entity
+from .nlu.context import ConversationContext
 from .service_call import ServiceCallPlan
 
 
@@ -14,6 +15,7 @@ class DeviceControlResult:
     plan: ServiceCallPlan | None
     response_text: str
     requires_confirmation: bool = False
+    entity: EntitySnapshot | None = None
 
 
 def _clean(text: str) -> str:
@@ -41,7 +43,44 @@ def _result(
         ServiceCallPlan(entity.domain, service, entity.entity_id, data or {}),
         response,
         requires_confirmation=confirm,
+        entity=entity,
     )
+
+
+def match_device_control_followup(
+    text: str, context: ConversationContext | None
+) -> DeviceControlResult | None:
+    """Resolve short media/vacuum references against the preceding device."""
+    if context is None or len(context.last_entities) != 1:
+        return None
+    entity = context.last_entities[0]
+    value = _clean(text).casefold()
+    if entity.domain == "media_player":
+        commands = {
+            "pausiere es": ("media_pause", "Wiedergabe pausiert."),
+            "pause": ("media_pause", "Wiedergabe pausiert."),
+            "spiel weiter": ("media_play", "Wiedergabe fortgesetzt."),
+            "starte es wieder": ("media_play", "Wiedergabe fortgesetzt."),
+            "stoppe es": ("media_stop", "Wiedergabe gestoppt."),
+        }
+        selected = commands.get(value)
+        if selected is not None:
+            service, speech = selected
+            return _result(entity, service, f"{entity.friendly_name}: {speech}")
+    if entity.domain == "vacuum":
+        commands = {
+            "pausiere ihn": ("pause", "pausiert"),
+            "pausiere es": ("pause", "pausiert"),
+            "stoppe ihn": ("stop", "gestoppt"),
+            "stoppe es": ("stop", "gestoppt"),
+            "schick ihn zur ladestation": ("return_to_base", "zur Ladestation geschickt"),
+            "schicke ihn zur ladestation": ("return_to_base", "zur Ladestation geschickt"),
+        }
+        selected = commands.get(value)
+        if selected is not None:
+            service, speech = selected
+            return _result(entity, service, f"{entity.friendly_name} {speech}.")
+    return None
 
 
 def match_device_control(

@@ -180,6 +180,34 @@ Du: Kannst du die Temperatur auf 22 Grad erhöhen?
 Assist: Erdgeschoss Heizung auf 22 Grad gestellt.
 ```
 
+Der Folgesatz darf auch verkürzt sein. HomeIntent merkt sich dazu nicht nur
+die zuletzt genannten Entitäten, sondern einen expliziten Dialogfokus aus
+Eigenschaft, Raum beziehungsweise Etage und möglichen Zielgeräten:
+
+```text
+Du: Wie warm ist es im Wohnzimmer?
+Du: Auf 22 Grad.
+
+Du: Wie hell ist es in der Küche?
+Du: Auf 35 Prozent.
+
+Du: Wie warm ist es im Wohnzimmer?
+Du: Zwei Grad wärmer.
+```
+
+Explizite Korrekturen verändern den räumlichen Bezug, ohne die bereits
+verstandene Aktion neu erraten zu müssen:
+
+```text
+Du: Mach das Küchenlicht an.
+Du: Nein, nicht Küche, sondern Büro.
+```
+
+Auch bei erweiterten Geräten können kurze Bezüge fortgeführt werden, etwa
+„Pausiere es“ nach einem Medienbefehl oder „Schick ihn zur Ladestation“ nach
+einem Staubsaugerbefehl. Der Kontext ist pro Assist-Konversation getrennt und
+läuft automatisch ab.
+
 Dasselbe Prinzip gilt für bereits unterstützte Stellgrößen wie Lichthelligkeit,
 Rollladenposition und Ventilatorstufe. Gibt es im zuvor genannten Raum oder auf
 der Etage mehrere passende Geräte, fragt HomeIntent nach. Messwerte ohne sichere
@@ -215,6 +243,21 @@ Der Ablauf ist absichtlich zweistufig:
 6. Die neue Automation erscheint in Home Assistant und erhält die Kategorie **Homeintent**.
 
 Ein „Nein“ bricht die Erstellung ab, ohne etwas zu speichern.
+
+Auslöser und Aktion können außerdem in zwei Gesprächsschritten genannt werden:
+
+```text
+Du: Wenn das Küchenfenster geöffnet wird.
+Assist: Was soll dann passieren?
+Du: Schalte das Küchenlicht ein.
+Assist: Automation erkannt: … Soll diese Automation erstellt werden?
+```
+
+Der unvollständige Entwurf enthält nur den bereits eindeutig geparsten
+Auslöser. Eine unverständliche zweite Antwort führt weder einen Direktbefehl
+aus noch erzeugt sie eine Automation; HomeIntent fragt erneut nach einer
+vollständigen Aktion. Auch hier wird erst nach der anschließenden Vorschau und
+einem ausdrücklichen „Ja“ geschrieben.
 
 ### Bedingungen
 
@@ -380,6 +423,11 @@ Alle Executor-Instanzen einer Home-Assistant-Instanz teilen eine Schreibsperre. 
 
 Die NLU-Verarbeitung läuft innerhalb von Home Assistant. HomeIntent sendet den gesprochenen Text nicht an einen eigenen Cloud-Dienst.
 
+Über die Home-Assistant-Funktion „Diagnoseinformationen herunterladen“ können
+Nutzer bei Bedarf bewusst technische Eckdaten erzeugen. Diese Diagnose enthält
+weder Gesprächsformulierungen noch Entitäts-IDs oder Zustände. HomeIntent
+speichert keine gesprochenen Texte und kein World Model dauerhaft.
+
 ## Bekannte Grenzen
 
 - Die mitgelieferten Grammatiken sind derzeit auf Deutsch ausgelegt.
@@ -428,10 +476,18 @@ Danach kann die komplette Testsuite so ausgeführt werden:
 python -m pytest -q
 ```
 
-Stand von Version 4.23.1:
+Aktueller Entwicklungsstand:
 
 ```text
-1670 passed, 14 skipped
+1700 passed, 14 skipped
+```
+
+Zusätzlich enthält `tests/eval/dialog_cases.json` ein datengetriebenes
+Mehrturn-Sprachkorpus. Das separate Sicherheitsgate garantiert, dass negative
+und nur lesende Fälle keinen Serviceplan erzeugen:
+
+```bash
+./scripts/run_language_eval.sh
 ```
 
 GitHub Actions prüft zusätzlich Python 3.12 und 3.13, Hassfest, HACS und den Import gegen das aktuelle stabile Home-Assistant-Containerimage.

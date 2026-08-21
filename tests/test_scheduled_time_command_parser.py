@@ -61,6 +61,11 @@ ENTITIES = [
             datetime(2026, 8, 21, 12, 0),
             datetime(2026, 8, 23, 8, 0),
         ),
+        (
+            "Am nächsten Werktag um 8 Uhr schalte das Küchenlicht ein",
+            datetime(2026, 8, 21, 12, 0),
+            datetime(2026, 8, 24, 8, 0),
+        ),
     ],
 )
 def test_calendar_phrases_become_date_guarded_once_models(
@@ -130,3 +135,22 @@ def test_compound_relative_duration_is_summed(engine):
     )
     assert result is not None
     assert result.model.triggers[0].relative_offset_seconds == 9_000
+
+
+def test_imprecise_day_period_requests_an_exact_time(engine):
+    feedback = engine.understanding_feedback(
+        "Morgen gegen Abend schalte das Küchenlicht ein", ENTITIES
+    )
+    assert feedback.speech == "Bitte nenne für diesen Auftrag eine genaue Uhrzeit."
+
+
+def test_unconfirmed_calendar_automation_can_be_rescheduled_by_dialog(engine):
+    original = engine.match_calendar_time_automation(
+        "Morgen um 8 Uhr schalte das Küchenlicht ein", ENTITIES
+    )
+    revised = engine.revise_pending_automation(
+        "Verschiebe die Uhrzeit auf 9:30 Uhr", original.model, ENTITIES
+    )
+
+    assert revised.model.calendar_schedule.hour == 9
+    assert revised.model.calendar_schedule.minute == 30

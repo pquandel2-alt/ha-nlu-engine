@@ -15,7 +15,7 @@ sub-feature in this repo already follows.
 
 from __future__ import annotations
 
-from ha_nlu.engine import AutomationMatchResult
+from ha_nlu.engine import AutomationDraftMatchResult, AutomationMatchResult
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.automation_validator import AutomationValidationError
 from ha_nlu.nlu.condition_model import ConditionType, LogicalOperator
@@ -68,6 +68,47 @@ def test_valid_trigger_and_action_produces_a_validated_automation_model(engine):
     assert len(result.model.triggers) == 1
     assert len(result.model.actions) == 1
     assert "AutomationModel" in result.response_text
+
+
+def test_trigger_only_starts_a_conversational_automation_draft(engine):
+    draft = engine.match_automation_draft_start(
+        "Wenn das Küchenfenster geöffnet wird", ENTITIES
+    )
+
+    assert isinstance(draft, AutomationDraftMatchResult)
+    assert draft.response_text == "Was soll dann passieren?"
+
+
+def test_next_turn_action_completes_the_automation_draft(engine):
+    draft = engine.match_automation_draft_start(
+        "Wenn das Küchenfenster geöffnet wird", ENTITIES
+    )
+    completed = engine.complete_automation_draft(
+        "Schalte das Küchenlicht ein", draft.trigger, draft.source_text, ENTITIES
+    )
+
+    assert isinstance(completed, AutomationMatchResult)
+    assert completed.validation_error is None
+    assert len(completed.model.triggers) == 1
+    assert len(completed.model.actions) == 1
+
+
+def test_unconfirmed_automation_can_be_revised_before_confirmation(engine):
+    original = engine.match_automation(
+        "Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht ein.", ENTITIES
+    )
+    repeated = engine.revise_pending_automation(
+        "Nur dreimal", original.model, ENTITIES
+    )
+    extended = engine.revise_pending_automation(
+        "Füge als weitere Aktion schalte das Küchenlicht aus hinzu",
+        repeated.model,
+        ENTITIES,
+    )
+
+    assert repeated.model.max_runs == 3
+    assert len(extended.model.actions) == 2
+    assert extended.validation_error is None
 
 
 def test_ambiguous_trigger_target_returns_none_never_guesses(engine):

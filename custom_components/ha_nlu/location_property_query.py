@@ -10,11 +10,13 @@ from .entities import EntitySnapshot, ResolveStatus, resolve_entity
 from .floors import FloorResolveStatus, resolve_floor_by_level_keyword, resolve_floor_name
 from .nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
 from .nlu.parser import ParseResult
+from .nlu.parse_outcome import ParseFailureReason
 
 
 @dataclass(frozen=True)
 class LocationQueryFeedback:
     response_text: str
+    reason: ParseFailureReason = ParseFailureReason.UNSUPPORTED_PROPERTY
 
 
 _PROPERTIES = {
@@ -119,7 +121,10 @@ class LocationPropertyQueryParser:
         if area.status is AreaResolveStatus.AMBIGUOUS or (
             floor is not None and floor.status is FloorResolveStatus.AMBIGUOUS
         ):
-            return LocationQueryFeedback(f"Der Ort {location} ist nicht eindeutig.")
+            return LocationQueryFeedback(
+                f"Der Ort {location} ist nicht eindeutig.",
+                ParseFailureReason.AMBIGUOUS_TARGET,
+            )
         if area.status is AreaResolveStatus.NOT_FOUND and (
             floor is None or floor.status is FloorResolveStatus.NOT_FOUND
         ):
@@ -131,7 +136,10 @@ class LocationPropertyQueryParser:
                 return None
             if not explicit_location:
                 return None
-            return LocationQueryFeedback(f"Ich kenne keinen Raum und keine Etage namens {location}.")
+            return LocationQueryFeedback(
+                f"Ich kenne keinen Raum und keine Etage namens {location}.",
+                ParseFailureReason.UNKNOWN_LOCATION,
+            )
 
         domain, device_class, label = spec
         area_id = area.area_id if area.status is AreaResolveStatus.OK else None
@@ -166,11 +174,13 @@ class LocationPropertyQueryParser:
         if not matched:
             if comparator:
                 return LocationQueryFeedback(
-                    f"In {location} erfüllt kein {label} die genannte Grenze."
+                    f"In {location} erfüllt kein {label} die genannte Grenze.",
+                    ParseFailureReason.UNKNOWN_ENTITY,
                 )
             target_kind = "Sensor" if domain == "sensor" else "Gerät"
             return LocationQueryFeedback(
-                f"Für {label} ist in {location} kein passender {target_kind} für Assist freigegeben."
+                f"Für {label} ist in {location} kein passender {target_kind} für Assist freigegeben.",
+                ParseFailureReason.UNSUPPORTED_CAPABILITY,
             )
         matched.sort(key=lambda entity: (entity.area_name or "", entity.friendly_name))
         average = bool(match.groupdict().get("average")) or "durchschnitt" in text.casefold()

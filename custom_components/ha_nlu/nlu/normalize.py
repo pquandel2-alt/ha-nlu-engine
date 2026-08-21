@@ -55,6 +55,16 @@ _POLITE_MODAL_RE = re.compile(
 )
 _TRIGGER_DISCOURSE_RE = re.compile(r"\b(?:jedes\s+mal|immer)\s+wenn\b", re.IGNORECASE)
 
+# Frequent speech-to-text tokenizations. These are orthographic rewrites,
+# not semantic guesses: both sides are the same German device/unit/verb.
+_STT_REWRITES = (
+    (re.compile(r"\bpro\s+cent\b", re.IGNORECASE), "Prozent"),
+    (re.compile(r"\broll[\s-]+laden\b", re.IGNORECASE), "Rollladen"),
+    (re.compile(r"\bgrad\s+(?:c|celsius)\b", re.IGNORECASE), "Grad"),
+    (re.compile(r"\b(an|aus)\s+machen\b", re.IGNORECASE), r"\1machen"),
+    (re.compile(r"\b(hoch|runter|herunter)\s+fahren\b", re.IGNORECASE), r"\1fahren"),
+)
+
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
@@ -63,6 +73,8 @@ def normalize(text: str) -> str:
     text = _DEGREE_SYMBOL_RE.sub(r"\1 Grad", text)
     text = _POLITE_MODAL_RE.sub("kannst du", text)
     text = _TRIGGER_DISCOURSE_RE.sub("wenn", text)
+    for pattern, replacement in _STT_REWRITES:
+        text = pattern.sub(replacement, text)
     text = _FILLER_RE.sub(" ", text)
     text = _WHITESPACE_RE.sub(" ", text)
     return text.strip()

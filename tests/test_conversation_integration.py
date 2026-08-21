@@ -59,6 +59,15 @@ EG_TEMPERATUR = EntitySnapshot(
     unit="°C",
     device_class="temperature",
 )
+KUECHE_FENSTER = EntitySnapshot(
+    "binary_sensor.kueche_fenster", "Küchenfenster", "binary_sensor", "off",
+    area_id="kueche", area_name="Küche", device_class="window",
+)
+KUECHE_LICHT = EntitySnapshot(
+    "light.kueche", "Küchenlicht", "light", "off",
+    area_id="kueche", area_name="Küche",
+    capabilities=frozenset({"TURN_ON", "TURN_OFF", "BRIGHTNESS"}),
+)
 
 
 def _make_entity(monkeypatch, entities: list[EntitySnapshot]) -> NluConversationEntity:
@@ -104,6 +113,20 @@ def test_state_query_returns_query_answer_and_does_not_call_service(monkeypatch)
     entity.hass.services.async_call.assert_not_awaited()
     assert result.response.response_type == intent.IntentResponseType.QUERY_ANSWER
     assert "Flurlicht" in result.response.speech
+
+
+def test_trigger_and_action_can_be_spoken_in_two_turns(monkeypatch):
+    entity = _make_entity(monkeypatch, [KUECHE_FENSTER, KUECHE_LICHT])
+
+    question = _run(entity, "Wenn das Küchenfenster geöffnet wird")
+    preview = _run(entity, "Schalte das Küchenlicht ein")
+
+    entity.hass.services.async_call.assert_not_awaited()
+    assert question.response.speech == "Was soll dann passieren?"
+    assert "Fenster im Bereich Küche" in preview.response.speech
+    assert "Licht im Bereich Küche" in preview.response.speech
+    context = entity._context_store.get("conv-1")
+    assert context.pending_automation_confirmation is not None
 
 
 @pytest.mark.parametrize(

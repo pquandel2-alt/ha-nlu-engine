@@ -66,6 +66,7 @@ class CalendarReference(Enum):
     DAY_AFTER_TOMORROW = auto()
     WEEKDAY = auto()
     DATE = auto()
+    NEXT_WORKDAY = auto()
 
 
 @dataclass(frozen=True)
@@ -249,6 +250,10 @@ def resolve_calendar_schedule(model: AutomationModel, now: datetime) -> Automati
         target_date = today + timedelta(days=1)
     elif schedule.reference is CalendarReference.DAY_AFTER_TOMORROW:
         target_date = today + timedelta(days=2)
+    elif schedule.reference is CalendarReference.NEXT_WORKDAY:
+        target_date = today + timedelta(days=1)
+        while target_date.weekday() >= 5:
+            target_date += timedelta(days=1)
     elif schedule.reference is CalendarReference.WEEKDAY:
         if schedule.weekday is None:
             raise ValueError("Calendar weekday is missing")

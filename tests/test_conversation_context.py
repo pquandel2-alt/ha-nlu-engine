@@ -12,8 +12,9 @@ from ha_nlu.nlu.context import (
     ConversationContext,
     ConversationContextStore,
     PendingAutomationConfirmation,
+    PendingAutomationDraft,
 )
-from ha_nlu.nlu.automation_model import AutomationModel
+from ha_nlu.nlu.automation_model import AutomationModel, TriggerModel, TriggerType
 
 LIGHT_WOHNZIMMER = EntitySnapshot("light.wohnzimmer", "Wohnzimmerlicht", "light", "on")
 LIGHT_KUECHE = EntitySnapshot("light.kueche", "Küchenlicht", "light", "on")
@@ -106,6 +107,31 @@ def test_automation_confirmation_uses_a_longer_ttl():
     assert store.get("automation") == context
     fake_time[0] = 121.0
     assert store.get("automation") is None
+
+
+def test_automation_draft_uses_the_dialog_ttl():
+    fake_time = [0.0]
+    store = ConversationContextStore(
+        ttl_seconds=30.0,
+        automation_confirmation_ttl_seconds=120.0,
+        clock=lambda: fake_time[0],
+    )
+    context = ConversationContext(
+        last_command=None,
+        last_entities=(),
+        last_area=None,
+        pending_clarification=None,
+        pending_automation_draft=PendingAutomationDraft(
+            TriggerModel(type=TriggerType.TIME, time_hour=8, time_minute=0),
+            "um 8 Uhr",
+        ),
+    )
+    store.set("draft", context)
+
+    fake_time[0] = 60.0
+    assert store.get("draft") == context
+    fake_time[0] = 121.0
+    assert store.get("draft") is None
 
 
 def test_v6_context_fields_default_to_none_for_existing_call_sites():

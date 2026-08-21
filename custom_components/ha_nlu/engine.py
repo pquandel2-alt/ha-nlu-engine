@@ -23,7 +23,7 @@ see the v2 plan, Phase 2 ("Intent-System vereinheitlichen"):
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from hassil import Intents
@@ -31,6 +31,7 @@ from hassil import Intents
 from .areas import AreaResolveStatus, resolve_area_name
 from .automation_summary import AutomationSummary
 from .automation_results import (
+    AutomationDraftMatchResult,
     AutomationDeletionMatchResult,
     AutomationMatchResult,
     AutomationToggleMatchResult,
@@ -44,6 +45,7 @@ from .nlu.normalize import normalize
 from .nlu.parser import AmbiguousReference, ClarificationRequest, ParseContext, ParseResult
 from .nlu.reasoning import ReasoningEngine, ResolvedSemanticIntent
 from .nlu.response import NluError, NluResponse
+from .nlu.parse_outcome import ParseFailureReason, UnderstandingFeedback
 from .nlu.response_generator import ResponseGenerator, _automation_label
 from .nlu.service_mapper import map_to_service_call
 from .nlu.validator import validate_command
@@ -51,6 +53,8 @@ from .automation_action_parser import AutomationActionParser
 from .automation_condition_parser import AutomationConditionParser, split_on_top_level_and
 from .automation_trigger_parser import _AUTOMATION_TRIGGER_RE, AutomationTriggerParser
 from .location_property_query import LocationPropertyQueryParser, LocationQueryFeedback
+from .contextual_property import ContextualPropertyResolver
+from .conversation_correction import ConversationCorrectionResolver
 from .relative_time_command_parser import RelativeTimeCommandParser
 from .scheduled_time_command_parser import ScheduledTimeCommandParser
 from .nlu.automation_model import AutomationModel, TriggerModel, TriggerType, render_automation_tree
@@ -231,7 +235,8 @@ _BARE_PERCENT_RE = re.compile(r"\bauf\s+\d{1,3}\b")
 # worth trying.
 _RELATIVE_TIME_RE = re.compile(r"\bin\s+\S+\s+(sekunden?|minuten?|stunden?)\b", re.IGNORECASE)
 _CALENDAR_TIME_RE = re.compile(
-    r"\b(heute|morgen|übermorgen)\b|\b(?:am|nächsten?|kommenden?)\s+"
+    r"\b(heute|morgen|übermorgen)\b|\b(?:am\s+)?(?:nächsten?|kommenden?)\s+werktag\b|"
+    r"\b(?:am|nächsten?|kommenden?)\s+"
     r"(montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonnabend|sonntag)\b|"
     r"\bam\s+\d{1,2}\.(?=\s)",
     re.IGNORECASE,
@@ -627,6 +632,32 @@ class NluEngine:
             self._automation_action_parser
         )
         self._location_property_query_parser = LocationPropertyQueryParser()
+        self._contextual_property_resolver = ContextualPropertyResolver(
+            self._climate_extended_parser,
+            self._percentage_parser,
+            self._fan_extended_parser,
+        )
+        self._conversation_correction_resolver = ConversationCorrectionResolver()
+
+    def match_correction_followup(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        context: ConversationContext | None,
+    ) -> MatchResult | None:
+        """Apply an explicit correction to the previous actionable turn."""
+        outcome = self._conversation_correction_resolver.resolve(text, entities, context)
+        if outcome is None:
+            return None
+        if isinstance(outcome, UnderstandingFeedback):
+            return MatchResult(plan=None, response_text=outcome.speech)
+        if isinstance(outcome, ClarificationRequest):
+            return MatchResult(
+                plan=None,
+                response_text=_clarification_question(outcome),
+                clarification=outcome,
+            )
+        return self._build_match_result(outcome, entities, context)
 
     def _select_parser(self, text: str):
         if _TEMPORAL_RE.search(text):
@@ -686,18 +717,42 @@ class NluEngine:
 
     def failure_feedback(self, text: str, entities: list[EntitySnapshot] | None = None) -> str | None:
         """Best-effort explanation after every deterministic parser failed."""
+        feedback = self.understanding_feedback(text, entities)
+        return feedback.speech if feedback is not None else None
+
+    def understanding_feedback(
+        self, text: str, entities: list[EntitySnapshot] | None = None
+    ) -> UnderstandingFeedback | None:
+        """Return the structured counterpart of the spoken failure text."""
+        if re.search(
+            r"\b(?:heute|morgen|übermorgen|am\s+\S+)\s+"
+            r"(?:gegen|irgendwann)\s+(?:früh|morgens|abends?|nachts)\b",
+            text,
+            re.IGNORECASE,
+        ):
+            return UnderstandingFeedback(
+                ParseFailureReason.INVALID_VALUE,
+                "Bitte nenne für diesen Auftrag eine genaue Uhrzeit.",
+            )
         if entities is not None:
             location = self._location_property_query_parser.parse(normalize(text), entities)
             if isinstance(location, LocationQueryFeedback):
-                return location.response_text
+                return UnderstandingFeedback(location.reason, location.response_text)
         if _AUTOMATION_TRIGGER_RE.search(text):
-            return "Ich konnte Trigger und Aktion der Automation nicht eindeutig erkennen."
+            return UnderstandingFeedback(
+                ParseFailureReason.INCOMPLETE_REQUEST,
+                "Ich konnte Trigger und Aktion der Automation nicht eindeutig erkennen.",
+            )
         if re.search(
             r"\b(schalte|mach|fahre|öffne|schließe|stelle|setze|starte|aktiviere|drehe)\b",
             text,
             re.IGNORECASE,
         ):
-            return "Ich konnte das angesprochene Gerät nicht eindeutig finden oder den Befehl nicht ausführen."
+            return UnderstandingFeedback(
+                ParseFailureReason.UNKNOWN_ENTITY,
+                "Ich konnte das angesprochene Gerät nicht eindeutig finden oder den Befehl nicht ausführen.",
+            )
+        return None
         if re.search(r"\b(wie|welche|welcher|welches|was|ist|sind)\b", text, re.IGNORECASE):
             return "Ich habe die Frage erkannt, aber die gewünschte Eigenschaft oder das Ziel nicht gefunden."
         return None
@@ -781,164 +836,6 @@ class NluEngine:
         return self._build_match_result(
             ParseResult(frame=frame, resolved_entities=[entity]), list(context.last_entities), context
         )
-
-    def match_contextual_temperature_followup(
-        self,
-        text: str,
-        entities: list[EntitySnapshot],
-        context: ConversationContext | None,
-    ) -> MatchResult | None:
-        """Infer a thermostat target from the preceding temperature query.
-
-        The spoken follow-up supplies an absolute setpoint but omits the
-        device. The previous query supplies only a measured sensor/location;
-        this method maps that factual location to climate entities. Exactly
-        one candidate is executed, several candidates trigger clarification,
-        and zero candidates produce a precise read-only response.
-        """
-        if context is None or context.last_command is None:
-            return None
-        previous = context.last_command
-        property_name = previous.parameters.get("property")
-        has_temperature_measurement = any(
-            entity.domain == "sensor" and entity.device_class == "temperature"
-            for entity in context.last_entities
-        )
-        if property_name != "temperatur" and not has_temperature_measurement:
-            return None
-
-        normalized = normalize(text)
-        value_match = re.match(
-            r"^(?:kannst du\s+)?(?:bitte\s+)?(?:"
-            r"(?:die\s+)?temperatur\s+auf\s+(?P<value_a>.+?)\s+grad\s+"
-            r"(?:erhöhen|anheben|stellen|setzen|ändern|regeln)"
-            r"|(?:erhöhe|erhöh|stelle|stell|setze|setz|ändere|änder|regel)\s+"
-            r"(?:die\s+)?temperatur\s+auf\s+(?P<value_b>.+?)\s+grad"
-            r"|(?:stelle|stell|setze|setz|mach)\s+(?:sie|es|die\s+temperatur)\s+"
-            r"auf\s+(?P<value_c>.+?)\s+grad)\s*[?.!]*$",
-            normalized,
-            re.IGNORECASE,
-        )
-        if value_match is None:
-            return None
-        raw_value = next(value for value in value_match.groups() if value is not None)
-
-        candidates = self._contextual_candidates(
-            "climate", entities, context, capability="TEMPERATURE"
-        )
-        if candidates is None:
-            return MatchResult(
-                plan=None,
-                response_text="Ich kann aus der vorherigen Temperaturabfrage keinen eindeutigen Bereich ableiten.",
-            )
-
-        if not candidates:
-            return MatchResult(
-                plan=None,
-                response_text="Dort ist keine steuerbare Heizung oder kein Thermostat für Assist freigegeben.",
-            )
-
-        # Reuse the existing hassil number-word/range parsing and climate
-        # validator instead of maintaining a second German number parser.
-        probe = candidates[0]
-        synthetic = f"stelle {probe.friendly_name} auf {raw_value} Grad"
-        parsed = self._climate_extended_parser.parse(
-            synthetic,
-            ParseContext(entities=[probe], index=build_entity_index([probe])),
-        )
-        if parsed is None:
-            return MatchResult(
-                plan=None,
-                response_text="Die gewünschte Temperatur muss zwischen 5 und 30 Grad liegen.",
-            )
-        temperature = parsed.frame.parameters["temperature"]
-
-        if len(candidates) > 1:
-            clarification = ClarificationRequest(
-                pending_intent="HassClimateSetTemperature",
-                pending_target="Temperatur",
-                candidates=tuple(candidates),
-                pending_parameters={"temperature": temperature},
-            )
-            return MatchResult(
-                plan=None,
-                response_text=_clarification_question(clarification),
-                clarification=clarification,
-            )
-
-        entity = candidates[0]
-        frame = SemanticFrame(
-            intent="HassClimateSetTemperature",
-            target=TargetReference(
-                text="Temperatur", entity_id=entity.entity_id, domain="climate"
-            ),
-            area=(
-                AreaReference(text=entity.area_name, area_id=entity.area_id)
-                if entity.area_id is not None and entity.area_name is not None
-                else None
-            ),
-            parameters={"temperature": temperature},
-            source_text=text,
-        )
-        return self._build_match_result(
-            ParseResult(frame=frame, resolved_entities=[entity]), entities, context
-        )
-
-    @staticmethod
-    def _contextual_candidates(
-        domain: str,
-        entities: list[EntitySnapshot],
-        context: ConversationContext,
-        *,
-        capability: str | None = None,
-    ) -> list[EntitySnapshot] | None:
-        """Resolve a device domain only inside the preceding turn's scope."""
-        def eligible(entity: EntitySnapshot) -> bool:
-            return entity.domain == domain and (
-                capability is None or capability in entity.capabilities
-            )
-
-        direct_ids = {
-            entity.entity_id for entity in context.last_entities if eligible(entity)
-        }
-        if direct_ids:
-            return [entity for entity in entities if entity.entity_id in direct_ids]
-
-        previous = context.last_command
-        parameters = previous.parameters if previous is not None else {}
-        location_kind = parameters.get("location_kind")
-        location_id = parameters.get("location_id")
-        if location_kind == "area" and location_id:
-            return [
-                entity for entity in entities
-                if eligible(entity) and entity.area_id == location_id
-            ]
-        if location_kind == "floor" and location_id:
-            return [
-                entity for entity in entities
-                if eligible(entity) and entity.floor_id == location_id
-            ]
-
-        area_ids = {
-            entity.area_id for entity in context.last_entities if entity.area_id is not None
-        }
-        floor_ids = {
-            entity.floor_id for entity in context.last_entities if entity.floor_id is not None
-        }
-        if len(area_ids) == 1:
-            area_id = next(iter(area_ids))
-            return [
-                entity for entity in entities
-                if eligible(entity) and entity.area_id == area_id
-            ]
-        if len(floor_ids) == 1:
-            floor_id = next(iter(floor_ids))
-            return [
-                entity for entity in entities
-                if eligible(entity) and entity.floor_id == floor_id
-            ]
-        return None
-
     def match_contextual_property_followup(
         self,
         text: str,
@@ -951,171 +848,23 @@ class NluEngine:
         temperature→climate, brightness→light, position→cover and
         speed/level→fan. Battery, humidity, power and energy stay read-only.
         """
-        temperature = self.match_contextual_temperature_followup(text, entities, context)
-        if temperature is not None:
-            return temperature
-        if context is None or not context.last_entities:
+        outcome = self._contextual_property_resolver.resolve(text, entities, context)
+        if outcome is None:
             return None
-
-        normalized = normalize(text)
-        percent_match = re.match(
-            r"^(?:kannst du\s+)?(?:bitte\s+)?(?:"
-            r"(?:die\s+)?(?P<property>helligkeit|position|rollläden?|rollos?|jalousien?)\s+"
-            r"auf\s+(?P<value_a>.+?)\s*(?:prozent)?\s+"
-            r"(?:erhöhen|anheben|stellen|setzen|ändern|dimmen|fahren)"
-            r"|(?:stelle|stell|setze|setz|mach|fahre|fahr)\s+"
-            r"(?:sie|es|die\s+helligkeit|die\s+position)\s+auf\s+"
-            r"(?P<value_b>.+?)\s+prozent)\s*[?.!]*$",
-            normalized,
-            re.IGNORECASE,
-        )
-        if percent_match is not None:
-            property_word = (percent_match.group("property") or "").casefold()
-            contextual_domains = {entity.domain for entity in context.last_entities}
-            if property_word == "helligkeit":
-                domain = "light"
-            elif property_word:
-                domain = "cover"
-            elif contextual_domains == {"light"}:
-                domain = "light"
-            elif contextual_domains == {"cover"}:
-                domain = "cover"
-            else:
-                return None
-            raw_value = percent_match.group("value_a") or percent_match.group("value_b")
-            candidates = self._contextual_candidates(
-                domain,
-                entities,
-                context,
-                capability="BRIGHTNESS" if domain == "light" else "POSITION",
-            )
-            return self._build_contextual_percentage(
-                text, raw_value, domain, candidates, entities, context
-            )
-
-        level_match = re.match(
-            r"^(?:kannst du\s+)?(?:bitte\s+)?(?:"
-            r"(?:die\s+)?(?:geschwindigkeit|stufe)\s+auf\s+(?:stufe\s+)?"
-            r"(?P<level_a>.+?)\s+(?:erhöhen|stellen|setzen|ändern)"
-            r"|(?:stelle|stell|setze|setz|mach)\s+(?:sie|ihn|es|die\s+stufe)\s+"
-            r"auf\s+stufe\s+(?P<level_b>.+?))\s*[?.!]*$",
-            normalized,
-            re.IGNORECASE,
-        )
-        if level_match is None:
-            return None
-        raw_level = level_match.group("level_a") or level_match.group("level_b")
-        candidates = self._contextual_candidates(
-            "fan", entities, context, capability="FAN_SPEED"
-        )
-        return self._build_contextual_fan_level(
-            text, raw_level, candidates, entities, context
-        )
-
-    def _build_contextual_percentage(
-        self,
-        source_text: str,
-        raw_value: str,
-        domain: str,
-        candidates: list[EntitySnapshot] | None,
-        entities: list[EntitySnapshot],
-        context: ConversationContext,
-    ) -> MatchResult:
-        label = "Licht" if domain == "light" else "Rollladen"
-        if not candidates:
+        if isinstance(outcome, UnderstandingFeedback):
+            return MatchResult(plan=None, response_text=outcome.speech)
+        if isinstance(outcome, ClarificationRequest):
             return MatchResult(
                 plan=None,
-                response_text=f"Dort ist kein steuerbares {label} für Assist freigegeben.",
+                response_text=_clarification_question(outcome),
+                clarification=outcome,
             )
-        probe = candidates[0]
-        parsed = self._percentage_parser.parse(
-            f"stelle {probe.friendly_name} auf {raw_value} Prozent",
-            ParseContext(entities=[probe], index=build_entity_index([probe])),
-        )
-        if parsed is None:
-            return MatchResult(
-                plan=None, response_text="Der Prozentwert muss zwischen 0 und 100 liegen."
-            )
-        percent = parsed.frame.parameters["percent"]
-        if len(candidates) > 1:
-            clarification = ClarificationRequest(
-                pending_intent="HassSetPercentage",
-                pending_target=label,
-                candidates=tuple(candidates),
-                pending_parameters={"percent": percent},
-            )
-            return MatchResult(
-                plan=None,
-                response_text=_clarification_question(clarification),
-                clarification=clarification,
-            )
-        entity = candidates[0]
-        frame = SemanticFrame(
-            intent="HassSetPercentage",
-            target=TargetReference(text=label, entity_id=entity.entity_id, domain=domain),
-            area=None,
-            parameters={"percent": percent},
-            source_text=source_text,
-        )
-        return self._build_match_result(
-            ParseResult(frame=frame, resolved_entities=[entity]), entities, context
-        )
-
-    def _build_contextual_fan_level(
-        self,
-        source_text: str,
-        raw_level: str,
-        candidates: list[EntitySnapshot] | None,
-        entities: list[EntitySnapshot],
-        context: ConversationContext,
-    ) -> MatchResult:
-        if not candidates:
-            return MatchResult(
-                plan=None, response_text="Dort ist kein Ventilator für Assist freigegeben."
-            )
-        probe = candidates[0]
-        parsed = self._fan_extended_parser.parse(
-            f"stelle {probe.friendly_name} auf Stufe {raw_level}",
-            ParseContext(entities=[probe], index=build_entity_index([probe])),
-        )
-        if parsed is None:
-            return MatchResult(
-                plan=None,
-                response_text="Die Ventilatorstufe muss zwischen 1 und 10 liegen.",
-            )
-        level = parsed.frame.parameters["level"]
-        if len(candidates) > 1:
-            clarification = ClarificationRequest(
-                pending_intent="HassFanSetSpeed",
-                pending_target="Ventilator",
-                candidates=tuple(candidates),
-                pending_parameters={"level": level},
-            )
-            return MatchResult(
-                plan=None,
-                response_text=_clarification_question(clarification),
-                clarification=clarification,
-            )
-        entity = candidates[0]
-        frame = SemanticFrame(
-            intent="HassFanSetSpeed",
-            target=TargetReference(
-                text="Ventilator", entity_id=entity.entity_id, domain="fan"
-            ),
-            area=None,
-            parameters={"level": level},
-            source_text=source_text,
-        )
-        return self._build_match_result(
-            ParseResult(frame=frame, resolved_entities=[entity]), entities, context
-        )
-
+        return self._build_match_result(outcome, entities, context)
     def match_reference(self, text: str, entities: list[EntitySnapshot], context: ConversationContext | None) -> MatchResult | None:
         """Resolve a pronoun or relative reference ("Mach es aus.", "Mach die
         auch an.", "Die Rollläden dort runter.", "Die andere.") against the
         stored ``ConversationContext`` (v2 plan Phase 27, "Pronomen und
         Referenzen"). Tried by ``conversation.py`` alongside
-        ``match_followup()`` - see ``ReferenceParser``'s docstring for why
         the two grammars can't collide with each other or with any other
         grammar (disjoint, fixed sentence sets, verified empirically against
         hassil==3.11.0).
@@ -1553,6 +1302,172 @@ class NluEngine:
         if validation_error is not None:
             response_text = f"{response_text}\nvalidation_error: {validation_error.name}"
         return AutomationMatchResult(model=model, response_text=response_text, validation_error=validation_error)
+
+    def match_automation_draft_start(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
+        context: ConversationContext | None = None,
+    ) -> AutomationDraftMatchResult | None:
+        """Recognize a complete trigger whose action was left for a reply."""
+        if not _AUTOMATION_TRIGGER_RE.search(text):
+            return None
+        parse_context = ParseContext(
+            entities=entities,
+            index=build_entity_index(entities),
+            world_model=world_model,
+            last_entities=context.last_entities if context is not None else (),
+            last_area=context.last_area if context is not None else None,
+        )
+        normalized = normalize(text).strip(" ,")
+        trigger = self._automation_trigger_parser.parse(normalized, parse_context)
+        if trigger is None:
+            return None
+        return AutomationDraftMatchResult(trigger=trigger, source_text=text)
+
+    def complete_automation_draft(
+        self,
+        text: str,
+        trigger: TriggerModel,
+        source_text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
+        context: ConversationContext | None = None,
+    ) -> AutomationMatchResult | None:
+        """Add a spoken action to a stored trigger and validate the model."""
+        parse_context = ParseContext(
+            entities=entities,
+            index=build_entity_index(entities),
+            world_model=world_model,
+            last_entities=context.last_entities if context is not None else (),
+            last_area=context.last_area if context is not None else None,
+        )
+        actions = self._automation_action_parser.parse(normalize(text), parse_context)
+        if not actions:
+            return None
+        model = AutomationModel(
+            triggers=(trigger,),
+            actions=actions,
+            source_text=f"{source_text}, {text}",
+        )
+        validation_error = validate_automation(model)
+        response_text = render_automation_tree(model)
+        if validation_error is not None:
+            response_text = f"{response_text}\nvalidation_error: {validation_error.name}"
+        return AutomationMatchResult(model, response_text, validation_error)
+
+    def revise_pending_automation(
+        self,
+        text: str,
+        model: AutomationModel,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
+    ) -> AutomationMatchResult | None:
+        """Apply a bounded spoken edit to an unconfirmed automation preview."""
+        normalized = normalize(text)
+        updated: AutomationModel | None = None
+
+        time_match = re.fullmatch(
+            r"(?:ändere|änder|verschiebe|setz(?:e)?)\s+(?:die\s+)?(?:uhrzeit|zeit)?\s*"
+            r"(?:auf\s+)?(?P<hour>\d{1,2})(?::(?P<minute>\d{1,2}))?\s*uhr[?.!]*",
+            normalized,
+            re.IGNORECASE,
+        )
+        if time_match is not None:
+            hour = int(time_match.group("hour"))
+            minute = int(time_match.group("minute") or 0)
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                return None
+            if model.calendar_schedule is not None:
+                updated = replace(
+                    model,
+                    calendar_schedule=replace(
+                        model.calendar_schedule, hour=hour, minute=minute
+                    ),
+                )
+            elif len(model.triggers) == 1 and model.triggers[0].type is TriggerType.TIME:
+                updated = replace(
+                    model,
+                    triggers=(
+                        replace(
+                            model.triggers[0],
+                            time_hour=hour,
+                            time_minute=minute,
+                            time_second=0,
+                        ),
+                    ),
+                )
+            else:
+                return None
+
+        repeat_match = re.fullmatch(
+            r"(?:führe\s+(?:sie|die\s+automation)\s+)?(?:doch\s+)?nur\s+"
+            r"(?P<count>\d+|einmal|zweimal|dreimal|viermal|fünfmal)"
+            r"(?:\s+(?:aus|ausführen))?[?.!]*",
+            normalized,
+            re.IGNORECASE,
+        )
+        if repeat_match is not None:
+            raw = repeat_match.group("count").casefold()
+            counts = {"einmal": 1, "zweimal": 2, "dreimal": 3, "viermal": 4, "fünfmal": 5}
+            count = int(raw) if raw.isdigit() else counts[raw]
+            if count <= 0:
+                return None
+            updated = replace(
+                model,
+                once=count == 1,
+                max_runs=None if count == 1 else count,
+            )
+
+        if re.fullmatch(
+            r"(?:entferne|lösch(?:e)?)\s+(?:die\s+)?bedingung[?.!]*",
+            normalized,
+            re.IGNORECASE,
+        ):
+            if not model.conditions:
+                return None
+            updated = replace(model, conditions=())
+
+        parse_context = ParseContext(
+            entities=entities,
+            index=build_entity_index(entities),
+            world_model=world_model,
+        )
+        action_match = re.fullmatch(
+            r"füge\s+(?:als\s+)?(?:weitere\s+|zweite\s+)?aktion\s+(.+?)\s+hinzu[?.!]*",
+            normalized,
+            re.IGNORECASE,
+        )
+        if action_match is not None:
+            actions = self._automation_action_parser.parse(
+                action_match.group(1), parse_context
+            )
+            if not actions:
+                return None
+            updated = replace(model, actions=(*model.actions, *actions))
+
+        condition_match = re.fullmatch(
+            r"füge\s+(?:die\s+)?bedingung\s+(.+?)\s+hinzu[?.!]*",
+            normalized,
+            re.IGNORECASE,
+        )
+        if condition_match is not None:
+            condition = self._automation_condition_parser.parse(
+                condition_match.group(1), parse_context
+            )
+            if condition is None:
+                return None
+            updated = replace(model, conditions=(*model.conditions, condition))
+
+        if updated is None:
+            return None
+        validation_error = validate_automation(updated)
+        return AutomationMatchResult(
+            updated,
+            render_automation_tree(updated),
+            validation_error,
+        )
 
     def match_relative_time_automation(
         self,

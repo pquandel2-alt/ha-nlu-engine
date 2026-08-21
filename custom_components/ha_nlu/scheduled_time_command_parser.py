@@ -54,6 +54,8 @@ _CLOCK_WORD = "|".join(_CLOCK_HOURS)
 _DATE_PART = rf"""
     (?P<relative_date>heute|morgen|übermorgen)
     |
+    (?:am\s+)?(?P<workday>nächsten?|kommenden?)\s+werktag
+    |
     (?:am|nächsten?|kommenden?)\s+(?P<weekday>{'|'.join(_WEEKDAYS)})
     |
     am\s+(?P<day>\d{{1,2}})\.?\s+(?P<month>{'|'.join(_MONTHS)})
@@ -114,7 +116,14 @@ class ScheduledTimeCommandParser:
 
         relative_date = (match.group("relative_date") or "").casefold()
         weekday_name = (match.group("weekday") or "").casefold()
-        if relative_date:
+        if match.group("workday"):
+            schedule = CalendarSchedule(
+                reference=CalendarReference.NEXT_WORKDAY,
+                hour=hour,
+                minute=minute,
+                spoken=match.group("whole").strip(),
+            )
+        elif relative_date:
             reference = {
                 "heute": CalendarReference.TODAY,
                 "morgen": CalendarReference.TOMORROW,

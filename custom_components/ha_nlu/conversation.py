@@ -36,8 +36,9 @@ from .automation_management import (
     select_automation_management,
 )
 from .const import DOMAIN, NOT_UNDERSTOOD_TEXT
-from .device_control import match_device_control
+from .device_control import match_device_control, match_device_control_followup
 from .engine import (
+    AutomationDraftMatchResult,
     AutomationDeletionMatchResult,
     AutomationMatchResult,
     AutomationToggleMatchResult,
@@ -58,8 +59,10 @@ from .nlu.context import (
     ConversationContextStore,
     PendingAutomationConfirmation,
     PendingAutomationDeletion,
+    PendingAutomationDraft,
     PendingServiceConfirmation,
 )
+from .nlu.dialog_focus import DialogFocus, derive_dialog_focus
 from .nlu.ha_automation_generator import GenerationError, generate_ha_automation_config
 from .nlu.response_generator import _automation_label
 from .service_call import QUERY_INTENTS
@@ -219,6 +222,29 @@ class NluConversationEntity(
         pending = self._context_store.get(user_input.conversation_id)
 
         if pending is not None and pending.pending_automation_confirmation is not None:
+            revised = self._engine.revise_pending_automation(
+                user_input.text,
+                pending.pending_automation_confirmation.model,
+                entities,
+                self._world_model,
+            )
+            if revised is not None and revised.validation_error is None:
+                self._context_store.set(
+                    user_input.conversation_id,
+                    ConversationContext(
+                        last_command=None,
+                        last_entities=(),
+                        last_area=None,
+                        pending_clarification=None,
+                        pending_automation_confirmation=PendingAutomationConfirmation(
+                            model=revised.model
+                        ),
+                    ),
+                )
+                response.async_set_speech(render_automation_preview(revised.model, entities))
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
             return await self._async_handle_automation_confirmation_reply(
                 user_input, response, pending.pending_automation_confirmation, entities
             )
@@ -233,6 +259,41 @@ class NluConversationEntity(
                 user_input, response, pending.pending_service_confirmation
             )
 
+        if pending is not None and pending.pending_automation_draft is not None:
+            draft = pending.pending_automation_draft
+            completed = self._engine.complete_automation_draft(
+                user_input.text,
+                draft.trigger,
+                draft.source_text,
+                entities,
+                self._world_model,
+                pending,
+            )
+            if completed is None:
+                response.async_set_speech(
+                    "Was soll dann passieren? Bitte nenne eine vollständige Aktion."
+                )
+            elif completed.validation_error is not None:
+                self._context_store.clear(user_input.conversation_id)
+                response.async_set_speech(completed.response_text)
+            else:
+                self._context_store.set(
+                    user_input.conversation_id,
+                    ConversationContext(
+                        last_command=None,
+                        last_entities=(),
+                        last_area=None,
+                        pending_clarification=None,
+                        pending_automation_confirmation=PendingAutomationConfirmation(
+                            model=completed.model
+                        ),
+                    ),
+                )
+                response.async_set_speech(render_automation_preview(completed.model, entities))
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
         management_request = parse_automation_management(user_input.text)
         if management_request is not None:
             return await self._async_handle_automation_management(
@@ -240,9 +301,11 @@ class NluConversationEntity(
             )
 
         device_control = match_device_control(user_input.text, entities)
+        if device_control is None:
+            device_control = match_device_control_followup(user_input.text, pending)
         if device_control is not None:
-            self._context_store.clear(user_input.conversation_id)
             if device_control.plan is None:
+                self._context_store.clear(user_input.conversation_id)
                 response.async_set_speech(device_control.response_text)
             elif device_control.requires_confirmation:
                 self._context_store.set(
@@ -272,12 +335,34 @@ class NluConversationEntity(
                         blocking=True,
                     )
                 except Exception as err:  # noqa: BLE001 - HA service failures are heterogeneous
+                    self._context_store.clear(user_input.conversation_id)
                     response.async_set_error(
                         intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
                         f"Fehler beim Ausführen: {err}",
                     )
                 else:
                     response.async_set_speech(device_control.response_text)
+                    if device_control.entity is not None:
+                        controlled = device_control.entity
+                        self._context_store.set(
+                            user_input.conversation_id,
+                            ConversationContext(
+                                last_command=None,
+                                last_entities=(controlled,),
+                                last_area=None,
+                                pending_clarification=None,
+                                focus=DialogFocus(
+                                    property=None,
+                                    scope_kind="entity",
+                                    scope_id=controlled.entity_id,
+                                    candidate_entity_ids=(controlled.entity_id,),
+                                    source_intent=(
+                                        "DeviceControl:"
+                                        + device_control.plan.service
+                                    ),
+                                ),
+                            ),
+                        )
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
             )
@@ -288,7 +373,11 @@ class NluConversationEntity(
             )
             self._context_store.clear(user_input.conversation_id)
         else:
-            result = self._engine.match_followup(user_input.text, pending)
+            result = self._engine.match_correction_followup(
+                user_input.text, entities, pending
+            )
+            if result is None:
+                result = self._engine.match_followup(user_input.text, pending)
             if result is None:
                 result = self._engine.match_contextual_property_followup(
                     user_input.text, entities, pending
@@ -350,6 +439,10 @@ class NluConversationEntity(
                 )
             if result is None:
                 result = self._engine.match_calendar_time_automation(
+                    user_input.text, entities, self._world_model, pending
+                )
+            if result is None:
+                result = self._engine.match_automation_draft_start(
                     user_input.text, entities, self._world_model, pending
                 )
             if result is None:
@@ -460,6 +553,25 @@ class NluConversationEntity(
                 response=response, conversation_id=user_input.conversation_id
             )
 
+        if isinstance(result, AutomationDraftMatchResult):
+            self._context_store.set(
+                user_input.conversation_id,
+                ConversationContext(
+                    last_command=None,
+                    last_entities=(),
+                    last_area=None,
+                    pending_clarification=None,
+                    pending_automation_draft=PendingAutomationDraft(
+                        trigger=result.trigger,
+                        source_text=result.source_text,
+                    ),
+                ),
+            )
+            response.async_set_speech(result.response_text)
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
         if isinstance(result, AutomationDeletionMatchResult):
             # V5 Teil 8/10 (V5.28, "Automation Deletion"): mirrors the
             # AutomationMatchResult branch above - nothing is ever deleted
@@ -547,6 +659,7 @@ class NluConversationEntity(
                     last_entities=tuple(result.command.entities),
                     last_area=result.command.area,
                     pending_clarification=None,
+                    focus=derive_dialog_focus(result.command),
                 ),
             )
         else:

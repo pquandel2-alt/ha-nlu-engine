@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .automation_summary import AutomationSummary
-from .nlu.automation_model import AutomationModel
+from .nlu.automation_model import AutomationModel, TriggerModel
 from .nlu.automation_validator import AutomationValidationError
 
 
@@ -16,6 +16,15 @@ class AutomationMatchResult:
     model: AutomationModel
     response_text: str
     validation_error: AutomationValidationError | None
+
+
+@dataclass(frozen=True)
+class AutomationDraftMatchResult:
+    """A trigger-only request that needs an action in a later turn."""
+
+    trigger: TriggerModel
+    source_text: str
+    response_text: str = "Was soll dann passieren?"
 
 
 @dataclass(frozen=True)

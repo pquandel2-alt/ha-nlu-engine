@@ -26,8 +26,9 @@ from ..automation_summary import AutomationSummary
 from ..entities import EntitySnapshot
 from ..floors import FloorSnapshot
 from ..service_call import ServiceCallPlan
-from .automation_model import AutomationModel
+from .automation_model import AutomationModel, TriggerModel
 from .command import SemanticCommand
+from .dialog_focus import DialogFocus
 from .parser import ClarificationRequest
 from .primitives import SemanticProperty
 from .semantic_state import SemanticState
@@ -41,6 +42,7 @@ __all__ = [
     "PendingAutomationConfirmation",
     "PendingAutomationDeletion",
     "PendingServiceConfirmation",
+    "PendingAutomationDraft",
 ]
 
 
@@ -94,6 +96,14 @@ class PendingServiceConfirmation:
 
     plan: ServiceCallPlan
     success_text: str
+
+
+@dataclass(frozen=True)
+class PendingAutomationDraft:
+    """A valid spoken trigger waiting for the action in the next turn."""
+
+    trigger: TriggerModel
+    source_text: str
 
 # No TTL value is specified anywhere in the plan (only the test case name
 # "context expiration", brain node 9ced4390, section 26). 30s covers a
@@ -153,6 +163,11 @@ class ConversationContext:
     # from Home Assistant (see PendingAutomationDeletion's own docstring).
     pending_automation_deletion: PendingAutomationDeletion | None = None
     pending_service_confirmation: PendingServiceConfirmation | None = None
+    # Explicit semantic focus for general follow-ups. This complements the
+    # legacy last_* fields and avoids repeatedly reverse-engineering scope
+    # and property from free-form parser parameters.
+    focus: DialogFocus | None = None
+    pending_automation_draft: PendingAutomationDraft | None = None
 
 
 class ConversationContextStore:
@@ -193,6 +208,7 @@ class ConversationContextStore:
             if context.pending_automation_confirmation is not None
             or context.pending_automation_deletion is not None
             or context.pending_service_confirmation is not None
+            or context.pending_automation_draft is not None
             else self._ttl_seconds
         )
         self._entries[conversation_id] = (self._clock(), ttl_seconds, context)
