@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 from homeassistant.components.automation.config import PLATFORM_SCHEMA
@@ -45,5 +46,11 @@ result = generate_ha_automation_config(
 if result.error is not None or result.config is None:
     raise RuntimeError(f"HomeIntent generation failed: {result.error}")
 
-PLATFORM_SCHEMA({"id": "homeintent-schema-smoke", **result.config})
+
+async def _validate() -> None:
+    """Run schema validation in the event-loop context required by HA templates."""
+    PLATFORM_SCHEMA({"id": "homeintent-schema-smoke", **result.config})
+
+
+asyncio.run(_validate())
 print("HOME_ASSISTANT_AUTOMATION_SCHEMA_OK")
