@@ -39,7 +39,7 @@ from .entities import EntitySnapshot, ResolveStatus, build_entity_index, resolve
 from .nlu.command import SemanticCommand, build_semantic_command
 from .nlu.context import ConversationContext
 from .nlu.debug import DebugTrace, format_command
-from .nlu.frame import SemanticFrame, TargetReference
+from .nlu.frame import AreaReference, SemanticFrame, TargetReference
 from .nlu.normalize import normalize
 from .nlu.parser import AmbiguousReference, ClarificationRequest, ParseContext, ParseResult
 from .nlu.reasoning import ReasoningEngine, ResolvedSemanticIntent
@@ -306,7 +306,11 @@ _AND_SPLIT_RE = re.compile(r"\s+und\s+", re.IGNORECASE)
 # (it's "ist [die|der|das] {name}"), grepped empirically before adding this,
 # same "one keyword, one dedicated grammar" precedent every regex above
 # already follows.
-_AREA_QUERY_RE = re.compile(r"\bist\s+es\b", re.IGNORECASE)
+_AREA_QUERY_RE = re.compile(
+    r"\bist\s+es\b|\bwie\s+hoch\s+ist\s+die\s+temperatur\b|"
+    r"\bwelche\s+temperatur\s+hat\b",
+    re.IGNORECASE,
+)
 
 # "automation(en)"/"was schaltet"/"was steuert"/"warum ist"/"warum geht"
 # routes to AutomationQueryParser's separately-compiled grammar (HomeIntent
@@ -377,6 +381,7 @@ _DOMAIN_QUESTION_WORD_DE = {
     "cover": "Welche Rollläden",
     "fan": "Welchen Ventilator",
     "climate": "Welche Heizung",
+    "sensor": "Welchen Sensor",
 }
 
 
@@ -632,14 +637,18 @@ class NluEngine:
             return self._light_extended_parser
         if _FAN_EXTENDED_RE.search(text):
             return self._fan_extended_parser
+        # The location-temperature vocabulary is narrower than the general
+        # climate keyword gate (which also contains "Temperatur"). Route
+        # these questions first so they cannot be mistaken for a setpoint
+        # command.
+        if _AREA_QUERY_RE.search(text):
+            return self._area_query_parser
         if _CLIMATE_EXTENDED_RE.search(text):
             return self._climate_extended_parser
         if _PERCENT_RE.search(text) or _BARE_PERCENT_RE.search(text):
             return self._percentage_parser
         if _QUANTIFIER_RE.search(text):
             return self._quantifier_parser
-        if _AREA_QUERY_RE.search(text):
-            return self._area_query_parser
         return self._single_parser
 
     def match(
@@ -1301,11 +1310,33 @@ class NluEngine:
         if entity is None:
             return None
 
-        spec = INTENTS.get(clarification.pending_intent)
-        if spec is None:
-            return None
         matched = [entity]
-        return MatchResult(plan=spec.build(matched), response_text=spec.response(matched))
+        spec = INTENTS.get(clarification.pending_intent)
+        if spec is not None:
+            return MatchResult(plan=spec.build(matched), response_text=spec.response(matched))
+        if clarification.pending_intent in QUERY_INTENTS:
+            area = (
+                AreaReference(text=entity.area_name, area_id=entity.area_id)
+                if entity.area_id is not None and entity.area_name is not None
+                else None
+            )
+            return self._build_match_result(
+                ParseResult(
+                    frame=SemanticFrame(
+                        intent=clarification.pending_intent,
+                        target=TargetReference(
+                            text=entity.friendly_name,
+                            entity_id=entity.entity_id,
+                            domain=entity.domain,
+                        ),
+                        area=area,
+                        source_text=reply_text,
+                    ),
+                    resolved_entities=matched,
+                ),
+                entities,
+            )
+        return None
 
     def respond(self, text: str, entities: list[EntitySnapshot]) -> NluResponse:
         """Same matching as ``match()``, but never collapses a miss to a bare

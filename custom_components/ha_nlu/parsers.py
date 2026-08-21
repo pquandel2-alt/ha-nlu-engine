@@ -796,7 +796,7 @@ class TemporalParser:
 
 
 class AreaQueryParser:
-    """Wraps the {area} grammar ("wie warm ist es im Wohnzimmer") - the 11th
+    """Wraps location temperature queries ("wie warm ist es im Wohnzimmer") - the 11th
     separately-compiled hassil grammar, HomeIntent plan V4.9, "Cross-
     Sentence References" (first-turn half: a state query with no entity
     name at all, only a room).
@@ -822,7 +822,9 @@ class AreaQueryParser:
     def __init__(self, intents: Intents) -> None:
         self._intents = intents
 
-    def parse(self, text: str, context: ParseContext) -> ParseResult | None:
+    def parse(
+        self, text: str, context: ParseContext
+    ) -> ParseResult | ClarificationRequest | None:
         slot_lists = {"area": WildcardSlotList(name="area")}
         result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
         if result is None or result.intent is None:
@@ -835,22 +837,46 @@ class AreaQueryParser:
         if not area_name:
             return None
 
+        area_id = None
+        floor_id = None
         area_resolved = resolve_area_name(area_name, context.entities)
-        if area_resolved.status is not AreaResolveStatus.OK:
-            return None  # room not found or ambiguous - never guess
+        if area_resolved.status is AreaResolveStatus.OK:
+            area_id = area_resolved.area_id
+        elif area_resolved.status is AreaResolveStatus.NOT_FOUND:
+            floor_resolved = resolve_floor_name(area_name, context.entities)
+            if floor_resolved.status is not FloorResolveStatus.OK:
+                return None  # neither a known room nor a known floor
+            floor_id = floor_resolved.floor_id
+        else:
+            return None  # ambiguous room name - never guess
 
         matches = resolve_candidates(
             context.entities,
-            Constraints(domain="sensor", area_id=area_resolved.area_id, device_class="temperature"),
+            Constraints(
+                domain="sensor",
+                area_id=area_id,
+                floor_id=floor_id,
+                device_class="temperature",
+            ),
         )
-        if len(matches) != 1:
-            return None  # no single unambiguous temperature sensor in that room - never guess
+        if not matches:
+            return None
+        if len(matches) > 1:
+            return ClarificationRequest(
+                pending_intent=result.intent.name,
+                pending_target=area_name,
+                candidates=tuple(matches),
+            )
         entity = matches[0]
 
         frame = SemanticFrame(
             intent=result.intent.name,
             target=TargetReference(text=area_name, entity_id=entity.entity_id, domain=entity.domain),
-            area=AreaReference(text=area_name, area_id=area_resolved.area_id),
+            area=(
+                AreaReference(text=area_name, area_id=area_id)
+                if area_id is not None
+                else None
+            ),
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=[entity])

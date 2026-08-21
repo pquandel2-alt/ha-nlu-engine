@@ -10,3 +10,5 @@ intents:
     data:
       - sentences:
           - "wie [warm|kalt] ist es [in der|in dem|im|am|beim] {area}"
+          - "wie hoch ist die temperatur [in der|in dem|im|am|beim] {area}"
+          - "welche temperatur hat [die|der|das] {area}"

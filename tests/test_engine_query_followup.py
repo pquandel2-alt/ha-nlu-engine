@@ -94,13 +94,54 @@ def test_area_query_first_turn_variant_kalt(engine):
     assert result.command.entities[0].entity_id == "sensor.wohnzimmer_temp"
 
 
-def test_area_query_first_turn_returns_none_for_ambiguous_area(engine):
+def test_area_query_first_turn_asks_for_sensor_when_location_has_multiple(engine):
     entities = ENTITIES + [WOHNZIMMER_TEMP_2]
-    assert engine.match("wie warm ist es im Wohnzimmer", entities) is None
+    result = engine.match("wie warm ist es im Wohnzimmer", entities)
+    assert result.clarification is not None
+    assert result.response_text == "Welchen Sensor meinst du?"
 
 
 def test_area_query_first_turn_returns_none_for_unresolvable_area(engine):
     assert engine.match("wie warm ist es im Partykeller", ENTITIES) is None
+
+
+def test_temperature_query_resolves_erdgeschoss_as_a_floor(engine):
+    for sentence in (
+        "Wie warm ist es im Erdgeschoss?",
+        "Wie hoch ist die Temperatur im Erdgeschoss?",
+        "Welche Temperatur hat das Erdgeschoss?",
+    ):
+        result = engine.match(sentence, ENTITIES)
+        assert result is not None
+        assert result.command.entities[0].entity_id == "sensor.kueche_temp"
+        assert result.response_text == "23.0 Grad."
+
+
+def test_floor_temperature_query_clarifies_multiple_sensors(engine):
+    second_eg_sensor = EntitySnapshot(
+        "sensor.wohnzimmer_eg_temp",
+        "Wohnzimmer EG Temperatur",
+        "sensor",
+        "21.0",
+        area_id="wohnzimmer",
+        area_name="Wohnzimmer",
+        floor_id="eg",
+        floor_name="Erdgeschoss",
+        floor_level=0,
+        unit="°C",
+        device_class="temperature",
+    )
+    entities = ENTITIES + [second_eg_sensor]
+
+    preview = engine.match("Welche Temperatur hat das Erdgeschoss?", entities)
+    assert preview.clarification is not None
+    assert preview.response_text == "Welchen Sensor meinst du?"
+
+    resolved = engine.resolve_clarification(
+        "Küche Temperatur", preview.clarification, entities
+    )
+    assert resolved is not None
+    assert resolved.response_text == "23.0 Grad."
 
 
 def test_query_followup_area(engine):

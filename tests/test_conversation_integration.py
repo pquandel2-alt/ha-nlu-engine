@@ -21,6 +21,8 @@ import sys
 from pathlib import Path
 from unittest.mock import AsyncMock
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "custom_components"))
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -43,6 +45,19 @@ FLUR_LICHT_OFF = EntitySnapshot(
 FLUR_LICHT_ON = EntitySnapshot(
     "light.flur_licht", "Flurlicht", "light", "on",
     capabilities=frozenset({"TURN_ON", "TURN_OFF", "BRIGHTNESS"}),
+)
+EG_TEMPERATUR = EntitySnapshot(
+    "sensor.kueche_temperatur",
+    "Küche Temperatur",
+    "sensor",
+    "22.4",
+    area_id="kueche",
+    area_name="Küche",
+    floor_id="eg",
+    floor_name="Erdgeschoss",
+    floor_level=0,
+    unit="°C",
+    device_class="temperature",
 )
 
 
@@ -89,6 +104,56 @@ def test_state_query_returns_query_answer_and_does_not_call_service(monkeypatch)
     entity.hass.services.async_call.assert_not_awaited()
     assert result.response.response_type == intent.IntentResponseType.QUERY_ANSWER
     assert "Flurlicht" in result.response.speech
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    (
+        "Wie warm ist es im Erdgeschoss?",
+        "Wie hoch ist die Temperatur im Erdgeschoss?",
+        "Welche Temperatur hat das Erdgeschoss?",
+    ),
+)
+def test_floor_temperature_question_reaches_live_conversation_query(
+    monkeypatch, sentence
+):
+    entity = _make_entity(monkeypatch, [EG_TEMPERATUR])
+
+    result = _run(entity, sentence)
+
+    entity.hass.services.async_call.assert_not_awaited()
+    assert result.response.error_code is None
+    assert result.response.response_type == intent.IntentResponseType.QUERY_ANSWER
+    assert result.response.speech == "22.4 Grad."
+
+
+def test_floor_temperature_question_clarifies_multiple_sensors(monkeypatch):
+    second = EntitySnapshot(
+        "sensor.wohnzimmer_temperatur",
+        "Wohnzimmer Temperatur",
+        "sensor",
+        "21.8",
+        area_id="wohnzimmer",
+        area_name="Wohnzimmer",
+        floor_id="eg",
+        floor_name="Erdgeschoss",
+        floor_level=0,
+        unit="°C",
+        device_class="temperature",
+    )
+    entity = _make_entity(monkeypatch, [EG_TEMPERATUR, second])
+
+    question = _run(
+        entity,
+        "Welche Temperatur hat das Erdgeschoss?",
+        conversation_id="floor-temp",
+    )
+    answer = _run(entity, "Küche Temperatur", conversation_id="floor-temp")
+
+    assert question.response.speech == "Welchen Sensor meinst du?"
+    assert answer.response.error_code is None
+    assert answer.response.response_type == intent.IntentResponseType.QUERY_ANSWER
+    assert answer.response.speech == "22.4 Grad."
 
 
 def test_unmatched_sentence_returns_not_understood(monkeypatch):
