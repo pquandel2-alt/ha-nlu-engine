@@ -6,6 +6,7 @@ import asyncio
 from datetime import datetime, timezone
 
 from homeassistant.components.automation.config import PLATFORM_SCHEMA
+from homeassistant.core import HomeAssistant
 
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.action_model import ActionModel, ActionType
@@ -49,6 +50,8 @@ if result.error is not None or result.config is None:
 
 async def _validate() -> None:
     """Run schema validation in the event-loop context required by HA templates."""
+    # HA's template validator resolves the active instance from loop-local state.
+    HomeAssistant("/tmp/homeintent-schema-smoke")
     PLATFORM_SCHEMA({"id": "homeintent-schema-smoke", **result.config})
 
 
