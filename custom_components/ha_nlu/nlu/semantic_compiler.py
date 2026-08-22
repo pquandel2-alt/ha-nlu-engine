@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from ..areas import AreaSnapshot
 from ..entities import EntitySnapshot, generate_aliases, normalize_for_compare
 from ..floors import FloorResolveStatus, resolve_floor_by_level_keyword
 from .constraint_resolver import Constraints, resolve_candidates
@@ -23,6 +24,9 @@ from .frame import AreaReference, Quantifier, SemanticFrame, TargetReference
 from .group_semantics import resolve_group_location
 from .parser import ClarificationRequest, ParseResult
 from .primitives import SemanticAction, SemanticProperty, SemanticQuantity
+from .query_command import QueryCommand, QueryFilter, QueryScope, QueryTarget
+from .query_executor import QueryExecutor
+from .semantic_state import SemanticState
 
 
 @dataclass(frozen=True)
@@ -113,6 +117,39 @@ _DOMAIN_CANONICAL = {
     "heizung": "climate", "heizungen": "climate", "thermostat": "climate", "thermostate": "climate",
     "skript": "script", "skripte": "script",
 }
+
+_QUERY_DEVICE_PATTERNS = {
+    ("binary_sensor", "window"): re.compile(r"\bfenster(?:kontakte?)?\b", re.I),
+    ("binary_sensor", "door"): re.compile(r"\btür(?:en)?\b", re.I),
+    ("binary_sensor", "garage_door"): re.compile(r"\bgaragentor(?:e)?\b", re.I),
+    ("binary_sensor", "motion"): re.compile(r"\b(?:bewegungsmelder|bewegungssensor(?:en)?)\b", re.I),
+    ("cover", None): _DOMAIN_PATTERNS["cover"],
+    ("light", None): _DOMAIN_PATTERNS["light"],
+    ("switch", None): _DOMAIN_PATTERNS["switch"],
+}
+_QUERY_STATE_PATTERNS = {
+    SemanticState.OPEN: re.compile(
+        r"\b(?:offen\w*|geöffnet\w*|hochgefahren\w*|oben)\b", re.I
+    ),
+    SemanticState.CLOSED: re.compile(
+        r"\b(?:geschlossen\w*|runtergefahren\w*|heruntergefahren\w*|unten|zu)\b", re.I
+    ),
+    SemanticState.ON: re.compile(r"\b(?:an|ein|eingeschaltet\w*|angeschaltet\w*)\b", re.I),
+    SemanticState.OFF: re.compile(r"\b(?:aus|ausgeschaltet\w*)\b", re.I),
+}
+_QUERY_MARKER_RE = re.compile(
+    r"\b(?:ist|sind|welch\w*|wie\s+viele|wo|gibt\s+es|haben\s+wir|irgendein\w*|keine?\w*)\b",
+    re.I,
+)
+_COUNT_QUERY_RE = re.compile(r"\bwie\s+viele\b", re.I)
+_LOCATION_QUERY_RE = re.compile(r"\b(?:wo|in\s+welchen\s+räumen|welche\s+räume)\b", re.I)
+_EXISTS_QUERY_RE = re.compile(r"\b(?:gibt\s+es|haben\s+wir|irgendein\w*|irgendwelche)\b", re.I)
+_ALL_QUERY_RE = re.compile(r"\b(?:alle|sämtliche|sämtlichen|beide)\b", re.I)
+_NONE_QUERY_RE = re.compile(r"\b(?:kein|keine|keiner|keines)\b", re.I)
+_SINGULAR_NAMED_QUERY_RE = re.compile(r"^\s*ist\s+(?:das|der|die)\b", re.I)
+_DURATION_QUESTION_RE = re.compile(r"^\s*wie\s+lange\b", re.I)
+
+_QUERY_EXECUTOR = QueryExecutor()
 
 
 def _tokens(text: str) -> set[str]:
@@ -338,4 +375,131 @@ class SemanticCommandCompiler:
                 quantity=semantic_quantity,
             ),
             resolved_entities=matches,
+        )
+
+
+class SemanticQueryCompiler:
+    """Compile plural state questions from freely ordered semantic facts."""
+
+    @staticmethod
+    def compile(text: str, entities: list[EntitySnapshot]) -> ParseResult | None:
+        # A question mark alone also supports terse chat-style questions such
+        # as "Offene Fenster im Erdgeschoss?".  An imperative verb always
+        # wins the command interpretation and is never converted to a query.
+        if (
+            not (_QUERY_MARKER_RE.search(text) or text.rstrip().endswith("?"))
+            or _COMMAND_VERB_RE.search(text)
+            or _SINGULAR_NAMED_QUERY_RE.search(text)
+            or _DURATION_QUESTION_RE.search(text)
+        ):
+            return None
+
+        targets = [
+            (domain, device_class)
+            for (domain, device_class), pattern in _QUERY_DEVICE_PATTERNS.items()
+            if pattern.search(text)
+        ]
+        states = [state for state, pattern in _QUERY_STATE_PATTERNS.items() if pattern.search(text)]
+        if len(targets) != 1 or len(states) != 1:
+            return None
+        domain, device_class = targets[0]
+        requested_state = states[0]
+
+        location = _location(text, entities)
+        has_location_cue = _LOCATION_CUE_RE.search(text) is not None
+        if has_location_cue and location is None:
+            return None
+        area_id = location[1] if location else None
+        floor_id = location[2] if location else None
+        location_name = location[0] if location else None
+
+        candidates = resolve_candidates(
+            entities,
+            Constraints(
+                domain=domain,
+                device_class=device_class,
+                area_id=area_id,
+                floor_id=floor_id,
+            ),
+        )
+        # The target category itself must exist. An empty *state match* is a
+        # valid answer, but inventing an answer for a home with no such
+        # selected entities would hide configuration errors.
+        if not candidates:
+            return None
+
+        if _NONE_QUERY_RE.search(text):
+            scope = QueryScope.NONE
+        elif _ALL_QUERY_RE.search(text):
+            if re.search(r"\bbeide\b", text, re.I) and len(candidates) != 2:
+                return None
+            scope = QueryScope.ALL
+        elif _COUNT_QUERY_RE.search(text):
+            scope = QueryScope.COUNT
+        elif _LOCATION_QUERY_RE.search(text):
+            scope = QueryScope.LOCATIONS
+        elif _EXISTS_QUERY_RE.search(text):
+            scope = QueryScope.EXISTS
+        else:
+            scope = QueryScope.LIST
+
+        intent = "HassExistsQuery" if scope is QueryScope.EXISTS else "HassStateQuery"
+        area_snapshot = (
+            AreaSnapshot(area_id=area_id, name=location_name)
+            if area_id is not None and location_name is not None
+            else None
+        )
+        query_command = QueryCommand(
+            intent=intent,
+            scope=scope,
+            target=QueryTarget(
+                domain=domain,
+                device_class=device_class,
+                area=area_snapshot,
+            ),
+            filter=QueryFilter(state=requested_state),
+        )
+        query_result = _QUERY_EXECUTOR.execute(query_command, candidates)
+
+        semantic_quantity = (
+            SemanticQuantity.exactly(2)
+            if re.search(r"\bbeide\b", text, re.I)
+            else SemanticQuantity.all()
+        )
+        return ParseResult(
+            frame=SemanticFrame(
+                intent=intent,
+                target=TargetReference(
+                    text=device_class or domain,
+                    domain=domain,
+                    device_class=device_class,
+                ),
+                area=(
+                    AreaReference(
+                        text=location_name,
+                        area_id=area_id,
+                        area_name=location_name,
+                    )
+                    if area_id is not None and location_name is not None
+                    else None
+                ),
+                quantifier=Quantifier("all"),
+                parameters={
+                    "semantic_state": requested_state,
+                    "count_only": scope is QueryScope.COUNT,
+                    "all_requested": scope is QueryScope.ALL,
+                    "none_requested": scope is QueryScope.NONE,
+                    "locations_requested": scope is QueryScope.LOCATIONS,
+                    "device_class": device_class,
+                    "domain": domain,
+                    "floor_id": floor_id,
+                    "floor_name": location_name if floor_id is not None else None,
+                    "query_command": query_command,
+                    "query_result": query_result,
+                },
+                source_text=text,
+                action=SemanticAction.QUERY,
+                quantity=semantic_quantity,
+            ),
+            resolved_entities=list(query_result.entities),
         )

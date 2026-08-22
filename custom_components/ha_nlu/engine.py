@@ -48,7 +48,7 @@ from .nlu.response import NluError, NluResponse
 from .nlu.parse_outcome import ParseFailureReason, UnderstandingFeedback
 from .nlu.response_generator import ResponseGenerator, _automation_label
 from .nlu.service_mapper import map_to_service_call
-from .nlu.semantic_compiler import SemanticCommandCompiler
+from .nlu.semantic_compiler import SemanticCommandCompiler, SemanticQueryCompiler
 from .nlu.validator import validate_command
 from .automation_action_parser import AutomationActionParser
 from .automation_condition_parser import AutomationConditionParser, split_on_top_level_and
@@ -732,6 +732,8 @@ class NluEngine:
         # not fall through to a broader wildcard parser (for example,
         # "beide" must never degrade into a singular command).
         result = self._select_parser(text).parse(text, parse_context)
+        if result is None:
+            result = SemanticQueryCompiler.compile(text, entities)
         if result is None:
             result = SemanticCommandCompiler.compile(text, entities)
         if result is None:

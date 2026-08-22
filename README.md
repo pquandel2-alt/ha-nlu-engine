@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
 
-- Aktuelle Version: **4.26.0**
+- Aktuelle Version: **4.26.1**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Lizenz: **MIT**
@@ -147,6 +147,8 @@ Welchen Zustand hat das Badezimmer Fenster?
 Was ist der Status vom Badezimmer Fenster?
 Sind alle Rollläden hochgefahren?
 Sind sämtliche Rollläden oben?
+Sind im Erdgeschoss offene Fenster?
+Offene Fenster, gibt es die im Erdgeschoss?
 Ist irgendein Fenster offen?
 Ist kein Fenster offen?
 Wie viele Fenster sind im Erdgeschoss geöffnet?
