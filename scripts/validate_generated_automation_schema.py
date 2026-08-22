@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 
 from homeassistant.components.automation.config import PLATFORM_SCHEMA
+from homeassistant.components.calendar import CREATE_EVENT_SCHEMA
 from homeassistant.core import HomeAssistant
 
+from ha_nlu.calendar_event import CalendarEventDraft, build_calendar_event_service_call
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.action_model import ActionModel, ActionType
 from ha_nlu.nlu.automation_model import AutomationModel, TriggerModel, TriggerTarget, TriggerType
@@ -47,13 +49,33 @@ result = generate_ha_automation_config(
 if result.error is not None or result.config is None:
     raise RuntimeError(f"HomeIntent generation failed: {result.error}")
 
+calendar = EntitySnapshot(
+    "calendar.privat",
+    "Privat",
+    "calendar",
+    "off",
+    capabilities=frozenset({"CREATE_EVENT"}),
+)
+calendar_call = build_calendar_event_service_call(
+    CalendarEventDraft(
+        title="Schema-Prüfung",
+        event_date=date(2026, 8, 25),
+        start_time=time(10, 0),
+        duration_minutes=60,
+        calendar_entity_id=calendar.entity_id,
+    ),
+    (calendar,),
+    datetime(2026, 8, 22, 12, 0, tzinfo=timezone.utc),
+)
+
 
 async def _validate() -> None:
     """Run schema validation in the event-loop context required by HA templates."""
     # HA's template validator resolves the active instance from loop-local state.
     HomeAssistant("/tmp/homeintent-schema-smoke")
     PLATFORM_SCHEMA({"id": "homeintent-schema-smoke", **result.config})
+    CREATE_EVENT_SCHEMA(calendar_call.data)
 
 
 asyncio.run(_validate())
-print("HOME_ASSISTANT_AUTOMATION_SCHEMA_OK")
+print("HOME_ASSISTANT_AUTOMATION_AND_CALENDAR_SCHEMA_OK")

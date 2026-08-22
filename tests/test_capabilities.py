@@ -96,6 +96,15 @@ def test_sensor_without_relevant_device_class_has_no_capabilities():
     assert caps == frozenset()
 
 
+def test_calendar_create_event_requires_the_real_supported_feature_bit():
+    assert derive_capabilities(
+        "calendar", None, {"supported_features": 1}
+    ) == {Capability.CREATE_EVENT}
+    assert derive_capabilities(
+        "calendar", None, {"supported_features": 0}
+    ) == frozenset()
+
+
 def test_required_capability_for_property_covers_every_property_with_a_capability_counterpart():
     assert required_capability_for_property(SemanticProperty.BRIGHTNESS) is Capability.BRIGHTNESS
     assert required_capability_for_property(SemanticProperty.COLOR) is Capability.COLOR

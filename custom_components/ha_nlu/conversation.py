@@ -35,6 +35,15 @@ from .automation_management import (
     parse_automation_management,
     select_automation_management,
 )
+from .calendar_event import (
+    CalendarEventDraft,
+    build_calendar_event_service_call,
+    calendar_event_question,
+    render_calendar_event_preview,
+    start_calendar_event_draft,
+    update_calendar_event_draft,
+    writable_calendars,
+)
 from .const import DOMAIN, NOT_UNDERSTOOD_TEXT
 from .device_control import match_device_control, match_device_control_followup
 from .engine import (
@@ -60,6 +69,7 @@ from .nlu.context import (
     PendingAutomationConfirmation,
     PendingAutomationDeletion,
     PendingAutomationDraft,
+    PendingCalendarEvent,
     PendingServiceConfirmation,
 )
 from .nlu.dialog_focus import DialogFocus, derive_dialog_focus
@@ -221,6 +231,12 @@ class NluConversationEntity(
         self._world_model = assemble_world_model(entities, devices)
         pending = self._context_store.get(user_input.conversation_id)
 
+        calendars = writable_calendars(entities)
+        if pending is not None and pending.pending_calendar_event is not None:
+            return await self._async_handle_calendar_event_turn(
+                user_input, response, pending.pending_calendar_event, calendars
+            )
+
         if pending is not None and pending.pending_automation_confirmation is not None:
             revised = self._engine.revise_pending_automation(
                 user_input.text,
@@ -290,6 +306,32 @@ class NluConversationEntity(
                     ),
                 )
                 response.async_set_speech(render_automation_preview(completed.model, entities))
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        calendar_draft = start_calendar_event_draft(
+            user_input.text, calendars, dt_util.now()
+        )
+        if calendar_draft is not None:
+            if not calendars:
+                self._context_store.clear(user_input.conversation_id)
+                response.async_set_speech(
+                    "Ich finde keinen für HomeIntent freigegebenen, beschreibbaren Kalender."
+                )
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
+            question = calendar_event_question(calendar_draft, calendars)
+            awaiting_confirmation = question is None
+            self._store_calendar_event(
+                user_input.conversation_id, calendar_draft, awaiting_confirmation
+            )
+            response.async_set_speech(
+                render_calendar_event_preview(calendar_draft, calendars)
+                if awaiting_confirmation
+                else question
+            )
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
             )
@@ -797,6 +839,114 @@ class NluConversationEntity(
             )
 
         response.async_set_speech(AUTOMATION_CREATED_TEXT)
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    def _store_calendar_event(
+        self,
+        conversation_id: str,
+        draft: CalendarEventDraft,
+        awaiting_confirmation: bool,
+    ) -> None:
+        self._context_store.set(
+            conversation_id,
+            ConversationContext(
+                last_command=None,
+                last_entities=(),
+                last_area=None,
+                pending_clarification=None,
+                pending_calendar_event=PendingCalendarEvent(
+                    draft=draft, awaiting_confirmation=awaiting_confirmation
+                ),
+            ),
+        )
+
+    async def _async_handle_calendar_event_turn(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        pending: PendingCalendarEvent,
+        calendars: tuple[EntitySnapshot, ...],
+    ) -> conversation.ConversationResult:
+        """Complete, revise, confirm, and finally create one calendar event."""
+        reply = classify_confirmation_reply(user_input.text)
+        if reply is ConfirmationReply.NO:
+            self._context_store.clear(user_input.conversation_id)
+            response.async_set_speech("Abgebrochen. Der Termin wurde nicht eingetragen.")
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        if not pending.awaiting_confirmation and reply is ConfirmationReply.YES:
+            response.async_set_speech(
+                calendar_event_question(pending.draft, calendars)
+                or "Bitte ergänze die noch fehlende Terminangabe."
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        if pending.awaiting_confirmation and reply is ConfirmationReply.YES:
+            try:
+                call = build_calendar_event_service_call(
+                    pending.draft, calendars, dt_util.now()
+                )
+            except ValueError as err:
+                response.async_set_speech(
+                    f"Der Termin kann so nicht eingetragen werden: {err}. Bitte korrigiere die Angabe."
+                )
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
+
+            self._context_store.clear(user_input.conversation_id)
+            try:
+                await self.hass.services.async_call(
+                    "calendar",
+                    "create_event",
+                    call.data,
+                    target={"entity_id": call.entity_id},
+                    blocking=True,
+                )
+            except Exception as err:  # noqa: BLE001 - HA calendar integrations raise heterogeneous errors
+                _LOGGER.error("Calendar event creation failed: %s", err)
+                response.async_set_error(
+                    intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                    f"Fehler beim Eintragen des Termins: {err}",
+                )
+            else:
+                response.async_set_speech("Der Termin wurde eingetragen.")
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        update = update_calendar_event_draft(
+            user_input.text, pending.draft, calendars, dt_util.now()
+        )
+        if update.error_text is not None:
+            response.async_set_speech(update.error_text)
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+        if pending.awaiting_confirmation and not update.changed:
+            response.async_set_speech(
+                "Bitte antworte mit Ja oder Nein. Du kannst Datum, Uhrzeit, Dauer, Titel oder Kalender auch noch korrigieren."
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        question = calendar_event_question(update.draft, calendars)
+        awaiting_confirmation = question is None
+        self._store_calendar_event(
+            user_input.conversation_id, update.draft, awaiting_confirmation
+        )
+        response.async_set_speech(
+            render_calendar_event_preview(update.draft, calendars)
+            if awaiting_confirmation
+            else question
+        )
         return conversation.ConversationResult(
             response=response, conversation_id=user_input.conversation_id
         )

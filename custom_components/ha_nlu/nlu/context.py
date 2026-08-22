@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from ..areas import AreaSnapshot
 from ..automation_summary import AutomationSummary
@@ -33,6 +33,9 @@ from .parser import ClarificationRequest
 from .primitives import SemanticProperty
 from .semantic_state import SemanticState
 
+if TYPE_CHECKING:
+    from ..calendar_event import CalendarEventDraft
+
 __all__ = [
     "ClarificationRequest",
     "ConversationContext",
@@ -43,6 +46,7 @@ __all__ = [
     "PendingAutomationDeletion",
     "PendingServiceConfirmation",
     "PendingAutomationDraft",
+    "PendingCalendarEvent",
 ]
 
 
@@ -104,6 +108,14 @@ class PendingAutomationDraft:
 
     trigger: TriggerModel
     source_text: str
+
+
+@dataclass(frozen=True)
+class PendingCalendarEvent:
+    """A calendar event being completed or awaiting final confirmation."""
+
+    draft: "CalendarEventDraft"
+    awaiting_confirmation: bool = False
 
 # No TTL value is specified anywhere in the plan (only the test case name
 # "context expiration", brain node 9ced4390, section 26). 30s covers a
@@ -168,6 +180,7 @@ class ConversationContext:
     # and property from free-form parser parameters.
     focus: DialogFocus | None = None
     pending_automation_draft: PendingAutomationDraft | None = None
+    pending_calendar_event: PendingCalendarEvent | None = None
 
 
 class ConversationContextStore:
@@ -209,6 +222,7 @@ class ConversationContextStore:
             or context.pending_automation_deletion is not None
             or context.pending_service_confirmation is not None
             or context.pending_automation_draft is not None
+            or context.pending_calendar_event is not None
             else self._ttl_seconds
         )
         self._entries[conversation_id] = (self._clock(), ttl_seconds, context)

@@ -146,6 +146,6 @@ def test_garage_movement_can_be_cancelled(monkeypatch, tmp_path):
 
 
 def test_every_extended_domain_is_selectable_in_live_home_assistant():
-    assert {"climate", "media_player", "vacuum", "scene", "lock"} <= set(
+    assert {"climate", "media_player", "vacuum", "scene", "lock", "calendar"} <= set(
         SELECTABLE_DOMAINS
     )

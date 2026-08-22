@@ -17,7 +17,7 @@ CONF_SELECTED_ENTITIES = "selected_entities"
 # a missing intent/parser (see service_call.py's HassRunScript).
 SELECTABLE_DOMAINS = (
     "light", "switch", "fan", "cover", "sensor", "binary_sensor", "script",
-    "climate", "media_player", "vacuum", "scene", "lock",
+    "climate", "media_player", "vacuum", "scene", "lock", "calendar",
 )
 
 NOT_UNDERSTOOD_TEXT = "Das habe ich nicht verstanden."

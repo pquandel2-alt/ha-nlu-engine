@@ -7,12 +7,14 @@ dataclasses and store directly.
 from __future__ import annotations
 
 from ha_nlu.entities import EntitySnapshot
+from ha_nlu.calendar_event import CalendarEventDraft
 from ha_nlu.nlu.context import (
     ClarificationRequest,
     ConversationContext,
     ConversationContextStore,
     PendingAutomationConfirmation,
     PendingAutomationDraft,
+    PendingCalendarEvent,
 )
 from ha_nlu.nlu.automation_model import AutomationModel, TriggerModel, TriggerType
 
@@ -132,6 +134,28 @@ def test_automation_draft_uses_the_dialog_ttl():
     assert store.get("draft") == context
     fake_time[0] = 121.0
     assert store.get("draft") is None
+
+
+def test_calendar_event_draft_uses_the_long_dialog_ttl():
+    fake_time = [0.0]
+    store = ConversationContextStore(
+        ttl_seconds=30.0,
+        automation_confirmation_ttl_seconds=120.0,
+        clock=lambda: fake_time[0],
+    )
+    context = ConversationContext(
+        last_command=None,
+        last_entities=(),
+        last_area=None,
+        pending_clarification=None,
+        pending_calendar_event=PendingCalendarEvent(CalendarEventDraft(title="Zahnarzt")),
+    )
+    store.set("calendar", context)
+
+    fake_time[0] = 60.0
+    assert store.get("calendar") == context
+    fake_time[0] = 121.0
+    assert store.get("calendar") is None
 
 
 def test_v6_context_fields_default_to_none_for_existing_call_sites():

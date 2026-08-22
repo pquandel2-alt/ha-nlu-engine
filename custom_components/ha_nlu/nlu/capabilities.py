@@ -34,6 +34,7 @@ class Capability(Enum):
     FAN_SPEED = auto()
     POWER = auto()
     ENERGY = auto()
+    CREATE_EVENT = auto()
 
 
 # HA light ColorMode values (homeassistant.components.light.ColorMode) that
@@ -47,6 +48,10 @@ _LIGHT_BRIGHTNESS_MODES = frozenset({"brightness"}) | _LIGHT_COLOR_MODES | _LIGH
 # deliberately stays hass-free, so it reads the integer feature mask that
 # HA exposes in every State instead of importing Home Assistant's enum.
 _COVER_SET_POSITION_FEATURE = 4
+
+# Stable Home Assistant CalendarEntityFeature.CREATE_EVENT bit. Calendar
+# entities may be read-only, so the domain alone is deliberately insufficient.
+_CALENDAR_CREATE_EVENT_FEATURE = 1
 
 
 def derive_capabilities(
@@ -114,6 +119,14 @@ def derive_capabilities(
     # infer from domain alone" rule FAN_SPEED already follows above.
     if domain == "climate" and "temperature" in attributes:
         caps.add(Capability.TEMPERATURE)
+
+    if domain == "calendar":
+        try:
+            supported_features = int(attributes.get("supported_features", 0))
+        except (TypeError, ValueError):
+            supported_features = 0
+        if supported_features & _CALENDAR_CREATE_EVENT_FEATURE:
+            caps.add(Capability.CREATE_EVENT)
 
     return frozenset(caps)
 

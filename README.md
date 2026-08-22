@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
 
-- Aktuelle Version: **4.29.1**
+- Aktuelle Version: **4.30.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Lizenz: **MIT**
@@ -156,6 +156,7 @@ HomeIntent kann aktuell unter anderem folgende Home-Assistant-Domänen verwenden
 | `lock` | ver- und entriegeln; Entriegeln nur nach Bestätigung |
 | `sensor` | Werte und Vergleiche abfragen (nur lesend) |
 | `binary_sensor` | Zustände abfragen, zum Beispiel Fenster oder Türen (nur lesend) |
+| `calendar` | Termine über beschreibbare Home-Assistant-Kalender anlegen |
 
 Beispiele:
 
@@ -328,6 +329,60 @@ der Etage mehrere passende Geräte, fragt HomeIntent nach. Messwerte ohne sicher
 Aktionszuordnung – beispielsweise Batterie, Luftfeuchtigkeit, Leistung oder
 Energie – bleiben ausschließlich lesend und lösen niemals eine erfundene Aktion
 aus.
+
+### Kalendertermine anlegen
+
+Seit Version 4.30 kann HomeIntent echte Termine über Home Assistants
+`calendar.create_event` anlegen. Das funktioniert auch mit einem über CalDAV
+eingebundenen Apple-/iCloud-Kalender, sofern die betreffende `calendar.*`-
+Entität das Home-Assistant-Feature `CREATE_EVENT` anbietet und für HomeIntent
+freigegeben ist. Nur lesbare Kalender werden nicht als Schreibziel angeboten.
+
+Ein vollständiger Termin kann in einem Satz genannt werden:
+
+```text
+Trag nächsten Dienstag um 10 Uhr für eine Stunde Zahnarzt ein.
+Erstelle am 25. August von 18 bis 20 Uhr den Termin Geburtstag.
+Schreibe Urlaub morgen ganztägig in meinen Kalender ein.
+Kannst du morgen um 10 Uhr einen Termin mit dem Titel Zahnarzt für 60 Minuten erstellen?
+```
+
+Fehlende Pflichtangaben fragt HomeIntent nacheinander ab. Bereits verstandene
+Angaben bleiben dabei im Kontext der aktuellen Assist-Konversation erhalten:
+
+```text
+Du: Trag einen Termin ein.
+Assist: Wie soll der Termin heißen?
+Du: Zahnarzt.
+Assist: An welchem Datum findet der Termin statt?
+Du: Nächsten Dienstag.
+Assist: Um wie viel Uhr beginnt der Termin?
+Du: Um 10 Uhr.
+Assist: Wann endet der Termin oder wie lange dauert er?
+Du: Eine Stunde.
+```
+
+Sind mehrere beschreibbare Kalender freigegeben, fragt HomeIntent zusätzlich
+nach dem Zielkalender. Bei genau einem geeigneten Kalender wird er automatisch
+verwendet. Vor dem Schreiben erscheint immer eine vollständige Vorschau mit
+Titel, Datum, Beginn, Ende und Kalender. Erst ein ausdrückliches „Ja“ führt
+`calendar.create_event` aus. „Nein“, „Abbrechen“ oder „Stopp“ verwirft den
+Entwurf ohne Schreibzugriff.
+
+Solange die Vorschau noch nicht bestätigt wurde, können Angaben korrigiert
+werden:
+
+```text
+Du: Doch um 11 Uhr.
+Du: Der Titel soll Kontrolltermin sein.
+Du: Nimm den Familienkalender.
+```
+
+Für Termine mit Uhrzeit ist eine Endzeit oder Dauer erforderlich; HomeIntent
+erfindet keine Standarddauer. Relative Daten, Wochentage, ausgeschriebene und
+numerische Daten sowie Ganztagstermine werden in der lokalen
+Home-Assistant-Zeitzone aufgelöst. Vergangene oder wegen einer Zeitumstellung
+nicht existierende Zeitpunkte werden abgelehnt.
 
 ### Mehrteilige Befehle
 
@@ -509,6 +564,12 @@ Für eine zuverlässige Auflösung empfiehlt es sich:
 - sinnvolle Aliase für Entitäten und Bereiche zu hinterlegen und
 - nur die tatsächlich per Sprache benötigten Entitäten für Assist freizugeben.
 
+Für das Anlegen von Terminen muss die gewünschte `calendar.*`-Entität ebenfalls
+für Assist beziehungsweise in den HomeIntent-Integrationsoptionen freigegeben
+sein. Wurde früher bereits eine feste Entitätsauswahl gespeichert, wird ein
+später hinzugefügter Kalender nicht automatisch ergänzt; öffne dann die
+Optionen von **HA NLU Engine** und wähle den Kalender dort zusätzlich aus.
+
 ## Kategorie „Homeintent“
 
 Alle ab Version 4.20.0 neu durch HomeIntent erzeugten Automationen werden automatisch der Home-Assistant-Automationskategorie **Homeintent** zugeordnet. Das gilt für:
@@ -559,6 +620,7 @@ speichert keine gesprochenen Texte und kein World Model dauerhaft.
 - Ist Home Assistant beim berechneten Zeitpunkt ausgeschaltet, wird der verpasste Auftrag aus Sicherheitsgründen verworfen. Eine automatische verspätete Ausführung findet bewusst nicht statt.
 - Direkte Steuerung neuer Gerätedomänen unterstützt bewusst nur geprüfte Kernaktionen. Erweiterte Klima-, Medien- oder Staubsaugerfunktionen können je nach Gerät noch fehlen.
 - Nicht jeder intern modellierbare Trigger, jede Bedingung oder Aktion besitzt bereits eine sichere Home-Assistant-YAML-Abbildung. Nicht unterstützte Strukturen werden abgelehnt, statt angenähert zu werden.
+- Kalendertermine können derzeit angelegt, aber noch nicht über HomeIntent verschoben, bearbeitet, aufgelistet oder gelöscht werden. Diese Funktionen hängen zusätzlich von den Fähigkeiten der jeweiligen Kalenderintegration ab.
 - Die Qualität der Zielauflösung hängt von sinnvollen Entity-Namen, Bereichen, Geräteklassen, Fähigkeiten und Assist-Freigaben ab.
 
 ## Architektur
@@ -601,7 +663,7 @@ python -m pytest -q
 Aktueller Entwicklungsstand:
 
 ```text
-1807 passed, 12 skipped
+1829 passed, 12 skipped
 ```
 
 Zusätzlich enthält `tests/eval/dialog_cases.json` ein datengetriebenes
