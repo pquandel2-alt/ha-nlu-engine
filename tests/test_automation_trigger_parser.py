@@ -14,6 +14,8 @@ tests/test_parsers.py's "call the parser, not the engine" style.
 
 from __future__ import annotations
 
+from itertools import permutations
+
 import pytest
 from hassil import Intents
 
@@ -126,6 +128,27 @@ def test_state_trigger_accepts_plural_verb_form_for_plural_device_class(parser, 
     assert trigger.target.device_class == "window"
     assert trigger.target.area_id == "kueche"
     assert trigger.state is SemanticState.OPEN
+
+
+def test_state_trigger_components_have_free_order(parser, context):
+    expected = parser.parse("wenn die Fenster in der Küche offen sind", context)
+    assert expected is not None
+
+    for parts in permutations(("wenn", "die Fenster", "in der Küche", "offen")):
+        assert parser.parse(" ".join(parts), context) == expected, parts
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    (
+        "wenn die Fenster in der Küche offen und geschlossen sind",
+        "wenn die Fenster in der Küche normalerweise offen sind",
+    ),
+)
+def test_semantic_state_trigger_refuses_conflicts_and_unexplained_modifiers(
+    parser, context, sentence
+):
+    assert parser.parse(sentence, context) is None
 
 
 # -- NUMERIC_STATE ---------------------------------------------------------

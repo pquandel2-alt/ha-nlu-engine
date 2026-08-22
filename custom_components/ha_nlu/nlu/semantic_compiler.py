@@ -18,16 +18,15 @@ from dataclasses import dataclass
 
 from ..areas import AreaSnapshot
 from ..entities import EntitySnapshot, generate_aliases, normalize_for_compare
-from ..floors import FloorResolveStatus, resolve_floor_by_level_keyword
 from ..world_model import WorldModel
 from .constraint_resolver import Constraints, resolve_candidates
 from .frame import AreaReference, Quantifier, SemanticFrame, TargetReference
-from .group_semantics import resolve_group_location
 from .parser import ClarificationRequest, ParseResult
 from .primitives import SemanticAction, SemanticProperty, SemanticQuantity
 from .query_command import QueryCommand, QueryFilter, QueryScope, QueryTarget
 from .query_executor import QueryExecutor
 from .semantic_lexicon import SemanticAnalysis, SemanticKind, analyse_semantics
+from .semantic_location import resolve_semantic_location
 
 
 @dataclass(frozen=True)
@@ -144,37 +143,6 @@ def _quantity(text: str) -> Quantifier | None:
     return None
 
 
-def _location(text: str, entities: list[EntitySnapshot]) -> tuple[str, str | None, str | None] | None:
-    level = _LEVEL_CUE_RE.search(text)
-    if level is not None:
-        resolved_level = resolve_floor_by_level_keyword(
-            "up" if level.group(0).casefold() == "oben" else "down", entities
-        )
-        if resolved_level.status is not FloorResolveStatus.OK:
-            return None
-        return level.group(0), None, resolved_level.floor_id
-    names = {
-        name
-        for entity in entities
-        for name in (entity.area_name, *entity.area_aliases, entity.floor_name)
-        if name
-    }
-    mentioned = [
-        name for name in sorted(names, key=len, reverse=True)
-        if re.search(rf"\b{re.escape(name)}\b", text, re.I)
-    ]
-    if not mentioned:
-        return None
-    longest = len(mentioned[0])
-    selected = [name for name in mentioned if len(name) == longest]
-    resolved = {resolve_group_location(name, entities) for name in selected}
-    resolved.discard(None)
-    if len(resolved) != 1:
-        return None
-    area_id, floor_id = resolved.pop()
-    return selected[0], area_id, floor_id
-
-
 def _percent(text: str) -> int | None:
     if _HALF_RE.search(text):
         return 50
@@ -260,7 +228,7 @@ class SemanticCommandCompiler:
             value for value in analysis.values(SemanticKind.DOMAIN)
             if isinstance(value, str)
         )
-        location = _location(text, entities)
+        location = resolve_semantic_location(text, entities)
         # A spoken scope is a hard constraint.  If HA does not know it (or
         # two floors make "oben" ambiguous), never silently widen the
         # request to every device in the house.
@@ -387,6 +355,8 @@ class SemanticQueryCompiler:
         if (
             not (_QUERY_MARKER_RE.search(text) or text.rstrip().endswith("?"))
             or analysis.values(SemanticKind.COMMAND_MARKER)
+            or analysis.values(SemanticKind.PROPERTY)
+            or analysis.values(SemanticKind.COMPARATOR)
             or _SINGULAR_NAMED_QUERY_RE.search(text)
             or _DURATION_QUESTION_RE.search(text)
         ):
@@ -405,7 +375,7 @@ class SemanticQueryCompiler:
         domain, device_class = targets[0]
         requested_state = states[0] if states else None
 
-        location = _location(text, entities)
+        location = resolve_semantic_location(text, entities)
         has_location_cue = _LOCATION_CUE_RE.search(text) is not None
         if has_location_cue and location is None:
             return None

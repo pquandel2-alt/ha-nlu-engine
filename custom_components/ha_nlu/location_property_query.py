@@ -11,6 +11,12 @@ from .floors import FloorResolveStatus, resolve_floor_by_level_keyword, resolve_
 from .nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
 from .nlu.parser import ParseResult
 from .nlu.parse_outcome import ParseFailureReason
+from .nlu.semantic_lexicon import (
+    MEASUREMENT_PROPERTY_SPECS,
+    SemanticKind,
+    analyse_semantics,
+)
+from .nlu.semantic_location import resolve_semantic_location
 
 
 @dataclass(frozen=True)
@@ -93,6 +99,52 @@ def _default_property(text: str) -> str | None:
 
 
 class LocationPropertyQueryParser:
+    @staticmethod
+    def _semantic_request(text: str, entities: list[EntitySnapshot]):
+        analysis = analyse_semantics(text)
+        if (
+            analysis.values(SemanticKind.COMMAND_MARKER)
+            or re.search(r"^\s*welch\w*\b", text, re.I)
+        ):
+            return None
+        properties = analysis.values(SemanticKind.PROPERTY)
+        comparators = analysis.values(SemanticKind.COMPARATOR)
+        if len(properties) != 1 or len(comparators) > 1:
+            return None
+        location = resolve_semantic_location(text, entities)
+        if location is None:
+            return None
+
+        location_tokens = {
+            token.casefold()
+            for token in re.findall(r"[\wäöüß]+", location[0], re.I)
+        }
+        unexplained = {
+            token.casefold() for token in analysis.unexplained_tokens
+        } - location_tokens
+        if unexplained:
+            return None
+
+        canonical = next(iter(properties))
+        spec = MEASUREMENT_PROPERTY_SPECS.get(canonical)
+        if spec is None:
+            return None
+        comparator = next(iter(comparators), None)
+        threshold_match = re.search(r"\b\d+(?:[,.]\d+)?\b", text)
+        if comparator is not None and threshold_match is None:
+            return None
+        comparator_words = {
+            "lt": "unter", "gt": "über", "lte": "höchstens", "gte": "mindestens",
+        }
+        return {
+            "property_name": spec[3],
+            "spec": spec[:3],
+            "location": location[0],
+            "comparator": comparator_words.get(comparator),
+            "threshold": threshold_match.group(0) if threshold_match is not None else None,
+            "average": "average" in analysis.values(SemanticKind.QUERY_SCOPE),
+        }
+
     def parse(
         self, text: str, entities: list[EntitySnapshot]
     ) -> ParseResult | LocationQueryFeedback | None:
@@ -101,17 +153,26 @@ class LocationPropertyQueryParser:
             (candidate for pattern in _PATTERNS if (candidate := pattern.match(text))),
             None,
         )
-        if match is None:
+        semantic_request = None if match is not None else self._semantic_request(text, entities)
+        if match is None and semantic_request is None:
             return None
-        property_name = (match.groupdict().get("property") or _default_property(text) or "").casefold()
-        spec = _PROPERTIES.get(property_name)
+        property_name = (
+            (match.groupdict().get("property") or _default_property(text) or "").casefold()
+            if match is not None else semantic_request["property_name"]
+        )
+        spec = _PROPERTIES.get(property_name) if match is not None else semantic_request["spec"]
         if spec is None:
             return None
-        location = match.group("location").strip(" ,.?!")
+        location = (
+            match.group("location").strip(" ,.?!")
+            if match is not None else semantic_request["location"]
+        )
         if not location:
             return None
 
         explicit_location = bool(
+            semantic_request is not None
+            or
             re.search(r"\b(?:im|in der|in dem|am|beim)\b", text, re.IGNORECASE)
             or re.search(r"\bhat\s+(?:der|die|das)\b", text, re.IGNORECASE)
             or re.match(rf"^(?:{_PROPERTY_WORDS})\b", text, re.IGNORECASE)
@@ -162,8 +223,14 @@ class LocationPropertyQueryParser:
             and (area_id is None or entity.area_id == area_id)
             and (floor_id is None or entity.floor_id == floor_id)
         ]
-        comparator = match.groupdict().get("comparator")
-        threshold_raw = match.groupdict().get("threshold")
+        comparator = (
+            match.groupdict().get("comparator")
+            if match is not None else semantic_request["comparator"]
+        )
+        threshold_raw = (
+            match.groupdict().get("threshold")
+            if match is not None else semantic_request["threshold"]
+        )
         if comparator and threshold_raw:
             threshold = float(threshold_raw.replace(",", "."))
             operators = {
@@ -193,7 +260,10 @@ class LocationPropertyQueryParser:
                 ParseFailureReason.UNSUPPORTED_CAPABILITY,
             )
         matched.sort(key=lambda entity: (entity.area_name or "", entity.friendly_name))
-        average = bool(match.groupdict().get("average")) or "durchschnitt" in text.casefold()
+        average = (
+            bool(match.groupdict().get("average"))
+            if match is not None else semantic_request["average"]
+        ) or "durchschnitt" in text.casefold()
         frame = SemanticFrame(
             intent="HassLocationPropertyQuery" if len(matched) > 1 or average else "HassGetState",
             target=TargetReference(text=location, domain=domain, device_class=device_class),

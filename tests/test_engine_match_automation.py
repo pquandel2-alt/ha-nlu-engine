@@ -71,6 +71,19 @@ def test_valid_trigger_and_action_produces_a_validated_automation_model(engine):
     assert "AutomationModel" in result.response_text
 
 
+def test_free_order_state_trigger_runs_through_complete_automation_pipeline(engine):
+    result = engine.match_automation(
+        "Wenn in der Küche offen die Fenster sind, schalte das Küchenlicht ein.",
+        ENTITIES,
+    )
+
+    assert isinstance(result, AutomationMatchResult)
+    assert result.validation_error is None
+    assert result.model.triggers[0].target.area_id == "kueche"
+    assert result.model.triggers[0].state.name == "OPEN"
+    assert result.model.actions[0].type is ActionType.TURN_ON
+
+
 def test_state_trigger_reuses_semantic_half_position_action(engine):
     cover = EntitySnapshot(
         "cover.kueche", "Rollade Küche", "cover", "open",

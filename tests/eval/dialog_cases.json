@@ -105,5 +105,20 @@
       "Kannst du die Temperatur auf 99 Grad erhöhen?"
     ],
     "expect": {"action": false, "response_contains": "zwischen 5 und 30"}
+  },
+  {
+    "id": "semantic_measurement_free_order",
+    "turns": ["Im Erdgeschoss aktuell die Temperatur wie viel?"],
+    "expect": {"intent": "HassLocationPropertyQuery", "action": false, "response_contains": "Grad"}
+  },
+  {
+    "id": "semantic_measurement_comparison",
+    "turns": ["Oben Batterien weniger als 20 Prozent?"],
+    "expect": {"action": false, "response_contains": "12 Prozent"}
+  },
+  {
+    "id": "unexplained_measurement_modifier_has_no_action",
+    "turns": ["Im Erdgeschoss Temperatur normalerweise?"],
+    "expect": {"match": false, "action": false}
   }
 ]

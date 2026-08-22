@@ -42,12 +42,9 @@ Two layers, per the plan:
 Reuses existing resolvers/vocabulary throughout (Regel 6) rather than
 inventing new ones - see the per-``_parse_*_condition`` methods below for
 which piece of ``areas.py``/``entities.py``/``constraint_resolver.py``/
-``parsers.py``/``world_model.py`` each condition type reuses. Mirrors
-``AutomationTriggerParser``'s own ``_resolve_area``/
-``_build_device_class_target``/``_build_named_target`` helpers structurally
-(architectural precedent, Wave 1 is the direct model) rather than importing
-them - they are thin, condition-vs-trigger-agnostic wrappers around shared
-primitives, not a parallel resolution system.
+``parsers.py``/``world_model.py`` each condition type reuses. Shared
+automation targets are resolved by ``automation_target_resolver.py`` for
+both triggers and conditions; there is no duplicate resolver anymore.
 """
 
 from __future__ import annotations
@@ -57,11 +54,10 @@ from pathlib import Path
 
 from hassil import Intents, RangeSlotList, RangeType, WildcardSlotList, recognize
 
-from .areas import AreaResolutionStatus, resolve_area_scored
-from .entities import EntitySnapshot, ResolutionStatus, resolve_entity_scored
+from .entities import ResolutionStatus, resolve_entity_scored
+from .automation_target_resolver import build_device_class_target, build_named_target
 from .nlu.automation_model import NumericComparator, SunEvent, TriggerTarget
 from .nlu.condition_model import ConditionModel, ConditionNode, ConditionType, LogicalOperator, TimeComparator, condition_tree_depth
-from .nlu.constraint_resolver import Constraints, resolve_candidates
 from .nlu.lexicon import (
     _COMPARATOR_SLOT_LIST,
     _DAY_PART_WINDOW_SLOT_LIST,
@@ -77,15 +73,14 @@ from .nlu.lexicon import (
     _WEEKDAY_SLOT_LIST,
 )
 from .nlu.parser import ParseContext
-from .parsers import StateQueryParser, _STATE_NAME_TO_SEMANTIC, _strip_locative_prepositions
+from .nlu.semantic_automation import compile_state_predicate
+from .parsers import _STATE_NAME_TO_SEMANTIC, _strip_locative_prepositions
 
 AUTOMATION_CONDITION_DIR = Path(__file__).parent / "intents" / "de" / "automation_condition"
 
 # V5 Wave 5 (V5.18, "Context in Automations") - same closed pronoun set
 # ``automation_trigger_parser.py`` establishes (Regel 6, not a second
 # vocabulary).
-_PRONOUN_WORDS = frozenset({"es"})
-
 # \b-anchored so "Grund"/"Sekunde"/"München" are never mis-split - neither
 # side of the embedded "und"/"nicht" substring in those words is itself a
 # word boundary (both neighbouring characters are word characters), so the
@@ -323,94 +318,26 @@ class AutomationConditionParser:
         text = _unmask_time_window_and(text)
         result = recognize(text, self._intents, slot_lists=self._slot_lists, language="de")
         if result is None or result.intent is None:
-            return None
+            return self._parse_semantic_state_condition(text, context)
         handler = self._dispatch.get(result.intent.name)
         if handler is None:
             return None
-        return handler(result.entities, context)
-
-    # -- shared helpers (architectural precedent: AutomationTriggerParser) ----
-
-    @staticmethod
-    def _resolve_area(slots: dict, entities: list[EntitySnapshot]) -> tuple[str | None, str | None] | None:
-        area_slot = slots.get("area")
-        if area_slot is None:
-            return None, None
-        area_text = _strip_locative_prepositions(str(area_slot.value))
-        if not area_text:
-            return None, None
-        resolved = resolve_area_scored(area_text, entities)
-        if resolved.status is not AreaResolutionStatus.RESOLVED or resolved.area is None:
-            return None  # named but not a known/unambiguous room - never guess
-        return resolved.area.area_id, resolved.area.name
-
-    def _build_device_class_target(self, device_class_value: str, slots: dict, context: ParseContext) -> TriggerTarget | None:
-        resolved_area = self._resolve_area(slots, context.entities)
-        if resolved_area is None:
-            return None
-        area_id, _area_name = resolved_area
-        domain, device_class, _candidates = StateQueryParser._device_class_candidates(
-            device_class_value, context.entities, area_id
-        )
-        return TriggerTarget(domain=domain, device_class=device_class, area_id=area_id)
+        parsed = handler(result.entities, context)
+        return parsed if parsed is not None else self._parse_semantic_state_condition(text, context)
 
     @staticmethod
-    def _build_pronoun_target(context: ParseContext) -> TriggerTarget | None:
-        """V5 Wave 5 (V5.18) - mirrors ``AutomationTriggerParser``'s own
-        ``_build_pronoun_target`` byte-for-byte (Regel 6, same architectural
-        precedent every other shared helper in this file already follows -
-        see the module docstring). "es" resolves against
-        ``context.last_entities``; refuses on nothing remembered or a mixed
-        remembered set."""
-        last_entities = context.last_entities
-        if not last_entities:
+    def _parse_semantic_state_condition(
+        text: str, context: ParseContext
+    ) -> ConditionNode | None:
+        compiled = compile_state_predicate(text, context)
+        if compiled is None:
             return None
-        if len(last_entities) == 1:
-            entity = last_entities[0]
-            candidates = resolve_candidates(
-                context.entities,
-                Constraints(domain=entity.domain, device_class=entity.device_class, area_id=entity.area_id),
-            )
-            if len(candidates) == 1:
-                return TriggerTarget(domain=entity.domain, device_class=entity.device_class, area_id=entity.area_id)
-            return TriggerTarget(
-                domain=entity.domain,
-                device_class=entity.device_class,
-                area_id=entity.area_id,
-                entity_id=entity.entity_id,
-            )
-        domains = {e.domain for e in last_entities}
-        device_classes = {e.device_class for e in last_entities}
-        area_ids = {e.area_id for e in last_entities}
-        if len(domains) != 1 or len(device_classes) != 1 or len(area_ids) != 1:
-            return None
-        return TriggerTarget(domain=next(iter(domains)), device_class=next(iter(device_classes)), area_id=next(iter(area_ids)))
-
-    @staticmethod
-    def _build_named_target(name_slot, context: ParseContext) -> TriggerTarget | None:
-        name = _strip_locative_prepositions(str(name_slot.value))
-        if name.strip().lower() in _PRONOUN_WORDS:
-            return AutomationConditionParser._build_pronoun_target(context)
-        resolved = resolve_entity_scored(name, context.entities, index=context.index)
-        if resolved.status is not ResolutionStatus.RESOLVED or resolved.entity is None:
-            return None  # not found or ambiguous - never guess (Regel 4)
-        entity = resolved.entity
-
-        # Same semantic-equivalence recheck AutomationTriggerParser's own
-        # _build_named_target documents: entity_id only stays set when the
-        # spoken name did real disambiguation beyond domain/device_class/area.
-        candidates = resolve_candidates(
-            context.entities,
-            Constraints(domain=entity.domain, device_class=entity.device_class, area_id=entity.area_id),
-        )
-        if len(candidates) == 1:
-            return TriggerTarget(domain=entity.domain, device_class=entity.device_class, area_id=entity.area_id)
-        return TriggerTarget(
-            domain=entity.domain,
-            device_class=entity.device_class,
-            area_id=entity.area_id,
-            entity_id=entity.entity_id,
-        )
+        target, state = compiled
+        return ConditionNode(condition=ConditionModel(
+            type=ConditionType.STATE,
+            target=target,
+            state=state,
+        ))
 
     # -- per-intent leaf parsing ------------------------------------------------
 
@@ -426,12 +353,12 @@ class AutomationConditionParser:
 
         device_class_slot = slots.get("device_class")
         if device_class_slot is not None:
-            target = self._build_device_class_target(str(device_class_slot.value), slots, context)
+            target = build_device_class_target(str(device_class_slot.value), slots, context)
         else:
             name_slot = slots.get("name")
             if name_slot is None:
                 return None
-            target = self._build_named_target(name_slot, context)
+            target = build_named_target(name_slot, context)
         if target is None:
             return None
         condition = ConditionModel(type=ConditionType.STATE, target=target, state=semantic_state)
@@ -456,7 +383,7 @@ class AutomationConditionParser:
             # trigger's own comment documents).
             return None
 
-        target = self._build_named_target(name_slot, context)
+        target = build_named_target(name_slot, context)
         if target is None:
             return None
 

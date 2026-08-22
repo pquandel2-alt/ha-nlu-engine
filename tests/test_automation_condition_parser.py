@@ -12,6 +12,8 @@ tests/test_automation_trigger_parser.py's "call the parser, not the engine" styl
 
 from __future__ import annotations
 
+from itertools import permutations
+
 import pytest
 from hassil import Intents
 
@@ -107,7 +109,6 @@ def test_parser_loads_intents_and_accepts_max_depth_parameter():
 # --- STATE (2 cases) -------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Grammar variant not yet in YAML")
 def test_state_condition_light_on(parser, context):
     """STATE: 'wenn das Licht an ist'"""
     node = parser.parse("wenn das Licht an ist", context)
@@ -118,7 +119,6 @@ def test_state_condition_light_on(parser, context):
     assert node.condition.state is SemanticState.ON
 
 
-@pytest.mark.skip(reason="Grammar variant not yet in YAML")
 def test_state_condition_fenster_offen(parser, context):
     """STATE: 'wenn die Tür offen ist' (variant phrasing)"""
     node = parser.parse("wenn die Tür offen ist", context)
@@ -126,6 +126,18 @@ def test_state_condition_fenster_offen(parser, context):
     assert node.condition is not None
     assert node.condition.type is ConditionType.STATE
     assert node.condition.state is SemanticState.OPEN
+
+
+def test_state_condition_components_have_free_order(parser, context):
+    expected = parser.parse("die Fenster in der Küche offen", context)
+    assert expected is not None
+
+    for parts in permutations(("die Fenster", "in der Küche", "offen")):
+        assert parser.parse(" ".join(parts), context) == expected, parts
+
+
+def test_semantic_state_condition_refuses_conflicting_states(parser, context):
+    assert parser.parse("die Fenster in der Küche offen und geschlossen", context) is None
 
 
 # --- NUMERIC (2 cases) -------------------------------------------------------

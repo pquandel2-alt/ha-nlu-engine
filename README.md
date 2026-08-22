@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
 
-- Aktuelle Version: **4.27.0**
+- Aktuelle Version: **4.28.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Lizenz: **MIT**
@@ -182,7 +182,14 @@ Luftfeuchtigkeit im Wohnzimmer.
 Stromverbrauch Küche.
 Batterien oben unter 20 Prozent.
 Wie hell Wohnzimmer?
+Im Erdgeschoss aktuell die Temperatur wie viel?
+Oben Batterien weniger als 20 Prozent?
 ```
+
+Auch Messwertfragen werden aus Eigenschaft, Ort, optionalem Vergleich und
+Zahl zusammengesetzt. Diese Bausteine dürfen frei angeordnet sein. Mehrere
+widersprüchliche Eigenschaften oder unbekannte bedeutungstragende Zusätze
+werden nicht stillschweigend ignoriert.
 
 Gibt es mehrere passende Sensoren, nennt HomeIntent alle Einzelwerte mit ihrem
 Entitätsnamen. Es bildet niemals ungefragt einen Mittelwert. Nur eine
@@ -272,6 +279,7 @@ HomeIntent kann Automationen nicht nur verstehen, sondern als echte Home-Assista
 
 ```text
 Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht ein.
+Wenn in der Küche offen die Fenster sind, schalte das Küchenlicht ein.
 ```
 
 Der Ablauf ist absichtlich zweistufig:
@@ -311,6 +319,13 @@ Wenn das Küchenfenster geöffnet wird und Samstag ist, schalte das Küchenlicht
 ```
 
 Die zentrale Struktur dafür ist das `AutomationModel`: ein validierter Syntaxbaum aus Triggern, Bedingungen und Aktionen. Erst der HA-Automation-Generator übersetzt dieses Modell in Home-Assistant-YAML.
+
+Zustandsauslöser und Zustandsbedingungen verwenden denselben semantischen
+Predicate-Compiler. Gerätetyp, Zustand und Raum beziehungsweise Etage dürfen
+dabei in unterschiedlicher Reihenfolge stehen. Widersprüchliche Zustände oder
+nicht erklärte Zusätze werden abgelehnt. Spezialisierte Auslöser wie Uhrzeit,
+Sonne, numerische Schwellen und Geräteereignisse bleiben in ihren streng
+validierten Fachparsern.
 
 ### Einmalige Automation
 
@@ -520,7 +535,7 @@ python -m pytest -q
 Aktueller Entwicklungsstand:
 
 ```text
-1787 passed, 14 skipped
+1805 passed, 12 skipped
 ```
 
 Zusätzlich enthält `tests/eval/dialog_cases.json` ein datengetriebenes

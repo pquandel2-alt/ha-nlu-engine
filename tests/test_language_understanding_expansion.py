@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from itertools import permutations
+
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.context import ConversationContext
 from ha_nlu.nlu.parse_outcome import ParseFailureReason
@@ -76,6 +78,29 @@ def test_general_location_properties(engine):
     assert engine.match("Luftfeuchtigkeit im Wohnzimmer", ENTITIES).response_text == "51 Prozent."
     assert engine.match("Stromverbrauch Küche", ENTITIES).response_text == "3.7 Kilowattstunden."
     assert engine.match("Temperatur Obergeschoss", ENTITIES).response_text == "19 Grad."
+
+
+def test_measurement_components_have_free_order(engine):
+    expected = "Küche Temperatur: 22,5 Grad; Wohnzimmer Temperatur: 21,5 Grad."
+
+    for parts in permutations(("im Erdgeschoss", "aktuell", "die Temperatur", "wie viel")):
+        result = engine.match(" ".join(parts) + "?", ENTITIES)
+        assert result is not None, parts
+        assert result.plan is None
+        assert result.response_text == expected
+
+
+def test_free_measurement_comparison_uses_shared_semantics(engine):
+    result = engine.match("Oben Batterien weniger als 20 Prozent?", ENTITIES)
+
+    assert result is not None
+    assert result.plan is None
+    assert result.response_text == "12 Prozent."
+
+
+def test_measurement_conflict_or_unexplained_modifier_is_never_answered_as_understood(engine):
+    assert engine.match("Im Erdgeschoss Temperatur und Luftfeuchtigkeit?", ENTITIES) is None
+    assert engine.match("Im Erdgeschoss Temperatur normalerweise?", ENTITIES) is None
 
 
 def test_multiple_measurements_are_listed_and_average_is_opt_in(engine):

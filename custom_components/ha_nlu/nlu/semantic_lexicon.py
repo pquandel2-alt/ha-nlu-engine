@@ -33,6 +33,9 @@ class SemanticKind(Enum):
     STATE = auto()
     QUANTIFIER = auto()
     QUERY_SCOPE = auto()
+    AUTOMATION_CUE = auto()
+    PROPERTY = auto()
+    COMPARATOR = auto()
 
 
 @dataclass(frozen=True)
@@ -140,7 +143,42 @@ LEXEMES: tuple[Lexeme, ...] = (
         r"gibt\s+es", r"haben\s+wir", r"irgendein\w*", r"irgendwelche",
     )),
     Lexeme(SemanticKind.QUERY_SCOPE, "none", (r"kein\w*",)),
+    Lexeme(SemanticKind.AUTOMATION_CUE, "predicate", (
+        r"wenn", r"sobald", r"falls", r"sofern", r"nur\s+wenn",
+    )),
+    Lexeme(SemanticKind.PROPERTY, "temperature", (
+        r"temperatur", r"wärme", r"warm", r"kalt", r"grad",
+    )),
+    Lexeme(SemanticKind.PROPERTY, "humidity", (
+        r"luftfeuchtigkeit", r"feuchtigkeit", r"feucht",
+    )),
+    Lexeme(SemanticKind.PROPERTY, "battery", (
+        r"batteriestand", r"batterie", r"batterien",
+    )),
+    Lexeme(SemanticKind.PROPERTY, "power", (r"leistung",)),
+    Lexeme(SemanticKind.PROPERTY, "energy", (
+        r"stromverbrauch", r"energieverbrauch",
+    )),
+    Lexeme(SemanticKind.PROPERTY, "brightness", (r"helligkeit", r"hell",)),
+    Lexeme(SemanticKind.COMPARATOR, "lt", (r"unter", r"weniger\s+als")),
+    Lexeme(SemanticKind.COMPARATOR, "gt", (r"über", r"mehr\s+als")),
+    Lexeme(SemanticKind.COMPARATOR, "lte", (r"höchstens", r"nicht\s+höher\s+als")),
+    Lexeme(SemanticKind.COMPARATOR, "gte", (r"mindestens",)),
+    Lexeme(SemanticKind.QUERY_SCOPE, "average", (r"durchschnitt\w*",)),
+    Lexeme(SemanticKind.QUERY_SCOPE, "measurement", (
+        r"wie\s+viel", r"aktuell\w*", r"momentan", r"gerade",
+    )),
 )
+
+
+MEASUREMENT_PROPERTY_SPECS = {
+    "temperature": ("sensor", "temperature", "Temperatur", "temperatur"),
+    "humidity": ("sensor", "humidity", "Luftfeuchtigkeit", "luftfeuchtigkeit"),
+    "battery": ("sensor", "battery", "Batteriestand", "batterie"),
+    "power": ("sensor", "power", "Leistung", "leistung"),
+    "energy": ("sensor", "energy", "Energieverbrauch", "energieverbrauch"),
+    "brightness": ("light", None, "Helligkeit", "helligkeit"),
+}
 
 
 _WORD_RE = re.compile(r"[\wäöüß]+", re.I)
