@@ -290,6 +290,38 @@ def test_all_covers_on_floor_natural_fixed_positions(engine):
     assert sorted(opened.plan.entity_id) == ["cover.kueche", "cover.wohnzimmer"]
 
 
+def test_floor_wins_over_same_named_area_for_percentage_group(engine):
+    """Regression for a real HA setup containing both named Erdgeschoss."""
+    entities = [
+        EntitySnapshot(
+            "sensor.erdgeschoss", "Temperatur Erdgeschoss", "sensor", "21.6",
+            area_id="erdgeschoss", area_name="Erdgeschoss",
+            floor_id="erdgeschoss", floor_name="Erdgeschoss",
+        ),
+        EntitySnapshot(
+            "cover.wohnzimmer", "Rollladen Wohnzimmer", "cover", "open",
+            area_id="wohnzimmer", area_name="Wohnzimmer",
+            floor_id="erdgeschoss", floor_name="Erdgeschoss",
+            capabilities=frozenset({"POSITION"}),
+        ),
+        EntitySnapshot(
+            "cover.kueche", "Rollladen Küche", "cover", "open",
+            area_id="kueche", area_name="Küche",
+            floor_id="erdgeschoss", floor_name="Erdgeschoss",
+            capabilities=frozenset({"POSITION"}),
+        ),
+    ]
+
+    result = engine.match(
+        "Fahre alle Rolladen im Erdgeschoss halb runter", entities
+    )
+
+    assert result is not None
+    assert result.plan.service == "set_cover_position"
+    assert sorted(result.plan.entity_id) == ["cover.kueche", "cover.wohnzimmer"]
+    assert result.plan.data == {"position": 50}
+
+
 def test_bare_number_on_switch_domain_still_returns_none(engine, entities):
     # A bare number is only unambiguous for the two percent-capable domains
     # (cover/light) - switch has no percent semantics at all, same as the

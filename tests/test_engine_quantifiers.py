@@ -64,6 +64,33 @@ def test_alle_lichter_im_buro_room_scoped(engine):
     assert sorted(result.plan.entity_id) == ["light.a", "light.b"]
 
 
+def test_floor_wins_over_same_named_area_for_cover_group(engine):
+    """A group location denotes the floor when floor and area names collide."""
+    entities = [
+        EntitySnapshot(
+            "sensor.erdgeschoss", "Temperatur Erdgeschoss", "sensor", "21.6",
+            area_id="erdgeschoss", area_name="Erdgeschoss",
+            floor_id="erdgeschoss", floor_name="Erdgeschoss",
+        ),
+        EntitySnapshot(
+            "cover.wohnzimmer", "Rollladen Wohnzimmer", "cover", "closed",
+            area_id="wohnzimmer", area_name="Wohnzimmer",
+            floor_id="erdgeschoss", floor_name="Erdgeschoss",
+        ),
+        EntitySnapshot(
+            "cover.kueche", "Rollladen Küche", "cover", "closed",
+            area_id="kueche", area_name="Küche",
+            floor_id="erdgeschoss", floor_name="Erdgeschoss",
+        ),
+    ]
+
+    result = engine.match("Fahre alle Rolladen im Erdgeschoss hoch", entities)
+
+    assert result is not None
+    assert result.plan.service == "open_cover"
+    assert sorted(result.plan.entity_id) == ["cover.kueche", "cover.wohnzimmer"]
+
+
 def test_beide_rejects_single_match_in_room(engine):
     entities = [
         EntitySnapshot("cover.a", "Rolllade", "cover", "closed", area_id="gaeste", area_name="Gästezimmer"),

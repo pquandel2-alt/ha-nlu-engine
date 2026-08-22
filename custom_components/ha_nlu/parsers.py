@@ -76,6 +76,27 @@ def _strip_locative_prepositions(name: str) -> str:
     return re.sub(r"\s+", " ", without_prepositions).strip()
 
 
+def _resolve_group_location(
+    name: str, entities: list[EntitySnapshot]
+) -> tuple[str | None, str | None] | None:
+    """Resolve a group scope as ``(area_id, floor_id)``.
+
+    Home Assistant permits an area and a floor to have the same name. For
+    quantified/group commands, a matching floor wins: "alle Rollläden im
+    Erdgeschoss" naturally targets the complete floor, not only an area
+    that also happens to be named "Erdgeschoss". If no floor matches, the
+    established area resolution remains the fallback.
+    """
+    floor = resolve_floor_name(name, entities)
+    if floor.status is FloorResolveStatus.OK:
+        return None, floor.floor_id
+
+    area = resolve_area_name(name, entities)
+    if area.status is AreaResolveStatus.OK:
+        return area.area_id, None
+    return None
+
+
 # Closed-vocabulary TextSlotList definitions (domain/quantifier/count/level/
 # color/color_temp/comparator/comparison_domain/temporal_*/device_class/
 # state/state_adj words) now live in nlu/lexicon.py (V6.3, "Semantic
@@ -241,16 +262,10 @@ class QuantifierParser:
     filtered set (wrong domain/room), refuses the whole command rather than
     silently matching everyone (that would misreport what got excluded).
 
-    Area resolution has a floor fallback: if the captured {area} text
-    doesn't resolve to a known room (``AreaResolveStatus.NOT_FOUND``), it's
-    tried again as a floor name (e.g. "im Erdgeschoss") before giving up -
-    same grammar slot, no separate {floor} sentence set needed, since a
-    floor name occupies exactly the same "[in der|im|...] X" position a room
-    name does. An *ambiguous* area match is never silently retried as a
-    floor - that would risk masking a real ambiguity the user should be
-    asked about (moot today, since AMBIGUOUS_ENTITY-style clarification
-    isn't wired for quantifier commands, but keeps the fallback narrowly
-    scoped to its one justified case: "this word is not a room").
+    A captured {area} may name a room or a floor. Floors take precedence for
+    group commands when Home Assistant contains both with the same name:
+    "alle Rollläden im Erdgeschoss" means the complete floor, not only the
+    same-named area. If no floor matches, normal area resolution applies.
     """
 
     def __init__(self, intents: Intents) -> None:
@@ -300,16 +315,10 @@ class QuantifierParser:
         if area_slot is not None:
             area_name = _strip_locative_prepositions(str(area_slot.value))
             if area_name:
-                area_resolved = resolve_area_name(area_name, context.entities)
-                if area_resolved.status is AreaResolveStatus.OK:
-                    area_id = area_resolved.area_id
-                elif area_resolved.status is AreaResolveStatus.NOT_FOUND:
-                    floor_resolved = resolve_floor_name(area_name, context.entities)
-                    if floor_resolved.status is not FloorResolveStatus.OK:
-                        return None  # neither a known room nor a known floor - never guess
-                    floor_id = floor_resolved.floor_id
-                else:
-                    return None  # ambiguous room name - never guess
+                location = _resolve_group_location(area_name, context.entities)
+                if location is None:
+                    return None  # neither a unique floor nor a unique room - never guess
+                area_id, floor_id = location
             else:
                 area_name = None
 
@@ -399,16 +408,10 @@ class PercentageParser:
             area_slot = result.entities.get("area")
             if area_slot is not None:
                 area_name = _strip_locative_prepositions(str(area_slot.value))
-                area = resolve_area_name(area_name, context.entities)
-                if area.status is AreaResolveStatus.OK:
-                    area_id = area.area_id
-                elif area.status is AreaResolveStatus.NOT_FOUND:
-                    floor = resolve_floor_name(area_name, context.entities)
-                    if floor.status is not FloorResolveStatus.OK:
-                        return None
-                    floor_id = floor.floor_id
-                else:
+                location = _resolve_group_location(area_name, context.entities)
+                if location is None:
                     return None
+                area_id, floor_id = location
 
             matches = resolve_candidates(
                 context.entities,
@@ -502,30 +505,29 @@ class PercentageParser:
 
         domain = str(domain_slot.value)
         location = _strip_locative_prepositions(str(area_slot.value))
+        floor = resolve_floor_name(location, context.entities)
         area = resolve_area_name(location, context.entities)
         area_id = floor_id = None
-        if area.status is AreaResolveStatus.OK:
+        if floor.status is FloorResolveStatus.OK:
+            floor_id = floor.floor_id
+        elif area.status is AreaResolveStatus.OK:
             area_id = area.area_id
+        elif floor.status is FloorResolveStatus.AMBIGUOUS:
+            return UnderstandingFeedback(
+                ParseFailureReason.AMBIGUOUS_TARGET,
+                f'Die Etage „{location}“ ist nicht eindeutig.',
+            )
         elif area.status is AreaResolveStatus.AMBIGUOUS:
             return UnderstandingFeedback(
                 ParseFailureReason.AMBIGUOUS_TARGET,
                 f'Der Bereich „{location}“ ist nicht eindeutig.',
             )
         else:
-            floor = resolve_floor_name(location, context.entities)
-            if floor.status is FloorResolveStatus.OK:
-                floor_id = floor.floor_id
-            elif floor.status is FloorResolveStatus.AMBIGUOUS:
-                return UnderstandingFeedback(
-                    ParseFailureReason.AMBIGUOUS_TARGET,
-                    f'Die Etage „{location}“ ist nicht eindeutig.',
-                )
-            else:
-                return UnderstandingFeedback(
-                    ParseFailureReason.UNKNOWN_ENTITY,
-                    f'Ich kenne den Bereich oder die Etage „{location}“ nicht. '
-                    "Bitte ordne die Geräte in Home Assistant einem Bereich und den Bereich einer Etage zu.",
-                )
+            return UnderstandingFeedback(
+                ParseFailureReason.UNKNOWN_ENTITY,
+                f'Ich kenne den Bereich oder die Etage „{location}“ nicht. '
+                "Bitte ordne die Geräte in Home Assistant einem Bereich und den Bereich einer Etage zu.",
+            )
 
         location_matches = resolve_candidates(
             context.entities,
