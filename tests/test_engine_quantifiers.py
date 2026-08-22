@@ -91,6 +91,44 @@ def test_floor_wins_over_same_named_area_for_cover_group(engine):
     assert sorted(result.plan.entity_id) == ["cover.kueche", "cover.wohnzimmer"]
 
 
+def test_area_scoped_plural_cover_is_implicit_all(engine):
+    entities = [
+        EntitySnapshot(
+            "cover.links", "Rollladen links", "cover", "closed",
+            area_id="esszimmer", area_name="Esszimmer",
+        ),
+        EntitySnapshot(
+            "cover.rechts", "Rollladen rechts", "cover", "closed",
+            area_id="esszimmer", area_name="Esszimmer",
+        ),
+    ]
+
+    result = engine.match("Fahre die Rolladen im Esszimmer hoch", entities)
+
+    assert result is not None
+    assert result.plan.service == "open_cover"
+    assert sorted(result.plan.entity_id) == ["cover.links", "cover.rechts"]
+
+
+def test_area_scoped_plural_lights_are_implicit_all(engine):
+    entities = [
+        EntitySnapshot(
+            "light.decke", "Deckenlicht", "light", "on",
+            area_id="esszimmer", area_name="Esszimmer",
+        ),
+        EntitySnapshot(
+            "light.tisch", "Tischlampe", "light", "on",
+            area_id="esszimmer", area_name="Esszimmer",
+        ),
+    ]
+
+    result = engine.match("Mach die Lichter im Esszimmer aus", entities)
+
+    assert result is not None
+    assert result.plan.service == "turn_off"
+    assert sorted(result.plan.entity_id) == ["light.decke", "light.tisch"]
+
+
 def test_beide_rejects_single_match_in_room(engine):
     entities = [
         EntitySnapshot("cover.a", "Rolllade", "cover", "closed", area_id="gaeste", area_name="Gästezimmer"),

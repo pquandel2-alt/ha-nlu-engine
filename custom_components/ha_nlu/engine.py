@@ -267,8 +267,15 @@ _CALENDAR_TIME_RE = re.compile(
 # "oben"/"unten" (HomeIntent plan V4.3, "Implicit Targets" - "Mach oben die
 # Lichter aus." has no {quantifier} word at all, only {level}) - added here
 # for the same "or this sentence never reaches QuantifierParser" reason.
+# An area-scoped phrase with a plural article/domain ("die Rollläden im
+# Esszimmer", "die Lichter in der Küche") is likewise an unambiguous group
+# request even without the redundant word "alle".  The article is part of
+# this gate deliberately: "den Rollladen im Büro" remains a singular target.
 _QUANTIFIER_RE = re.compile(
-    r"\b(alle|beide[nr]?|nur|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|oben|unten)\b", re.IGNORECASE
+    r"\b(alle|beide[nr]?|nur|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|oben|unten)\b"
+    r"|\bdie\s+(?:lichter|lampen|steckdosen|rol{2,3}[aä]den|rollos|ventilatoren)\b"
+    r"(?=.*\b(?:in der|in dem|im|am|beim)\b)",
+    re.IGNORECASE,
 )
 
 # "Welche {attribute} zeigt {name} [Sensor]?" / "Was zeigt {name} [Sensor]

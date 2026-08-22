@@ -133,6 +133,40 @@ def test_cover_group_without_floor_assignment_returns_actionable_error(monkeypat
     )
 
 
+def test_complete_group_command_supersedes_pending_cover_clarification(monkeypatch):
+    covers = [
+        EntitySnapshot(
+            "cover.links", "Rollladen Esszimmer", "cover", "closed",
+            area_id="esszimmer", area_name="Esszimmer",
+        ),
+        EntitySnapshot(
+            "cover.rechts", "Rollladen Esszimmer", "cover", "closed",
+            area_id="esszimmer", area_name="Esszimmer",
+        ),
+    ]
+    entity = _make_entity(monkeypatch, covers)
+
+    ambiguous = _run(
+        entity,
+        "Fahre den Rollladen im Esszimmer hoch",
+        conversation_id="cover-replacement",
+    )
+    replacement = _run(
+        entity,
+        "Fahre alle Rolladen im Esszimmer hoch",
+        conversation_id="cover-replacement",
+    )
+
+    assert ambiguous.response.speech == "Welche Rollläden meinst du?"
+    assert replacement.response.speech == "2 Rollläden geöffnet."
+    entity.hass.services.async_call.assert_awaited_once_with(
+        "cover",
+        "open_cover",
+        {"entity_id": ["cover.links", "cover.rechts"]},
+        blocking=True,
+    )
+
+
 def test_trigger_and_action_can_be_spoken_in_two_turns(monkeypatch):
     entity = _make_entity(monkeypatch, [KUECHE_FENSTER, KUECHE_LICHT])
 

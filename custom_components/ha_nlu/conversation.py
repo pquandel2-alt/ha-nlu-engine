@@ -368,10 +368,20 @@ class NluConversationEntity(
             )
 
         if pending is not None and pending.pending_clarification is not None:
-            result = self._engine.resolve_clarification(
-                user_input.text, pending.pending_clarification, entities
+            # A complete new command supersedes an open clarification.  Try
+            # the ordinary grammar first so e.g. "Fahre alle Rollläden im
+            # Esszimmer hoch" cannot be mistaken for the short answer to
+            # "Welche Rollläden meinst du?".  Elliptical answers such as
+            # "die linke" do not match a complete command and therefore
+            # continue through the established clarification resolver.
+            result = self._engine.match(
+                user_input.text, entities, self._world_model
             )
-            self._context_store.clear(user_input.conversation_id)
+            if result is None:
+                result = self._engine.resolve_clarification(
+                    user_input.text, pending.pending_clarification, entities
+                )
+                self._context_store.clear(user_input.conversation_id)
         else:
             result = self._engine.match_correction_followup(
                 user_input.text, entities, pending
