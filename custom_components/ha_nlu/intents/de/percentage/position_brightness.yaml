@@ -11,6 +11,19 @@ intents:
   HassSetPercentage:
     data:
       - sentences:
+          # Multi-target percentage commands are resolved by domain and
+          # room/floor, never by treating the complete phrase as one entity
+          # name ("Fahre alle Rollläden im Erdgeschoss auf 90 Prozent").
+          # Keep these specific forms before the open {name} wildcard.
+          - "[kannst du|bitte] (fahre|mach|stelle|setze) [die] {quantifier} [die] {domain} (in der|in dem|im|am|beim) {area} auf {percent} [Prozent]"
+          - "[kannst du|bitte] (fahre|mach|stelle|setze) (in der|in dem|im|am|beim) {area} [die] {quantifier} [die] {domain} auf {percent} [Prozent]"
+          - "[kannst du|bitte] (fahre|mach|stelle|setze) [die] {domain} (in der|in dem|im|am|beim) {area} [die] {quantifier} auf {percent} [Prozent]"
+          - "[kannst du|bitte] (fahre|mach|stelle|setze) [die] {quantifier} [die] {domain} auf {percent} [Prozent]"
+          - "[kannst du|bitte] (fahre|mach|stelle|setze) [die] {quantifier} [die] {domain} (in der|in dem|im|am|beim) {area} (halb runter|halb hoch|halb|zur hälfte|auf die hälfte)"
+          - "[kannst du|bitte] (fahre|mach|stelle|setze) (in der|in dem|im|am|beim) {area} [die] {quantifier} [die] {domain} (halb runter|halb hoch|halb|zur hälfte|auf die hälfte)"
+          - "[kannst du|bitte] (fahre|mach|stelle|setze) [die] {domain} (in der|in dem|im|am|beim) {area} [die] {quantifier} (halb runter|halb hoch|halb|zur hälfte|auf die hälfte)"
+          - "[kannst du|bitte] (fahre|mach|stelle|setze) [die] {quantifier} [die] {domain} (halb runter|halb hoch|halb|zur hälfte|auf die hälfte)"
+          - "[kannst du|bitte] (fahre|mach|stelle|setze) [den|die|das] {name} (halb runter|halb hoch|halb|zur hälfte|auf die hälfte)"
           # "Prozent" is optional (HomeIntent plan V4.2, "Number
           # Normalization": "50" alone must normalize to the same value as
           # "50 Prozent") - safe to drop here without risking a guess: the

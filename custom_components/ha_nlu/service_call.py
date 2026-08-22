@@ -134,11 +134,17 @@ class PercentIntentSpec:
 PERCENT_INTENTS: dict[str, PercentIntentSpec] = {
     "cover": PercentIntentSpec(
         build=lambda es, pct: ServiceCallPlan("cover", "set_cover_position", _entity_id_field(es), {"position": pct}),
-        response=lambda es, pct: f"{es[0].friendly_name} auf {pct} Prozent gefahren.",
+        response=lambda es, pct: _plural_response(
+            es, f"auf {pct} Prozent gefahren.", f"auf {pct} Prozent gefahren."
+        ),
     ),
     "light": PercentIntentSpec(
         build=lambda es, pct: ServiceCallPlan("light", "turn_on", _entity_id_field(es), {"brightness_pct": pct}),
-        response=lambda es, pct: f"{es[0].friendly_name} auf {pct} Prozent Helligkeit gestellt.",
+        response=lambda es, pct: _plural_response(
+            es,
+            f"auf {pct} Prozent Helligkeit gestellt.",
+            f"auf {pct} Prozent Helligkeit gestellt.",
+        ),
     ),
 }
 

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import pytest
 
+from ha_nlu.entities import EntitySnapshot
+
 
 def test_fahre_rolllade_buro_auf_30_prozent_runter(engine, entities):
     # Regression case from the real-world requirement ("Fahre die Rolllade
@@ -88,6 +90,107 @@ def test_bare_number_trailing_verb_phrasing(engine, entities):
     result = engine.match("kannst du das Treppenlicht auf 30 dimmen", entities)
     assert result is not None
     assert result.plan.data == {"brightness_pct": 30}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Fahre alle Rolladen im Erdgeschoss auf 90%",
+        "Stelle im Erdgeschoss alle Rollläden auf 90 Prozent",
+        "Fahre die Rollläden im Erdgeschoss alle auf 90 Prozent",
+    ],
+)
+def test_all_covers_on_floor_set_to_percentage(engine, text):
+    entities = [
+        EntitySnapshot(
+            "cover.wohnzimmer", "Rollladen Wohnzimmer", "cover", "closed",
+            floor_id="eg", floor_name="Erdgeschoss",
+            capabilities=frozenset({"POSITION"}),
+        ),
+        EntitySnapshot(
+            "cover.kueche", "Rollladen Küche", "cover", "closed",
+            floor_id="eg", floor_name="Erdgeschoss",
+            capabilities=frozenset({"POSITION"}),
+        ),
+        EntitySnapshot(
+            "cover.buero", "Rollladen Büro", "cover", "closed",
+            floor_id="og", floor_name="Obergeschoss",
+            capabilities=frozenset({"POSITION"}),
+        ),
+    ]
+
+    result = engine.match(text, entities)
+
+    assert result is not None
+    assert result.plan.domain == "cover"
+    assert result.plan.service == "set_cover_position"
+    assert sorted(result.plan.entity_id) == ["cover.kueche", "cover.wohnzimmer"]
+    assert result.plan.data == {"position": 90}
+    assert result.response_text == "2 Rollläden auf 90 Prozent gefahren."
+
+
+def test_both_percentage_targets_require_exactly_two_entities(engine):
+    entities = [
+        EntitySnapshot(
+            f"cover.{index}", f"Rollladen {index}", "cover", "closed",
+            capabilities=frozenset({"POSITION"}),
+        )
+        for index in range(3)
+    ]
+    assert engine.match("Fahre beide Rolladen auf 90 Prozent", entities) is None
+
+
+def test_single_cover_natural_fixed_positions(engine, entities):
+    half = engine.match("Fahre den Rollladen Wohnzimmer halb runter", entities)
+    assert half is not None
+    assert half.plan.service == "set_cover_position"
+    assert half.plan.data == {"position": 50}
+
+    closed = engine.match("Fahre den Rollladen Wohnzimmer komplett runter", entities)
+    assert closed is not None
+    assert closed.plan.service == "close_cover"
+
+    opened = engine.match("Fahre den Rollladen Wohnzimmer hoch", entities)
+    assert opened is not None
+    assert opened.plan.service == "open_cover"
+
+
+def test_all_covers_on_floor_natural_fixed_positions(engine):
+    entities = [
+        EntitySnapshot(
+            "cover.wohnzimmer", "Rollladen Wohnzimmer", "cover", "closed",
+            floor_id="eg", floor_name="Erdgeschoss",
+            capabilities=frozenset({"POSITION"}),
+        ),
+        EntitySnapshot(
+            "cover.kueche", "Rollladen Küche", "cover", "closed",
+            floor_id="eg", floor_name="Erdgeschoss",
+            capabilities=frozenset({"POSITION"}),
+        ),
+        EntitySnapshot(
+            "cover.buero", "Rollladen Büro", "cover", "closed",
+            floor_id="og", floor_name="Obergeschoss",
+            capabilities=frozenset({"POSITION"}),
+        ),
+    ]
+
+    half = engine.match("Fahre alle Rolladen im Erdgeschoss halb runter", entities)
+    assert half is not None
+    assert half.plan.service == "set_cover_position"
+    assert sorted(half.plan.entity_id) == ["cover.kueche", "cover.wohnzimmer"]
+    assert half.plan.data == {"position": 50}
+
+    closed = engine.match(
+        "Fahre alle Rolladen im Erdgeschoss komplett runter", entities
+    )
+    assert closed is not None
+    assert closed.plan.service == "close_cover"
+    assert sorted(closed.plan.entity_id) == ["cover.kueche", "cover.wohnzimmer"]
+
+    opened = engine.match("Fahre alle Rolladen im Erdgeschoss hoch", entities)
+    assert opened is not None
+    assert opened.plan.service == "open_cover"
+    assert sorted(opened.plan.entity_id) == ["cover.kueche", "cover.wohnzimmer"]
 
 
 def test_bare_number_on_switch_domain_still_returns_none(engine, entities):

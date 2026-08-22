@@ -366,6 +366,9 @@ class PercentageParser:
     def parse(self, text: str, context: ParseContext) -> ParseResult | None:
         slot_lists = {
             "name": WildcardSlotList(name="name"),
+            "domain": _DOMAIN_SLOT_LIST,
+            "area": WildcardSlotList(name="area"),
+            "quantifier": _QUANTIFIER_SLOT_LIST,
             "percent": RangeSlotList(name="percent", start=0, stop=100, step=1, type=RangeType.PERCENTAGE),
             "comparator": _COMPARATOR_SLOT_LIST,
         }
@@ -373,24 +376,74 @@ class PercentageParser:
         if result is None or result.intent is None:
             return None
 
-        name_slot = result.entities.get("name")
         percent_slot = result.entities.get("percent")
-        if name_slot is None or percent_slot is None:
+        half_requested = bool(re.search(r"\b(halb|hälfte)\b", text, re.IGNORECASE))
+        if percent_slot is None and not half_requested:
             return None
 
-        percent = int(percent_slot.value)
+        percent = 50 if percent_slot is None else int(percent_slot.value)
         if not 0 <= percent <= 100:
             return None  # RangeSlotList already guarantees this structurally; kept as an explicit guard
 
-        name = _strip_locative_prepositions(str(name_slot.value))
-        resolved = resolve_entity(name, context.entities)
-        if resolved.status is not ResolveStatus.OK or resolved.entity is None:
-            return None
+        domain_slot = result.entities.get("domain")
+        if domain_slot is not None:
+            domain = str(domain_slot.value)
+            if PERCENT_INTENTS.get(domain) is None:
+                return None
 
-        # Which service call applies is decided by the resolved entity's
-        # actual domain, not by the verb used - see PERCENT_INTENTS docstring.
-        if PERCENT_INTENTS.get(resolved.entity.domain) is None:
-            return None
+            area_id = area_name = floor_id = None
+            area_slot = result.entities.get("area")
+            if area_slot is not None:
+                area_name = _strip_locative_prepositions(str(area_slot.value))
+                area = resolve_area_name(area_name, context.entities)
+                if area.status is AreaResolveStatus.OK:
+                    area_id = area.area_id
+                elif area.status is AreaResolveStatus.NOT_FOUND:
+                    floor = resolve_floor_name(area_name, context.entities)
+                    if floor.status is not FloorResolveStatus.OK:
+                        return None
+                    floor_id = floor.floor_id
+                else:
+                    return None
+
+            matches = resolve_candidates(
+                context.entities,
+                Constraints(domain=domain, area_id=area_id, floor_id=floor_id),
+            )
+            if not matches:
+                return None
+            quantifier = str(result.entities["quantifier"].value)
+            if quantifier == "both" and len(matches) != 2:
+                return None
+            target_text = domain
+            target = TargetReference(text=target_text, domain=domain)
+            area_reference = (
+                AreaReference(text=area_name, area_id=area_id)
+                if area_id is not None
+                else None
+            )
+            frame_quantifier = Quantifier(kind=quantifier)
+        else:
+            name_slot = result.entities.get("name")
+            if name_slot is None:
+                return None
+            name = _strip_locative_prepositions(str(name_slot.value))
+            resolved = resolve_entity(name, context.entities)
+            if resolved.status is not ResolveStatus.OK or resolved.entity is None:
+                return None
+
+            # Which service call applies is decided by the resolved entity's
+            # actual domain, not by the verb used - see PERCENT_INTENTS docstring.
+            if PERCENT_INTENTS.get(resolved.entity.domain) is None:
+                return None
+            matches = [resolved.entity]
+            target = TargetReference(
+                text=name,
+                entity_id=resolved.entity.entity_id,
+                domain=resolved.entity.domain,
+            )
+            area_reference = None
+            frame_quantifier = None
 
         parameters: dict[str, object] = {"percent": percent}
         comparator_slot = result.entities.get("comparator")
@@ -399,12 +452,13 @@ class PercentageParser:
 
         frame = SemanticFrame(
             intent=result.intent.name,
-            target=TargetReference(text=name, entity_id=resolved.entity.entity_id, domain=resolved.entity.domain),
-            area=None,
+            target=target,
+            area=area_reference,
+            quantifier=frame_quantifier,
             parameters=parameters,
             source_text=text,
         )
-        return ParseResult(frame=frame, resolved_entities=[resolved.entity])
+        return ParseResult(frame=frame, resolved_entities=matches)
 
 
 class FanExtendedParser:

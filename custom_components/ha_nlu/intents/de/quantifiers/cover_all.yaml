@@ -3,6 +3,8 @@ intents:
   HassOpenCover:
     data:
       - sentences:
+          - "[kannst du|bitte] fahre [die] {quantifier} [die] {domain} (komplett|vollständig|ganz) hoch"
+          - "[kannst du|bitte] fahre [die] {quantifier} [die] {domain} [in der|in dem|im|am|beim] {area} (komplett|vollständig|ganz) hoch"
           - "[kannst du] fahre [die] {quantifier} [die] {domain} hoch"
           - "[kannst du|bitte] [die] {quantifier} [die] {domain} hochfahren"
           - "öffne [die] {quantifier} [die] {domain}"
@@ -22,6 +24,8 @@ intents:
   HassCloseCover:
     data:
       - sentences:
+          - "[kannst du|bitte] fahre [die] {quantifier} [die] {domain} (komplett|vollständig|ganz) runter"
+          - "[kannst du|bitte] fahre [die] {quantifier} [die] {domain} [in der|in dem|im|am|beim] {area} (komplett|vollständig|ganz) runter"
           - "[kannst du] fahre [die] {quantifier} [die] {domain} runter"
           - "[kannst du|bitte] [die] {quantifier} [die] {domain} runterfahren"
           - "schließe [die] {quantifier} [die] {domain}"

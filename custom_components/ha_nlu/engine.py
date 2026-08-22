@@ -232,6 +232,11 @@ _PERCENT_RE = re.compile(r"\bprozent\b", re.IGNORECASE)
 # and the digit, or a unit word after it, in those two).
 _BARE_PERCENT_RE = re.compile(r"\bauf\s+\d{1,3}\b")
 
+# Fixed natural-language cover position: "halb (runter/hoch)" and "zur
+# Hälfte" mean an absolute 50 percent position. Routed to PercentageParser
+# so single and quantified room/floor targets share the same safe resolver.
+_HALF_POSITION_RE = re.compile(r"\b(halb|hälfte)\b", re.IGNORECASE)
+
 # Wave 13 ("Relative-Zeit-Automationen") - the same cheap, collision-free
 # pre-check scaffold ``_AUTOMATION_TRIGGER_RE`` establishes for
 # ``match_automation()``, gating ``match_relative_time_automation()`` so an
@@ -688,7 +693,7 @@ class NluEngine:
             return self._area_query_parser
         if _CLIMATE_EXTENDED_RE.search(text):
             return self._climate_extended_parser
-        if _PERCENT_RE.search(text) or _BARE_PERCENT_RE.search(text):
+        if _PERCENT_RE.search(text) or _BARE_PERCENT_RE.search(text) or _HALF_POSITION_RE.search(text):
             return self._percentage_parser
         if _QUANTIFIER_RE.search(text):
             return self._quantifier_parser

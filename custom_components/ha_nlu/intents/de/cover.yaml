@@ -14,6 +14,7 @@ intents:
     data:
       - sentences:
           - "[kannst du] mach [den|die|das] {name} ganz auf"
+          - "[kannst du|bitte] fahre [den|die|das] {name} (komplett|vollständig|ganz) hoch"
           - "[kannst du] öffne [den|die|das] {name}"
           - "[kannst du] fahre [den|die|das] {name} hoch"
           - "[kannst du|bitte] [den|die|das] {name} hochfahren"
@@ -24,6 +25,7 @@ intents:
     data:
       - sentences:
           - "[kannst du] mach [den|die|das] {name} ganz zu"
+          - "[kannst du|bitte] fahre [den|die|das] {name} (komplett|vollständig|ganz) runter"
           - "[kannst du] schließe [den|die|das] {name}"
           - "[kannst du] fahre [den|die|das] {name} runter"
           - "[kannst du|bitte] [den|die|das] {name} runterfahren"
