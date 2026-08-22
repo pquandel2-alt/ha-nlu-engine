@@ -6,6 +6,8 @@ mirroring test_engine_quantifiers.py's style.
 
 from __future__ import annotations
 
+import pytest
+
 from ha_nlu.entities import EntitySnapshot
 
 TWO_FLOOR_HOUSE = [
@@ -27,6 +29,24 @@ TWO_FLOOR_HOUSE = [
     EntitySnapshot(
         "light.schlafzimmer", "Schlafzimmerlicht", "light", "off",
         area_id="schlafzimmer", area_name="Schlafzimmer",
+        floor_id="obergeschoss", floor_name="Obergeschoss", floor_level=1,
+    ),
+]
+
+TWO_FLOOR_COVERS = [
+    EntitySnapshot(
+        "cover.wohnzimmer", "Rollladen Wohnzimmer", "cover", "closed",
+        area_id="wohnzimmer", area_name="Wohnzimmer",
+        floor_id="erdgeschoss", floor_name="Erdgeschoss", floor_level=0,
+    ),
+    EntitySnapshot(
+        "cover.kueche", "Rollladen Küche", "cover", "closed",
+        area_id="kueche", area_name="Küche",
+        floor_id="erdgeschoss", floor_name="Erdgeschoss", floor_level=0,
+    ),
+    EntitySnapshot(
+        "cover.buero", "Rollladen Büro", "cover", "closed",
+        area_id="buero", area_name="Büro",
         floor_id="obergeschoss", floor_name="Obergeschoss", floor_level=1,
     ),
 ]
@@ -54,6 +74,87 @@ def test_alle_lichter_im_erdgeschoss_floor_name_fallback(engine):
     result = engine.match("mach alle Lichter im Erdgeschoss aus", TWO_FLOOR_HOUSE)
     assert result is not None
     assert sorted(result.plan.entity_id) == ["light.kueche", "light.wohnzimmer"]
+
+
+def test_location_before_cover_group_with_short_imperative(engine):
+    result = engine.match(
+        "Fahr im Erdgeschoss alle Rolladen hoch", TWO_FLOOR_COVERS
+    )
+
+    assert result is not None
+    assert result.plan.service == "open_cover"
+    assert sorted(result.plan.entity_id) == ["cover.kueche", "cover.wohnzimmer"]
+
+
+def test_location_before_cover_group_with_standard_imperative(engine):
+    result = engine.match(
+        "Fahre im Erdgeschoss alle Rolladen hoch", TWO_FLOOR_COVERS
+    )
+
+    assert result is not None
+    assert result.plan.service == "open_cover"
+    assert sorted(result.plan.entity_id) == ["cover.kueche", "cover.wohnzimmer"]
+
+
+def test_location_before_light_group(engine):
+    result = engine.match(
+        "Mach im Erdgeschoss alle Lichter aus", TWO_FLOOR_HOUSE
+    )
+
+    assert result is not None
+    assert result.plan.service == "turn_off"
+    assert sorted(result.plan.entity_id) == ["light.kueche", "light.wohnzimmer"]
+
+
+def test_location_before_implicit_plural_groups(engine):
+    covers = engine.match(
+        "Fahre im Erdgeschoss die Rolladen hoch", TWO_FLOOR_COVERS
+    )
+    lights = engine.match(
+        "Mach im Erdgeschoss die Lichter aus", TWO_FLOOR_HOUSE
+    )
+
+    assert covers is not None
+    assert sorted(covers.plan.entity_id) == ["cover.kueche", "cover.wohnzimmer"]
+    assert lights is not None
+    assert sorted(lights.plan.entity_id) == ["light.kueche", "light.wohnzimmer"]
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    (
+        "Fahr im Erdgeschoss alle Rolladen hoch",
+        "Im Erdgeschoss fahre bitte alle Rolladen hoch",
+        "Fahr bitte alle Rolladen hoch im Erdgeschoss",
+        "Fahre alle im Erdgeschoss vorhandenen Rolladen hoch",
+        "Kannst du alle Rolladen hochfahren, die im Erdgeschoss sind",
+    ),
+)
+def test_semantic_group_composition_is_order_independent(engine, sentence):
+    result = engine.match(sentence, TWO_FLOOR_COVERS)
+
+    assert result is not None
+    assert result.plan.service == "open_cover"
+    assert sorted(result.plan.entity_id) == ["cover.kueche", "cover.wohnzimmer"]
+
+
+def test_semantic_group_composition_refuses_conflicting_action(engine):
+    assert (
+        engine.match(
+            "Fahre im Erdgeschoss alle Rolladen hoch und runter",
+            TWO_FLOOR_COVERS,
+        )
+        is None
+    )
+
+
+def test_semantic_group_composition_does_not_turn_question_into_action(engine):
+    assert (
+        engine.match(
+            "Sind im Erdgeschoss alle Rolladen hoch?", TWO_FLOOR_COVERS
+        )
+        is None
+    )
 
 
 def test_oben_without_any_floor_data_returns_none(engine, entities):

@@ -27,6 +27,7 @@ from .entities import (
 from .floors import FloorResolveStatus, resolve_floor_by_level_keyword, resolve_floor_name
 from .nlu.constraint_resolver import Constraints, resolve_candidates
 from .nlu.frame import AreaReference, Comparison, Quantifier, SemanticFrame, TargetReference, TemporalExpression
+from .nlu.group_semantics import parse_flexible_group_command, resolve_group_location
 from .nlu.lexicon import (
     _COLOR_SLOT_LIST,
     _COLOR_TEMP_SLOT_LIST,
@@ -74,27 +75,6 @@ _LOCATIVE_PREPOSITIONS = re.compile(r"\b(in der|in dem|im|am|beim)\b", re.IGNORE
 def _strip_locative_prepositions(name: str) -> str:
     without_prepositions = _LOCATIVE_PREPOSITIONS.sub(" ", name)
     return re.sub(r"\s+", " ", without_prepositions).strip()
-
-
-def _resolve_group_location(
-    name: str, entities: list[EntitySnapshot]
-) -> tuple[str | None, str | None] | None:
-    """Resolve a group scope as ``(area_id, floor_id)``.
-
-    Home Assistant permits an area and a floor to have the same name. For
-    quantified/group commands, a matching floor wins: "alle Rollläden im
-    Erdgeschoss" naturally targets the complete floor, not only an area
-    that also happens to be named "Erdgeschoss". If no floor matches, the
-    established area resolution remains the fallback.
-    """
-    floor = resolve_floor_name(name, entities)
-    if floor.status is FloorResolveStatus.OK:
-        return None, floor.floor_id
-
-    area = resolve_area_name(name, entities)
-    if area.status is AreaResolveStatus.OK:
-        return area.area_id, None
-    return None
 
 
 # Closed-vocabulary TextSlotList definitions (domain/quantifier/count/level/
@@ -266,6 +246,11 @@ class QuantifierParser:
     group commands when Home Assistant contains both with the same name:
     "alle Rollläden im Erdgeschoss" means the complete floor, not only the
     same-named area. If no floor matches, normal area resolution applies.
+
+    If no established Hassil sentence matches, ``group_semantics`` composes
+    the same frame from independently detected domain, quantity, location
+    and action slots. This makes their word order flexible without adding a
+    separate YAML sentence for every permutation.
     """
 
     def __init__(self, intents: Intents) -> None:
@@ -282,7 +267,7 @@ class QuantifierParser:
         }
         result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
         if result is None or result.intent is None:
-            return None
+            return parse_flexible_group_command(text, context.entities)
 
         spec = INTENTS.get(result.intent.name)
         if spec is None:
@@ -315,7 +300,7 @@ class QuantifierParser:
         if area_slot is not None:
             area_name = _strip_locative_prepositions(str(area_slot.value))
             if area_name:
-                location = _resolve_group_location(area_name, context.entities)
+                location = resolve_group_location(area_name, context.entities)
                 if location is None:
                     return None  # neither a unique floor nor a unique room - never guess
                 area_id, floor_id = location
@@ -408,7 +393,7 @@ class PercentageParser:
             area_slot = result.entities.get("area")
             if area_slot is not None:
                 area_name = _strip_locative_prepositions(str(area_slot.value))
-                location = _resolve_group_location(area_name, context.entities)
+                location = resolve_group_location(area_name, context.entities)
                 if location is None:
                     return None
                 area_id, floor_id = location
