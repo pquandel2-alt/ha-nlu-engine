@@ -49,6 +49,7 @@ from .nlu.parse_outcome import ParseFailureReason, UnderstandingFeedback
 from .nlu.response_generator import ResponseGenerator, _automation_label
 from .nlu.service_mapper import map_to_service_call
 from .nlu.semantic_compiler import SemanticCommandCompiler, SemanticQueryCompiler
+from .nlu.semantic_lexicon import analyse_semantics
 from .nlu.validator import validate_command
 from .automation_action_parser import AutomationActionParser
 from .automation_condition_parser import AutomationConditionParser, split_on_top_level_and
@@ -725,7 +726,9 @@ class NluEngine:
         if location_query is not None:
             return self._build_match_result(location_query, entities)
         parse_context = ParseContext(
-            entities=entities, index=build_entity_index(entities), world_model=world_model
+            entities=entities,
+            index=(world_model.entity_index if world_model is not None else build_entity_index(entities)),
+            world_model=world_model,
         )
         # Location/property phrases are the explicit cross-router fallback
         # above. Once a grammar is selected here, a semantic rejection must
@@ -733,9 +736,14 @@ class NluEngine:
         # "beide" must never degrade into a singular command).
         result = self._select_parser(text).parse(text, parse_context)
         if result is None:
-            result = SemanticQueryCompiler.compile(text, entities)
-        if result is None:
-            result = SemanticCommandCompiler.compile(text, entities)
+            semantic_analysis = analyse_semantics(text)
+            result = SemanticQueryCompiler.compile(
+                text, entities, world_model, semantic_analysis
+            )
+            if result is None:
+                result = SemanticCommandCompiler.compile(
+                    text, entities, world_model, semantic_analysis
+                )
         if result is None:
             return None
         if isinstance(result, ClarificationRequest):

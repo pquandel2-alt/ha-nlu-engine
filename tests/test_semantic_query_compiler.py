@@ -106,3 +106,37 @@ def test_query_frame_marks_read_only_semantics(engine):
 
     assert result.frame.action.name == "QUERY"
     assert result.frame.quantity.kind.name == "ALL"
+
+
+@pytest.mark.parametrize(
+    ("sentence", "expected_ids"),
+    (
+        (
+            "Welche Fenster sind im Erdgeschoss?",
+            ["binary_sensor.wohnzimmer", "binary_sensor.kueche"],
+        ),
+        (
+            "Im Erdgeschoss, welche Fenster gibt es dort?",
+            ["binary_sensor.wohnzimmer", "binary_sensor.kueche"],
+        ),
+        ("Gibt es Fenster im Dachgeschoss?", ["binary_sensor.buero"]),
+    ),
+)
+def test_stateless_plural_queries_use_the_same_composition(engine, sentence, expected_ids):
+    result = engine.match(sentence, WINDOWS)
+
+    assert result is not None
+    assert result.plan is None
+    assert {entity.entity_id for entity in result.command.entities} == set(expected_ids)
+
+
+def test_every_bare_query_permutation_is_read_only(engine):
+    for parts in permutations(("Welche", "Fenster", "im Erdgeschoss")):
+        result = engine.match(" ".join(parts) + "?", WINDOWS)
+
+        assert result is not None, parts
+        assert result.plan is None
+        assert {entity.entity_id for entity in result.command.entities} == {
+            "binary_sensor.wohnzimmer",
+            "binary_sensor.kueche",
+        }

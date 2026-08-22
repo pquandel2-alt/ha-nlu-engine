@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
 
-- Aktuelle Version: **4.26.1**
+- Aktuelle Version: **4.27.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Lizenz: **MIT**
@@ -60,12 +60,22 @@ Gesprochener oder geschriebener Satz
 
 Wenn ein Ziel nicht eindeutig aufgelöst werden kann, rät HomeIntent nicht. Der Befehl wird abgelehnt oder es wird – sofern der jeweilige Dialogpfad dies unterstützt – nachgefragt.
 
-Der semantische Compiler ist kein eingebautes Sprachmodell. Er arbeitet mit
-einem kleinen Wortschatz wiederverwendbarer Bedeutungen und prüft mögliche
-Kombinationen gegen die tatsächlich in Home Assistant vorhandenen Geräte,
-Bereiche, Etagen und Fähigkeiten. So entsteht flexible Satzstellung ohne
-Cloud-Latenz, Modell-Download oder hohe Hardware-Anforderungen. Alte
-Satzgrammatiken bleiben als schneller und kompatibler Pfad erhalten.
+Der semantische Compiler ist kein eingebautes Sprachmodell. Seit Version
+4.27 zerlegt ein gemeinsames spanbasiertes Lexikon jeden Satz in
+wiederverwendbare Bedeutungen. Jeder Treffer behält seine Position im Text;
+Mehrwortausdrücke, Konflikte und nicht erklärte bedeutungstragende Wörter
+können dadurch geprüft werden. Query und Befehl verwenden denselben einmalig
+erzeugten Analysepass. Die Interpretation wird anschließend gegen die
+tatsächlich in Home Assistant vorhandenen Geräte, Bereiche, Etagen und
+Fähigkeiten geprüft. So entsteht flexible Satzstellung ohne Cloud-Latenz,
+Modell-Download oder hohe Hardware-Anforderungen. Alte Satzgrammatiken bleiben
+als schneller und kompatibler Pfad erhalten.
+
+Dabei werden nicht alle denkbaren deutschen Gespräche vorgetäuscht. Erkennt
+HomeIntent einen wichtigen Zusatz nicht oder ergeben die Bausteine mehrere
+widersprüchliche Bedeutungen, führt es keine Aktion aus. Ein neuer Ausdruck
+erweitert das zentrale Lexikon für alle zulässigen Satzstellungen und muss
+nicht als vollständiger Satz in vielen Varianten eingetragen werden.
 
 ## Funktionsumfang
 
@@ -139,7 +149,9 @@ Abfragen sind lesend aufgebaut und führen keinen Home-Assistant-Service aus.
 
 ```text
 Welche Fenster sind offen?
+Welche Fenster sind im Erdgeschoss?
 Gibt es offene Fenster im Keller?
+Gibt es im Dachgeschoss Fenster?
 Ist das Schlafzimmerfenster geöffnet?
 Ist das Badezimmer Fenster geschlossen?
 Ist das Fenster vom Badezimmer geschlossen?
@@ -508,7 +520,7 @@ python -m pytest -q
 Aktueller Entwicklungsstand:
 
 ```text
-1725 passed, 14 skipped
+1787 passed, 14 skipped
 ```
 
 Zusätzlich enthält `tests/eval/dialog_cases.json` ein datengetriebenes

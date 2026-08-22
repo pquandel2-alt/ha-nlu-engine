@@ -116,3 +116,18 @@ def test_compiler_exposes_composed_semantic_primitives(engine):
     assert result.frame.action.name == "SET"
     assert result.frame.property.name == "POSITION"
     assert result.frame.quantity.kind.name == "ALL"
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    (
+        "Fahre sämtliche Rollläden im Erdgeschoss nicht hoch",
+        "Fahre vielleicht sämtliche Rollläden im Erdgeschoss hoch",
+        "Fahre sämtliche Rollläden im Erdgeschoss normalerweise hoch",
+        "Fahre sämtliche Rollläden im Erdgeschoss gestern hoch",
+    ),
+)
+def test_unexplained_modifiers_can_never_create_a_service_plan(engine, sentence):
+    result = engine.match(sentence, HOUSE)
+
+    assert result is None or result.plan is None

@@ -81,6 +81,7 @@ class QueryTarget:
     domain: str | None = None
     device_class: str | None = None
     area: AreaSnapshot | None = None
+    floor_id: str | None = None
     entity_id: str | None = None
     kind: QueryTargetKind = QueryTargetKind.ENTITY
 

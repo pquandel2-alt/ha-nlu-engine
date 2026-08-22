@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from ..areas import AreaSnapshot
 from ..entities import EntitySnapshot, generate_aliases, normalize_for_compare
 from ..floors import FloorResolveStatus, resolve_floor_by_level_keyword
+from ..world_model import WorldModel
 from .constraint_resolver import Constraints, resolve_candidates
 from .frame import AreaReference, Quantifier, SemanticFrame, TargetReference
 from .group_semantics import resolve_group_location
@@ -26,7 +27,7 @@ from .parser import ClarificationRequest, ParseResult
 from .primitives import SemanticAction, SemanticProperty, SemanticQuantity
 from .query_command import QueryCommand, QueryFilter, QueryScope, QueryTarget
 from .query_executor import QueryExecutor
-from .semantic_state import SemanticState
+from .semantic_lexicon import SemanticAnalysis, SemanticKind, analyse_semantics
 
 
 @dataclass(frozen=True)
@@ -48,14 +49,6 @@ _QUESTION_RE = re.compile(
 )
 _LOCATION_CUE_RE = re.compile(r"\b(?:im|in\s+der|in\s+dem|am|beim)\s+", re.I)
 _LEVEL_CUE_RE = re.compile(r"(?<!nach\s)\b(?:oben|unten)\b", re.I)
-_DOMAIN_PATTERNS = {
-    "light": re.compile(r"\b(?:licht(?:er)?|lamp(?:e|en)|leucht(?:e|en)|beleuchtung)\b", re.I),
-    "switch": re.compile(r"\b(?:schalter|steckdos(?:e|en))\b", re.I),
-    "cover": re.compile(r"\b(?:rol{2,3}[aä]d(?:e|en)|rollos?|jalousie(?:n)?)\b", re.I),
-    "fan": re.compile(r"\b(?:ventilator(?:en)?|lüfter)\b", re.I),
-    "climate": re.compile(r"\b(?:heizung(?:en)?|thermostat(?:e)?)\b", re.I),
-    "script": re.compile(r"\b(?:skript(?:e)?)\b", re.I),
-}
 _PLURAL_RE = re.compile(
     r"\b(?:lichter|lampen|leuchten|steckdosen|rollläden|rolläden|rollos|"
     r"jalousien|ventilatoren|heizungen|thermostate|skripte)\b",
@@ -70,19 +63,6 @@ _COUNT_WORDS = {
 _COUNT_RE = re.compile(r"\b(" + "|".join(_COUNT_WORDS) + r"|[2-9]|10)\b", re.I)
 _ORDERED_SUBSET_RE = re.compile(r"\b(?:erste\w*|letzte\w*)\b", re.I)
 
-_COMMAND_VERB_RE = re.compile(
-    r"\b(?:(?:an|aus)mach(?:e|en)?|(?:ein|aus)schalt(?:e|en)?|"
-    r"mach(?:e|en)?|schalt(?:e|en)?|stell(?:e|en)?|setz(?:e|en)?|"
-    r"fahr(?:e|en)?|gefahren|öffn(?:e|en)?|schließ(?:e|en)?|dreh(?:e|en)?|"
-    r"lass(?:e|en)?|aktivier(?:e|en)?|start(?:e|en)?|führ(?:e|en)?)\b",
-    re.I,
-)
-_OPEN_RE = re.compile(r"\b(?:hoch|oben|hochgefahren|öffn(?:e|en)?|auf)\b", re.I)
-_CLOSE_RE = re.compile(r"\b(?:runter|herunter|geschlossen|schließ(?:e|en)?|zu)\b", re.I)
-_ON_RE = re.compile(r"\b(?:an|ein|anmachen|einschalten|eingeschaltet|aktivier(?:e|en)?)\b", re.I)
-_OFF_RE = re.compile(r"\b(?:aus|ausmachen|ausschalten|ausgeschaltet|deaktivier(?:e|en)?)\b", re.I)
-_TOGGLE_RE = re.compile(r"\b(?:umschalten|toggle)\b", re.I)
-_RUN_RE = re.compile(r"\b(?:start(?:e|en)?|aktivier(?:e|en)?|ausführen|führe)\b", re.I)
 _HALF_RE = re.compile(r"\b(?:halb|halbe(?:r|n)?|hälfte|zur\s+hälfte)\b", re.I)
 _ZERO_RE = re.compile(r"\b(?:komplett|ganz|vollständig)\s+(?:runter|herunter|zu)\b", re.I)
 _HUNDRED_RE = re.compile(r"\b(?:komplett|ganz|vollständig)\s+(?:hoch|auf)\b", re.I)
@@ -118,34 +98,10 @@ _DOMAIN_CANONICAL = {
     "skript": "script", "skripte": "script",
 }
 
-_QUERY_DEVICE_PATTERNS = {
-    ("binary_sensor", "window"): re.compile(r"\bfenster(?:kontakte?)?\b", re.I),
-    ("binary_sensor", "door"): re.compile(r"\btür(?:en)?\b", re.I),
-    ("binary_sensor", "garage_door"): re.compile(r"\bgaragentor(?:e)?\b", re.I),
-    ("binary_sensor", "motion"): re.compile(r"\b(?:bewegungsmelder|bewegungssensor(?:en)?)\b", re.I),
-    ("cover", None): _DOMAIN_PATTERNS["cover"],
-    ("light", None): _DOMAIN_PATTERNS["light"],
-    ("switch", None): _DOMAIN_PATTERNS["switch"],
-}
-_QUERY_STATE_PATTERNS = {
-    SemanticState.OPEN: re.compile(
-        r"\b(?:offen\w*|geöffnet\w*|hochgefahren\w*|oben)\b", re.I
-    ),
-    SemanticState.CLOSED: re.compile(
-        r"\b(?:geschlossen\w*|runtergefahren\w*|heruntergefahren\w*|unten|zu)\b", re.I
-    ),
-    SemanticState.ON: re.compile(r"\b(?:an|ein|eingeschaltet\w*|angeschaltet\w*)\b", re.I),
-    SemanticState.OFF: re.compile(r"\b(?:aus|ausgeschaltet\w*)\b", re.I),
-}
 _QUERY_MARKER_RE = re.compile(
     r"\b(?:ist|sind|welch\w*|wie\s+viele|wo|gibt\s+es|haben\s+wir|irgendein\w*|keine?\w*)\b",
     re.I,
 )
-_COUNT_QUERY_RE = re.compile(r"\bwie\s+viele\b", re.I)
-_LOCATION_QUERY_RE = re.compile(r"\b(?:wo|in\s+welchen\s+räumen|welche\s+räume)\b", re.I)
-_EXISTS_QUERY_RE = re.compile(r"\b(?:gibt\s+es|haben\s+wir|irgendein\w*|irgendwelche)\b", re.I)
-_ALL_QUERY_RE = re.compile(r"\b(?:alle|sämtliche|sämtlichen|beide)\b", re.I)
-_NONE_QUERY_RE = re.compile(r"\b(?:kein|keine|keiner|keines)\b", re.I)
 _SINGULAR_NAMED_QUERY_RE = re.compile(r"^\s*ist\s+(?:das|der|die)\b", re.I)
 _DURATION_QUESTION_RE = re.compile(r"^\s*wie\s+lange\b", re.I)
 
@@ -158,6 +114,20 @@ def _tokens(text: str) -> set[str]:
         for token in _TOKEN_RE.findall(text)
         if normalize_for_compare(token) not in _STOP_WORDS
     }
+
+
+def _has_unexplained_meaning(analysis, dynamic_texts=()) -> bool:
+    """Whether lexical coverage leaves non-registry meaning unexplained."""
+    dynamic_tokens = {
+        token
+        for dynamic_text in dynamic_texts
+        if dynamic_text
+        for token in _tokens(dynamic_text)
+    }
+    return bool({
+        normalize_for_compare(token)
+        for token in analysis.unexplained_tokens
+    } - dynamic_tokens)
 
 
 def _quantity(text: str) -> Quantifier | None:
@@ -216,25 +186,29 @@ def _percent(text: str) -> int | None:
     return int(match.group("after") or match.group("unit")) if match else None
 
 
-def _intents(text: str, domains: frozenset[str], percent: int | None) -> frozenset[str]:
-    if _COMMAND_VERB_RE.search(text) is None:
+def _intents(
+    text: str, domains: frozenset[str], percent: int | None, analysis=None
+) -> frozenset[str]:
+    analysis = analysis or analyse_semantics(text)
+    if not analysis.values(SemanticKind.COMMAND_MARKER):
         return frozenset()
+    actions = analysis.values(SemanticKind.ACTION)
     found: set[str] = set()
     if percent is not None:
         found.add("HassSetPercentage")
     if "cover" in domains and percent is None:
-        if _OPEN_RE.search(text):
+        if "open" in actions:
             found.add("HassOpenCover")
-        if _CLOSE_RE.search(text):
+        if "close" in actions:
             found.add("HassCloseCover")
     if domains & {"light", "switch", "fan", "climate"}:
-        if _TOGGLE_RE.search(text):
+        if "toggle" in actions:
             found.add("HassToggle")
-        if _ON_RE.search(text):
+        if "turn_on" in actions:
             found.add("HassTurnOn")
-        if _OFF_RE.search(text):
+        if "turn_off" in actions:
             found.add("HassTurnOff")
-    if "script" in domains and _RUN_RE.search(text):
+    if "script" in domains and "run" in actions:
         found.add("HassRunScript")
     return frozenset(found)
 
@@ -268,18 +242,23 @@ class SemanticCommandCompiler:
 
     @staticmethod
     def compile(
-        text: str, entities: list[EntitySnapshot]
+        text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
+        analysis: SemanticAnalysis | None = None,
     ) -> ParseResult | ClarificationRequest | None:
         if _QUESTION_RE.search(text) or re.search(r"\baußer\b", text, re.I):
             return None
         if _ORDERED_SUBSET_RE.search(text):
             return None
+        analysis = analysis or analyse_semantics(text)
         spoken_percent = _ANY_PERCENT_RE.search(text)
         if spoken_percent is not None and int(spoken_percent.group("value")) > 100:
             return None
 
         domains = frozenset(
-            domain for domain, pattern in _DOMAIN_PATTERNS.items() if pattern.search(text)
+            value for value in analysis.values(SemanticKind.DOMAIN)
+            if isinstance(value, str)
         )
         location = _location(text, entities)
         # A spoken scope is a hard constraint.  If HA does not know it (or
@@ -296,7 +275,7 @@ class SemanticCommandCompiler:
         if not domains and preliminary:
             domains = frozenset(entity.domain for entity in preliminary)
 
-        intents = _intents(text, domains, percent)
+        intents = _intents(text, domains, percent, analysis)
         facts = SemanticFacts(
             intents=intents,
             domains=domains,
@@ -314,7 +293,9 @@ class SemanticCommandCompiler:
             return None
 
         if quantity is not None:
-            matches = resolve_candidates(
+            matches = list(world_model.select_entities(
+                domain=domain, area_id=facts.area_id, floor_id=facts.floor_id,
+            )) if world_model is not None else resolve_candidates(
                 entities,
                 Constraints(domain=domain, area_id=facts.area_id, floor_id=facts.floor_id),
             )
@@ -342,6 +323,17 @@ class SemanticCommandCompiler:
             entity = matches[0]
             target = TargetReference(entity.friendly_name, entity.entity_id, entity.domain)
             area = None
+
+        registry_texts = [facts.location_text or ""]
+        for entity in matches:
+            registry_texts.extend((
+                entity.friendly_name,
+                entity.area_name or "",
+                entity.floor_name or "",
+                *(alias.text for alias in generate_aliases(entity)),
+            ))
+        if _has_unexplained_meaning(analysis, registry_texts):
+            return None
 
         action = {
             "HassTurnOn": SemanticAction.TURN_ON,
@@ -379,43 +371,61 @@ class SemanticCommandCompiler:
 
 
 class SemanticQueryCompiler:
-    """Compile plural state questions from freely ordered semantic facts."""
+    """Compile read-only plural queries from freely ordered semantic facts."""
 
     @staticmethod
-    def compile(text: str, entities: list[EntitySnapshot]) -> ParseResult | None:
+    def compile(
+        text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
+        analysis: SemanticAnalysis | None = None,
+    ) -> ParseResult | None:
         # A question mark alone also supports terse chat-style questions such
         # as "Offene Fenster im Erdgeschoss?".  An imperative verb always
         # wins the command interpretation and is never converted to a query.
+        analysis = analysis or analyse_semantics(text)
         if (
             not (_QUERY_MARKER_RE.search(text) or text.rstrip().endswith("?"))
-            or _COMMAND_VERB_RE.search(text)
+            or analysis.values(SemanticKind.COMMAND_MARKER)
             or _SINGULAR_NAMED_QUERY_RE.search(text)
             or _DURATION_QUESTION_RE.search(text)
         ):
             return None
 
-        targets = [
-            (domain, device_class)
-            for (domain, device_class), pattern in _QUERY_DEVICE_PATTERNS.items()
-            if pattern.search(text)
-        ]
-        states = [state for state, pattern in _QUERY_STATE_PATTERNS.items() if pattern.search(text)]
-        if len(targets) != 1 or len(states) != 1:
+        targets = list(analysis.values(SemanticKind.DEVICE_CLASS))
+        targets.extend(
+            (domain, None)
+            for domain in analysis.values(SemanticKind.DOMAIN)
+            if isinstance(domain, str)
+        )
+        targets = list(dict.fromkeys(targets))
+        states = list(analysis.values(SemanticKind.STATE))
+        if len(targets) != 1 or len(states) > 1:
             return None
         domain, device_class = targets[0]
-        requested_state = states[0]
+        requested_state = states[0] if states else None
 
         location = _location(text, entities)
         has_location_cue = _LOCATION_CUE_RE.search(text) is not None
         if has_location_cue and location is None:
             return None
+        # Unknown modifiers may materially change a question (for example
+        # "normalerweise", "gestern" or "nicht").  Do not pretend they were
+        # understood. Dynamic registry location names are deliberately
+        # removed from this check because they cannot live in the lexicon.
+        if _has_unexplained_meaning(analysis, (location[0],) if location else ()):
+            return None
         area_id = location[1] if location else None
         floor_id = location[2] if location else None
         location_name = location[0] if location else None
 
-        candidates = resolve_candidates(
-            entities,
-            Constraints(
+        candidates = list(world_model.select_entities(
+            domain=domain,
+            device_class=device_class,
+            area_id=area_id,
+            floor_id=floor_id,
+        )) if world_model is not None else resolve_candidates(
+            entities, Constraints(
                 domain=domain,
                 device_class=device_class,
                 area_id=area_id,
@@ -428,17 +438,23 @@ class SemanticQueryCompiler:
         if not candidates:
             return None
 
-        if _NONE_QUERY_RE.search(text):
+        scopes = analysis.values(SemanticKind.QUERY_SCOPE)
+        quantities = analysis.values(SemanticKind.QUANTIFIER)
+        if "none" in scopes:
+            if requested_state is None:
+                return None
             scope = QueryScope.NONE
-        elif _ALL_QUERY_RE.search(text):
-            if re.search(r"\bbeide\b", text, re.I) and len(candidates) != 2:
+        elif "all" in quantities or "both" in quantities:
+            if requested_state is None:
+                return None
+            if "both" in quantities and len(candidates) != 2:
                 return None
             scope = QueryScope.ALL
-        elif _COUNT_QUERY_RE.search(text):
+        elif "count" in scopes:
             scope = QueryScope.COUNT
-        elif _LOCATION_QUERY_RE.search(text):
+        elif "locations" in scopes:
             scope = QueryScope.LOCATIONS
-        elif _EXISTS_QUERY_RE.search(text):
+        elif "exists" in scopes:
             scope = QueryScope.EXISTS
         else:
             scope = QueryScope.LIST
@@ -456,6 +472,7 @@ class SemanticQueryCompiler:
                 domain=domain,
                 device_class=device_class,
                 area=area_snapshot,
+                floor_id=floor_id,
             ),
             filter=QueryFilter(state=requested_state),
         )
@@ -463,7 +480,7 @@ class SemanticQueryCompiler:
 
         semantic_quantity = (
             SemanticQuantity.exactly(2)
-            if re.search(r"\bbeide\b", text, re.I)
+            if "both" in quantities
             else SemanticQuantity.all()
         )
         return ParseResult(

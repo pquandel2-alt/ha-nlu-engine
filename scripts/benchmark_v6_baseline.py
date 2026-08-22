@@ -35,6 +35,7 @@ sys.path.insert(0, str(REPO_ROOT / "custom_components"))
 
 from ha_nlu.engine import NluEngine  # noqa: E402
 from ha_nlu.entities import EntitySnapshot  # noqa: E402
+from ha_nlu.world_model import build_world_model  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Synthetic entity generation
@@ -174,10 +175,11 @@ BENCHMARK_UTTERANCES: list[tuple[str, str]] = [
     ("sensor_query", "wie hoch ist die Außentemperatur?"),
     ("area_quantifier", "Mach alle Lichter im Wohnzimmer aus"),
     ("cover_percentage", "Fahre Rollladen Büro auf 30 Prozent runter"),
+    ("semantic_free_order_query", "Im Erdgeschoss geschlossen, welche Fenster sind das?"),
 ]
 
 SCALES: list[int] = [100, 500, 1000, 5000]
-ITERATIONS = 200
+ITERATIONS = 50
 WARMUP_ITERATIONS = 10
 
 
@@ -236,13 +238,14 @@ def benchmark_engine_construction(repeats: int = 5) -> Stats:
 
 
 def benchmark_utterance(engine: NluEngine, label: str, text: str, entities: list[EntitySnapshot], scale: int) -> Stats:
+    world_model = build_world_model(entities, [])
     # Warmup: first call(s) into a fresh entity list pay for any incidental
     # cold-path cost (e.g. first regex compile cache fill) - excluded from
     # the measured sample so steady-state per-call cost is what's reported.
     for _ in range(WARMUP_ITERATIONS):
-        engine.match(text, entities)
+        engine.match(text, entities, world_model)
 
-    durations = _time_call(lambda: engine.match(text, entities), ITERATIONS)
+    durations = _time_call(lambda: engine.match(text, entities, world_model), ITERATIONS)
     durations.sort()
     return Stats(
         label=label,

@@ -20,6 +20,7 @@ LIGHT_WOHNZIMMER = EntitySnapshot(
 )
 LIGHT_KUECHE = EntitySnapshot(
     "light.kueche", "Küchenlicht", "light", "on", area_id="kueche", area_name="Küche",
+    capabilities=frozenset({"TURN_ON"}),
 )
 SWITCH_UNSELECTED = EntitySnapshot(
     "switch.wohnzimmer_stecker", "Wohnzimmer Steckdose", "switch", "on", area_id="wohnzimmer",
@@ -81,6 +82,17 @@ def test_devices_in_area():
     # result, but still reachable via devices_by_id.
     assert world_model.devices_in_area("nonexistent") == ()
     assert world_model.devices_by_id["device_orphan"] == DEVICE_NO_AREA
+
+
+def test_semantic_indices_and_combined_selection():
+    world_model = build_world_model(ENTITIES, DEVICES)
+
+    assert world_model.entities_by_domain["light"] == tuple(ENTITIES)
+    assert world_model.entities_by_area_id["wohnzimmer"] == (LIGHT_WOHNZIMMER,)
+    assert world_model.entities_by_floor_id["eg"] == (LIGHT_WOHNZIMMER,)
+    assert world_model.entities_by_capability["TURN_ON"] == (LIGHT_KUECHE,)
+    assert world_model.select_entities(domain="light", area_id="kueche") == (LIGHT_KUECHE,)
+    assert world_model.select_entities(domain="light", area_id="unknown") == ()
 
 
 def test_empty_everything_yields_empty_world_model():

@@ -1246,16 +1246,17 @@ class QueryFollowupParser:
 
         requested_state = _STATE_NAME_TO_SEMANTIC[state_name] if state_name is not None else previous.filter.state
 
-        # Area/floor mentioned this turn wins; otherwise carry over the
-        # previous turn's area verbatim (a floor is never carried forward -
-        # QueryTarget has no floor field, same "same-turn-only" precedent
-        # the pure "und {level}" sentence already established).
+        # Area/floor mentioned this turn wins; otherwise carry the previous
+        # resolved location forward. Both are first-class QueryTarget data.
         if area_id is not None or floor_id is not None:
             final_area_id, final_area_name, final_floor_id = area_id, area_name, floor_id
         elif previous.target.area is not None:
             final_area_id = previous.target.area.area_id
             final_area_name = previous.target.area.name
             final_floor_id = None
+        elif previous.target.floor_id is not None:
+            final_area_id = final_area_name = None
+            final_floor_id = previous.target.floor_id
         else:
             final_area_id = final_area_name = final_floor_id = None
 
@@ -1268,7 +1269,12 @@ class QueryFollowupParser:
         new_command = QueryCommand(
             intent=previous.intent,
             scope=previous.scope,
-            target=QueryTarget(domain=domain, device_class=device_class, area=area_snapshot),
+            target=QueryTarget(
+                domain=domain,
+                device_class=device_class,
+                area=area_snapshot,
+                floor_id=final_floor_id,
+            ),
             filter=QueryFilter(state=requested_state),
         )
         query_result = _QUERY_EXECUTOR.execute(new_command, candidates)
@@ -1855,7 +1861,12 @@ class StateQueryParser:
                 else QueryScope.ALL if all_requested
                 else QueryScope.COUNT if count_only else QueryScope.LIST
             ),
-            target=QueryTarget(domain=domain, device_class=device_class, area=area_snapshot),
+            target=QueryTarget(
+                domain=domain,
+                device_class=device_class,
+                area=area_snapshot,
+                floor_id=floor_id,
+            ),
             filter=QueryFilter(state=requested_state),
         )
         query_result = _QUERY_EXECUTOR.execute(query_command, candidates)
@@ -1913,7 +1924,12 @@ class StateQueryParser:
         query_command = QueryCommand(
             intent="HassExistsQuery",
             scope=QueryScope.EXISTS,
-            target=QueryTarget(domain=domain, device_class=device_class, area=area_snapshot),
+            target=QueryTarget(
+                domain=domain,
+                device_class=device_class,
+                area=area_snapshot,
+                floor_id=floor_id,
+            ),
             filter=QueryFilter(state=requested_state),
         )
         query_result = _QUERY_EXECUTOR.execute(query_command, candidates)
