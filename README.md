@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
 
-- Aktuelle Version: **4.29.0**
+- Aktuelle Version: **4.29.1**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Lizenz: **MIT**
@@ -76,6 +76,65 @@ HomeIntent einen wichtigen Zusatz nicht oder ergeben die Bausteine mehrere
 widersprüchliche Bedeutungen, führt es keine Aktion aus. Ein neuer Ausdruck
 erweitert das zentrale Lexikon für alle zulässigen Satzstellungen und muss
 nicht als vollständiger Satz in vielen Varianten eingetragen werden.
+
+## Was ist seit Version 4.29 besser?
+
+HomeIntent wertet einen Satz nicht mehr nur entlang einzelner fest hinterlegter
+Formulierungen aus. Der gemeinsame semantische Analysepass erkennt unter
+anderem Aktion, Gerätetyp, Zustand, Ort, Etage, Menge, Messgröße,
+Vergleichsoperator und Wert als getrennte Bedeutungsbausteine. Danach werden
+diese Bausteine fachlich geprüft und mit dem aktuellen Home-Assistant-Modell
+abgeglichen.
+
+Dadurch darf sich die Reihenfolge vieler Satzteile ändern, ohne dass für jede
+Variante ein eigener vollständiger Beispielsatz programmiert werden muss:
+
+```text
+Fahre alle Rollläden im Erdgeschoss hoch.
+Im Erdgeschoss bitte alle Rollläden hochfahren.
+Nach oben fahren sollen im Erdgeschoss alle Rollläden.
+
+Sind im Erdgeschoss offene Fenster?
+Offene Fenster, gibt es die im Erdgeschoss?
+Welche Fenster im Erdgeschoss sind noch geöffnet?
+
+Welche Lichter sind heller als 50 Prozent?
+Mindestens 50 Prozent, welche Lichter sind das?
+Im Wohnzimmer heller als 50 Prozent: Welche Lichter gibt es?
+```
+
+Die gemeinsame Auswertung verbessert mehrere Bereiche gleichzeitig:
+
+| Bereich | Verbesserung |
+| --- | --- |
+| Befehle | Aktion, Ziel, Bereich oder Etage, Menge und Wert können flexibler angeordnet werden. |
+| Zustandsfragen | Einzelne, mehrere, alle, irgendeine oder keine passende Entität können abgefragt werden. |
+| Messwerte | Temperatur, Luftfeuchtigkeit, Batterie, Leistung, Energie und Helligkeit verwenden dieselbe Orts- und Vergleichslogik. |
+| Vergleiche | Ausdrücke wie „über“, „unter“, „mindestens“, „höchstens“, „heller“ und „dunkler“ werden unabhängig von ihrer Position erkannt. |
+| Automationen | Zustandsauslöser und Zustandsbedingungen verwenden denselben geprüften Predicate-Compiler. |
+| Folgefragen | Gerät, Raum, Etage und abgefragte Eigenschaft können als Dialogfokus sicher weiterverwendet werden. |
+| Sicherheit | Widersprüche, unbekannte wichtige Zusätze und fachlich unpassende Einheiten werden abgelehnt statt geraten. |
+
+Beispielsweise kann nach einer Temperaturabfrage eine verkürzte Anweisung den
+sicheren Dialogkontext nutzen:
+
+```text
+Du: Wie hoch ist die Temperatur im Erdgeschoss?
+Assist: 21,6 Grad.
+Du: Kannst du die Temperatur auf 22 Grad erhöhen?
+Assist: Erdgeschoss Heizung auf 22 Grad gestellt.
+```
+
+Auch dabei bleibt HomeIntent vollständig lokal und deterministisch. Es wird
+kein Text an einen LLM-Anbieter gesendet, kein Modell heruntergeladen und keine
+leistungsstarke Spezialhardware benötigt. Die semantische Analyse braucht in
+den Projektmessungen nur wenige Millisekunden, selbst wenn das World Model
+mehrere tausend Entitäten enthält.
+
+Diese Flexibilität hat bewusst eine Sicherheitsgrenze: HomeIntent ist kein
+allgemeiner Chatbot und behauptet nicht, jeden beliebigen deutschen Satz zu
+verstehen. Fehlt eine eindeutige, unterstützte Smart-Home-Bedeutung, wird
+nachgefragt oder nichts ausgeführt. So bleibt das Ergebnis reproduzierbar.
 
 ## Funktionsumfang
 
