@@ -55,6 +55,8 @@ from .nlu.query_command import QueryCommand, QueryFilter, QueryResultStatus, Que
 from .world_model import WorldModel
 from .nlu.query_executor import QueryExecutor
 from .nlu.semantic_state import SemanticState
+from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
+from .nlu.semantic_location import resolve_semantic_location
 from .service_call import (
     ACTION_OPPOSITES,
     CLIMATE_EXTENDED_INTENTS,
@@ -762,6 +764,50 @@ class ComparisonQueryParser:
     def __init__(self, intents: Intents) -> None:
         self._intents = intents
 
+    @staticmethod
+    def _semantic_components(text: str, context: ParseContext):
+        analysis = analyse_semantics(text)
+        if (
+            not re.search(r"\bwelch\w*\b", text, re.I)
+            or analysis.values(SemanticKind.COMMAND_MARKER)
+        ):
+            return None
+        comparators = analysis.values(SemanticKind.COMPARATOR)
+        domains = {
+            value for value in analysis.values(SemanticKind.DOMAIN)
+            if isinstance(value, str)
+        }
+        if not domains and re.search(r"\b(?:räume?|heizungen?|thermostate?)\b", text, re.I):
+            domains = {"climate"}
+        if len(comparators) != 1 or len(domains) != 1:
+            return None
+        comparator = next(iter(comparators))
+        domain = next(iter(domains))
+        threshold_match = re.search(r"\b\d+(?:[,.]\d+)?\b", text)
+        if threshold_match is None:
+            return None
+        threshold = float(threshold_match.group(0).replace(",", "."))
+
+        has_percent = re.search(r"(?:prozent|%)", text, re.I) is not None
+        has_temperature = "temperature" in analysis.values(SemanticKind.PROPERTY)
+        if has_percent and not has_temperature and domain in {"light", "cover"}:
+            current_value = _current_percent
+        elif has_temperature and not has_percent and domain == "climate":
+            current_value = _current_temperature
+        else:
+            return None
+
+        location = resolve_semantic_location(text, context.entities)
+        location_text = location[0] if location else None
+        area_id = location[1] if location else None
+        floor_id = location[2] if location else None
+        location_tokens = set(re.findall(r"[\wäöüß]+", (location_text or "").casefold(), re.I))
+        known_target_tokens = {"raum", "räume", "raeume", "heizung", "heizungen", "thermostat", "thermostate"}
+        unexplained = {token.casefold() for token in analysis.unexplained_tokens}
+        if unexplained - location_tokens - known_target_tokens:
+            return None
+        return domain, comparator, threshold, current_value, area_id, location_text, floor_id
+
     def parse(self, text: str, context: ParseContext) -> ParseResult | None:
         slot_lists = {
             "domain": _COMPARISON_DOMAIN_SLOT_LIST,
@@ -770,53 +816,58 @@ class ComparisonQueryParser:
             "temperature": RangeSlotList(name="temperature", start=0, stop=40, step=1, type=RangeType.NUMBER),
             "area": WildcardSlotList(name="area"),
         }
-        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
-        if result is None or result.intent is None:
-            return None
-
-        spec = QUERY_INTENTS.get(result.intent.name)
-        if spec is None:
-            return None
-
-        domain_slot = result.entities.get("domain")
-        comparator_slot = result.entities.get("comparator")
-        if domain_slot is None or comparator_slot is None:
-            return None
-        domain = str(domain_slot.value)
-        if domain not in spec.allowed_domains:
-            return None
-        comparator = str(comparator_slot.value)
-
-        percent_slot = result.entities.get("percent")
-        temperature_slot = result.entities.get("temperature")
-        if percent_slot is not None and domain in ("light", "cover"):
-            threshold = float(percent_slot.value)
-            current_value = _current_percent
-        elif temperature_slot is not None and domain == "climate":
-            threshold = float(temperature_slot.value)
-            current_value = _current_temperature
+        semantic = self._semantic_components(text, context)
+        if semantic is not None:
+            domain, comparator, threshold, current_value, area_id, area_name, floor_id = semantic
+            intent_name = "HassQueryComparison"
         else:
-            return None  # value slot doesn't match the domain - no defined meaning, never guess
+            result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+            if result is None or result.intent is None:
+                return None
+            spec = QUERY_INTENTS.get(result.intent.name)
+            if spec is None:
+                return None
 
-        area_id = None
-        area_name = None
-        floor_id = None
-        area_slot = result.entities.get("area")
-        if area_slot is not None:
-            area_name = _strip_locative_prepositions(str(area_slot.value))
-            if area_name:
-                area_resolved = resolve_area_name(area_name, context.entities)
-                if area_resolved.status is AreaResolveStatus.OK:
-                    area_id = area_resolved.area_id
-                elif area_resolved.status is AreaResolveStatus.NOT_FOUND:
-                    floor_resolved = resolve_floor_name(area_name, context.entities)
-                    if floor_resolved.status is not FloorResolveStatus.OK:
-                        return None  # neither a known room nor a known floor - never guess
-                    floor_id = floor_resolved.floor_id
-                else:
-                    return None  # ambiguous room name - never guess
+            domain_slot = result.entities.get("domain")
+            comparator_slot = result.entities.get("comparator")
+            if domain_slot is None or comparator_slot is None:
+                return None
+            domain = str(domain_slot.value)
+            if domain not in spec.allowed_domains:
+                return None
+            comparator = str(comparator_slot.value)
+
+            percent_slot = result.entities.get("percent")
+            temperature_slot = result.entities.get("temperature")
+            if percent_slot is not None and domain in ("light", "cover"):
+                threshold = float(percent_slot.value)
+                current_value = _current_percent
+            elif temperature_slot is not None and domain == "climate":
+                threshold = float(temperature_slot.value)
+                current_value = _current_temperature
             else:
-                area_name = None
+                return None
+
+            area_id = None
+            area_name = None
+            floor_id = None
+            area_slot = result.entities.get("area")
+            if area_slot is not None:
+                area_name = _strip_locative_prepositions(str(area_slot.value))
+                if area_name:
+                    area_resolved = resolve_area_name(area_name, context.entities)
+                    if area_resolved.status is AreaResolveStatus.OK:
+                        area_id = area_resolved.area_id
+                    elif area_resolved.status is AreaResolveStatus.NOT_FOUND:
+                        floor_resolved = resolve_floor_name(area_name, context.entities)
+                        if floor_resolved.status is not FloorResolveStatus.OK:
+                            return None
+                        floor_id = floor_resolved.floor_id
+                    else:
+                        return None
+                else:
+                    area_name = None
+            intent_name = result.intent.name
 
         candidates = resolve_candidates(
             context.entities, Constraints(domain=domain, area_id=area_id, floor_id=floor_id)
@@ -827,7 +878,7 @@ class ComparisonQueryParser:
             return None
 
         frame = SemanticFrame(
-            intent=result.intent.name,
+            intent=intent_name,
             target=TargetReference(text=domain, domain=domain),
             area=AreaReference(text=area_name, area_id=area_id) if area_id is not None else None,
             quantifier=Quantifier(kind="all"),

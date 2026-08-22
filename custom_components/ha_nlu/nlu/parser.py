@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol, runtime_checkable
 
 from ..areas import AreaSnapshot
-from ..entities import EntityIndex, EntitySnapshot
+from ..entities import EntityIndex, EntitySnapshot, build_entity_index
 from ..world_model import WorldModel
 from .frame import SemanticFrame
 
@@ -40,6 +40,23 @@ class ParseContext:
     # resolves pronouns against, not a second context system).
     last_entities: tuple[EntitySnapshot, ...] = ()
     last_area: AreaSnapshot | None = None
+
+
+def create_parse_context(
+    entities: list[EntitySnapshot],
+    *,
+    world_model: WorldModel | None = None,
+    last_entities: tuple[EntitySnapshot, ...] = (),
+    last_area: AreaSnapshot | None = None,
+) -> ParseContext:
+    """Build one parser context while reusing an existing WorldModel index."""
+    return ParseContext(
+        entities=entities,
+        index=world_model.entity_index if world_model is not None else build_entity_index(entities),
+        world_model=world_model,
+        last_entities=last_entities,
+        last_area=last_area,
+    )
 
 
 @dataclass(frozen=True)

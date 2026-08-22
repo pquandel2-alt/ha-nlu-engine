@@ -11,6 +11,8 @@ Prozent") - both halves are exercised here.
 
 from __future__ import annotations
 
+from itertools import permutations
+
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.frame import Comparison
 
@@ -232,3 +234,21 @@ def test_query_sets_all_quantifier_avoiding_ambiguous_entity_validation_error(en
     result = engine.match("welche Lichter sind mindestens 50 Prozent", many_lights)
     assert result is not None
     assert len(result.command.entities) == 2
+
+
+def test_comparison_components_have_free_order(engine):
+    for parts in permutations(("welche Lichter", "sind", "mindestens", "50 Prozent")):
+        result = engine.match(" ".join(parts) + "?", LIGHTS_AND_COVERS)
+
+        assert result is not None, parts
+        assert result.plan is None
+        assert result.command.entities == (LIGHTS_AND_COVERS[0],)
+
+
+def test_temperature_comparison_components_have_free_order(engine):
+    for parts in permutations(("welche Räume", "im Wohnzimmer", "unter", "20 Grad")):
+        result = engine.match(" ".join(parts) + "?", ROOMS)
+
+        assert result is not None, parts
+        assert result.plan is None
+        assert result.command.entities == (ROOMS[0],)

@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
 
-- Aktuelle Version: **4.28.0**
+- Aktuelle Version: **4.29.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Lizenz: **MIT**
@@ -169,6 +169,8 @@ Was ist im Badezimmer eingeschaltet?
 Wie viel Grad sind im Badezimmer?
 Wie warm ist es im Wohnzimmer?
 Welche Lichter sind heller als 50 Prozent?
+Mindestens 50 Prozent, welche Lichter sind das?
+Im Wohnzimmer unter 20 Grad, welche Räume betrifft das?
 Warum ist das Küchenlicht an?
 ```
 
@@ -190,6 +192,11 @@ Auch Messwertfragen werden aus Eigenschaft, Ort, optionalem Vergleich und
 Zahl zusammengesetzt. Diese Bausteine dürfen frei angeordnet sein. Mehrere
 widersprüchliche Eigenschaften oder unbekannte bedeutungstragende Zusätze
 werden nicht stillschweigend ignoriert.
+
+Auch Vergleichsfragen sind nicht an eine Reihenfolge gebunden. Zielgruppe,
+Ort, Vergleichsoperator, Zahl und Einheit werden unabhängig erkannt. Die
+Kombination muss fachlich zusammenpassen: Grad ist nur für Temperaturziele,
+Prozent nur für unterstützte Licht- oder Rollladenwerte zulässig.
 
 Gibt es mehrere passende Sensoren, nennt HomeIntent alle Einzelwerte mit ihrem
 Entitätsnamen. Es bildet niemals ungefragt einen Mittelwert. Nur eine
@@ -535,7 +542,7 @@ python -m pytest -q
 Aktueller Entwicklungsstand:
 
 ```text
-1805 passed, 12 skipped
+1807 passed, 12 skipped
 ```
 
 Zusätzlich enthält `tests/eval/dialog_cases.json` ein datengetriebenes

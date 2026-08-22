@@ -13,6 +13,7 @@ from .nlu.parser import ParseResult
 from .nlu.parse_outcome import ParseFailureReason
 from .nlu.semantic_lexicon import (
     MEASUREMENT_PROPERTY_SPECS,
+    SemanticAnalysis,
     SemanticKind,
     analyse_semantics,
 )
@@ -100,8 +101,12 @@ def _default_property(text: str) -> str | None:
 
 class LocationPropertyQueryParser:
     @staticmethod
-    def _semantic_request(text: str, entities: list[EntitySnapshot]):
-        analysis = analyse_semantics(text)
+    def _semantic_request(
+        text: str,
+        entities: list[EntitySnapshot],
+        analysis: SemanticAnalysis | None = None,
+    ):
+        analysis = analysis or analyse_semantics(text)
         if (
             analysis.values(SemanticKind.COMMAND_MARKER)
             or re.search(r"^\s*welch\w*\b", text, re.I)
@@ -146,14 +151,26 @@ class LocationPropertyQueryParser:
         }
 
     def parse(
-        self, text: str, entities: list[EntitySnapshot]
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        analysis: SemanticAnalysis | None = None,
     ) -> ParseResult | LocationQueryFeedback | None:
         text = re.sub(r"^und\s+", "", text, flags=re.IGNORECASE)
+        analysis = analysis or analyse_semantics(text)
+        if (
+            re.search(r"\bwelch\w*\b", text, re.I)
+            and analysis.values(SemanticKind.COMPARATOR)
+        ):
+            return None
         match = next(
             (candidate for pattern in _PATTERNS if (candidate := pattern.match(text))),
             None,
         )
-        semantic_request = None if match is not None else self._semantic_request(text, entities)
+        semantic_request = (
+            None if match is not None
+            else self._semantic_request(text, entities, analysis)
+        )
         if match is None and semantic_request is None:
             return None
         property_name = (

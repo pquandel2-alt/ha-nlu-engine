@@ -160,8 +160,12 @@ LEXEMES: tuple[Lexeme, ...] = (
         r"stromverbrauch", r"energieverbrauch",
     )),
     Lexeme(SemanticKind.PROPERTY, "brightness", (r"helligkeit", r"hell",)),
-    Lexeme(SemanticKind.COMPARATOR, "lt", (r"unter", r"weniger\s+als")),
-    Lexeme(SemanticKind.COMPARATOR, "gt", (r"über", r"mehr\s+als")),
+    Lexeme(SemanticKind.COMPARATOR, "lt", (
+        r"unter", r"weniger\s+als", r"dunkler\s+als",
+    )),
+    Lexeme(SemanticKind.COMPARATOR, "gt", (
+        r"über", r"mehr\s+als", r"heller\s+als",
+    )),
     Lexeme(SemanticKind.COMPARATOR, "lte", (r"höchstens", r"nicht\s+höher\s+als")),
     Lexeme(SemanticKind.COMPARATOR, "gte", (r"mindestens",)),
     Lexeme(SemanticKind.QUERY_SCOPE, "average", (r"durchschnitt\w*",)),

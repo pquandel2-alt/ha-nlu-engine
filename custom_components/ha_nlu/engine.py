@@ -36,13 +36,19 @@ from .automation_results import (
     AutomationMatchResult,
     AutomationToggleMatchResult,
 )
-from .entities import EntitySnapshot, ResolveStatus, build_entity_index, resolve_entity
+from .entities import EntitySnapshot, ResolveStatus, resolve_entity
 from .nlu.command import SemanticCommand, build_semantic_command
 from .nlu.context import ConversationContext
 from .nlu.debug import DebugTrace, format_command
 from .nlu.frame import AreaReference, SemanticFrame, TargetReference
 from .nlu.normalize import normalize
-from .nlu.parser import AmbiguousReference, ClarificationRequest, ParseContext, ParseResult
+from .nlu.parser import (
+    AmbiguousReference,
+    ClarificationRequest,
+    ParseContext,
+    ParseResult,
+    create_parse_context,
+)
 from .nlu.reasoning import ReasoningEngine, ResolvedSemanticIntent
 from .nlu.response import NluError, NluResponse
 from .nlu.parse_outcome import ParseFailureReason, UnderstandingFeedback
@@ -161,8 +167,8 @@ _TEMPORAL_RE = re.compile(
 # _LIGHT_EXTENDED_RE's bare "heller"/"dunkler" keywords below - and this
 # regex is checked first regardless, same precedent already documented.
 _COMPARISON_QUERY_RE = re.compile(
-    r"\bwelche\b.*\b(mindestens|höchstens|nicht höher als|über|unter|"
-    r"heller als|dunkler als|mehr als|weniger als)\b",
+    r"(?=.*\bwelch\w*\b)(?=.*\b(mindestens|höchstens|nicht höher als|über|unter|"
+    r"heller als|dunkler als|mehr als|weniger als)\b)",
     re.IGNORECASE,
 )
 
@@ -720,23 +726,21 @@ class NluEngine:
             return self._match_multi(segments, entities, world_model)
 
         text = normalize(text)
-        location_query = self._location_property_query_parser.parse(text, entities)
+        semantic_analysis = analyse_semantics(text)
+        location_query = self._location_property_query_parser.parse(
+            text, entities, semantic_analysis
+        )
         if isinstance(location_query, LocationQueryFeedback):
             return None
         if location_query is not None:
             return self._build_match_result(location_query, entities)
-        parse_context = ParseContext(
-            entities=entities,
-            index=(world_model.entity_index if world_model is not None else build_entity_index(entities)),
-            world_model=world_model,
-        )
+        parse_context = create_parse_context(entities, world_model=world_model)
         # Location/property phrases are the explicit cross-router fallback
         # above. Once a grammar is selected here, a semantic rejection must
         # not fall through to a broader wildcard parser (for example,
         # "beide" must never degrade into a singular command).
         result = self._select_parser(text).parse(text, parse_context)
         if result is None:
-            semantic_analysis = analyse_semantics(text)
             result = SemanticQueryCompiler.compile(
                 text, entities, world_model, semantic_analysis
             )
@@ -783,10 +787,7 @@ class NluEngine:
             ):
                 percentage_feedback = self._percentage_parser.failure_feedback(
                     normalized,
-                    ParseContext(
-                        entities=entities,
-                        index=build_entity_index(entities),
-                    ),
+                    create_parse_context(entities),
                 )
                 if percentage_feedback is not None:
                     return percentage_feedback
@@ -1085,7 +1086,7 @@ class NluEngine:
             return None
 
         normalized = normalize(text)
-        parse_context = ParseContext(entities=entities, index=build_entity_index(entities))
+        parse_context = create_parse_context(entities)
         result = self._automation_query_parser.parse(normalized, parse_context, automations)
         if result is None:
             return None
@@ -1126,7 +1127,7 @@ class NluEngine:
             return None
 
         normalized = normalize(text)
-        parse_context = ParseContext(entities=entities, index=build_entity_index(entities))
+        parse_context = create_parse_context(entities)
         match: AutomationDeleteMatch | None = self._automation_delete_parser.parse(
             normalized, parse_context, automations
         )
@@ -1192,7 +1193,7 @@ class NluEngine:
             return None
 
         normalized = normalize(text)
-        parse_context = ParseContext(entities=entities, index=build_entity_index(entities))
+        parse_context = create_parse_context(entities)
         match: AutomationToggleMatch | None = self._automation_toggle_parser.parse(
             normalized, parse_context, automations
         )
@@ -1310,9 +1311,8 @@ class NluEngine:
 
         last_entities = context.last_entities if context is not None else ()
         last_area = context.last_area if context is not None else None
-        parse_context = ParseContext(
-            entities=entities,
-            index=build_entity_index(entities),
+        parse_context = create_parse_context(
+            entities,
             world_model=world_model,
             last_entities=tuple(last_entities),
             last_area=last_area,
@@ -1381,9 +1381,8 @@ class NluEngine:
         """Recognize a complete trigger whose action was left for a reply."""
         if not _AUTOMATION_TRIGGER_RE.search(text):
             return None
-        parse_context = ParseContext(
-            entities=entities,
-            index=build_entity_index(entities),
+        parse_context = create_parse_context(
+            entities,
             world_model=world_model,
             last_entities=context.last_entities if context is not None else (),
             last_area=context.last_area if context is not None else None,
@@ -1404,9 +1403,8 @@ class NluEngine:
         context: ConversationContext | None = None,
     ) -> AutomationMatchResult | None:
         """Add a spoken action to a stored trigger and validate the model."""
-        parse_context = ParseContext(
-            entities=entities,
-            index=build_entity_index(entities),
+        parse_context = create_parse_context(
+            entities,
             world_model=world_model,
             last_entities=context.last_entities if context is not None else (),
             last_area=context.last_area if context is not None else None,
@@ -1497,11 +1495,7 @@ class NluEngine:
                 return None
             updated = replace(model, conditions=())
 
-        parse_context = ParseContext(
-            entities=entities,
-            index=build_entity_index(entities),
-            world_model=world_model,
-        )
+        parse_context = create_parse_context(entities, world_model=world_model)
         action_match = re.fullmatch(
             r"füge\s+(?:als\s+)?(?:weitere\s+|zweite\s+)?aktion\s+(.+?)\s+hinzu[?.!]*",
             normalized,
@@ -1574,9 +1568,8 @@ class NluEngine:
 
         last_entities = context.last_entities if context is not None else ()
         last_area = context.last_area if context is not None else None
-        parse_context = ParseContext(
-            entities=entities,
-            index=build_entity_index(entities),
+        parse_context = create_parse_context(
+            entities,
             world_model=world_model,
             last_entities=tuple(last_entities),
             last_area=last_area,
@@ -1713,9 +1706,8 @@ class NluEngine:
         if not _CALENDAR_TIME_RE.search(text):
             return None
         normalized = normalize(text)
-        parse_context = ParseContext(
-            entities=entities,
-            index=build_entity_index(entities),
+        parse_context = create_parse_context(
+            entities,
             world_model=world_model,
             last_entities=tuple(context.last_entities) if context is not None else (),
             last_area=context.last_area if context is not None else None,
@@ -1860,7 +1852,7 @@ class NluEngine:
         """
         normalized = normalize(text)
         parser = self._select_parser(normalized)
-        result = parser.parse(normalized, ParseContext(entities=entities, index=build_entity_index(entities)))
+        result = parser.parse(normalized, create_parse_context(entities))
         if result is None:
             return NluResponse(success=False, speech=None, command=None, error=NluError.NO_MATCH)
         if isinstance(result, ClarificationRequest):
@@ -1909,7 +1901,7 @@ class NluEngine:
         normalized = normalize(text)
         parser = self._select_parser(normalized)
         parser_name = type(parser).__name__
-        result = parser.parse(normalized, ParseContext(entities=entities, index=build_entity_index(entities)))
+        result = parser.parse(normalized, create_parse_context(entities))
         if result is None:
             return DebugTrace(
                 input=text,
