@@ -113,6 +113,7 @@ class TriggerTarget:
     domain: str | None = None
     device_class: str | None = None
     area_id: str | None = None
+    floor_id: str | None = None
     entity_id: str | None = None
     # V5 Wave 4 (V5.17, "Natural Language Quantifiers in Automations") -
     # reuses parsers.py's QuantifierParser vocabulary/values verbatim
@@ -315,6 +316,7 @@ def _render_target(target: TriggerTarget) -> str:
             ("domain", target.domain),
             ("device_class", target.device_class),
             ("area_id", target.area_id),
+            ("floor_id", target.floor_id),
             ("entity_id", target.entity_id),
             ("quantifier", target.quantifier),
             ("quantifier_count", target.quantifier_count),

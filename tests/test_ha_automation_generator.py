@@ -400,6 +400,30 @@ def test_set_position():
     assert result.config["actions"][0] == {"action": "cover.set_cover_position", "target": {"entity_id": "cover.wohnzimmer_rollo"}, "data": {"position": 50}}
 
 
+def test_floor_scoped_action_resolves_only_entities_on_that_floor():
+    downstairs = EntitySnapshot(
+        "cover.eg", "Rollladen unten", "cover", "open", floor_id="eg", floor_name="Erdgeschoss"
+    )
+    upstairs = EntitySnapshot(
+        "cover.dg", "Rollladen oben", "cover", "open", floor_id="dg", floor_name="Dachgeschoss"
+    )
+    model = _model(
+        _trigger(),
+        actions=(
+            ActionModel(
+                type=ActionType.SET_POSITION,
+                target=TriggerTarget(domain="cover", floor_id="dg", quantifier="all"),
+                value=50,
+            ),
+        ),
+    )
+
+    result = generate_ha_automation_config(model, [*ALL_ENTITIES, downstairs, upstairs])
+
+    assert result.error is None
+    assert result.config["actions"][0]["target"] == {"entity_id": "cover.dg"}
+
+
 def test_set_temperature():
     model = _model(_trigger(), actions=(ActionModel(type=ActionType.SET_TEMPERATURE, target=TriggerTarget(entity_id="climate.heizung"), value=21),))
     result = generate_ha_automation_config(model, ALL_ENTITIES)

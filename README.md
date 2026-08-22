@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
 
-- Aktuelle Version: **4.25.9**
+- Aktuelle Version: **4.26.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Lizenz: **MIT**
@@ -25,7 +25,13 @@ HomeIntent benötigt dafür:
 - keinen externen Server und
 - keine Internetverbindung für die Verarbeitung eines Sprachbefehls.
 
-Die Erkennung basiert auf deutschen Hassil-Grammatiken, strukturierten semantischen Modellen und deterministischen Resolvern. Derselbe Satz führt bei demselben Home-Assistant-Zustand und Gesprächskontext zum selben Ergebnis.
+Die Erkennung kombiniert bewährte deutsche Hassil-Grammatiken mit einem
+lokalen symbolischen Sprach-Compiler, strukturierten semantischen Modellen
+und deterministischen Resolvern. Der Compiler zerlegt eine Formulierung in
+unabhängige Bedeutungsbausteine wie Aktion, Gerätetyp, Ort, Anzahl und Wert.
+Dadurch müssen diese Bausteine nicht in einer fest vorgegebenen Reihenfolge
+stehen. Derselbe Satz führt bei demselben Home-Assistant-Zustand und
+Gesprächskontext trotzdem immer zum selben Ergebnis.
 
 ## Warum ein deterministischer Ansatz?
 
@@ -37,7 +43,7 @@ HomeIntent verfolgt daher diese Reihenfolge:
 Gesprochener oder geschriebener Satz
                 │
                 ▼
-       Normalisierung und Grammatik
+ Normalisierung, Grammatik und semantischer Compiler
                 │
                 ▼
        Semantische Bedeutung (AST)
@@ -53,6 +59,13 @@ Gesprochener oder geschriebener Satz
 ```
 
 Wenn ein Ziel nicht eindeutig aufgelöst werden kann, rät HomeIntent nicht. Der Befehl wird abgelehnt oder es wird – sofern der jeweilige Dialogpfad dies unterstützt – nachgefragt.
+
+Der semantische Compiler ist kein eingebautes Sprachmodell. Er arbeitet mit
+einem kleinen Wortschatz wiederverwendbarer Bedeutungen und prüft mögliche
+Kombinationen gegen die tatsächlich in Home Assistant vorhandenen Geräte,
+Bereiche, Etagen und Fähigkeiten. So entsteht flexible Satzstellung ohne
+Cloud-Latenz, Modell-Download oder hohe Hardware-Anforderungen. Alte
+Satzgrammatiken bleiben als schneller und kompatibler Pfad erhalten.
 
 ## Funktionsumfang
 
@@ -83,6 +96,8 @@ Schalte alle Lichter im Erdgeschoss aus.
 Stell das Wohnzimmerlicht auf 40 Prozent.
 Mach das Licht blau.
 Fahre die Rolllade im Wohnzimmer auf 30 Prozent.
+Auf halbe Höhe im Erdgeschoss bitte sämtliche Rollläden fahren.
+Nach oben fahren sollen im Erdgeschoss alle Rollläden.
 Stelle den Ventilator auf Stufe 3.
 Starte Gute Nacht.
 Stelle die Heizung im Wohnzimmer auf 21 Grad.

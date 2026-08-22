@@ -109,6 +109,16 @@ def _speak_target(
         if target.area_id is not None:
             area_name = area_name_by_id.get(target.area_id, target.area_id)
             name = f"{name} im Bereich {area_name}"
+        elif target.floor_id is not None:
+            floor_name = next(
+                (
+                    entity.floor_name
+                    for entity in entity_by_id.values()
+                    if entity.floor_id == target.floor_id and entity.floor_name
+                ),
+                target.floor_id,
+            )
+            name = f"{name} auf der Etage {floor_name}"
     if target.exclude_entity_ids:
         excluded = ", ".join(
             entity_by_id[eid].friendly_name if eid in entity_by_id else eid for eid in target.exclude_entity_ids

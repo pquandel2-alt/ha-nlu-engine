@@ -120,7 +120,13 @@ def _resolve_target_entities(target: TriggerTarget, entities: list[EntitySnapsho
     if target.entity_id is not None:
         return [e for e in entities if e.entity_id == target.entity_id]
     candidates = resolve_candidates(
-        entities, Constraints(domain=target.domain, device_class=target.device_class, area_id=target.area_id)
+        entities,
+        Constraints(
+            domain=target.domain,
+            device_class=target.device_class,
+            area_id=target.area_id,
+            floor_id=target.floor_id,
+        ),
     )
     if target.exclude_entity_ids:
         candidates = [e for e in candidates if e.entity_id not in target.exclude_entity_ids]

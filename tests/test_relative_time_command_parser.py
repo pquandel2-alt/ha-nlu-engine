@@ -102,6 +102,35 @@ def test_reported_short_imperative_half_position_is_delayed_once(engine):
     assert result.model.actions[0].value == 50
 
 
+def test_delayed_command_reuses_order_independent_semantic_compiler(engine):
+    entities = [
+        EntitySnapshot(
+            "cover.buero", "Rollladen Büro", "cover", "open",
+            area_id="buero", area_name="Büro",
+            floor_id="dg", floor_name="Dachgeschoss",
+            capabilities=frozenset({"POSITION"}),
+        ),
+        EntitySnapshot(
+            "cover.studio", "Rollladen Studio", "cover", "open",
+            area_id="studio", area_name="Studio",
+            floor_id="dg", floor_name="Dachgeschoss",
+            capabilities=frozenset({"POSITION"}),
+        ),
+    ]
+
+    result = engine.match_relative_time_automation(
+        "In 30 Sekunden sollen im Dachgeschoss sämtliche Rollläden auf halbe Höhe gefahren werden",
+        entities,
+    )
+
+    assert result is not None
+    assert result.model.once is True
+    assert result.model.triggers[0].relative_offset_seconds == 30
+    assert result.model.actions[0].type is ActionType.SET_POSITION
+    assert result.model.actions[0].value == 50
+    assert result.model.actions[0].target.floor_id == "dg"
+
+
 def test_dst_jump_uses_elapsed_time_not_nonexistent_wall_time(engine):
     berlin = ZoneInfo("Europe/Berlin")
     now = datetime(2026, 3, 29, 1, 30, 0, tzinfo=berlin)

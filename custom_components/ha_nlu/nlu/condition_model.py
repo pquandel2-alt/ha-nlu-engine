@@ -122,6 +122,7 @@ def _render_condition(condition: ConditionModel) -> str:
                 ("domain", condition.target.domain),
                 ("device_class", condition.target.device_class),
                 ("area_id", condition.target.area_id),
+                ("floor_id", condition.target.floor_id),
                 ("entity_id", condition.target.entity_id),
             )
             if value is not None

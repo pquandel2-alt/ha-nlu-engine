@@ -48,6 +48,7 @@ from .nlu.response import NluError, NluResponse
 from .nlu.parse_outcome import ParseFailureReason, UnderstandingFeedback
 from .nlu.response_generator import ResponseGenerator, _automation_label
 from .nlu.service_mapper import map_to_service_call
+from .nlu.semantic_compiler import SemanticCommandCompiler
 from .nlu.validator import validate_command
 from .automation_action_parser import AutomationActionParser
 from .automation_condition_parser import AutomationConditionParser, split_on_top_level_and
@@ -731,6 +732,8 @@ class NluEngine:
         # not fall through to a broader wildcard parser (for example,
         # "beide" must never degrade into a singular command).
         result = self._select_parser(text).parse(text, parse_context)
+        if result is None:
+            result = SemanticCommandCompiler.compile(text, entities)
         if result is None:
             return None
         if isinstance(result, ClarificationRequest):
@@ -1638,8 +1641,20 @@ class NluEngine:
                 quantifier=frame.quantifier.kind,
                 quantifier_count=frame.quantifier.value,
             )
+        elif frame.quantifier is not None:
+            floor_ids = {entity.floor_id for entity in entities}
+            if len(floor_ids) != 1 or None in floor_ids:
+                # TriggerTarget must retain a real scope; never turn an
+                # arbitrary concrete list into an all-house automation.
+                return None
+            target = TriggerTarget(
+                domain=domain,
+                floor_id=next(iter(floor_ids)),
+                quantifier=frame.quantifier.kind,
+                quantifier_count=frame.quantifier.value,
+            )
         else:
-            # TriggerTarget cannot represent a concrete list or floor scope.
+            # TriggerTarget cannot represent an arbitrary concrete list.
             # Refuse instead of broadening it to every entity in the house.
             return None
 
