@@ -140,6 +140,32 @@ def test_both_percentage_targets_require_exactly_two_entities(engine):
     assert engine.match("Fahre beide Rolladen auf 90 Prozent", entities) is None
 
 
+def test_percentage_group_ignores_non_position_cover_on_same_floor(engine):
+    entities = [
+        EntitySnapshot(
+            "cover.wohnzimmer", "Rollladen Wohnzimmer", "cover", "closed",
+            floor_id="eg", floor_name="Erdgeschoss",
+            capabilities=frozenset({"POSITION"}),
+        ),
+        EntitySnapshot(
+            "cover.kueche", "Rollladen Küche", "cover", "closed",
+            floor_id="eg", floor_name="Erdgeschoss",
+            capabilities=frozenset({"POSITION"}),
+        ),
+        EntitySnapshot(
+            "cover.garage", "Garagentor", "cover", "closed",
+            floor_id="eg", floor_name="Erdgeschoss",
+        ),
+    ]
+
+    result = engine.match("Fahre die Rolladen im Erdgeschoss halb runter", entities)
+
+    assert result is not None
+    assert result.plan.service == "set_cover_position"
+    assert sorted(result.plan.entity_id) == ["cover.kueche", "cover.wohnzimmer"]
+    assert result.plan.data == {"position": 50}
+
+
 def test_single_cover_natural_fixed_positions(engine, entities):
     half = engine.match("Fahre den Rollladen Wohnzimmer halb runter", entities)
     assert half is not None

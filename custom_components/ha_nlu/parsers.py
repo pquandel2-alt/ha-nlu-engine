@@ -410,6 +410,17 @@ class PercentageParser:
                 context.entities,
                 Constraints(domain=domain, area_id=area_id, floor_id=floor_id),
             )
+            # A percentage group may share its HA domain/location with
+            # unrelated or simpler entities (for example a garage cover
+            # without SET_POSITION on the same floor). Such an entity must
+            # not make every positionable Rollladen fail validation. Select
+            # only targets that can execute this exact percentage command.
+            required_capability = "POSITION" if domain == "cover" else "BRIGHTNESS"
+            matches = [
+                entity
+                for entity in matches
+                if required_capability in entity.capabilities
+            ]
             if not matches:
                 return None
             quantifier_slot = result.entities.get("quantifier")
