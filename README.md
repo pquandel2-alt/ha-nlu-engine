@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
 
-- Aktuelle Version: **4.25.4**
+- Aktuelle Version: **4.25.5**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Lizenz: **MIT**

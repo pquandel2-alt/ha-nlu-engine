@@ -166,6 +166,57 @@ def test_percentage_group_ignores_non_position_cover_on_same_floor(engine):
     assert result.plan.data == {"position": 50}
 
 
+def test_percentage_group_explains_missing_floor_assignment(engine):
+    entities = [
+        EntitySnapshot(
+            "cover.buero", "Rollladen Büro", "cover", "closed",
+            area_id="buero", area_name="Büro",
+            capabilities=frozenset({"POSITION"}),
+        ),
+    ]
+
+    text = "Fahre alle Rolladen im Erdgeschoss halb runter"
+
+    assert engine.match(text, entities) is None
+    assert engine.failure_feedback(text, entities) == (
+        "Ich kenne den Bereich oder die Etage „Erdgeschoss“ nicht. "
+        "Bitte ordne die Geräte in Home Assistant einem Bereich und den Bereich einer Etage zu."
+    )
+
+
+def test_percentage_group_explains_when_floor_has_no_selected_covers(engine):
+    entities = [
+        EntitySnapshot(
+            "light.flur", "Flurlicht", "light", "off",
+            floor_id="eg", floor_name="Erdgeschoss",
+            capabilities=frozenset({"BRIGHTNESS"}),
+        ),
+    ]
+
+    text = "Fahre alle Rolladen im Erdgeschoss halb runter"
+
+    assert engine.match(text, entities) is None
+    assert engine.failure_feedback(text, entities) == (
+        "Ich finde keine für HomeIntent ausgewählten Rollläden in „Erdgeschoss“."
+    )
+
+
+def test_percentage_group_explains_unsupported_position_control(engine):
+    entities = [
+        EntitySnapshot(
+            "cover.markise", "Markise", "cover", "closed",
+            floor_id="eg", floor_name="Erdgeschoss",
+        ),
+    ]
+
+    text = "Fahre alle Rolladen im Erdgeschoss halb runter"
+
+    assert engine.match(text, entities) is None
+    assert engine.failure_feedback(text, entities) == (
+        "Die Rollläden in „Erdgeschoss“ melden keine unterstützte Positionssteuerung."
+    )
+
+
 def test_single_cover_natural_fixed_positions(engine, entities):
     half = engine.match("Fahre den Rollladen Wohnzimmer halb runter", entities)
     assert half is not None

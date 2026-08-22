@@ -115,6 +115,24 @@ def test_state_query_returns_query_answer_and_does_not_call_service(monkeypatch)
     assert "Flurlicht" in result.response.speech
 
 
+def test_cover_group_without_floor_assignment_returns_actionable_error(monkeypatch):
+    cover = EntitySnapshot(
+        "cover.buero", "Rollladen Büro", "cover", "closed",
+        area_id="buero", area_name="Büro",
+        capabilities=frozenset({"POSITION"}),
+    )
+    entity = _make_entity(monkeypatch, [cover])
+
+    result = _run(entity, "Fahre alle Rolladen im Erdgeschoss halb runter")
+
+    entity.hass.services.async_call.assert_not_awaited()
+    assert result.response.error_code == intent.IntentResponseErrorCode.NO_INTENT_MATCH
+    assert result.response.speech == (
+        "Ich kenne den Bereich oder die Etage „Erdgeschoss“ nicht. "
+        "Bitte ordne die Geräte in Home Assistant einem Bereich und den Bereich einer Etage zu."
+    )
+
+
 def test_trigger_and_action_can_be_spoken_in_two_turns(monkeypatch):
     entity = _make_entity(monkeypatch, [KUECHE_FENSTER, KUECHE_LICHT])
 

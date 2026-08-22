@@ -751,6 +751,21 @@ class NluEngine:
             location = self._location_property_query_parser.parse(normalize(text), entities)
             if isinstance(location, LocationQueryFeedback):
                 return UnderstandingFeedback(location.reason, location.response_text)
+            normalized = normalize(text)
+            if (
+                _PERCENT_RE.search(normalized)
+                or _BARE_PERCENT_RE.search(normalized)
+                or _HALF_POSITION_RE.search(normalized)
+            ):
+                percentage_feedback = self._percentage_parser.failure_feedback(
+                    normalized,
+                    ParseContext(
+                        entities=entities,
+                        index=build_entity_index(entities),
+                    ),
+                )
+                if percentage_feedback is not None:
+                    return percentage_feedback
         if _AUTOMATION_TRIGGER_RE.search(text):
             return UnderstandingFeedback(
                 ParseFailureReason.INCOMPLETE_REQUEST,

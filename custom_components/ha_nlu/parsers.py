@@ -45,6 +45,7 @@ from .nlu.lexicon import (
 )
 from .nlu.command import SemanticCommand
 from .nlu.parser import AmbiguousReference, ClarificationRequest, ParseContext, ParseResult
+from .nlu.parse_outcome import ParseFailureReason, UnderstandingFeedback
 from .nlu.query_command import QueryCommand, QueryFilter, QueryResultStatus, QueryScope, QueryTarget, QueryTargetKind
 from .world_model import WorldModel
 from .nlu.query_executor import QueryExecutor
@@ -363,16 +364,19 @@ class PercentageParser:
     def __init__(self, intents: Intents) -> None:
         self._intents = intents
 
-    def parse(self, text: str, context: ParseContext) -> ParseResult | None:
-        slot_lists = {
+    def _recognize(self, text: str):
+        """Recognize once with the same slots used by matching and feedback."""
+        return recognize(text, self._intents, slot_lists={
             "name": WildcardSlotList(name="name"),
             "domain": _DOMAIN_SLOT_LIST,
             "area": WildcardSlotList(name="area"),
             "quantifier": _QUANTIFIER_SLOT_LIST,
             "percent": RangeSlotList(name="percent", start=0, stop=100, step=1, type=RangeType.PERCENTAGE),
             "comparator": _COMPARATOR_SLOT_LIST,
-        }
-        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+        }, language="de")
+
+    def parse(self, text: str, context: ParseContext) -> ParseResult | None:
+        result = self._recognize(text)
         if result is None or result.intent is None:
             return None
 
@@ -476,6 +480,72 @@ class PercentageParser:
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=matches)
+
+    def failure_feedback(
+        self, text: str, context: ParseContext
+    ) -> UnderstandingFeedback | None:
+        """Explain why a recognized group percentage command had no targets.
+
+        A single named cover can work even when it has no Area/Floor Registry
+        assignment because its friendly name is enough to resolve it. Group
+        commands cannot safely infer which rooms belong to a floor, so make
+        that live-data difference explicit instead of returning the former
+        generic device error.
+        """
+        result = self._recognize(text)
+        if result is None or result.intent is None:
+            return None
+        domain_slot = result.entities.get("domain")
+        area_slot = result.entities.get("area")
+        if domain_slot is None or area_slot is None:
+            return None
+
+        domain = str(domain_slot.value)
+        location = _strip_locative_prepositions(str(area_slot.value))
+        area = resolve_area_name(location, context.entities)
+        area_id = floor_id = None
+        if area.status is AreaResolveStatus.OK:
+            area_id = area.area_id
+        elif area.status is AreaResolveStatus.AMBIGUOUS:
+            return UnderstandingFeedback(
+                ParseFailureReason.AMBIGUOUS_TARGET,
+                f'Der Bereich „{location}“ ist nicht eindeutig.',
+            )
+        else:
+            floor = resolve_floor_name(location, context.entities)
+            if floor.status is FloorResolveStatus.OK:
+                floor_id = floor.floor_id
+            elif floor.status is FloorResolveStatus.AMBIGUOUS:
+                return UnderstandingFeedback(
+                    ParseFailureReason.AMBIGUOUS_TARGET,
+                    f'Die Etage „{location}“ ist nicht eindeutig.',
+                )
+            else:
+                return UnderstandingFeedback(
+                    ParseFailureReason.UNKNOWN_ENTITY,
+                    f'Ich kenne den Bereich oder die Etage „{location}“ nicht. '
+                    "Bitte ordne die Geräte in Home Assistant einem Bereich und den Bereich einer Etage zu.",
+                )
+
+        location_matches = resolve_candidates(
+            context.entities,
+            Constraints(domain=domain, area_id=area_id, floor_id=floor_id),
+        )
+        noun = "Rollläden" if domain == "cover" else "Lichter"
+        if not location_matches:
+            return UnderstandingFeedback(
+                ParseFailureReason.UNKNOWN_ENTITY,
+                f'Ich finde keine für HomeIntent ausgewählten {noun} in „{location}“.',
+            )
+
+        required_capability = "POSITION" if domain == "cover" else "BRIGHTNESS"
+        if not any(required_capability in entity.capabilities for entity in location_matches):
+            detail = "Positionssteuerung" if domain == "cover" else "Helligkeitssteuerung"
+            return UnderstandingFeedback(
+                ParseFailureReason.UNSUPPORTED_CAPABILITY,
+                f'Die {noun} in „{location}“ melden keine unterstützte {detail}.',
+            )
+        return None
 
 
 class FanExtendedParser:
