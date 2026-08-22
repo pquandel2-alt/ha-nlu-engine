@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
 
-- Aktuelle Version: **4.25.3**
+- Aktuelle Version: **4.25.4**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Lizenz: **MIT**
@@ -491,7 +491,7 @@ python -m pytest -q
 Aktueller Entwicklungsstand:
 
 ```text
-1723 passed, 14 skipped
+1725 passed, 14 skipped
 ```
 
 Zusätzlich enthält `tests/eval/dialog_cases.json` ein datengetriebenes
