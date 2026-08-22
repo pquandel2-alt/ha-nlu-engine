@@ -74,7 +74,10 @@ async def _validate() -> None:
     # HA's template validator resolves the active instance from loop-local state.
     HomeAssistant("/tmp/homeintent-schema-smoke")
     PLATFORM_SCHEMA({"id": "homeintent-schema-smoke", **result.config})
-    CREATE_EVENT_SCHEMA(calendar_call.data)
+    # The live service call passes the entity through Home Assistant's
+    # separate ``target`` argument. CREATE_EVENT_SCHEMA is the lower-level
+    # entity-service schema and therefore validates the already merged shape.
+    CREATE_EVENT_SCHEMA({"entity_id": calendar_call.entity_id, **calendar_call.data})
 
 
 asyncio.run(_validate())
