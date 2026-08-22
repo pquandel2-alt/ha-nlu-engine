@@ -68,6 +68,24 @@ class RelativeTimeCommandParser:
     def parse(
         self, text: str, context: ParseContext
     ) -> tuple[tuple["ActionModel | ActionGroup", ...], int] | None:
+        decomposed = self.decompose(text)
+        if decomposed is None:
+            return None
+        command_text, offset_seconds = decomposed
+
+        actions = self._action_parser.parse(command_text, context)
+        if not actions:
+            return None
+        return actions, offset_seconds
+
+    def decompose(self, text: str) -> tuple[str, int] | None:
+        """Extract timing and reconstruct the untimed command.
+
+        Kept separate from action parsing so the engine can pass the same
+        command through its broader direct-command understanding when the
+        automation-specific grammar does not cover an otherwise valid
+        action phrasing (for example the semantic "halb runter" form).
+        """
         result = recognize(text, self._intents, slot_lists=self._slot_lists, language="de")
         if result is None or result.intent is None or result.intent.name != "HassRelativeTimeCommand":
             return None
@@ -93,8 +111,4 @@ class RelativeTimeCommandParser:
         command_prefix_slot = result.entities.get("command_prefix")
         if command_prefix_slot is not None:
             command_text = f"{command_prefix_slot.value} {command_text}"
-
-        actions = self._action_parser.parse(command_text, context)
-        if not actions:
-            return None
-        return actions, offset_seconds
+        return command_text, offset_seconds

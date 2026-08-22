@@ -58,6 +58,8 @@ from .conversation_correction import ConversationCorrectionResolver
 from .relative_time_command_parser import RelativeTimeCommandParser
 from .scheduled_time_command_parser import ScheduledTimeCommandParser
 from .nlu.automation_model import AutomationModel, TriggerModel, TriggerType, render_automation_tree
+from .nlu.automation_model import TriggerTarget
+from .nlu.action_model import ActionGroup, ActionModel, ActionType
 from .nlu.automation_sentence_split import split_trigger_action
 from .nlu.automation_validator import validate_automation
 from .nlu.condition_model import ConditionNode
@@ -1210,6 +1212,22 @@ class NluEngine:
             ),
         )
 
+    def _parse_action_semantically(
+        self, text: str, context: ParseContext
+    ) -> tuple[ActionModel | ActionGroup, ...] | None:
+        """Prefer the shared direct-command semantics for automation actions.
+
+        This keeps percentage, natural-position and flexible-word-order
+        understanding identical for immediate, delayed and state-triggered
+        commands. Automation-only actions remain available through the
+        established dedicated parser as the fallback.
+        """
+        direct = self.match(text, context.entities, context.world_model)
+        action = self._action_from_direct_match(direct, context.entities)
+        if action is not None:
+            return (action,)
+        return self._automation_action_parser.parse(text, context)
+
     def match_automation(
         self,
         text: str,
@@ -1300,7 +1318,7 @@ class NluEngine:
                 if (
                     trigger_candidate
                     and self._automation_trigger_parser.parse(trigger_candidate, parse_context) is not None
-                    and self._automation_action_parser.parse(action_candidate, parse_context)
+                    and self._parse_action_semantically(action_candidate, parse_context)
                 ):
                     candidates.append((trigger_candidate, action_candidate))
             for marker in re.finditer(r"\s+(wenn|sobald|falls)\s+", normalized, re.IGNORECASE):
@@ -1309,7 +1327,7 @@ class NluEngine:
                 if (
                     action_candidate
                     and self._automation_trigger_parser.parse(trigger_candidate, parse_context) is not None
-                    and self._automation_action_parser.parse(action_candidate, parse_context)
+                    and self._parse_action_semantically(action_candidate, parse_context)
                 ):
                     candidates.append((trigger_candidate, action_candidate))
             if len(candidates) != 1:
@@ -1325,7 +1343,7 @@ class NluEngine:
                 return None
             trigger, condition_node = split_result
 
-        actions = self._automation_action_parser.parse(action_text, parse_context)
+        actions = self._parse_action_semantically(action_text, parse_context)
         if not actions:
             return None
 
@@ -1380,7 +1398,7 @@ class NluEngine:
             last_entities=context.last_entities if context is not None else (),
             last_area=context.last_area if context is not None else None,
         )
-        actions = self._automation_action_parser.parse(normalize(text), parse_context)
+        actions = self._parse_action_semantically(normalize(text), parse_context)
         if not actions:
             return None
         model = AutomationModel(
@@ -1477,7 +1495,7 @@ class NluEngine:
             re.IGNORECASE,
         )
         if action_match is not None:
-            actions = self._automation_action_parser.parse(
+            actions = self._parse_action_semantically(
                 action_match.group(1), parse_context
             )
             if not actions:
@@ -1551,7 +1569,16 @@ class NluEngine:
             last_area=last_area,
         )
 
-        parsed = self._relative_time_command_parser.parse(normalized, parse_context)
+        parsed = None
+        decomposed = self._relative_time_command_parser.decompose(normalized)
+        if decomposed is not None:
+            command_text, offset_seconds = decomposed
+            direct = self.match(command_text, entities, world_model)
+            action = self._action_from_direct_match(direct, entities)
+            if action is not None:
+                parsed = ((action,), offset_seconds)
+        if parsed is None:
+            parsed = self._relative_time_command_parser.parse(normalized, parse_context)
         if parsed is None:
             return None
         actions, offset_seconds = parsed
@@ -1567,6 +1594,88 @@ class NluEngine:
         if validation_error is not None:
             response_text = f"{response_text}\nvalidation_error: {validation_error.name}"
         return AutomationMatchResult(model=model, response_text=response_text, validation_error=validation_error)
+
+    @staticmethod
+    def _action_from_direct_match(
+        result: MatchResult | CommandPlan | None,
+        available_entities: list[EntitySnapshot],
+    ) -> ActionModel | None:
+        """Translate one validated direct command into an automation action.
+
+        This is the semantic bridge used only after a relative-time phrase
+        has been removed. It reuses the direct-command understanding instead
+        of maintaining a second list of delayed-action sentences.
+        """
+        if not isinstance(result, MatchResult) or result.plan is None or result.command is None:
+            return None
+        entities = result.command.entities
+        if not entities or len({entity.domain for entity in entities}) != 1:
+            return None
+
+        domain = entities[0].domain
+        frame = result.command.source_frame
+        if len(entities) == 1:
+            entity = entities[0]
+            equivalent = [
+                candidate
+                for candidate in available_entities
+                if candidate.domain == entity.domain
+                and candidate.device_class == entity.device_class
+                and candidate.area_id == entity.area_id
+            ]
+            if entity.area_id is not None and len(equivalent) == 1:
+                target = TriggerTarget(
+                    domain=domain,
+                    device_class=entity.device_class,
+                    area_id=entity.area_id,
+                )
+            else:
+                target = TriggerTarget(domain=domain, entity_id=entity.entity_id)
+        elif result.command.area is not None and frame.quantifier is not None:
+            target = TriggerTarget(
+                domain=domain,
+                area_id=result.command.area.area_id,
+                quantifier=frame.quantifier.kind,
+                quantifier_count=frame.quantifier.value,
+            )
+        else:
+            # TriggerTarget cannot represent a concrete list or floor scope.
+            # Refuse instead of broadening it to every entity in the house.
+            return None
+
+        plan = result.plan
+        if plan.domain == "cover" and plan.service == "open_cover":
+            return ActionModel(type=ActionType.TURN_ON, target=target)
+        if plan.domain == "cover" and plan.service == "close_cover":
+            return ActionModel(type=ActionType.TURN_OFF, target=target)
+        if plan.domain == "cover" and plan.service == "set_cover_position":
+            position = plan.data.get("position")
+            return (
+                ActionModel(type=ActionType.SET_POSITION, target=target, value=float(position))
+                if isinstance(position, (int, float))
+                else None
+            )
+        if plan.domain == "light" and plan.service == "turn_on":
+            brightness = plan.data.get("brightness_pct")
+            if isinstance(brightness, (int, float)):
+                return ActionModel(
+                    type=ActionType.SET_BRIGHTNESS,
+                    target=target,
+                    value=float(brightness),
+                )
+        if plan.domain == "climate" and plan.service == "set_temperature":
+            temperature = plan.data.get("temperature")
+            if isinstance(temperature, (int, float)):
+                return ActionModel(
+                    type=ActionType.SET_TEMPERATURE,
+                    target=target,
+                    value=float(temperature),
+                )
+        if plan.service == "turn_on":
+            return ActionModel(type=ActionType.TURN_ON, target=target)
+        if plan.service == "turn_off":
+            return ActionModel(type=ActionType.TURN_OFF, target=target)
+        return None
 
     def match_calendar_time_automation(
         self,

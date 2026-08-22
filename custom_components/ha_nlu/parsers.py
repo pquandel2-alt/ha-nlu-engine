@@ -27,7 +27,11 @@ from .entities import (
 from .floors import FloorResolveStatus, resolve_floor_by_level_keyword, resolve_floor_name
 from .nlu.constraint_resolver import Constraints, resolve_candidates
 from .nlu.frame import AreaReference, Comparison, Quantifier, SemanticFrame, TargetReference, TemporalExpression
-from .nlu.group_semantics import parse_flexible_group_command, resolve_group_location
+from .nlu.group_semantics import (
+    parse_flexible_group_command,
+    parse_flexible_percentage_group,
+    resolve_group_location,
+)
 from .nlu.lexicon import (
     _COLOR_SLOT_LIST,
     _COLOR_TEMP_SLOT_LIST,
@@ -372,7 +376,7 @@ class PercentageParser:
     def parse(self, text: str, context: ParseContext) -> ParseResult | None:
         result = self._recognize(text)
         if result is None or result.intent is None:
-            return None
+            return parse_flexible_percentage_group(text, context.entities)
 
         percent_slot = result.entities.get("percent")
         half_requested = bool(re.search(r"\b(halb|hälfte)\b", text, re.IGNORECASE))

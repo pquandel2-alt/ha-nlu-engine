@@ -18,6 +18,7 @@ from __future__ import annotations
 from ha_nlu.engine import AutomationDraftMatchResult, AutomationMatchResult
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.automation_validator import AutomationValidationError
+from ha_nlu.nlu.action_model import ActionType
 from ha_nlu.nlu.condition_model import ConditionType, LogicalOperator
 
 KUECHE_FENSTER = EntitySnapshot(
@@ -68,6 +69,25 @@ def test_valid_trigger_and_action_produces_a_validated_automation_model(engine):
     assert len(result.model.triggers) == 1
     assert len(result.model.actions) == 1
     assert "AutomationModel" in result.response_text
+
+
+def test_state_trigger_reuses_semantic_half_position_action(engine):
+    cover = EntitySnapshot(
+        "cover.kueche", "Rollade Küche", "cover", "open",
+        area_id="kueche", area_name="Küche",
+        capabilities=frozenset({"POSITION"}),
+    )
+
+    result = engine.match_automation(
+        "Wenn das Küchenfenster geöffnet wird, fahr die Rollade Küche halb runter.",
+        [*ENTITIES, cover],
+    )
+
+    assert isinstance(result, AutomationMatchResult)
+    assert result.validation_error is None
+    assert result.model.actions[0].type is ActionType.SET_POSITION
+    assert result.model.actions[0].target.area_id == "kueche"
+    assert result.model.actions[0].value == 50
 
 
 def test_trigger_only_starts_a_conversational_automation_draft(engine):

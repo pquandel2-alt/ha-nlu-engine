@@ -85,6 +85,16 @@ _POWER_VERB_RE = re.compile(
 _POWER_ON_RE = re.compile(r"\b(?:an|ein|anmachen|einschalten)\b", re.IGNORECASE)
 _POWER_OFF_RE = re.compile(r"\b(?:aus|ausmachen|ausschalten)\b", re.IGNORECASE)
 _POWER_TOGGLE_RE = re.compile(r"\b(?:um|toggle)\b", re.IGNORECASE)
+_PERCENT_ACTION_RE = re.compile(
+    r"\b(?:fahr|fahre|fahren|mach|mache|stelle|stellen|setze|setzen|dimme|dimmen)\b",
+    re.IGNORECASE,
+)
+_HALF_RE = re.compile(r"\b(?:halb|hälfte)\b", re.IGNORECASE)
+_EXPLICIT_PERCENT_RE = re.compile(
+    r"(?:\bauf\s+(?P<after_auf>100|[1-9]?\d)\b|"
+    r"\b(?P<with_unit>100|[1-9]?\d)\s*(?:prozent|%))",
+    re.IGNORECASE,
+)
 
 
 def resolve_group_location(
@@ -235,6 +245,62 @@ def parse_flexible_group_command(
                 else None
             ),
             quantifier=Quantifier(kind=quantifier, value=quantifier_value),
+            source_text=text,
+        ),
+        resolved_entities=matches,
+    )
+
+
+def parse_flexible_percentage_group(
+    text: str, entities: list[EntitySnapshot]
+) -> ParseResult | None:
+    """Compose a percentage group command from the same free-order slots."""
+    domain_result = _domain(text)
+    if domain_result is None:
+        return None
+    domain, domain_match = domain_result
+    if domain not in {"cover", "light"} or _PERCENT_ACTION_RE.search(text) is None:
+        return None
+
+    if _HALF_RE.search(text):
+        percent = 50
+    else:
+        explicit = _EXPLICIT_PERCENT_RE.search(text)
+        if explicit is None:
+            return None
+        percent = int(explicit.group("after_auf") or explicit.group("with_unit"))
+
+    quantifier_result = _quantifier(text, domain, domain_match)
+    location = _location(text, entities)
+    if quantifier_result is None or location is None:
+        return None
+
+    quantifier, quantifier_value = quantifier_result
+    location_text, area_id, floor_id = location
+    matches = resolve_candidates(
+        entities,
+        Constraints(domain=domain, area_id=area_id, floor_id=floor_id),
+    )
+    required_capability = "POSITION" if domain == "cover" else "BRIGHTNESS"
+    matches = [e for e in matches if required_capability in e.capabilities]
+    if not matches:
+        return None
+    if quantifier == "both" and len(matches) != 2:
+        return None
+    if quantifier == "count" and len(matches) != quantifier_value:
+        return None
+
+    return ParseResult(
+        frame=SemanticFrame(
+            intent="HassSetPercentage",
+            target=TargetReference(text=domain, domain=domain),
+            area=(
+                AreaReference(text=location_text, area_id=area_id)
+                if area_id is not None
+                else None
+            ),
+            quantifier=Quantifier(kind=quantifier, value=quantifier_value),
+            parameters={"percent": percent},
             source_text=text,
         ),
         resolved_entities=matches,

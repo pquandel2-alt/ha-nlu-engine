@@ -322,6 +322,62 @@ def test_floor_wins_over_same_named_area_for_percentage_group(engine):
     assert result.plan.data == {"position": 50}
 
 
+def test_short_imperative_percentage_group_on_dachgeschoss(engine):
+    entities = [
+        EntitySnapshot(
+            "sensor.dachgeschoss", "Temperatur Dachgeschoss", "sensor", "22",
+            area_id="dachgeschoss", area_name="Dachgeschoss",
+            floor_id="dachgeschoss", floor_name="Dachgeschoss",
+        ),
+        EntitySnapshot(
+            "cover.buero", "Rollladen Büro", "cover", "open",
+            area_id="buero", area_name="Büro",
+            floor_id="dachgeschoss", floor_name="Dachgeschoss",
+            capabilities=frozenset({"POSITION"}),
+        ),
+        EntitySnapshot(
+            "cover.studio", "Rollladen Studio", "cover", "open",
+            area_id="studio", area_name="Studio",
+            floor_id="dachgeschoss", floor_name="Dachgeschoss",
+            capabilities=frozenset({"POSITION"}),
+        ),
+    ]
+
+    result = engine.match(
+        "Fahr die Rolladen im Dachgeschoss halb runter", entities
+    )
+
+    assert result is not None
+    assert result.plan.service == "set_cover_position"
+    assert sorted(result.plan.entity_id) == ["cover.buero", "cover.studio"]
+    assert result.plan.data == {"position": 50}
+
+
+def test_percentage_group_semantics_accept_free_word_order(engine):
+    entities = [
+        EntitySnapshot(
+            "cover.buero", "Rollladen Büro", "cover", "open",
+            area_id="buero", area_name="Büro",
+            floor_id="dg", floor_name="Dachgeschoss",
+            capabilities=frozenset({"POSITION"}),
+        ),
+        EntitySnapshot(
+            "cover.studio", "Rollladen Studio", "cover", "open",
+            area_id="studio", area_name="Studio",
+            floor_id="dg", floor_name="Dachgeschoss",
+            capabilities=frozenset({"POSITION"}),
+        ),
+    ]
+
+    result = engine.match(
+        "Im Dachgeschoss stelle bitte alle vorhandenen Rolladen halb", entities
+    )
+
+    assert result is not None
+    assert sorted(result.plan.entity_id) == ["cover.buero", "cover.studio"]
+    assert result.plan.data == {"position": 50}
+
+
 def test_bare_number_on_switch_domain_still_returns_none(engine, entities):
     # A bare number is only unambiguous for the two percent-capable domains
     # (cover/light) - switch has no percent semantics at all, same as the

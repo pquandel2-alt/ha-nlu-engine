@@ -72,6 +72,14 @@ def test_does_not_strip_bitte():
     assert normalize("bitte das Licht an") == "bitte das Licht an"
 
 
+def test_short_cover_imperative_is_normalized_without_touching_names():
+    assert normalize("Fahr die Rollläden hoch") == "fahre die Rollläden hoch"
+    assert normalize("Bitte fahr die Rollläden runter") == (
+        "Bitte fahre die Rollläden runter"
+    )
+    assert normalize("Mach das Fahr Licht an") == "Mach das Fahr Licht an"
+
+
 def test_engine_matches_filler_words_end_to_end(engine, entities):
     # V4.1 "Advanced German Language": filler particles must not block a
     # match that would otherwise succeed.

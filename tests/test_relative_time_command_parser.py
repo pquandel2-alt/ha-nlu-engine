@@ -80,6 +80,28 @@ def test_suffix_word_order_is_supported(engine):
     assert result.model.actions[0].type is ActionType.TURN_ON
 
 
+def test_reported_short_imperative_half_position_is_delayed_once(engine):
+    entities = [
+        EntitySnapshot(
+            "cover.buero", "Rollade Büro", "cover", "open",
+            area_id="buero", area_name="Büro",
+            capabilities=frozenset({"POSITION"}),
+        ),
+    ]
+
+    result = engine.match_relative_time_automation(
+        "Fahr die Rollade im Büro in 30 Sekunden halb runter", entities
+    )
+
+    assert result is not None
+    assert result.validation_error is None
+    assert result.model.once is True
+    assert result.model.triggers[0].relative_offset_seconds == 30
+    assert result.model.actions[0].type is ActionType.SET_POSITION
+    assert result.model.actions[0].target.area_id == "buero"
+    assert result.model.actions[0].value == 50
+
+
 def test_dst_jump_uses_elapsed_time_not_nonexistent_wall_time(engine):
     berlin = ZoneInfo("Europe/Berlin")
     now = datetime(2026, 3, 29, 1, 30, 0, tzinfo=berlin)
