@@ -180,6 +180,26 @@ def test_all_covers_on_floor_natural_fixed_positions(engine):
     assert sorted(half.plan.entity_id) == ["cover.kueche", "cover.wohnzimmer"]
     assert half.plan.data == {"position": 50}
 
+    implicit_all = engine.match(
+        "Fahre die Rolladen im Erdgeschoss halb runter", entities
+    )
+    assert implicit_all is not None
+    assert implicit_all.plan.service == "set_cover_position"
+    assert sorted(implicit_all.plan.entity_id) == [
+        "cover.kueche", "cover.wohnzimmer"
+    ]
+    assert implicit_all.plan.data == {"position": 50}
+
+    implicit_percent = engine.match(
+        "Fahre die Rolladen im Erdgeschoss auf 90 Prozent", entities
+    )
+    assert implicit_percent is not None
+    assert implicit_percent.plan.service == "set_cover_position"
+    assert sorted(implicit_percent.plan.entity_id) == [
+        "cover.kueche", "cover.wohnzimmer"
+    ]
+    assert implicit_percent.plan.data == {"position": 90}
+
     closed = engine.match(
         "Fahre alle Rolladen im Erdgeschoss komplett runter", entities
     )

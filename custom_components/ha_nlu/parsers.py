@@ -412,7 +412,13 @@ class PercentageParser:
             )
             if not matches:
                 return None
-            quantifier = str(result.entities["quantifier"].value)
+            quantifier_slot = result.entities.get("quantifier")
+            # A definite plural scoped to a location ("die Rollläden im
+            # Erdgeschoss") denotes the complete matching group even when
+            # the user does not repeat the explicit word "alle".
+            quantifier = (
+                str(quantifier_slot.value) if quantifier_slot is not None else "all"
+            )
             if quantifier == "both" and len(matches) != 2:
                 return None
             target_text = domain
