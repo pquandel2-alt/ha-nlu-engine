@@ -43,6 +43,11 @@ _LIGHT_COLOR_MODES = frozenset({"hs", "rgb", "rgbw", "rgbww", "xy"})
 _LIGHT_COLOR_TEMP_MODES = frozenset({"color_temp"})
 _LIGHT_BRIGHTNESS_MODES = frozenset({"brightness"}) | _LIGHT_COLOR_MODES | _LIGHT_COLOR_TEMP_MODES
 
+# Stable Home Assistant CoverEntityFeature.SET_POSITION bit. The module
+# deliberately stays hass-free, so it reads the integer feature mask that
+# HA exposes in every State instead of importing Home Assistant's enum.
+_COVER_SET_POSITION_FEATURE = 4
+
 
 def derive_capabilities(
     domain: str, device_class: str | None, attributes: Mapping[str, Any]
@@ -79,8 +84,16 @@ def derive_capabilities(
         if color_modes & _LIGHT_COLOR_TEMP_MODES:
             caps.add(Capability.COLOR_TEMPERATURE)
 
-    if domain == "cover" and "current_position" in attributes:
-        caps.add(Capability.POSITION)
+    if domain == "cover":
+        try:
+            supported_features = int(attributes.get("supported_features", 0))
+        except (TypeError, ValueError):
+            supported_features = 0
+        if (
+            "current_position" in attributes
+            or supported_features & _COVER_SET_POSITION_FEATURE
+        ):
+            caps.add(Capability.POSITION)
 
     if domain == "fan" and "percentage" in attributes:
         caps.add(Capability.FAN_SPEED)

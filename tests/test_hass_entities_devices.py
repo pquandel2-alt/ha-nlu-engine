@@ -171,3 +171,41 @@ def test_build_world_model_end_to_end(registries):
     assert device is not None
     assert device.device_id == "device_1"
     assert world_model.entities_for_device("device_1") == world_model.entities
+
+
+def test_live_cover_feature_mask_reaches_group_percentage_command(registries, engine):
+    for entity_id, area_id, area_name in (
+        ("cover.wohnzimmer", "wohnzimmer", "Wohnzimmer"),
+        ("cover.kueche", "kueche", "Küche"),
+    ):
+        registries.entities[entity_id] = _entity_entry(area_id=area_id)
+        registries.areas[area_id] = _area_entry(name=area_name, floor_id="eg")
+    registries.entities["cover.garage"] = _entity_entry(area_id="garage")
+    registries.areas["garage"] = _area_entry(name="Garage", floor_id="eg")
+    registries.floors["eg"] = _floor_entry(name="Erdgeschoss", level=0)
+
+    hass = _FakeHass(states={
+        "cover.wohnzimmer": hass_entities.State(
+            "cover.wohnzimmer", "closed",
+            {"friendly_name": "Rollladen Wohnzimmer", "supported_features": 4},
+        ),
+        "cover.kueche": hass_entities.State(
+            "cover.kueche", "closed",
+            {"friendly_name": "Rollladen Küche", "supported_features": 4},
+        ),
+        "cover.garage": hass_entities.State(
+            "cover.garage", "closed",
+            {"friendly_name": "Garagentor", "supported_features": 3},
+        ),
+    })
+    entry = _FakeEntry(selected_entities=[
+        "cover.wohnzimmer", "cover.kueche", "cover.garage",
+    ])
+
+    snapshots = hass_entities.build_entity_snapshots(hass, entry)
+    result = engine.match("Fahre alle Rolladen im Erdgeschoss halb runter", snapshots)
+
+    assert result is not None
+    assert result.plan.service == "set_cover_position"
+    assert sorted(result.plan.entity_id) == ["cover.kueche", "cover.wohnzimmer"]
+    assert result.plan.data == {"position": 50}

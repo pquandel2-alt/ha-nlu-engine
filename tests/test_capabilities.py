@@ -51,6 +51,11 @@ def test_cover_with_position_attribute_has_position():
     assert caps == {Capability.POSITION}
 
 
+def test_cover_set_position_feature_has_position_without_current_value():
+    caps = derive_capabilities("cover", None, {"supported_features": 4})
+    assert caps == {Capability.POSITION}
+
+
 def test_cover_without_position_attribute_has_no_capabilities():
     caps = derive_capabilities("cover", None, {})
     assert caps == frozenset()
