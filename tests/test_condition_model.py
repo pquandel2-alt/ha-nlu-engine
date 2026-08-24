@@ -29,8 +29,8 @@ from ha_nlu.nlu.semantic_state import SemanticState
 # ============================================================================
 
 
-def test_condition_type_covers_all_nine_documented_types():
-    """ConditionType has all 9 values from HomeIntent V5 Teil 3/10."""
+def test_condition_type_covers_all_documented_types():
+    """ConditionType includes device and calendar-event conditions."""
     assert {t.name for t in ConditionType} == {
         "STATE",
         "NUMERIC",
@@ -41,6 +41,7 @@ def test_condition_type_covers_all_nine_documented_types():
         "PRESENCE",
         "DEVICE",
         "ENTITY",
+        "CALENDAR_EVENT",
     }
 
 

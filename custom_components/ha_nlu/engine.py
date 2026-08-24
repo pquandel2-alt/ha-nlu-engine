@@ -60,6 +60,7 @@ from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
 from .nlu.validator import validate_command
 from .automation_action_parser import AutomationActionParser
 from .automation_condition_parser import AutomationConditionParser, split_on_top_level_and
+from .calendar_automation import parse_calendar_automation_draft
 from .automation_trigger_parser import _AUTOMATION_TRIGGER_RE, AutomationTriggerParser
 from .location_property_query import LocationPropertyQueryParser, LocationQueryFeedback
 from .contextual_property import ContextualPropertyResolver
@@ -71,7 +72,7 @@ from .nlu.automation_model import TriggerTarget
 from .nlu.action_model import ActionGroup, ActionModel, ActionType
 from .nlu.automation_sentence_split import split_trigger_action
 from .nlu.automation_validator import validate_automation
-from .nlu.condition_model import ConditionNode
+from .nlu.condition_model import ConditionModel, ConditionNode, ConditionType
 from .parsers import (
     AreaQueryParser,
     AutomationDeleteMatch,
@@ -1295,6 +1296,46 @@ class NluEngine:
             text, create_parse_context(entities, world_model=world_model)
         )
 
+    def parse_automation_trigger(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
+    ) -> TriggerModel | None:
+        normalized = normalize(text)
+        normalized = re.sub(
+            r"^(?:wenn\s+)?(?:die\s+)?sonne\s+(?:untergeht|untergegangen\s+ist)$",
+            "bei sonnenuntergang",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        normalized = re.sub(
+            r"^(?:wenn\s+)?(?:die\s+)?sonne\s+(?:aufgeht|aufgegangen\s+ist)$",
+            "bei sonnenaufgang",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if not _AUTOMATION_TRIGGER_RE.search(normalized):
+            normalized = "wenn " + normalized
+        return self._automation_trigger_parser.parse(
+            normalized, create_parse_context(entities, world_model=world_model)
+        )
+
+    def parse_automation_condition(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
+    ) -> ConditionNode | None:
+        normalized = normalize(text)
+        normalized = re.sub(r"^nur\s+", "", normalized, flags=re.IGNORECASE)
+        normalized = re.sub(r"^dass\s+", "wenn ", normalized, flags=re.IGNORECASE)
+        if not re.search(r"\b(?:wenn|falls|sofern)\b", normalized, re.IGNORECASE):
+            normalized = "wenn " + normalized
+        return self._automation_condition_parser.parse(
+            normalized, create_parse_context(entities, world_model=world_model)
+        )
+
     def match_automation(
         self,
         text: str,
@@ -1769,6 +1810,64 @@ class NluEngine:
         if plan.service == "turn_off":
             return ActionModel(type=ActionType.TURN_OFF, target=target)
         return None
+
+    def match_calendar_event_automation(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
+        context: ConversationContext | None = None,
+    ) -> AutomationMatchResult | None:
+        """Create an automation driven by a real HA calendar event."""
+        draft = parse_calendar_automation_draft(text, entities)
+        if draft is None:
+            return None
+        parse_context = create_parse_context(
+            entities,
+            world_model=world_model,
+            last_entities=tuple(context.last_entities) if context is not None else (),
+            last_area=context.last_area if context is not None else None,
+        )
+        actions = self._parse_action_semantically(draft.action_text, parse_context)
+        if not actions and re.search(r"\berinner(?:e|n|t)?\s+(?:mich|uns)\b", draft.action_text, re.IGNORECASE):
+            message = (
+                f"Kalendertermin {draft.summary_contains} {draft.event == 'start' and 'beginnt' or 'endet'}."
+                if draft.summary_contains
+                else f"Ein Kalendertermin {draft.event == 'start' and 'beginnt' or 'endet'}."
+            )
+            actions = (ActionModel(type=ActionType.NOTIFY, message=message),)
+        if not actions:
+            return None
+        conditions = (
+            (
+                ConditionNode(
+                    condition=ConditionModel(
+                        type=ConditionType.CALENDAR_EVENT,
+                        raw_state=draft.summary_contains,
+                    )
+                ),
+            )
+            if draft.summary_contains
+            else ()
+        )
+        model = AutomationModel(
+            triggers=(
+                TriggerModel(
+                    type=TriggerType.CALENDAR,
+                    calendar_entity_id=draft.calendar_entity_id,
+                    calendar_event=draft.event,
+                    offset_minutes=draft.offset_minutes,
+                ),
+            ),
+            conditions=conditions,
+            actions=actions,
+            source_text=text,
+        )
+        validation_error = validate_automation(model)
+        response_text = render_automation_tree(model)
+        if validation_error is not None:
+            response_text = f"{response_text}\nvalidation_error: {validation_error.name}"
+        return AutomationMatchResult(model, response_text, validation_error)
 
     def match_calendar_time_automation(
         self,

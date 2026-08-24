@@ -659,6 +659,62 @@ def test_replace_actions_preserves_trigger_conditions_delay_and_housekeeping():
     ]
 
 
+def test_replace_trigger_section_preserves_conditions_and_actions():
+    hass = _make_hass()
+    existing = {
+        "id": "abc123",
+        "alias": "Test",
+        "triggers": [{"trigger": "time", "at": "20:00:00"}],
+        "conditions": [{"condition": "state", "entity_id": "person.philipp", "state": "home"}],
+        "actions": [{"action": "light.turn_on", "target": {"entity_id": "light.flur"}}],
+    }
+    with (
+        patch.object(automation_executor.yaml_util, "load_yaml", return_value=[existing]),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml") as dump_mock,
+        patch.object(automation_executor, "write_utf8_file_atomic"),
+    ):
+        executor = AutomationExecutor(hass)
+        executor._metadata_store.async_load_all = AsyncMock(return_value={
+            "abc123": {"created_by": "homeintent", "version": 3, "once": False}
+        })
+        executor._metadata_store.async_update = AsyncMock()
+        asyncio.run(executor.async_replace_automation_section(
+            "abc123",
+            "triggers",
+            [{"trigger": "sun", "event": "sunset"}],
+            "Neuer Auslöser",
+        ))
+
+    written = dump_mock.call_args.args[0][0]
+    assert written == {
+        **existing,
+        "triggers": [{"trigger": "sun", "event": "sunset"}],
+    }
+    executor._metadata_store.async_update.assert_awaited_once_with(
+        "abc123", source_text="Neuer Auslöser", version=4
+    )
+
+
+def test_structural_edit_refuses_one_shot_automation_before_write():
+    hass = _make_hass()
+    existing = {"id": "abc123", **SAMPLE_CONFIG}
+    with (
+        patch.object(automation_executor.yaml_util, "load_yaml", return_value=[existing]),
+        patch.object(automation_executor.yaml_util, "dump") as dump_mock,
+        patch.object(automation_executor, "write_utf8_file_atomic"),
+    ):
+        executor = AutomationExecutor(hass)
+        executor._metadata_store.async_load_all = AsyncMock(return_value={
+            "abc123": {"created_by": "homeintent", "version": 1, "once": True}
+        })
+        with pytest.raises(ValueError, match="einmaliger Aufträge"):
+            asyncio.run(executor.async_replace_automation_section(
+                "abc123", "conditions", [], "Nicht erlaubt"
+            ))
+
+    dump_mock.assert_not_called()
+
+
 # --- Wave 12, "Einmalige Automation" (fire-once, then self-delete) --------
 
 

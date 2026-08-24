@@ -163,6 +163,7 @@ _CONDITION_REQUIRED_FIELDS: dict[ConditionType, tuple[str, ...]] = {
     ConditionType.PRESENCE: ("raw_state",),  # target is optional (None = whole-house "niemand zuhause")
     ConditionType.DEVICE: ("device_id", "device_condition_type"),
     ConditionType.ENTITY: ("target", "raw_state"),
+    ConditionType.CALENDAR_EVENT: ("raw_state",),
 }
 
 _ACTION_REQUIRED_FIELDS: dict[ActionType, tuple[str, ...]] = {
@@ -230,6 +231,10 @@ def _validate_condition_leaf(condition: ConditionModel) -> AutomationValidationE
     error = _validate_target(condition.target)
     if error is not None:
         return error
+    if condition.type is ConditionType.CALENDAR_EVENT and (
+        len(condition.raw_state or "") > 100 or not (condition.raw_state or "").strip()
+    ):
+        return AutomationValidationError.INVALID_PARAMETER
     if condition.time_hour is not None and not (0 <= condition.time_hour <= 23):
         return AutomationValidationError.INVALID_TIME
     if condition.time_minute is not None and not (0 <= condition.time_minute <= 59):

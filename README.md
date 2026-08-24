@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
 
-- Aktuelle Version: **4.34.0**
+- Aktuelle Version: **4.35.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Lizenz: **MIT**
@@ -182,6 +182,8 @@ HomeIntent kann aktuell unter anderem folgende Home-Assistant-Domänen verwenden
 | `lawn_mower` | Mähen starten, pausieren oder zur Ladestation fahren |
 | `camera` | Kamerastream auf einem eindeutig genannten Media Player anzeigen |
 | `notify` | eine Nachricht über eine eindeutig genannte Notify-Entität senden |
+| `todo` | Einkaufs- und Aufgabenlisten lesen sowie mehrere Einträge hinzufügen, abhaken oder entfernen |
+| `timer` | Timer starten, verlängern, verkürzen, pausieren, fortsetzen, abbrechen und abfragen |
 
 Beispiele:
 
@@ -455,6 +457,43 @@ numerische Daten sowie Ganztagstermine werden in der lokalen
 Home-Assistant-Zeitzone aufgelöst. Vergangene oder wegen einer Zeitumstellung
 nicht existierende Zeitpunkte werden abgelehnt.
 
+### Einkaufslisten, Aufgabenlisten und Timer
+
+HomeIntent verwendet die nativen Home-Assistant-Dienste der `todo.*`- und
+`timer.*`-Entitäten. Mehrere Einkaufsartikel können in einem einzigen Satz
+genannt werden; jeder Artikel wird als eigener Listeneintrag angelegt:
+
+```text
+Füge Milch, Brot, Eier und Kaffee zur Einkaufsliste hinzu.
+Setze Äpfel und Bananen auf meine Einkaufsliste.
+Was steht auf meiner Einkaufsliste?
+Markiere Milch und Brot auf der Einkaufsliste als erledigt.
+Entferne Milch und Brot von der Einkaufsliste.
+Lösche alle erledigten Einträge aus der Einkaufsliste.
+```
+
+Kommas, „und“ sowie „sowie“ trennen die Artikel. Doppelt genannte Artikel
+werden innerhalb desselben Befehls nur einmal angelegt. Bei mehreren
+freigegebenen Listen fragt HomeIntent nach der gewünschten Liste; „die erste“,
+„die zweite“ oder ihr Name setzt den ursprünglichen Auftrag fort. Das Löschen
+aller erledigten Einträge erfordert eine Bestätigung.
+
+Timer lassen sich ebenso dialogfähig steuern:
+
+```text
+Stelle den Küchentimer auf 5 Minuten und 30 Sekunden.
+Verlängere den Küchentimer um zwei Minuten.
+Verkürze den Küchentimer um 30 Sekunden.
+Pausiere den Küchentimer.
+Setze den Küchentimer fort.
+Wie lange läuft der Küchentimer noch?
+Brich den Küchentimer ab.
+```
+
+HomeIntent erzeugt dafür keine kurzlebige Automation, sondern steuert die
+vorhandene Timer-Entität direkt. Dadurch bleiben Status, Pause und Restzeit in
+Home Assistant sichtbar.
+
 ### Mehrteilige Befehle
 
 Mehrere direkte Aktionen können nacheinander formuliert werden. Vor der Ausführung werden alle Teilbefehle aufgelöst und validiert.
@@ -581,6 +620,27 @@ Schalte das Küchenlicht ein wenn das Bürofenster geöffnet wird.
 Jedes Mal wenn das Bürofenster geöffnet wird schalte das Küchenlicht ein.
 ```
 
+### Kalenderereignisse als Automationsauslöser
+
+Ein Termin kann nicht nur angelegt oder abgefragt werden, sondern auch eine
+dauerhafte Automation auslösen:
+
+```text
+Wenn der Termin Müllabfuhr beginnt, erinnere mich.
+Zehn Minuten vor einem Arzttermin schalte das Flurlicht ein.
+Wenn im Familienkalender Urlaub beginnt, aktiviere die Szene Abwesend.
+Schalte das Flurlicht ein, wenn Urlaub im Familienkalender beginnt.
+Wenn ein Termin endet, schalte das Flurlicht aus.
+```
+
+HomeIntent erzeugt einen nativen Home-Assistant-`calendar`-Trigger für Beginn
+oder Ende. „Vor“ und „nach“ werden als Trigger-Offset gespeichert. Wird ein
+Titel genannt, ergänzt HomeIntent eine deterministische, unabhängig von der
+Groß-/Kleinschreibung arbeitende Titelbedingung; andere Termine desselben
+Kalenders lösen die Aktion dann nicht aus. Kalender-Automationen verwenden den
+Modus `queued`, damit ein zweites Ereignis während einer laufenden Aktionsfolge
+nicht verloren geht. Auch hier gelten Vorschau und ausdrückliche Bestätigung.
+
 ### Eine Automation begrenzt wiederholen
 
 Mit Formulierungen wie „nur dreimal“ kann die Ausführungszahl einer Automation
@@ -606,11 +666,15 @@ Deaktiviere die Automation für Küchenlicht.
 Aktiviere die Automation für Küchenlicht.
 Lösche die Automation für Küchenlicht.
 Ändere nur die Aktion, behalte Auslöser und Bedingungen.
+Füge der Automation eine weitere Aktion hinzu.
+Ändere den Auslöser der Automation auf wenn die Sonne untergeht.
+Füge der Automation die Bedingung hinzu, dass jemand zuhause ist.
+Lösche alle Bedingungen der Automation.
 Zeige die Details der Automation für Küchenlicht.
 Mache die letzte HomeIntent-Automationsänderung rückgängig.
 ```
 
-Löschen erfordert eine Bestätigung. Aktivieren und Deaktivieren ändern den dauerhaften `initial_state` in `automations.yaml`; die Einstellung bleibt daher auch nach einem Reload oder Neustart erhalten. Beim Verschieben muss genau ein noch geplanter einmaliger Auftrag passen. Bei mehreren Treffern nennt HomeIntent die Kandidaten und bittet um ein eindeutigeres Gerät, statt einen beliebigen Auftrag zu ändern.
+Löschen erfordert eine Bestätigung. Aktivieren und Deaktivieren ändern den dauerhaften `initial_state` in `automations.yaml`; die Einstellung bleibt daher auch nach einem Reload oder Neustart erhalten. Bei mehreren Treffern nennt HomeIntent die Kandidaten und behält den ursprünglichen Auftrag im Dialog. Die Auswahl kann mit dem Namen oder „die erste“, „die zweite“ beziehungsweise „die dritte“ erfolgen.
 
 Bei Abfragen unterscheidet HomeIntent die YAML-Rollen: Eine Frage nach dem
 Auslöser durchsucht nur Trigger, eine Frage nach dem gesteuerten Gerät nur
@@ -618,6 +682,16 @@ Aktionen. Beim gezielten Austauschen einer Aktion wählt HomeIntent ausschließl
 eigene Automationen, fragt neue Aktion und Bestätigung ab und schreibt die
 Änderung transaktional. Trigger, Bedingungen, triggerbedingte Verzögerungen,
 Self-Delete und Laufzähler bleiben dabei unverändert.
+Eine zusätzliche Aktion kann alternativ hinten an die vorhandene Aktionsfolge
+angefügt werden.
+
+Bei dauerhaften eigenen Automationen können außerdem Auslöser ersetzt oder
+ergänzt und Bedingungen ersetzt, ergänzt oder vollständig entfernt werden.
+Vor der Bestätigung nennt HomeIntent jeweils die Anzahl der Elemente vorher
+und nachher. Das unklare Löschen nur „einer passenden“ Bedingung wird
+verweigert; HomeIntent entfernt niemals durch Raten einen Strukturteil.
+Einmalige Aufträge sind von solchen Strukturänderungen ausgenommen, weil ihre
+Zeit- und Self-Delete-Metadaten zusammengehören.
 Auch Verschieben, Laufbegrenzung, Bereinigung und Rücknahme verlangen eine
 ausdrückliche Bestätigung. Vor jeder Mutation wird zusätzlich ein begrenzter
 Versionsstand gespeichert; die letzte HomeIntent-Änderung kann dadurch
@@ -662,6 +736,7 @@ für Assist beziehungsweise in den HomeIntent-Integrationsoptionen freigegeben
 sein. Wurde früher bereits eine feste Entitätsauswahl gespeichert, wird ein
 später hinzugefügter Kalender nicht automatisch ergänzt; öffne dann die
 Optionen von **HA NLU Engine** und wähle den Kalender dort zusätzlich aus.
+Dasselbe gilt für neu hinzugefügte `todo.*`-Listen oder `timer.*`-Entitäten.
 
 ## Kategorie „Homeintent“
 

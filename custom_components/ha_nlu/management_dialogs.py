@@ -12,6 +12,11 @@ from homeassistant.components import conversation
 from homeassistant.helpers import intent
 
 from .automation_action_edit import select_candidate_reply
+from .automation_structure_edit import (
+    AutomationEditOperation,
+    AutomationEditSection,
+    AutomationStructureEditRequest,
+)
 from .automation_executor import AutomationExecutor
 from .calendar_management import (
     CalendarManagementKind,
@@ -30,9 +35,14 @@ from .nlu.automation_confirmation import ConfirmationReply, classify_confirmatio
 from .nlu.context import (
     ConversationContext,
     PendingAutomationActionEdit,
+    PendingAutomationStructureEdit,
     PendingCalendarMutation,
 )
-from .nlu.ha_automation_generator import generate_ha_action_configs
+from .nlu.ha_automation_generator import (
+    generate_ha_action_configs,
+    generate_ha_condition_configs,
+    generate_ha_trigger_configs,
+)
 from .nlu.response_generator import _automation_label
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,6 +60,177 @@ def store_automation_action_edit(
             pending_clarification=None,
             pending_automation_action_edit=pending,
         ),
+    )
+
+
+def store_automation_structure_edit(
+    agent: Any, conversation_id: str, pending: PendingAutomationStructureEdit
+) -> None:
+    agent._context_store.set(
+        conversation_id,
+        ConversationContext(
+            last_command=None,
+            last_entities=(),
+            last_area=None,
+            pending_clarification=None,
+            pending_automation_structure_edit=pending,
+        ),
+    )
+
+
+def _structure_label(section: AutomationEditSection) -> str:
+    return "Auslöser" if section is AutomationEditSection.TRIGGERS else "Bedingungen"
+
+
+async def async_prepare_automation_structure_edit(
+    agent: Any,
+    user_input: conversation.ConversationInput,
+    response: intent.IntentResponse,
+    pending: PendingAutomationStructureEdit,
+    entities: list[EntitySnapshot],
+    edit_text: str | None,
+) -> conversation.ConversationResult:
+    request: AutomationStructureEditRequest = pending.request
+    automation = pending.automation
+    assert automation is not None
+    section = request.section
+    existing = list(
+        automation.triggers
+        if section is AutomationEditSection.TRIGGERS
+        else automation.conditions
+    )
+    if request.operation is AutomationEditOperation.CLEAR:
+        rendered: list[dict] = []
+        spoken_edit = "alle Bedingungen entfernen"
+    else:
+        if not edit_text:
+            store_automation_structure_edit(agent, user_input.conversation_id, pending)
+            response.async_set_speech(
+                "Wie soll der neue Auslöser lauten?"
+                if section is AutomationEditSection.TRIGGERS
+                else "Welche Bedingung soll gelten?"
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+        if section is AutomationEditSection.TRIGGERS:
+            parsed = agent._engine.parse_automation_trigger(
+                edit_text, entities, agent._world_model
+            )
+            new_values, error = (
+                generate_ha_trigger_configs((parsed,), entities)
+                if parsed is not None else (None, None)
+            )
+        else:
+            parsed = agent._engine.parse_automation_condition(
+                edit_text, entities, agent._world_model
+            )
+            new_values, error = (
+                generate_ha_condition_configs((parsed,), entities)
+                if parsed is not None else (None, None)
+            )
+        if parsed is None or error is not None or new_values is None:
+            response.async_set_speech(
+                f"Den neuen {_structure_label(section)} habe ich nicht eindeutig verstanden. "
+                "Bitte formuliere ihn als vollständigen Satz."
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+        rendered = (
+            [*existing, *new_values]
+            if request.operation is AutomationEditOperation.ADD
+            else new_values
+        )
+        spoken_edit = edit_text.strip()
+    ready = PendingAutomationStructureEdit(
+        request=request,
+        candidates=pending.candidates,
+        automation=automation,
+        rendered=tuple(rendered),
+        edit_text=spoken_edit,
+        ready=True,
+    )
+    store_automation_structure_edit(agent, user_input.conversation_id, ready)
+    response.async_set_speech(
+        f"Vorschau für „{_automation_label(automation)}“: "
+        f"{_structure_label(section)} vorher {len(existing)}, danach {len(rendered)}. "
+        f"Änderung: {spoken_edit}. Soll ich das übernehmen?"
+    )
+    return conversation.ConversationResult(
+        response=response, conversation_id=user_input.conversation_id
+    )
+
+
+async def async_handle_automation_structure_edit_turn(
+    agent: Any,
+    user_input: conversation.ConversationInput,
+    response: intent.IntentResponse,
+    pending: PendingAutomationStructureEdit,
+    entities: list[EntitySnapshot],
+) -> conversation.ConversationResult:
+    if pending.ready:
+        reply = classify_confirmation_reply(user_input.text)
+        if reply is ConfirmationReply.UNCLEAR:
+            response.async_set_speech("Bitte antworte mit Ja oder Nein.")
+        elif reply is ConfirmationReply.NO:
+            agent._context_store.clear(user_input.conversation_id)
+            response.async_set_speech("Abgebrochen. Die Automation wurde nicht verändert.")
+        else:
+            assert pending.automation is not None
+            request: AutomationStructureEditRequest = pending.request
+            if agent._automation_executor is None:
+                agent._automation_executor = AutomationExecutor(agent.hass)
+            try:
+                await agent._automation_executor.async_replace_automation_section(
+                    pending.automation.automation_id,
+                    "triggers" if request.section is AutomationEditSection.TRIGGERS else "conditions",
+                    list(pending.rendered),
+                    (pending.automation.source_text or pending.automation.alias)
+                    + " | Änderung: " + (pending.edit_text or ""),
+                )
+            except Exception as err:  # noqa: BLE001
+                response.async_set_error(
+                    intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                    f"Fehler beim Ändern der Automation: {err}",
+                )
+            else:
+                response.async_set_speech(
+                    f"Die {_structure_label(request.section)} wurden geändert."
+                )
+            agent._context_store.clear(user_input.conversation_id)
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    automation = pending.automation
+    if automation is None:
+        automation = select_candidate_reply(user_input.text, pending.candidates)
+        if automation is None:
+            response.async_set_speech(
+                "Das ist nicht eindeutig. Bitte nenne genau eine Automation oder ihre Nummer: "
+                + ", ".join(_automation_label(item) for item in pending.candidates) + "."
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+        pending = replace(pending, automation=automation)
+        payload = pending.request.payload
+        if payload or pending.request.operation is AutomationEditOperation.CLEAR:
+            return await async_prepare_automation_structure_edit(
+                agent, user_input, response, pending, entities, payload
+            )
+        store_automation_structure_edit(agent, user_input.conversation_id, pending)
+        response.async_set_speech(
+            "Wie soll der neue Auslöser lauten?"
+            if pending.request.section is AutomationEditSection.TRIGGERS
+            else "Welche Bedingung soll gelten?"
+        )
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+    return await async_prepare_automation_structure_edit(
+        agent, user_input, response, pending, entities, user_input.text
     )
 
 
@@ -110,11 +291,17 @@ async def async_handle_automation_action_edit_turn(
                 agent,
                 user_input.conversation_id,
                 PendingAutomationActionEdit(
-                    candidates=pending.candidates, automation=automation
+                    candidates=pending.candidates,
+                    automation=automation,
+                    operation=pending.operation,
                 ),
             )
             response.async_set_speech(
-                "Was soll stattdessen passieren? Auslöser und Bedingungen bleiben unverändert."
+                (
+                    "Welche Aktion soll zusätzlich danach ausgeführt werden?"
+                    if pending.operation == "add"
+                    else "Was soll stattdessen passieren? Auslöser und Bedingungen bleiben unverändert."
+                )
             )
         return conversation.ConversationResult(
             response=response, conversation_id=user_input.conversation_id
@@ -136,19 +323,42 @@ async def async_handle_automation_action_edit_turn(
         return conversation.ConversationResult(
             response=response, conversation_id=user_input.conversation_id
         )
+    rendered_actions = list(rendered)
+    if pending.operation == "add":
+        existing_user_actions = [
+            dict(action) for action in automation.actions
+            if not (
+                isinstance(action, dict)
+                and (
+                    "delay" in action
+                    or action.get("action") in {
+                        "ha_nlu.delete_automation",
+                        "ha_nlu.record_automation_run",
+                    }
+                )
+            )
+        ]
+        rendered_actions = [*existing_user_actions, *rendered_actions]
     store_automation_action_edit(
         agent,
         user_input.conversation_id,
         PendingAutomationActionEdit(
             candidates=pending.candidates,
             automation=automation,
-            rendered_actions=tuple(rendered),
+            rendered_actions=tuple(rendered_actions),
             action_text=user_input.text,
+            operation=pending.operation,
         ),
     )
     response.async_set_speech(
-        f"Soll ich bei „{_automation_label(automation)}“ nur die Aktion durch "
-        f"„{user_input.text.strip()}“ ersetzen?"
+        (
+            f"Vorschau für „{_automation_label(automation)}“: Aktionen vorher "
+            f"{len(automation.actions)}, danach {len(rendered_actions)}. "
+            f"Soll ich „{user_input.text.strip()}“ zusätzlich ausführen?"
+            if pending.operation == "add"
+            else f"Soll ich bei „{_automation_label(automation)}“ nur die Aktion durch "
+            f"„{user_input.text.strip()}“ ersetzen?"
+        )
     )
     return conversation.ConversationResult(
         response=response, conversation_id=user_input.conversation_id

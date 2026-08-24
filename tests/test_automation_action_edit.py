@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ha_nlu.automation_action_edit import (
+    action_edit_operation,
     homeintent_candidates,
     is_action_edit_request,
     select_candidate_reply,
@@ -21,6 +22,8 @@ def test_only_explicit_action_edit_language_opens_the_dialog():
     assert is_action_edit_request("Ändere nur die Aktion, behalte den Auslöser")
     assert is_action_edit_request("Ersetze bei der Automation nur die Aktion")
     assert not is_action_edit_request("Ändere die Temperatur auf 22 Grad")
+    assert is_action_edit_request("Füge eine Aktion zur Automation hinzu")
+    assert action_edit_operation("Füge eine Aktion hinzu") == "add"
 
 
 def test_candidates_never_include_non_homeintent_automations():

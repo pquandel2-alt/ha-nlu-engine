@@ -45,6 +45,7 @@ speaks this back to the user and persists nothing, exactly the same
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any
@@ -293,6 +294,17 @@ def _generate_condition_leaf(condition: ConditionModel, entities: list[EntitySna
             return None, GenerationError.ENTITY_NOT_FOUND
         return {"condition": "state", "entity_id": _entity_id_field(candidates), "state": condition.raw_state}, None
 
+    if condition.type is ConditionType.CALENDAR_EVENT:
+        assert condition.raw_state is not None
+        needle = json.dumps(condition.raw_state.casefold(), ensure_ascii=False)
+        return {
+            "condition": "template",
+            "value_template": (
+                "{{ " + needle
+                + " in (trigger.calendar_event.summary | default('', true) | lower) }}"
+            ),
+        }, None
+
     # ConditionType.DEVICE / ConditionType.DATE - see module docstring.
     return None, GenerationError.UNSUPPORTED_CONDITION_TYPE
 
@@ -503,6 +515,34 @@ def generate_ha_action_configs(
     return rendered, None
 
 
+def generate_ha_trigger_configs(
+    triggers: tuple[TriggerModel, ...], entities: list[EntitySnapshot]
+) -> tuple[list[dict[str, Any]] | None, GenerationError | None]:
+    """Public trigger-only renderer used by safe automation editing."""
+    rendered: list[dict[str, Any]] = []
+    for trigger in triggers:
+        config, error = _generate_trigger(trigger, entities)
+        if error is not None:
+            return None, error
+        assert config is not None
+        rendered.append(config)
+    return rendered, None
+
+
+def generate_ha_condition_configs(
+    conditions: tuple[ConditionNode, ...], entities: list[EntitySnapshot]
+) -> tuple[list[dict[str, Any]] | None, GenerationError | None]:
+    """Public condition-only renderer used by safe automation editing."""
+    rendered: list[dict[str, Any]] = []
+    for condition in conditions:
+        config, error = _generate_condition_node(condition, entities)
+        if error is not None:
+            return None, error
+        assert config is not None
+        rendered.append(config)
+    return rendered, None
+
+
 def generate_ha_automation_config(
     model: AutomationModel, entities: list[EntitySnapshot], automation_id: str | None = None
 ) -> GenerationResult:
@@ -594,6 +634,10 @@ def generate_ha_automation_config(
         )
 
     config: dict[str, Any] = {"alias": model.source_text, "triggers": triggers, "actions": actions}
+    if any(trigger.type is TriggerType.CALENDAR for trigger in model.triggers):
+        # Calendar events can overlap; queued prevents a second event from
+        # being discarded while the first action sequence is still active.
+        config["mode"] = "queued"
     if conditions:
         config["conditions"] = conditions
     return GenerationResult(config=config, error=None)

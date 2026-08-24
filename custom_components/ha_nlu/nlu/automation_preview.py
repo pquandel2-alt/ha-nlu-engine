@@ -163,6 +163,14 @@ def _speak_trigger(
         text = "der bestätigte Kalenderzeitpunkt erreicht ist"
     elif trigger.type is TriggerType.WEEKDAY:
         text = " oder ".join(_WEEKDAY_SPOKEN_DE.get(d, d) for d in trigger.weekdays) + " ist"
+    elif trigger.type is TriggerType.CALENDAR:
+        calendar = entity_by_id.get(trigger.calendar_entity_id or "")
+        name = calendar.friendly_name if calendar is not None else trigger.calendar_entity_id
+        event = "beginnt" if trigger.calendar_event == "start" else "endet"
+        text = f"ein Termin im Kalender {name} {event}"
+        if trigger.offset_minutes:
+            direction = "nach" if trigger.offset_minutes > 0 else "vor"
+            text = f"es {abs(trigger.offset_minutes)} Minuten {direction} diesem Termin ist"
     else:
         text = "ein unbekannter Auslöser eintritt"
     if trigger.delay_seconds:
@@ -204,6 +212,8 @@ def _speak_condition_leaf(
     if condition.type is ConditionType.ENTITY:
         target = _speak_target(condition.target, entity_by_id, area_name_by_id)
         return f"{target} den Zustand „{condition.raw_state}“ hat"
+    if condition.type is ConditionType.CALENDAR_EVENT:
+        return f"der Kalendertitel „{condition.raw_state}“ enthält"
     return "eine unbekannte Bedingung erfüllt ist"
 
 

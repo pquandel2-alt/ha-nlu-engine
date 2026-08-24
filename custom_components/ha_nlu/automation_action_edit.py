@@ -9,7 +9,8 @@ from .entities import normalize_for_compare
 
 
 _EDIT_RE = re.compile(
-    r"\b(?:ändere|aendere|ersetz\w*)\b.*\b(?:nur\s+)?(?:die\s+)?aktion\b",
+    r"\b(?:ändere|aendere|ersetz\w*|füg\w*|fueg\w*|hinzufüg\w*|hinzufueg\w*)\b"
+    r".*\b(?:nur\s+)?(?:die\s+|eine\s+|als\s+)?aktion\b",
     re.I,
 )
 
@@ -17,6 +18,15 @@ _EDIT_RE = re.compile(
 def is_action_edit_request(text: str) -> bool:
     """Require explicit action-edit language; never infer destructive scope."""
     return _EDIT_RE.search(text) is not None
+
+
+def action_edit_operation(text: str) -> str:
+    """Return the explicit bounded action edit operation."""
+    return (
+        "add"
+        if re.search(r"\b(?:füg|fueg|hinzufüg|hinzufueg)", text, re.I)
+        else "replace"
+    )
 
 
 def homeintent_candidates(
@@ -49,4 +59,18 @@ def select_candidate_reply(
         if normalize_for_compare(item.alias) in spoken
         or spoken in normalize_for_compare(item.alias)
     ]
-    return matched[0] if len(matched) == 1 else None
+    if len(matched) == 1:
+        return matched[0]
+    ordinal = re.search(
+        r"\b(?:die\s+)?(erste|zweite|dritte|1\.?|2\.?|3\.?)\b", text, re.I
+    )
+    if ordinal is not None:
+        indexes = {
+            "erste": 0, "1": 0, "1.": 0,
+            "zweite": 1, "2": 1, "2.": 1,
+            "dritte": 2, "3": 2, "3.": 2,
+        }
+        index = indexes[ordinal.group(1).casefold()]
+        if index < len(candidates):
+            return candidates[index]
+    return None

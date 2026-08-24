@@ -808,6 +808,66 @@ class AutomationExecutor:
                 raise
             await self._async_complete_transaction()
 
+    async def async_replace_automation_section(
+        self,
+        automation_id: str,
+        section: str,
+        new_values: list[dict[str, Any]],
+        source_text: str,
+    ) -> None:
+        """Transactionally replace triggers or conditions of one HomeIntent automation."""
+        if section not in {"triggers", "conditions"}:
+            raise ValueError("Unbekannter Automationsabschnitt")
+        if section == "triggers" and not new_values:
+            raise ValueError("Mindestens ein Auslöser ist erforderlich")
+        path = self._hass.config.path(AUTOMATIONS_YAML_FILENAME)
+        async with self._lock:
+            metadata = await self._metadata_store.async_load_all()
+            entry = metadata.get(automation_id)
+            if not entry or entry.get("created_by") != CREATED_BY_HOMEINTENT:
+                raise ValueError("Die Automation wurde nicht von HomeIntent erstellt")
+            if entry.get("once"):
+                raise ValueError(
+                    "Auslöser und Bedingungen einmaliger Aufträge können nicht nachträglich geändert werden"
+                )
+            snapshot = await self._async_read_snapshot(path)
+            updated: list[dict[str, Any]] = []
+            found = False
+            for automation in snapshot.automations:
+                if automation.get("id") != automation_id:
+                    updated.append(automation)
+                    continue
+                found = True
+                replacement = {**automation, section: list(new_values)}
+                if section == "conditions" and not new_values:
+                    replacement.pop("conditions", None)
+                updated.append(replacement)
+            if not found:
+                raise ValueError(f"No automation with id {automation_id!r} found")
+            transaction = await self._async_begin_transaction(
+                operation=f"replace_{section}",
+                automation_id=automation_id,
+                path=path,
+                snapshot=snapshot,
+                updated=updated,
+            )
+            try:
+                await self._hass.services.async_call(
+                    "automation", "reload", {}, blocking=True
+                )
+                await self._metadata_store.async_update(
+                    automation_id,
+                    source_text=source_text,
+                    version=int(entry.get("version", 1)) + 1,
+                )
+            except Exception:
+                await self._async_rollback_transaction(path, transaction)
+                await self._hass.services.async_call(
+                    "automation", "reload", {}, blocking=True
+                )
+                raise
+            await self._async_complete_transaction()
+
     async def async_cleanup_expired_scheduled_automations(
         self, now: datetime
     ) -> tuple[str, ...]:

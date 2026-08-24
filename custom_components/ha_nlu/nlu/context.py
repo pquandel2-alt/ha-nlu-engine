@@ -40,6 +40,7 @@ if TYPE_CHECKING:
         CalendarManagementKind,
         CalendarManagementRequest,
     )
+    from ..productivity import ProductivityRequest
 
 __all__ = [
     "ClarificationRequest",
@@ -52,10 +53,12 @@ __all__ = [
     "PendingServiceConfirmation",
     "PendingAutomationDraft",
     "PendingAutomationActionEdit",
+    "PendingAutomationStructureEdit",
     "PendingAutomationManagement",
     "PendingCalendarEvent",
     "PendingCalendarMutation",
     "PendingSemanticCommand",
+    "PendingProductivityCommand",
 ]
 
 
@@ -127,6 +130,19 @@ class PendingAutomationActionEdit:
     automation: AutomationSummary | None = None
     rendered_actions: tuple[dict, ...] = ()
     action_text: str | None = None
+    operation: str = "replace"
+
+
+@dataclass(frozen=True)
+class PendingAutomationStructureEdit:
+    """Select, preview and confirm a trigger/condition edit."""
+
+    request: object
+    candidates: tuple[AutomationSummary, ...]
+    automation: AutomationSummary | None = None
+    rendered: tuple[dict, ...] = ()
+    edit_text: str | None = None
+    ready: bool = False
 
 
 @dataclass(frozen=True)
@@ -136,6 +152,7 @@ class PendingAutomationManagement:
     request: object
     automation: AutomationSummary | None = None
     target: object | None = None
+    candidates: tuple[AutomationSummary, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -173,6 +190,14 @@ class PendingSemanticCommand:
     response_verb: str
     requires_confirmation: bool = False
     value_kind: str | None = None
+
+
+@dataclass(frozen=True)
+class PendingProductivityCommand:
+    """A list/timer command awaiting target selection or confirmation."""
+
+    request: "ProductivityRequest"
+    awaiting_confirmation: bool = False
 
 # No TTL value is specified anywhere in the plan (only the test case name
 # "context expiration", brain node 9ced4390, section 26). 30s covers a
@@ -238,10 +263,12 @@ class ConversationContext:
     focus: DialogFocus | None = None
     pending_automation_draft: PendingAutomationDraft | None = None
     pending_automation_action_edit: PendingAutomationActionEdit | None = None
+    pending_automation_structure_edit: PendingAutomationStructureEdit | None = None
     pending_automation_management: PendingAutomationManagement | None = None
     pending_calendar_event: PendingCalendarEvent | None = None
     pending_calendar_mutation: PendingCalendarMutation | None = None
     pending_semantic_command: PendingSemanticCommand | None = None
+    pending_productivity_command: PendingProductivityCommand | None = None
 
 
 class ConversationContextStore:
@@ -284,10 +311,12 @@ class ConversationContextStore:
             or context.pending_service_confirmation is not None
             or context.pending_automation_draft is not None
             or context.pending_automation_action_edit is not None
+            or context.pending_automation_structure_edit is not None
             or context.pending_automation_management is not None
             or context.pending_calendar_event is not None
             or context.pending_calendar_mutation is not None
             or context.pending_semantic_command is not None
+            or context.pending_productivity_command is not None
             else self._ttl_seconds
         )
         self._entries[conversation_id] = (self._clock(), ttl_seconds, context)

@@ -30,14 +30,20 @@ from homeassistant.util import dt as dt_util
 
 from .automation_executor import AutomationExecutor
 from .automation_action_edit import (
+    action_edit_operation,
     homeintent_candidates,
     is_action_edit_request,
+    select_candidate_reply,
 )
 from .automation_management import (
     AutomationManagementKind,
     format_scheduled_time,
     parse_automation_management,
     select_automation_management,
+)
+from .automation_structure_edit import (
+    AutomationEditOperation,
+    parse_automation_structure_edit,
 )
 from .calendar_event import (
     CalendarEventDraft,
@@ -66,9 +72,12 @@ from .entities import EntitySnapshot
 from .hass_entities import build_device_snapshots, build_entity_snapshots
 from .management_dialogs import (
     async_handle_automation_action_edit_turn,
+    async_handle_automation_structure_edit_turn,
+    async_prepare_automation_structure_edit,
     async_handle_calendar_management,
     async_handle_calendar_mutation_confirmation,
     store_automation_action_edit,
+    store_automation_structure_edit,
 )
 from .nlu.automation_confirmation import ConfirmationReply, classify_confirmation_reply
 from .nlu.automation_model import resolve_pending_schedule
@@ -80,8 +89,10 @@ from .nlu.context import (
     PendingAutomationDraft,
     PendingAutomationActionEdit,
     PendingAutomationManagement,
+    PendingAutomationStructureEdit,
     PendingCalendarEvent,
     PendingServiceConfirmation,
+    PendingProductivityCommand,
 )
 from .nlu.dialog_focus import DialogFocus, derive_dialog_focus
 from .nlu.ha_automation_generator import GenerationError, generate_ha_automation_config
@@ -92,6 +103,16 @@ from .risk import requires_confirmation
 from .extended_device_query import match_extended_device_query
 from .world_model import WorldModel, build_world_model as assemble_world_model
 from .runtime_data import HaNluRuntimeData
+from .productivity import (
+    ProductivityRequest,
+    TimerOperation,
+    TimerRequest,
+    TodoOperation,
+    TodoRequest,
+    format_duration,
+    parse_productivity_request,
+    select_productivity_candidate,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -257,6 +278,13 @@ class NluConversationEntity(
 
         all_calendars = tuple(entity for entity in entities if entity.domain == "calendar")
         calendars = writable_calendars(entities)
+        if pending is not None and pending.pending_productivity_command is not None:
+            return await self._async_handle_pending_productivity(
+                user_input,
+                response,
+                pending.pending_productivity_command,
+                entities,
+            )
         if pending is not None and pending.pending_calendar_event is not None:
             return await self._async_handle_calendar_event_turn(
                 user_input, response, pending.pending_calendar_event, calendars
@@ -301,6 +329,15 @@ class NluConversationEntity(
                 user_input,
                 response,
                 pending.pending_automation_action_edit,
+                entities,
+            )
+
+        if pending is not None and pending.pending_automation_structure_edit is not None:
+            return await async_handle_automation_structure_edit_turn(
+                self,
+                user_input,
+                response,
+                pending.pending_automation_structure_edit,
                 entities,
             )
 
@@ -378,6 +415,12 @@ class NluConversationEntity(
                 response=response, conversation_id=user_input.conversation_id
             )
 
+        productivity = parse_productivity_request(user_input.text, entities)
+        if productivity is not None:
+            return await self._async_handle_productivity_request(
+                user_input, response, productivity, entities
+            )
+
         calendar_management = parse_calendar_management(
             user_input.text, all_calendars, dt_util.now()
         )
@@ -412,18 +455,82 @@ class NluConversationEntity(
                 response=response, conversation_id=user_input.conversation_id
             )
 
+        structure_edit = (
+            None
+            if is_action_edit_request(user_input.text)
+            else parse_automation_structure_edit(user_input.text)
+        )
+        if structure_edit is not None:
+            if self._automation_executor is None:
+                self._automation_executor = AutomationExecutor(self.hass)
+            automations = await self._automation_executor.async_list_automations()
+            candidates = tuple(
+                item for item in homeintent_candidates(automations, user_input.text)
+                if not item.once
+            )
+            if not candidates:
+                response.async_set_speech(
+                    "Ich finde keine passende dauerhafte HomeIntent-Automation. "
+                    "Einmalige Aufträge werden aus Sicherheitsgründen nicht strukturell geändert."
+                )
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
+            pending_edit = PendingAutomationStructureEdit(
+                request=structure_edit,
+                candidates=candidates,
+                automation=candidates[0] if len(candidates) == 1 else None,
+            )
+            if len(candidates) > 1:
+                store_automation_structure_edit(
+                    self, user_input.conversation_id, pending_edit
+                )
+                response.async_set_speech(
+                    "Welche Automation meinst du? "
+                    + ", ".join(_automation_label(item) for item in candidates) + "."
+                )
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
+            if (
+                structure_edit.payload
+                or structure_edit.operation is AutomationEditOperation.CLEAR
+            ):
+                return await async_prepare_automation_structure_edit(
+                    self,
+                    user_input,
+                    response,
+                    pending_edit,
+                    entities,
+                    structure_edit.payload,
+                )
+            store_automation_structure_edit(
+                self, user_input.conversation_id, pending_edit
+            )
+            response.async_set_speech(
+                "Wie soll der neue Auslöser lauten?"
+                if structure_edit.section.name == "TRIGGERS"
+                else "Welche Bedingung soll gelten?"
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
         if is_action_edit_request(user_input.text):
             if self._automation_executor is None:
                 self._automation_executor = AutomationExecutor(self.hass)
             automations = await self._automation_executor.async_list_automations()
             candidates = homeintent_candidates(automations, user_input.text)
+            operation = action_edit_operation(user_input.text)
             if not candidates:
                 response.async_set_speech("Ich finde keine änderbare HomeIntent-Automation.")
             elif len(candidates) > 1:
                 store_automation_action_edit(
                     self,
                     user_input.conversation_id,
-                    PendingAutomationActionEdit(candidates=candidates),
+                    PendingAutomationActionEdit(
+                        candidates=candidates, operation=operation
+                    ),
                 )
                 response.async_set_speech(
                     "Welche Automation meinst du? "
@@ -435,11 +542,17 @@ class NluConversationEntity(
                     self,
                     user_input.conversation_id,
                     PendingAutomationActionEdit(
-                        candidates=candidates, automation=candidates[0]
+                        candidates=candidates,
+                        automation=candidates[0],
+                        operation=operation,
                     ),
                 )
                 response.async_set_speech(
-                    "Was soll stattdessen passieren? Auslöser und Bedingungen bleiben unverändert."
+                    (
+                        "Welche Aktion soll zusätzlich danach ausgeführt werden?"
+                        if operation == "add"
+                        else "Was soll stattdessen passieren? Auslöser und Bedingungen bleiben unverändert."
+                    )
                 )
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
@@ -539,6 +652,10 @@ class NluConversationEntity(
                 )
             if result is None:
                 result = self._engine.match_automation(
+                    user_input.text, entities, self._world_model, pending
+                )
+            if result is None:
+                result = self._engine.match_calendar_event_automation(
                     user_input.text, entities, self._world_model, pending
                 )
             if result is None:
@@ -840,6 +957,261 @@ class NluConversationEntity(
         return conversation.ConversationResult(
             response=response, conversation_id=user_input.conversation_id
         )
+
+    def _store_productivity(
+        self,
+        conversation_id: str,
+        request: ProductivityRequest,
+        *,
+        awaiting_confirmation: bool = False,
+    ) -> None:
+        self._context_store.set(
+            conversation_id,
+            ConversationContext(
+                last_command=None,
+                last_entities=(),
+                last_area=None,
+                pending_clarification=None,
+                pending_productivity_command=PendingProductivityCommand(
+                    request=request,
+                    awaiting_confirmation=awaiting_confirmation,
+                ),
+            ),
+        )
+
+    async def _async_handle_pending_productivity(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        pending: PendingProductivityCommand,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult:
+        if pending.awaiting_confirmation:
+            reply = classify_confirmation_reply(user_input.text)
+            if reply is ConfirmationReply.UNCLEAR:
+                response.async_set_speech("Bitte antworte mit Ja oder Nein.")
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
+            self._context_store.clear(user_input.conversation_id)
+            if reply is ConfirmationReply.NO:
+                response.async_set_speech("Abgebrochen. Die Liste wurde nicht verändert.")
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
+            return await self._async_execute_productivity(
+                user_input, response, pending.request, entities
+            )
+
+        selected = select_productivity_candidate(pending.request, user_input.text)
+        if selected is None:
+            labels = ", ".join(item.friendly_name for item in pending.request.candidates)
+            question = "Welche Liste" if isinstance(pending.request, TodoRequest) else "Welchen Timer"
+            response.async_set_speech(f"{question} meinst du? {labels}.")
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+        return await self._async_handle_productivity_request(
+            user_input, response, selected, entities
+        )
+
+    async def _async_handle_productivity_request(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        request: ProductivityRequest,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult:
+        if request.entity_id is None:
+            if request.candidates:
+                self._store_productivity(user_input.conversation_id, request)
+                labels = ", ".join(item.friendly_name for item in request.candidates)
+                question = "Welche Liste" if isinstance(request, TodoRequest) else "Welchen Timer"
+                response.async_set_speech(f"{question} meinst du? {labels}.")
+            else:
+                noun = "keine für HomeIntent freigegebene Liste" if isinstance(request, TodoRequest) else "keinen für HomeIntent freigegebenen Timer"
+                response.async_set_speech(f"Ich finde {noun}.")
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        if (
+            isinstance(request, TodoRequest)
+            and request.operation is TodoOperation.CLEAR_COMPLETED
+        ):
+            self._store_productivity(
+                user_input.conversation_id, request, awaiting_confirmation=True
+            )
+            response.async_set_speech(
+                "Soll ich wirklich alle erledigten Einträge aus der Liste löschen?"
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        self._context_store.clear(user_input.conversation_id)
+        return await self._async_execute_productivity(
+            user_input, response, request, entities
+        )
+
+    async def _async_execute_productivity(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        request: ProductivityRequest,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult:
+        try:
+            if isinstance(request, TodoRequest):
+                speech = await self._async_execute_todo(request)
+            else:
+                speech = await self._async_execute_timer(request, entities)
+        except Exception as err:  # noqa: BLE001 - HA service errors are heterogeneous
+            _LOGGER.error("Productivity command failed: %s", err)
+            response.async_set_error(
+                intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                f"Fehler beim Ausführen: {err}",
+            )
+        else:
+            response.async_set_speech(speech)
+            if (
+                isinstance(request, TimerRequest)
+                and request.operation is TimerOperation.STATUS
+            ) or (
+                isinstance(request, TodoRequest)
+                and request.operation is TodoOperation.LIST
+            ):
+                response.response_type = intent.IntentResponseType.QUERY_ANSWER
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    async def _async_get_todo_items(self, entity_id: str) -> list[dict]:
+        result = await self.hass.services.async_call(
+            "todo",
+            "get_items",
+            {"status": ["needs_action", "completed"]},
+            target={"entity_id": entity_id},
+            blocking=True,
+            return_response=True,
+        )
+        container = result.get(entity_id, result) if isinstance(result, dict) else {}
+        items = container.get("items", []) if isinstance(container, dict) else []
+        return [item for item in items if isinstance(item, dict)]
+
+    async def _async_execute_todo(self, request: TodoRequest) -> str:
+        assert request.entity_id is not None
+        if request.operation is TodoOperation.LIST:
+            items = await self._async_get_todo_items(request.entity_id)
+            open_items = [
+                str(item.get("summary") or item.get("item") or "").strip()
+                for item in items
+                if item.get("status", "needs_action") == "needs_action"
+            ]
+            open_items = [item for item in open_items if item]
+            return (
+                "Auf der Liste steht nichts Offenes."
+                if not open_items
+                else "Auf der Liste stehen: " + ", ".join(open_items) + "."
+            )
+
+        if request.operation is TodoOperation.CLEAR_COMPLETED:
+            items = await self._async_get_todo_items(request.entity_id)
+            completed = [
+                item.get("uid") or item.get("summary") or item.get("item")
+                for item in items
+                if item.get("status") == "completed"
+            ]
+            completed = [item for item in completed if item]
+            if completed:
+                await self.hass.services.async_call(
+                    "todo", "remove_completed_items", {},
+                    target={"entity_id": request.entity_id}, blocking=True,
+                )
+            return (
+                "Es gab keine erledigten Einträge."
+                if not completed
+                else f"{len(completed)} erledigte Einträge wurden gelöscht."
+            )
+
+        service = {
+            TodoOperation.ADD: "add_item",
+            TodoOperation.COMPLETE: "update_item",
+            TodoOperation.REMOVE: "remove_item",
+        }[request.operation]
+        for item in request.items:
+            data: dict[str, object] = {"item": item}
+            if request.operation is TodoOperation.COMPLETE:
+                data["status"] = "completed"
+            await self.hass.services.async_call(
+                "todo", service, data,
+                target={"entity_id": request.entity_id}, blocking=True,
+            )
+        count = len(request.items)
+        if request.operation is TodoOperation.ADD:
+            return (
+                f"{request.items[0]} wurde zur Liste hinzugefügt."
+                if count == 1
+                else f"{count} Einträge wurden zur Liste hinzugefügt: "
+                + ", ".join(request.items) + "."
+            )
+        if request.operation is TodoOperation.COMPLETE:
+            return f"{count} Eintrag" + (" wurde" if count == 1 else "e wurden") + " als erledigt markiert."
+        return f"{count} Eintrag" + (" wurde" if count == 1 else "e wurden") + " aus der Liste entfernt."
+
+    async def _async_execute_timer(
+        self, request: TimerRequest, entities: list[EntitySnapshot]
+    ) -> str:
+        assert request.entity_id is not None
+        entity = next((item for item in entities if item.entity_id == request.entity_id), None)
+        if request.operation is TimerOperation.STATUS:
+            if entity is None:
+                return "Der Timer ist nicht mehr verfügbar."
+            if entity.state == "idle":
+                return "Der Timer ist nicht aktiv."
+            remaining = entity.attributes.get("remaining") or entity.attributes.get("duration")
+            state = "pausiert" if entity.state == "paused" else "aktiv"
+            return f"Der Timer ist {state}. Verbleibende Zeit: {remaining}."
+
+        service = {
+            TimerOperation.START: "start",
+            TimerOperation.CHANGE: "change",
+            TimerOperation.PAUSE: "pause",
+            TimerOperation.RESUME: "start",
+            TimerOperation.CANCEL: "cancel",
+            TimerOperation.FINISH: "finish",
+        }[request.operation]
+        data: dict[str, str | int] = {}
+        if request.operation is TimerOperation.START:
+            assert request.duration_seconds is not None
+            data["duration"] = self._timer_duration_value(request.duration_seconds)
+        elif request.operation is TimerOperation.CHANGE:
+            assert request.change_seconds is not None
+            # timer.change explicitly accepts signed seconds; using the
+            # integer form avoids ambiguity around a negative HH:MM string.
+            data["duration"] = request.change_seconds
+        await self.hass.services.async_call(
+            "timer", service, data,
+            target={"entity_id": request.entity_id}, blocking=True,
+        )
+        if request.operation is TimerOperation.START:
+            return f"Timer für {format_duration(request.duration_seconds or 0)} gestartet."
+        if request.operation is TimerOperation.CHANGE:
+            verb = "verlängert" if (request.change_seconds or 0) > 0 else "verkürzt"
+            return f"Timer um {format_duration(request.change_seconds or 0)} {verb}."
+        return {
+            TimerOperation.PAUSE: "Timer pausiert.",
+            TimerOperation.RESUME: "Timer fortgesetzt.",
+            TimerOperation.CANCEL: "Timer abgebrochen.",
+            TimerOperation.FINISH: "Timer beendet.",
+        }[request.operation]
+
+    @staticmethod
+    def _timer_duration_value(seconds: int) -> str:
+        sign = "-" if seconds < 0 else ""
+        hours, remainder = divmod(abs(seconds), 3600)
+        minutes, secs = divmod(remainder, 60)
+        return f"{sign}{hours:02d}:{minutes:02d}:{secs:02d}"
 
     async def _async_handle_automation_confirmation_reply(
         self,
@@ -1212,8 +1584,19 @@ class NluConversationEntity(
                 response.async_set_speech("Ich habe keinen passenden geplanten Auftrag gefunden.")
             elif len(selection.automations) > 1:
                 labels = ", ".join(_automation_label(item) for item in selection.automations)
+                self._context_store.set(
+                    user_input.conversation_id,
+                    ConversationContext(
+                        last_command=None, last_entities=(), last_area=None,
+                        pending_clarification=None,
+                        pending_automation_management=PendingAutomationManagement(
+                            request=request, candidates=selection.automations
+                        ),
+                    ),
+                )
                 response.async_set_speech(
-                    "Mehrere Aufträge passen. Bitte nenne das Gerät im Verschiebebefehl: "
+                    "Mehrere Aufträge passen. Bitte nenne das Gerät oder wähle "
+                    "einen Auftrag per Name oder Nummer: "
                     + labels
                     + "."
                 )
@@ -1256,8 +1639,18 @@ class NluConversationEntity(
                 labels = ", ".join(
                     _automation_label(item) for item in selection.automations
                 )
+                self._context_store.set(
+                    user_input.conversation_id,
+                    ConversationContext(
+                        last_command=None, last_entities=(), last_area=None,
+                        pending_clarification=None,
+                        pending_automation_management=PendingAutomationManagement(
+                            request=request, candidates=selection.automations
+                        ),
+                    ),
+                )
                 response.async_set_speech(
-                    "Mehrere Automationen passen. Bitte nenne das Gerät: "
+                    "Mehrere Automationen passen. Welche meinst du? "
                     + labels
                     + "."
                 )
@@ -1289,6 +1682,55 @@ class NluConversationEntity(
         response: intent.IntentResponse,
         pending: PendingAutomationManagement,
     ) -> conversation.ConversationResult:
+        if pending.candidates:
+            automation = select_candidate_reply(user_input.text, pending.candidates)
+            if automation is None:
+                response.async_set_speech(
+                    "Das ist nicht eindeutig. Bitte nenne eine Automation oder sage "
+                    "die erste, die zweite oder die dritte: "
+                    + ", ".join(_automation_label(item) for item in pending.candidates)
+                    + "."
+                )
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
+            request = pending.request
+            if request.kind is AutomationManagementKind.RESCHEDULE:
+                now = dt_util.now()
+                target = datetime.fromisoformat(automation.scheduled_for)
+                target = target.replace(hour=request.hour, minute=request.minute, second=0)
+                comparable_now = now
+                if target.tzinfo is None and now.tzinfo is not None:
+                    comparable_now = now.replace(tzinfo=None)
+                elif target.tzinfo is not None and now.tzinfo is None:
+                    comparable_now = now.replace(tzinfo=target.tzinfo)
+                if target <= comparable_now:
+                    self._context_store.clear(user_input.conversation_id)
+                    response.async_set_speech("Die neue Uhrzeit liegt bereits in der Vergangenheit.")
+                    return conversation.ConversationResult(response=response, conversation_id=user_input.conversation_id)
+                replacement = PendingAutomationManagement(request, automation, target)
+                question = (
+                    f"Soll ich {_automation_label(automation)} wirklich auf "
+                    f"{format_scheduled_time(target.isoformat())} verschieben?"
+                )
+            else:
+                replacement = PendingAutomationManagement(request, automation)
+                question = (
+                    f"Soll {_automation_label(automation)} wirklich auf "
+                    f"{request.max_runs} Ausführungen begrenzt werden?"
+                )
+            self._context_store.set(
+                user_input.conversation_id,
+                ConversationContext(
+                    last_command=None, last_entities=(), last_area=None,
+                    pending_clarification=None,
+                    pending_automation_management=replacement,
+                ),
+            )
+            response.async_set_speech(question)
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
         reply = classify_confirmation_reply(user_input.text)
         if reply is ConfirmationReply.UNCLEAR:
             response.async_set_speech("Bitte antworte mit Ja oder Nein.")
