@@ -1,0 +1,39 @@
+{
+  "title": "HomeIntent",
+  "config": {
+    "abort": {
+      "already_configured": "HomeIntent ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "HomeIntent-Geräte auswählen",
+        "description": "Lege fest, welche Home-Assistant-Entitäten HomeIntent verstehen und steuern darf. Ohne eigene Auswahl gilt dynamisch die Assist-Freigabe.",
+        "data": {
+          "selected_entities": "Freigegebene Entitäten"
+        }
+      }
+    }
+  },
+  "services": {
+    "delete_automation": {
+      "name": "Automation löschen",
+      "description": "Interner Dienst für selbstlöschende HomeIntent-Automationen.",
+      "fields": {
+        "automation_id": {
+          "name": "Automations-ID",
+          "description": "ID der zu löschenden Automation."
+        }
+      }
+    },
+    "record_automation_run": {
+      "name": "Automationsausführung erfassen",
+      "description": "Interner Dienst für Automationen mit begrenzter Ausführungszahl.",
+      "fields": {
+        "automation_id": {"name": "Automations-ID"},
+        "max_runs": {"name": "Maximale Ausführungen"}
+      }
+    }
+  }
+}

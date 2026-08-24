@@ -21,8 +21,8 @@ from ha_nlu.nlu.semantic_state import SemanticState
 # ============================================================================
 
 
-def test_action_type_covers_all_eleven_documented_types():
-    """ActionType has all 11 values from HomeIntent V5 Teil 4/10 (V5.7)."""
+def test_action_type_covers_all_documented_types():
+    """ActionType includes the original leaves plus native IF/THEN/ELSE."""
     assert {t.name for t in ActionType} == {
         "TURN_ON",
         "TURN_OFF",
@@ -35,6 +35,7 @@ def test_action_type_covers_all_eleven_documented_types():
         "NOTIFY",
         "DELAY",
         "WAIT",
+        "CHOOSE",
     }
 
 

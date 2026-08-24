@@ -145,6 +145,11 @@ def _format_offset(minutes: int) -> str:
 
 
 def _generate_trigger(trigger: TriggerModel, entities: list[EntitySnapshot]) -> tuple[dict[str, Any] | None, GenerationError | None]:
+    def identified(config: dict[str, Any]) -> dict[str, Any]:
+        if trigger.trigger_id is not None:
+            config["id"] = trigger.trigger_id
+        return config
+
     if trigger.type is TriggerType.STATE:
         assert trigger.target is not None and trigger.state is not None
         candidates = _resolve_target_entities(trigger.target, entities)
@@ -155,7 +160,7 @@ def _generate_trigger(trigger: TriggerModel, entities: list[EntitySnapshot]) -> 
         to_raw = _raw_state_for_semantic(domain, device_class, trigger.state)
         if to_raw is None:
             return None, GenerationError.UNSUPPORTED_STATE
-        return {"trigger": "state", "entity_id": _entity_id_field(candidates), "to": to_raw}, None
+        return identified({"trigger": "state", "entity_id": _entity_id_field(candidates), "to": to_raw}), None
 
     if trigger.type is TriggerType.NUMERIC_STATE:
         assert trigger.target is not None and trigger.comparator is not None and trigger.threshold is not None
@@ -163,7 +168,7 @@ def _generate_trigger(trigger: TriggerModel, entities: list[EntitySnapshot]) -> 
         if not candidates:
             return None, GenerationError.ENTITY_NOT_FOUND
         key = "above" if trigger.comparator is NumericComparator.ABOVE else "below"
-        return {"trigger": "numeric_state", "entity_id": _entity_id_field(candidates), key: trigger.threshold}, None
+        return identified({"trigger": "numeric_state", "entity_id": _entity_id_field(candidates), key: trigger.threshold}), None
 
     if trigger.type is TriggerType.PRESENCE:
         assert trigger.target is not None and trigger.target.entity_id is not None
@@ -172,7 +177,7 @@ def _generate_trigger(trigger: TriggerModel, entities: list[EntitySnapshot]) -> 
         # decision: the upstream parser never records arrival vs. departure,
         # so this is the only truthful translation (see that module's
         # docstring for the full reasoning).
-        return {"trigger": "state", "entity_id": trigger.target.entity_id}, None
+        return identified({"trigger": "state", "entity_id": trigger.target.entity_id}), None
 
     if trigger.type is TriggerType.SUN:
         assert trigger.sun_event is not None
@@ -180,13 +185,29 @@ def _generate_trigger(trigger: TriggerModel, entities: list[EntitySnapshot]) -> 
         config: dict[str, Any] = {"trigger": "sun", "event": event}
         if trigger.offset_minutes is not None:
             config["offset"] = _format_offset(trigger.offset_minutes)
-        return config, None
+        return identified(config), None
 
     if trigger.type is TriggerType.TIME:
         assert trigger.time_hour is not None
         minute = trigger.time_minute or 0
         second = trigger.time_second or 0
-        return {"trigger": "time", "at": f"{trigger.time_hour:02d}:{minute:02d}:{second:02d}"}, None
+        return identified({"trigger": "time", "at": f"{trigger.time_hour:02d}:{minute:02d}:{second:02d}"}), None
+
+    if trigger.type is TriggerType.CALENDAR:
+        assert trigger.calendar_entity_id is not None and trigger.calendar_event is not None
+        if not any(
+            entity.entity_id == trigger.calendar_entity_id and entity.domain == "calendar"
+            for entity in entities
+        ):
+            return None, GenerationError.ENTITY_NOT_FOUND
+        config = {
+            "trigger": "calendar",
+            "entity_id": trigger.calendar_entity_id,
+            "event": trigger.calendar_event,
+        }
+        if trigger.offset_minutes is not None:
+            config["offset"] = _format_offset(trigger.offset_minutes)
+        return identified(config), None
 
     if trigger.type is TriggerType.RELATIVE_TIME:
         # Preview-only. conversation.py must anchor the offset to the
@@ -311,7 +332,38 @@ def _generate_action_leaf(action: ActionModel, entities: list[EntitySnapshot]) -
         return {"action": "persistent_notification.create", "data": {"message": action.message}}, None
 
     if action.type is ActionType.WAIT:
-        return None, GenerationError.UNSUPPORTED_ACTION_TYPE
+        assert action.wait_condition is not None
+        template, error = _condition_template(action.wait_condition, entities)
+        if error is not None:
+            return None, (
+                GenerationError.UNSUPPORTED_ACTION_TYPE
+                if error is GenerationError.UNSUPPORTED_CONDITION_TYPE
+                else error
+            )
+        assert template is not None
+        config: dict[str, Any] = {
+            "wait_template": "{{ " + template + " }}",
+            "continue_on_timeout": False,
+        }
+        if action.timeout_seconds is not None:
+            config["timeout"] = {"seconds": action.timeout_seconds}
+        return config, None
+
+    if action.type is ActionType.CHOOSE:
+        assert action.if_condition is not None
+        condition, error = _generate_condition_node(action.if_condition, entities)
+        if error is not None:
+            return None, error
+        then_steps, error = generate_ha_action_configs(action.then_steps, entities)
+        if error is not None:
+            return None, error
+        else_steps, error = generate_ha_action_configs(action.else_steps, entities)
+        if error is not None:
+            return None, error
+        config = {"if": [condition], "then": then_steps}
+        if else_steps:
+            config["else"] = else_steps
+        return config, None
 
     assert action.target is not None
     candidates = _resolve_target_entities(action.target, entities)
@@ -366,6 +418,58 @@ def _generate_action_leaf(action: ActionModel, entities: list[EntitySnapshot]) -
         "target": {"entity_id": _entity_id_field(candidates)},
         "data": {"percentage": action.value},
     }, None
+
+
+def _condition_template(
+    node: ConditionNode, entities: list[EntitySnapshot]
+) -> tuple[str | None, GenerationError | None]:
+    """Compile a bounded condition tree into a deterministic wait template."""
+    if node.operator is not None:
+        parts: list[str] = []
+        for child in node.children:
+            value, error = _condition_template(child, entities)
+            if error is not None:
+                return None, error
+            assert value is not None
+            parts.append(f"({value})")
+        if node.operator is LogicalOperator.NOT:
+            return f"not {parts[0]}", None
+        joiner = " and " if node.operator is LogicalOperator.AND else " or "
+        return joiner.join(parts), None
+
+    assert node.condition is not None
+    condition = node.condition
+    if condition.type in {ConditionType.STATE, ConditionType.ENTITY, ConditionType.PRESENCE}:
+        if condition.target is None:
+            return None, GenerationError.UNSUPPORTED_CONDITION_TYPE
+        candidates = _resolve_target_entities(condition.target, entities)
+        if not candidates:
+            return None, GenerationError.ENTITY_NOT_FOUND
+        if condition.type is ConditionType.STATE:
+            assert condition.state is not None
+            raw = _raw_state_for_semantic(
+                condition.target.domain or candidates[0].domain,
+                condition.target.device_class or candidates[0].device_class,
+                condition.state,
+            )
+        else:
+            raw = condition.raw_state
+        if raw is None:
+            return None, GenerationError.UNSUPPORTED_STATE
+        return " and ".join(
+            f"is_state('{entity.entity_id}', '{raw}')" for entity in candidates
+        ), None
+    if condition.type is ConditionType.NUMERIC:
+        assert condition.target is not None and condition.threshold is not None and condition.comparator is not None
+        candidates = _resolve_target_entities(condition.target, entities)
+        if not candidates:
+            return None, GenerationError.ENTITY_NOT_FOUND
+        operator = ">" if condition.comparator is NumericComparator.ABOVE else "<"
+        return " and ".join(
+            f"states('{entity.entity_id}') | float(0) {operator} {condition.threshold:g}"
+            for entity in candidates
+        ), None
+    return None, GenerationError.UNSUPPORTED_CONDITION_TYPE
 
 
 def _generate_action_step(

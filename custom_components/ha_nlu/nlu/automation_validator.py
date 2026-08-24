@@ -150,6 +150,7 @@ _TRIGGER_REQUIRED_FIELDS: dict[TriggerType, tuple[str, ...]] = {
     TriggerType.RELATIVE_TIME: ("relative_offset_seconds",),
     TriggerType.CALENDAR_TIME: (),
     TriggerType.WEEKDAY: ("weekdays",),
+    TriggerType.CALENDAR: ("calendar_entity_id", "calendar_event"),
 }
 
 _CONDITION_REQUIRED_FIELDS: dict[ConditionType, tuple[str, ...]] = {
@@ -176,6 +177,7 @@ _ACTION_REQUIRED_FIELDS: dict[ActionType, tuple[str, ...]] = {
     ActionType.NOTIFY: ("message",),
     ActionType.DELAY: ("delay_seconds",),
     ActionType.WAIT: ("wait_condition",),
+    ActionType.CHOOSE: ("if_condition", "then_steps"),
 }
 
 _PERCENT_ACTION_TYPES = frozenset({ActionType.SET_BRIGHTNESS, ActionType.SET_POSITION, ActionType.SET_FAN_SPEED})
@@ -213,6 +215,10 @@ def _validate_trigger(trigger: TriggerModel) -> AutomationValidationError | None
     if trigger.weekdays and not set(trigger.weekdays) <= _VALID_WEEKDAYS:
         return AutomationValidationError.INVALID_PARAMETER
     if trigger.delay_seconds is not None and trigger.delay_seconds < 0:
+        return AutomationValidationError.INVALID_PARAMETER
+    if trigger.trigger_id is not None and not trigger.trigger_id.strip():
+        return AutomationValidationError.INVALID_PARAMETER
+    if trigger.type is TriggerType.CALENDAR and trigger.calendar_event not in {"start", "end"}:
         return AutomationValidationError.INVALID_PARAMETER
     return None
 
@@ -283,6 +289,15 @@ def _validate_action_leaf(action: ActionModel) -> AutomationValidationError | No
         return AutomationValidationError.INVALID_PARAMETER
     if action.type is ActionType.WAIT and action.wait_condition is not None:
         return _validate_condition_node(action.wait_condition, depth=1)
+    if action.type is ActionType.CHOOSE:
+        assert action.if_condition is not None
+        error = _validate_condition_node(action.if_condition, depth=1)
+        if error is not None:
+            return error
+        for step in (*action.then_steps, *action.else_steps):
+            error = _validate_action_step(step)
+            if error is not None:
+                return error
     return None
 
 

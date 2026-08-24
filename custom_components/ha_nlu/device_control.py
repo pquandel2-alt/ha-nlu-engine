@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from .entities import EntitySnapshot, ResolveStatus, normalize_for_compare, resolve_entity
 from .nlu.context import ConversationContext
 from .service_call import ServiceCallPlan
+from .risk import requires_confirmation
 
 
 @dataclass(frozen=True)
@@ -42,9 +43,9 @@ def _result(
     confirm: bool = False,
 ) -> DeviceControlResult:
     return DeviceControlResult(
-        ServiceCallPlan(entity.domain, service, entity.entity_id, data or {}),
+        (plan := ServiceCallPlan(entity.domain, service, entity.entity_id, data or {})),
         response,
-        requires_confirmation=confirm,
+        requires_confirmation=confirm or requires_confirmation(plan, [entity]),
         entity=entity,
     )
 

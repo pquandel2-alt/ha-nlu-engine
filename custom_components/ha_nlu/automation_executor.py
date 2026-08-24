@@ -53,6 +53,7 @@ import re
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime
+from functools import partial
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -61,6 +62,7 @@ from homeassistant.util import yaml as yaml_util
 from homeassistant.util.file import write_utf8_file_atomic
 
 from .automation_metadata_store import AutomationMetadata, AutomationMetadataStore, utcnow_isoformat
+from .automation_history import AutomationHistoryStore, AUTOMATION_HISTORY_FILENAME
 from .automation_summary import AutomationSummary, CREATED_BY_HOMEINTENT
 from .automation_transaction import (
     AutomationTransaction,
@@ -108,6 +110,15 @@ def _collect_entity_ids(value: Any) -> set[str]:
     return found
 
 
+def _mapping_tuple(value: Any) -> tuple[dict[str, Any], ...]:
+    """Normalize legacy singular dict and modern plural-list YAML shapes."""
+    if isinstance(value, dict):
+        return (value,)
+    if isinstance(value, list):
+        return tuple(item for item in value if isinstance(item, dict))
+    return ()
+
+
 class AutomationExecutor:
     """One instance per config entry (same lifetime/ownership as
     ``NluEngine``/``ConversationContextStore`` on ``NluConversationEntity``),
@@ -123,6 +134,9 @@ class AutomationExecutor:
         self._journal = AutomationTransactionJournal(
             hass.config.path(TRANSACTION_JOURNAL_FILENAME)
         )
+        self._history = AutomationHistoryStore(
+            hass.config.path(AUTOMATION_HISTORY_FILENAME)
+        )
 
     async def _async_read_snapshot(self, path: str) -> _AutomationFileSnapshot:
         return await self._hass.async_add_executor_job(self._read_snapshot, path)
@@ -135,6 +149,7 @@ class AutomationExecutor:
         path: str,
         snapshot: _AutomationFileSnapshot,
         updated: list[dict[str, Any]],
+        record_history: bool = True,
     ) -> AutomationTransaction:
         existing = await self._hass.async_add_executor_job(self._journal.read)
         if existing is not None:
@@ -144,10 +159,16 @@ class AutomationExecutor:
         content, expected_after_digest = await self._hass.async_add_executor_job(
             self._serialize_automations, updated
         )
+        created_at = utcnow_isoformat()
+        metadata_snapshot = (
+            await self._metadata_store.async_load_all()
+            if record_history and self._history.available
+            else None
+        )
         transaction = AutomationTransaction(
             operation=operation,
             automation_id=automation_id,
-            created_at=utcnow_isoformat(),
+            created_at=created_at,
             before_digest=snapshot.digest,
             # Persist the exact expected result *before* touching YAML. A
             # crash after the atomic replace but before the second journal
@@ -182,6 +203,21 @@ class AutomationExecutor:
             transaction, after_digest=after_digest, state="yaml_written"
         )
         await self._hass.async_add_executor_job(self._journal.write, transaction)
+        if metadata_snapshot is not None:
+            try:
+                await self._hass.async_add_executor_job(
+                    partial(
+                        self._history.append,
+                        operation=operation,
+                        automation_id=automation_id,
+                        created_at=created_at,
+                        automations=snapshot.automations,
+                        metadata=metadata_snapshot,
+                    )
+                )
+            except Exception:
+                await self._async_rollback_transaction(path, transaction)
+                raise
         return transaction
 
     async def _async_rollback_transaction(
@@ -197,6 +233,10 @@ class AutomationExecutor:
             transaction.after_digest,
         )
         await self._hass.async_add_executor_job(self._journal.clear)
+        if transaction.operation != "rollback" and self._history.available:
+            await self._hass.async_add_executor_job(
+                self._history.pop_if_created_at, transaction.created_at
+            )
 
     async def _async_complete_transaction(self) -> None:
         await self._hass.async_add_executor_job(self._journal.clear)
@@ -532,6 +572,9 @@ class AutomationExecutor:
                     once=bool(entry.get("once")) if entry else False,
                     max_runs=entry.get("max_runs") if entry else None,
                     run_count=int(entry.get("run_count", 0)) if entry else 0,
+                    triggers=_mapping_tuple(automation.get("triggers", automation.get("trigger"))),
+                    conditions=_mapping_tuple(automation.get("conditions", automation.get("condition"))),
+                    actions=_mapping_tuple(automation.get("actions", automation.get("action"))),
                 )
             )
         return tuple(summaries)
@@ -899,6 +942,43 @@ class AutomationExecutor:
                         version=int(entry.get("version", 1)) + 1,
                     )
             return tuple(orphan_ids)
+
+    async def async_rollback_last_change(self) -> str:
+        """Restore the previous YAML snapshot and reload Home Assistant."""
+        path = self._hass.config.path(AUTOMATIONS_YAML_FILENAME)
+        async with self._lock:
+            history = await self._hass.async_add_executor_job(self._history.peek)
+            if history is None:
+                raise ValueError("Es gibt keine frühere HomeIntent-Änderung")
+            previous = history.get("automations")
+            if not isinstance(previous, list):
+                raise ValueError("Der letzte Verlaufseintrag ist beschädigt")
+            snapshot = await self._async_read_snapshot(path)
+            transaction = await self._async_begin_transaction(
+                operation="rollback",
+                automation_id=str(history.get("automation_id") or "unknown"),
+                path=path,
+                snapshot=snapshot,
+                updated=previous,
+                record_history=False,
+            )
+            try:
+                await self._hass.services.async_call(
+                    "automation", "reload", {}, blocking=True
+                )
+                previous_metadata = history.get("metadata", {})
+                if not isinstance(previous_metadata, dict):
+                    raise ValueError("Die Metadaten im Verlaufseintrag sind beschädigt")
+                await self._metadata_store.async_replace_all(previous_metadata)
+            except Exception:
+                await self._async_rollback_transaction(path, transaction)
+                await self._hass.services.async_call(
+                    "automation", "reload", {}, blocking=True
+                )
+                raise
+            await self._async_complete_transaction()
+            await self._hass.async_add_executor_job(self._history.pop)
+            return str(history.get("operation") or "Änderung")
 
     @staticmethod
     def _scheduled_for_from_yaml(

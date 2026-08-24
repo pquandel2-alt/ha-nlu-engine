@@ -17,6 +17,8 @@ class CalendarManagementKind(Enum):
     FIND = auto()
     DELETE = auto()
     RESCHEDULE = auto()
+    AVAILABILITY = auto()
+    UPDATE = auto()
 
 
 @dataclass(frozen=True)
@@ -27,6 +29,9 @@ class CalendarManagementRequest:
     title_filter: str | None = None
     calendar_entity_ids: tuple[str, ...] = ()
     new_start_time: time | None = None
+    new_date: date | None = None
+    new_title: str | None = None
+    new_duration_minutes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +61,33 @@ _TITLE_RE = re.compile(
     re.I,
 )
 _NEW_TIME_RE = re.compile(r"\bauf\s+(\d{1,2})(?::(\d{2}))?\s*(?:uhr)?\b", re.I)
+_AVAILABILITY_RE = re.compile(
+    r"\b(?:habe|hab)\s+ich\b.*\b(?:zeit|frei)\b|\bbin\s+ich\b.*\bfrei\b",
+    re.I,
+)
+_TIME_WINDOW_RE = re.compile(
+    r"\b(?:von|zwischen)\s+(\d{1,2})(?::(\d{2}))?\s*(?:uhr)?\s+"
+    r"(?:bis|und)\s+(\d{1,2})(?::(\d{2}))?\s*(?:uhr)?\b",
+    re.I,
+)
+_RENAME_RE = re.compile(
+    r"\bbenenn\w*\s+(?:den\s+)?termin\s+(?P<old>.+?)\s+(?:in|zu)\s+(?P<new>.+?)\s+um\b",
+    re.I,
+)
+_CHANGE_DURATION_RE = re.compile(
+    r"\b(?:aender\w*|änder\w*)\s+(?:die\s+)?dauer\s+(?:vom|von dem)\s+termin\s+"
+    r"(?P<title>.+?)\s+auf\s+(?P<count>\d+)\s*(?P<unit>minuten?|stunden?)\b",
+    re.I,
+)
+_TARGET_DATE_RE = re.compile(
+    r"\bauf\s+(?P<date>heute|morgen|übermorgen|uebermorgen|am\s+\d{1,2}\.\d{1,2}\.(?:\d{2,4})?)\b",
+    re.I,
+)
+_MOVE_TITLE_RE = re.compile(
+    r"\b(?:verschieb\w*|verleg\w*)\s+(?:den\s+)?(?:kalender)?termin\s+(.+?)\s+auf\b",
+    re.I,
+)
+_ANY_NEW_TIME_RE = re.compile(r"\b(?:auf|um)\s+(\d{1,2})(?::(\d{2}))?\s*(?:uhr)?\b", re.I)
 
 
 def _day_range(value: date, now: datetime) -> tuple[datetime, datetime]:
@@ -119,11 +151,23 @@ def parse_calendar_management(
     """Parse bounded calendar management language without stealing device commands."""
     if re.search(r"\b(?:auftrag|automation)\b", text, re.I):
         return None
-    has_mutation = _DELETE_RE.search(text) is not None or _RESCHEDULE_RE.search(text) is not None
-    if _CALENDAR_CUE_RE.search(text) is None and not has_mutation:
+    rename_match = _RENAME_RE.search(text)
+    duration_match = _CHANGE_DURATION_RE.search(text)
+    has_mutation = (
+        _DELETE_RE.search(text) is not None
+        or _RESCHEDULE_RE.search(text) is not None
+        or rename_match is not None
+        or duration_match is not None
+    )
+    availability = _AVAILABILITY_RE.search(text) is not None
+    if _CALENDAR_CUE_RE.search(text) is None and not has_mutation and not availability:
         return None
     kind: CalendarManagementKind | None = None
-    if _DELETE_RE.search(text):
+    if availability:
+        kind = CalendarManagementKind.AVAILABILITY
+    elif rename_match is not None or duration_match is not None:
+        kind = CalendarManagementKind.UPDATE
+    elif _DELETE_RE.search(text):
         kind = CalendarManagementKind.DELETE
     elif _RESCHEDULE_RE.search(text):
         kind = CalendarManagementKind.RESCHEDULE
@@ -137,24 +181,54 @@ def parse_calendar_management(
         item.entity_id for item in calendars
     )
     start, end = _range_from_text(text, now)
+    target_date_match = _TARGET_DATE_RE.search(text) if kind is CalendarManagementKind.RESCHEDULE else None
+    new_date = _date_from_text(target_date_match.group("date"), now) if target_date_match else None
+    if new_date is not None:
+        # The date after "auf" is the destination, not a lookup constraint.
+        start, end = now, now + timedelta(days=366)
+    if kind is CalendarManagementKind.AVAILABILITY:
+        window = _TIME_WINDOW_RE.search(text)
+        if window is not None:
+            start_hour, start_minute = int(window.group(1)), int(window.group(2) or 0)
+            end_hour, end_minute = int(window.group(3)), int(window.group(4) or 0)
+            if 0 <= start_hour <= 23 and 0 <= end_hour <= 23 and start_minute < 60 and end_minute < 60:
+                requested_date = _date_from_text(text, now) or now.date()
+                start = datetime.combine(requested_date, time(start_hour, start_minute), tzinfo=now.tzinfo)
+                end = datetime.combine(requested_date, time(end_hour, end_minute), tzinfo=now.tzinfo)
     new_start: time | None = None
     if kind is CalendarManagementKind.RESCHEDULE:
-        match = _NEW_TIME_RE.search(text)
+        match = _NEW_TIME_RE.search(text) or _ANY_NEW_TIME_RE.search(text)
         if match is not None:
             hour, minute = int(match.group(1)), int(match.group(2) or 0)
             if 0 <= hour <= 23 and 0 <= minute <= 59:
                 new_start = time(hour, minute)
+    move_match = _MOVE_TITLE_RE.search(text)
+    if rename_match is not None:
+        title_filter = rename_match.group("old").strip()
+    elif duration_match is not None:
+        title_filter = duration_match.group("title").strip()
+    elif kind in {CalendarManagementKind.DELETE, CalendarManagementKind.RESCHEDULE}:
+        title_filter = (
+            move_match.group(1).strip()
+            if move_match is not None
+            else _mutation_title_filter(text)
+        )
+    else:
+        title_filter = _title_filter(text)
     return CalendarManagementRequest(
         kind=kind,
         start=start,
         end=end,
-        title_filter=(
-            _mutation_title_filter(text)
-            if kind in {CalendarManagementKind.DELETE, CalendarManagementKind.RESCHEDULE}
-            else _title_filter(text)
-        ),
+        title_filter=title_filter,
         calendar_entity_ids=calendar_ids,
         new_start_time=new_start,
+        new_date=new_date,
+        new_title=rename_match.group("new").strip(" .!?;") if rename_match else None,
+        new_duration_minutes=(
+            int(duration_match.group("count"))
+            * (60 if duration_match.group("unit").casefold().startswith("st") else 1)
+            if duration_match else None
+        ),
     )
 
 
@@ -211,6 +285,14 @@ def render_calendar_events(
     events: tuple[CalendarEventSummary, ...],
     request: CalendarManagementRequest,
 ) -> str:
+    if request.kind is CalendarManagementKind.AVAILABILITY:
+        if not events:
+            return (
+                f"Ja, zwischen {request.start.strftime('%H:%M')} und "
+                f"{request.end.strftime('%H:%M')} Uhr ist kein Termin eingetragen."
+            )
+        names = ", ".join(f"„{event.summary}“" for event in events[:3])
+        return f"Nein, in diesem Zeitraum liegt {names}."
     if not events:
         if request.title_filter:
             return f"Ich finde keinen Termin mit „{request.title_filter}“ im abgefragten Zeitraum."

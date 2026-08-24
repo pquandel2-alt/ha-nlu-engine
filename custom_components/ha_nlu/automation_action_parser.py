@@ -130,6 +130,11 @@ _CHUNK_SPLIT_RE = re.compile(r",|\bund\b", re.IGNORECASE)
 _PARALLEL_MARKER_RE = re.compile(r"\b(gleichzeitig|parallel)\b", re.IGNORECASE)
 _LEADING_CONNECTOR_RE = re.compile(r"^(dann|danach)\b\s*", re.IGNORECASE)
 _WHITESPACE_RE = re.compile(r"\s+")
+_CHOOSE_RE = re.compile(
+    r"^wenn\s+(?P<condition>.+?)\s*,?\s+dann\s+(?P<then>.+?)"
+    r"(?:\s*,?\s+sonst\s+(?P<else>.+))?$",
+    re.I,
+)
 
 
 def _split_chunks(text: str) -> tuple[list[str], bool]:
@@ -200,6 +205,24 @@ class AutomationActionParser:
         }
 
     def parse(self, text: str, context: ParseContext) -> tuple["ActionModel | ActionGroup", ...] | None:
+        choose = _CHOOSE_RE.fullmatch(text.strip())
+        if choose is not None:
+            condition = self._condition_parser.parse(
+                "wenn " + choose.group("condition"), context
+            )
+            then_steps = self.parse(choose.group("then"), context)
+            else_text = choose.group("else")
+            else_steps = self.parse(else_text, context) if else_text else ()
+            if condition is None or not then_steps or (else_text and not else_steps):
+                return None
+            return (
+                ActionModel(
+                    type=ActionType.CHOOSE,
+                    if_condition=condition,
+                    then_steps=then_steps,
+                    else_steps=else_steps or (),
+                ),
+            )
         chunks, is_parallel = _split_chunks(text)
         if not chunks:
             return None

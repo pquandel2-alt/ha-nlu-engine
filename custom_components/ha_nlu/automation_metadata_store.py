@@ -125,6 +125,11 @@ class AutomationMetadataStore:
         await self._hass.async_add_executor_job(self._write, path, entries)
         return updated
 
+    async def async_replace_all(self, entries: dict[str, Any]) -> None:
+        """Atomically restore a version-history metadata snapshot."""
+        path = self._hass.config.path(METADATA_FILENAME)
+        await self._hass.async_add_executor_job(self._write, path, entries)
+
     @staticmethod
     def _read(path: str) -> dict[str, Any]:
         try:

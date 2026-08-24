@@ -11,6 +11,8 @@ import re
 
 from .entities import EntitySnapshot, normalize_for_compare
 from .device_control import DeviceControlResult
+from .entity_scope import resolve_entity_scope
+from .risk import requires_confirmation
 
 
 def _feature_mask(entity: EntitySnapshot) -> int:
@@ -66,6 +68,67 @@ def match_extended_device_control(
     build_result,
 ):
     """Return one unambiguous extended-domain service plan or ``None``."""
+    group_domains = frozenset({
+        "humidifier", "water_heater", "number", "input_number", "select",
+        "input_boolean", "valve", "lawn_mower",
+    })
+    scope = resolve_entity_scope(text, entities, group_domains)
+    if scope is not None and len(scope.entities) > 1:
+        operations: list[tuple[str, str]] = []
+        domain = scope.entities[0].domain
+        data: dict = {}
+        if domain == "humidifier" and (humidity := _percent(text)) is not None and re.search(
+            r"\b(?:luftfeuchtigkeit|feuchtigkeit)\b", text, re.I
+        ):
+            if all(_bounded_value(entity, humidity, "min_humidity", "max_humidity", 0, 100) for entity in scope.entities):
+                operations.append(("set_humidity", f"auf {humidity} Prozent Luftfeuchtigkeit gestellt"))
+                data = {"humidity": humidity}
+        elif domain == "water_heater" and (temperature := _number(text)) is not None and re.search(
+            r"\b(?:grad|temperatur|warmwasser)\b", text, re.I
+        ):
+            if all(_bounded_value(entity, temperature, "min_temp", "max_temp", 20, 90) for entity in scope.entities):
+                operations.append(("set_temperature", f"auf {temperature:g} Grad gestellt"))
+                data = {"temperature": temperature}
+        elif domain in {"number", "input_number"} and (value := _number(text)) is not None:
+            if all(_bounded_value(entity, value, "min", "max", float("-inf"), float("inf")) for entity in scope.entities):
+                operations.append(("set_value", f"auf {value:g} gestellt"))
+                data = {"value": value}
+        elif domain == "select":
+            choices = {_option(text, entity) for entity in scope.entities}
+            if len(choices) == 1 and None not in choices:
+                choice = choices.pop()
+                operations.append(("select_option", f"auf {choice} gestellt"))
+                data = {"option": choice}
+        elif domain in {"humidifier", "input_boolean"}:
+            if re.search(r"\b(?:an|ein|einschalt\w*|anmach\w*)\b", text, re.I):
+                operations.append(("turn_on", "eingeschaltet"))
+            if re.search(r"\b(?:aus|ausschalt\w*|ausmach\w*)\b", text, re.I):
+                operations.append(("turn_off", "ausgeschaltet"))
+        elif domain == "valve":
+            if re.search(r"\b(?:oeffn\w*|öffn\w*)\b", text, re.I):
+                operations.append(("open_valve", "geöffnet"))
+            if re.search(r"\b(?:schliess\w*|schließ\w*)\b", text, re.I):
+                operations.append(("close_valve", "geschlossen"))
+        elif domain == "lawn_mower":
+            if re.search(r"\b(?:maeh\w*|mäh\w*|start\w*)\b", text, re.I):
+                operations.append(("start_mowing", "gestartet"))
+            if re.search(r"\bpaus\w*\b", text, re.I):
+                operations.append(("pause", "pausiert"))
+            if re.search(r"\b(?:ladestation|dock)\b", text, re.I):
+                operations.append(("dock", "zur Ladestation geschickt"))
+        if len(operations) == 1:
+            service, spoken = operations[0]
+            from .service_call import ServiceCallPlan
+
+            plan = ServiceCallPlan(
+                domain, service, [entity.entity_id for entity in scope.entities], data
+            )
+            return DeviceControlResult(
+                plan,
+                f"{len(scope.entities)} Geräte {spoken}.",
+                requires_confirmation=requires_confirmation(plan, list(scope.entities)),
+            )
+
     entity = mentioned_entity(
         text,
         entities,

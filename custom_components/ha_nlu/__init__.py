@@ -17,6 +17,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from .const import DOMAIN
+from .runtime_data import HaNluRuntimeData
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -38,6 +39,7 @@ SELF_DELETE_RETRY_SECONDS = (1.0, 5.0)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    entry.runtime_data = HaNluRuntimeData()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 

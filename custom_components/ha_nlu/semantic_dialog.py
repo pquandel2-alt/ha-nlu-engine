@@ -29,6 +29,11 @@ _DOMAIN_WORDS = {
     "fan": ("ventilatoren", "lüfter"),
     "climate": ("heizungen", "thermostate"),
     "input_boolean": ("helfer", "modi"),
+    "humidifier": ("luftbefeuchter", "befeuchter"),
+    "water_heater": ("warmwasser", "boiler", "wasserheizer"),
+    "number": ("regler", "wert"),
+    "input_number": ("regler", "wert", "helfer"),
+    "select": ("profil", "programm", "auswahl"),
 }
 
 
@@ -68,6 +73,54 @@ def _temperature_result(
     return DeviceControlResult(
         ServiceCallPlan("climate", "set_temperature", entity.entity_id, {"temperature": value}),
         f"{entity.friendly_name} auf {value:g} Grad gestellt.",
+        entity=entity,
+    )
+
+
+def _value_result(
+    entity: EntitySnapshot, service: str, value_kind: str, raw_value: str
+) -> DeviceControlResult | None:
+    """Validate and materialize a value reply for several HA domains."""
+    if value_kind == "option":
+        normalized = normalize_for_compare(raw_value.strip(" .!?"))
+        options = [
+            str(option)
+            for option in entity.attributes.get("options", ())
+            if normalize_for_compare(str(option)) == normalized
+            or normalize_for_compare(str(option)) in normalized
+        ]
+        if len(options) != 1:
+            return None
+        return DeviceControlResult(
+            ServiceCallPlan(entity.domain, service, entity.entity_id, {"option": options[0]}),
+            f"{entity.friendly_name} auf {options[0]} gestellt.",
+            entity=entity,
+        )
+
+    number = _NUMBER_RE.search(raw_value)
+    if number is None:
+        return None
+    value = float(number.group(1).replace(",", "."))
+    if value_kind == "temperature" and entity.domain == "climate":
+        return _temperature_result(entity, value)
+    bounds = {
+        "humidity": ("min_humidity", "max_humidity", 0.0, 100.0, "humidity", "Prozent Luftfeuchtigkeit"),
+        "water_temperature": ("min_temp", "max_temp", 20.0, 90.0, "temperature", "Grad"),
+        "number": ("min", "max", float("-inf"), float("inf"), "value", ""),
+    }.get(value_kind)
+    if bounds is None:
+        return None
+    minimum_key, maximum_key, default_min, default_max, data_key, unit = bounds
+    try:
+        minimum = float(entity.attributes.get(minimum_key, default_min))
+        maximum = float(entity.attributes.get(maximum_key, default_max))
+    except (TypeError, ValueError):
+        return None
+    if not minimum <= value <= maximum:
+        return None
+    return DeviceControlResult(
+        ServiceCallPlan(entity.domain, service, entity.entity_id, {data_key: value}),
+        f"{entity.friendly_name} auf {value:g}{(' ' + unit) if unit else ''} gestellt.",
         entity=entity,
     )
 
@@ -126,6 +179,24 @@ def start_semantic_dialog(
             pending=pending,
             question=f"Auf welche Temperatur soll ich {climate.friendly_name} stellen?",
         )
+
+    specifications = (
+        ("humidifier", "set_humidity", "humidity", r"\b(?:luftfeuchtigkeit|feuchtigkeit|stell\w*|regel\w*)\b", "Welche Luftfeuchtigkeit in Prozent möchtest du?"),
+        ("water_heater", "set_temperature", "water_temperature", r"\b(?:warmwasser|temperatur|grad|stell\w*)\b", "Auf welche Temperatur soll ich das Warmwasser stellen?"),
+        ("number", "set_value", "number", r"\b(?:stell\w*|setz\w*|wert|regel\w*)\b", "Welchen Wert soll ich einstellen?"),
+        ("input_number", "set_value", "number", r"\b(?:stell\w*|setz\w*|wert|regel\w*)\b", "Welchen Wert soll ich einstellen?"),
+        ("select", "select_option", "option", r"\b(?:wähl\w*|waehl\w*|stell\w*|setz\w*)\b", "Welche Option soll ich auswählen?"),
+    )
+    for domain, service, value_kind, cue, question in specifications:
+        target = _mentioned_entity(text, entities, frozenset({domain}))
+        if target is not None and re.search(cue, text, re.I):
+            return SemanticDialogOutcome(
+                pending=PendingSemanticCommand(
+                    "value", (target,), domain, service, {}, "eingestellt",
+                    value_kind=value_kind,
+                ),
+                question=question,
+            )
     return None
 
 
@@ -134,14 +205,20 @@ def continue_semantic_dialog(
 ) -> SemanticDialogOutcome:
     """Fill the one missing component without widening the candidate set."""
     if pending.missing == "value":
-        number = _NUMBER_RE.search(text)
-        if number is None:
-            return SemanticDialogOutcome(pending=pending, question="Bitte nenne die gewünschte Temperatur in Grad.")
-        result = _temperature_result(
-            pending.candidates[0], float(number.group(1).replace(",", "."))
+        value_kind = pending.value_kind or "temperature"
+        result = _value_result(
+            pending.candidates[0], pending.service, value_kind, text
         )
         if result is None:
-            return SemanticDialogOutcome(pending=pending, question="Diese Temperatur wird nicht unterstützt. Welche Temperatur möchtest du?")
+            options = pending.candidates[0].attributes.get("options", ())
+            hint = (
+                " Mögliche Optionen sind: " + ", ".join(str(item) for item in options) + "."
+                if value_kind == "option" and options else ""
+            )
+            return SemanticDialogOutcome(
+                pending=pending,
+                question="Diesen Wert habe ich nicht eindeutig verstanden oder er wird nicht unterstützt." + hint,
+            )
         return SemanticDialogOutcome(result=result)
 
     if pending.missing == "target":

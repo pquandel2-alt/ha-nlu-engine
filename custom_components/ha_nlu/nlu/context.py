@@ -35,7 +35,11 @@ from .semantic_state import SemanticState
 
 if TYPE_CHECKING:
     from ..calendar_event import CalendarEventDraft
-    from ..calendar_management import CalendarEventSummary, CalendarManagementKind
+    from ..calendar_management import (
+        CalendarEventSummary,
+        CalendarManagementKind,
+        CalendarManagementRequest,
+    )
 
 __all__ = [
     "ClarificationRequest",
@@ -48,6 +52,7 @@ __all__ = [
     "PendingServiceConfirmation",
     "PendingAutomationDraft",
     "PendingAutomationActionEdit",
+    "PendingAutomationManagement",
     "PendingCalendarEvent",
     "PendingCalendarMutation",
     "PendingSemanticCommand",
@@ -125,6 +130,15 @@ class PendingAutomationActionEdit:
 
 
 @dataclass(frozen=True)
+class PendingAutomationManagement:
+    """A state-changing management operation awaiting explicit consent."""
+
+    request: object
+    automation: AutomationSummary | None = None
+    target: object | None = None
+
+
+@dataclass(frozen=True)
 class PendingCalendarEvent:
     """A calendar event being completed or awaiting final confirmation."""
 
@@ -137,8 +151,14 @@ class PendingCalendarMutation:
     """One uniquely identified calendar event awaiting destructive consent."""
 
     kind: "CalendarManagementKind"
-    event: "CalendarEventSummary"
+    event: "CalendarEventSummary | None" = None
     new_start_time: object | None = None
+    candidates: tuple["CalendarEventSummary", ...] = ()
+    request: "CalendarManagementRequest | None" = None
+    recurrence_scope: str | None = None  # this / all / future
+    new_date: object | None = None
+    new_title: str | None = None
+    new_duration_minutes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -152,6 +172,7 @@ class PendingSemanticCommand:
     data: dict
     response_verb: str
     requires_confirmation: bool = False
+    value_kind: str | None = None
 
 # No TTL value is specified anywhere in the plan (only the test case name
 # "context expiration", brain node 9ced4390, section 26). 30s covers a
@@ -217,6 +238,7 @@ class ConversationContext:
     focus: DialogFocus | None = None
     pending_automation_draft: PendingAutomationDraft | None = None
     pending_automation_action_edit: PendingAutomationActionEdit | None = None
+    pending_automation_management: PendingAutomationManagement | None = None
     pending_calendar_event: PendingCalendarEvent | None = None
     pending_calendar_mutation: PendingCalendarMutation | None = None
     pending_semantic_command: PendingSemanticCommand | None = None
@@ -262,6 +284,7 @@ class ConversationContextStore:
             or context.pending_service_confirmation is not None
             or context.pending_automation_draft is not None
             or context.pending_automation_action_edit is not None
+            or context.pending_automation_management is not None
             or context.pending_calendar_event is not None
             or context.pending_calendar_mutation is not None
             or context.pending_semantic_command is not None

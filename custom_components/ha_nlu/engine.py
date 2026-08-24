@@ -1403,11 +1403,33 @@ class NluEngine:
 
         condition_node: ConditionNode | None = None
         trigger = self._automation_trigger_parser.parse(trigger_text, parse_context)
-        if trigger is None:
+        triggers: tuple[TriggerModel, ...] = ()
+        if trigger is not None:
+            triggers = (trigger,)
+        else:
+            parts = re.split(
+                r"\s+oder\s+(?=(?:wenn|sobald|falls)\b)",
+                trigger_text,
+                flags=re.IGNORECASE,
+            )
+            if len(parts) > 1:
+                parsed = tuple(
+                    candidate
+                    for part in parts
+                    if (candidate := self._automation_trigger_parser.parse(part, parse_context))
+                    is not None
+                )
+                if len(parsed) == len(parts):
+                    triggers = tuple(
+                        replace(candidate, trigger_id=f"ausloeser_{index}")
+                        for index, candidate in enumerate(parsed, start=1)
+                    )
+        if not triggers:
             split_result = self._split_trigger_condition(trigger_text, parse_context)
             if split_result is None:
                 return None
             trigger, condition_node = split_result
+            triggers = (trigger,)
 
         actions = self._parse_action_semantically(action_text, parse_context)
         if not actions:
@@ -1415,7 +1437,7 @@ class NluEngine:
 
         conditions = (condition_node,) if condition_node is not None else ()
         model = AutomationModel(
-            triggers=(trigger,), conditions=conditions, actions=actions, source_text=text,
+            triggers=triggers, conditions=conditions, actions=actions, source_text=text,
             once=once, max_runs=max_runs,
         )
         validation_error = validate_automation(model)

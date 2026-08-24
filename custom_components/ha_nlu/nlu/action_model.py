@@ -41,6 +41,7 @@ class ActionType(Enum):
     NOTIFY = auto()
     DELAY = auto()
     WAIT = auto()
+    CHOOSE = auto()
 
 
 class ExecutionMode(Enum):
@@ -72,6 +73,9 @@ class ActionModel:
     delay_seconds: int | None = None  # DELAY
     wait_condition: ConditionNode | None = None  # WAIT - reuses ConditionNode, see module docstring
     timeout_seconds: int | None = None  # WAIT - optional ("warte maximal 30 Minuten")
+    if_condition: ConditionNode | None = None  # CHOOSE
+    then_steps: tuple["ActionModel | ActionGroup", ...] = ()  # CHOOSE
+    else_steps: tuple["ActionModel | ActionGroup", ...] = ()  # CHOOSE
 
 
 @dataclass(frozen=True)

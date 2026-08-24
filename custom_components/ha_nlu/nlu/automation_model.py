@@ -58,6 +58,7 @@ class TriggerType(Enum):
     RELATIVE_TIME = auto()
     CALENDAR_TIME = auto()
     WEEKDAY = auto()
+    CALENDAR = auto()
 
 
 class CalendarReference(Enum):
@@ -172,6 +173,9 @@ class TriggerModel:
     # nachdem es 20 Uhr ist" is not a sentence any of the 7 trigger grammars
     # accept.
     delay_seconds: int | None = None
+    trigger_id: str | None = None
+    calendar_entity_id: str | None = None  # CALENDAR
+    calendar_event: str | None = None  # start/end
 
 
 @dataclass(frozen=True)

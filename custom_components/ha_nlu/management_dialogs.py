@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+import re
+from dataclasses import replace
+from datetime import time
 from typing import Any
 
 from homeassistant.components import conversation
@@ -20,6 +23,7 @@ from .calendar_runtime import (
     async_delete_calendar_event,
     async_get_mutable_calendar_events,
     async_reschedule_calendar_event,
+    async_update_calendar_event_details,
 )
 from .entities import EntitySnapshot, normalize_for_compare
 from .nlu.automation_confirmation import ConfirmationReply, classify_confirmation_reply
@@ -165,7 +169,11 @@ async def async_handle_calendar_management(
             response=response, conversation_id=user_input.conversation_id
         )
 
-    if request.kind in {CalendarManagementKind.LIST, CalendarManagementKind.FIND}:
+    if request.kind in {
+        CalendarManagementKind.LIST,
+        CalendarManagementKind.FIND,
+        CalendarManagementKind.AVAILABILITY,
+    }:
         try:
             result = await agent.hass.services.async_call(
                 "calendar",
@@ -212,6 +220,18 @@ async def async_handle_calendar_management(
             response=response, conversation_id=user_input.conversation_id
         )
     if request.kind is CalendarManagementKind.RESCHEDULE and request.new_start_time is None:
+        agent._context_store.set(
+            user_input.conversation_id,
+            ConversationContext(
+                last_command=None,
+                last_entities=(),
+                last_area=None,
+                pending_clarification=None,
+                pending_calendar_mutation=PendingCalendarMutation(
+                    kind=request.kind, request=request
+                ),
+            ),
+        )
         response.async_set_speech("Auf welche Uhrzeit soll ich den Termin verschieben?")
         return conversation.ConversationResult(
             response=response, conversation_id=user_input.conversation_id
@@ -243,8 +263,25 @@ async def async_handle_calendar_management(
         )
     if len(events) > 1:
         names = "; ".join(f"„{event.summary}“ ({event.start})" for event in events[:5])
+        agent._context_store.set(
+            user_input.conversation_id,
+            ConversationContext(
+                last_command=None,
+                last_entities=(),
+                last_area=None,
+                pending_clarification=None,
+                pending_calendar_mutation=PendingCalendarMutation(
+                    kind=request.kind,
+                    new_start_time=request.new_start_time,
+                    candidates=events,
+                    new_date=request.new_date,
+                    new_title=request.new_title,
+                    new_duration_minutes=request.new_duration_minutes,
+                ),
+            ),
+        )
         response.async_set_speech(
-            f"Mehrere Termine passen: {names}. Bitte nenne Titel und Zeitpunkt genauer."
+            f"Mehrere Termine passen: {names}. Welchen davon meinst du?"
         )
         return conversation.ConversationResult(
             response=response, conversation_id=user_input.conversation_id
@@ -262,11 +299,29 @@ async def async_handle_calendar_management(
                 kind=request.kind,
                 event=event,
                 new_start_time=request.new_start_time,
+                new_date=request.new_date,
+                new_title=request.new_title,
+                new_duration_minutes=request.new_duration_minutes,
             ),
         ),
     )
+    if event.recurrence_id is not None:
+        response.async_set_speech(
+            "Der Termin gehört zu einer Serie. Meinst du nur diesen Termin, "
+            "die ganze Serie oder diesen und alle folgenden Termine?"
+        )
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
     if request.kind is CalendarManagementKind.DELETE:
         preview = f"Soll ich den Termin „{event.summary}“ wirklich löschen?"
+    elif request.kind is CalendarManagementKind.UPDATE:
+        change = (
+            f"in „{request.new_title}“ umbenennen"
+            if request.new_title is not None
+            else f"auf {request.new_duration_minutes} Minuten Dauer ändern"
+        )
+        preview = f"Soll ich den Termin „{event.summary}“ wirklich {change}?"
     else:
         assert request.new_start_time is not None
         preview = (
@@ -285,6 +340,111 @@ async def async_handle_calendar_mutation_confirmation(
     response: intent.IntentResponse,
     pending: PendingCalendarMutation,
 ) -> conversation.ConversationResult:
+    if pending.request is not None:
+        match = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*(?:uhr)?\b", user_input.text, re.I)
+        if match is None:
+            response.async_set_speech("Bitte nenne eine eindeutige Uhrzeit, zum Beispiel 20 Uhr.")
+            return conversation.ConversationResult(response=response, conversation_id=user_input.conversation_id)
+        hour, minute = int(match.group(1)), int(match.group(2) or 0)
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            response.async_set_speech("Diese Uhrzeit ist nicht gültig. Welche Uhrzeit meinst du?")
+            return conversation.ConversationResult(response=response, conversation_id=user_input.conversation_id)
+        agent._context_store.clear(user_input.conversation_id)
+        return await async_handle_calendar_management(
+            agent,
+            user_input,
+            response,
+            replace(pending.request, new_start_time=time(hour, minute)),
+            tuple(entity for entity in agent._world_model.entities if entity.domain == "calendar"),
+        )
+
+    if pending.event is None and pending.candidates:
+        normalized = normalize_for_compare(user_input.text)
+        selected = [
+            event for event in pending.candidates
+            if normalize_for_compare(event.summary) in normalized
+        ]
+        ordinal = re.search(r"\b(?:der|den)\s+(erste|zweite|dritte|vierte|fuenfte|fünfte)\b", normalized)
+        if not selected and ordinal is not None:
+            index = {"erste": 0, "zweite": 1, "dritte": 2, "vierte": 3, "fuenfte": 4, "fünfte": 4}[ordinal.group(1)]
+            if index < len(pending.candidates):
+                selected = [pending.candidates[index]]
+        if len(selected) != 1:
+            response.async_set_speech("Das ist noch nicht eindeutig. Bitte nenne den Titel oder zum Beispiel den ersten Termin.")
+            return conversation.ConversationResult(response=response, conversation_id=user_input.conversation_id)
+        event = selected[0]
+        agent._context_store.set(
+            user_input.conversation_id,
+            ConversationContext(
+                last_command=None,
+                last_entities=(),
+                last_area=None,
+                pending_clarification=None,
+                pending_calendar_mutation=PendingCalendarMutation(
+                    kind=pending.kind,
+                    event=event,
+                    new_start_time=pending.new_start_time,
+                    new_date=pending.new_date,
+                    new_title=pending.new_title,
+                    new_duration_minutes=pending.new_duration_minutes,
+                ),
+            ),
+        )
+        verb = (
+            "löschen" if pending.kind is CalendarManagementKind.DELETE
+            else f"in „{pending.new_title}“ umbenennen" if pending.new_title
+            else f"auf {pending.new_duration_minutes} Minuten Dauer ändern" if pending.kind is CalendarManagementKind.UPDATE
+            else f"auf {pending.new_start_time.strftime('%H:%M')} Uhr verschieben"
+        )
+        response.async_set_speech(f"Soll ich den Termin „{event.summary}“ wirklich {verb}?")
+        return conversation.ConversationResult(response=response, conversation_id=user_input.conversation_id)
+
+    if (
+        pending.event is not None
+        and pending.event.recurrence_id is not None
+        and pending.recurrence_scope is None
+    ):
+        normalized = normalize_for_compare(user_input.text)
+        scopes = []
+        if re.search(r"\b(?:nur\s+)?(?:diesen|dieser|einzelnen)\b", normalized):
+            scopes.append("this")
+        if re.search(r"\b(?:ganze|komplette|alle)\w*\s+serie\b", normalized):
+            scopes.append("all")
+        if re.search(r"\b(?:folgenden|zukuenftigen|zukünftigen)\b", normalized):
+            scopes.append("future")
+        if len(scopes) != 1:
+            response.async_set_speech(
+                "Bitte sage: nur diesen Termin, die ganze Serie oder diesen und alle folgenden."
+            )
+            return conversation.ConversationResult(response=response, conversation_id=user_input.conversation_id)
+        agent._context_store.set(
+            user_input.conversation_id,
+            ConversationContext(
+                last_command=None,
+                last_entities=(),
+                last_area=None,
+                pending_clarification=None,
+                pending_calendar_mutation=PendingCalendarMutation(
+                    kind=pending.kind,
+                    event=pending.event,
+                    new_start_time=pending.new_start_time,
+                    new_date=pending.new_date,
+                    new_title=pending.new_title,
+                    new_duration_minutes=pending.new_duration_minutes,
+                    recurrence_scope=scopes[0],
+                ),
+            ),
+        )
+        scope_text = {"this": "nur diesen Termin", "all": "die ganze Serie", "future": "diesen und alle folgenden Termine"}[scopes[0]]
+        verb = (
+            "löschen" if pending.kind is CalendarManagementKind.DELETE
+            else f"in „{pending.new_title}“ umbenennen" if pending.new_title
+            else f"auf {pending.new_duration_minutes} Minuten Dauer ändern" if pending.kind is CalendarManagementKind.UPDATE
+            else f"auf {pending.new_start_time.strftime('%H:%M')} Uhr verschieben"
+        )
+        response.async_set_speech(f"Soll ich {scope_text} wirklich {verb}?")
+        return conversation.ConversationResult(response=response, conversation_id=user_input.conversation_id)
+
     reply = classify_confirmation_reply(user_input.text)
     if reply is ConfirmationReply.NO:
         agent._context_store.clear(user_input.conversation_id)
@@ -294,15 +454,47 @@ async def async_handle_calendar_mutation_confirmation(
     else:
         agent._context_store.clear(user_input.conversation_id)
         try:
+            assert pending.event is not None
             if pending.kind is CalendarManagementKind.DELETE:
-                await async_delete_calendar_event(agent.hass, pending.event)
+                if pending.recurrence_scope is None:
+                    await async_delete_calendar_event(agent.hass, pending.event)
+                else:
+                    await async_delete_calendar_event(
+                        agent.hass, pending.event, pending.recurrence_scope
+                    )
                 response.async_set_speech("Der Termin wurde gelöscht.")
-            else:
+            elif pending.kind is CalendarManagementKind.RESCHEDULE:
                 assert pending.new_start_time is not None
-                await async_reschedule_calendar_event(
-                    agent.hass, pending.event, pending.new_start_time
-                )
+                if pending.recurrence_scope is None:
+                    if pending.new_date is None:
+                        await async_reschedule_calendar_event(
+                            agent.hass, pending.event, pending.new_start_time
+                        )
+                    else:
+                        await async_reschedule_calendar_event(
+                            agent.hass,
+                            pending.event,
+                            pending.new_start_time,
+                            new_date=pending.new_date,
+                        )
+                else:
+                    await async_reschedule_calendar_event(
+                        agent.hass,
+                        pending.event,
+                        pending.new_start_time,
+                        pending.recurrence_scope,
+                        pending.new_date,
+                    )
                 response.async_set_speech("Der Termin wurde verschoben.")
+            else:
+                await async_update_calendar_event_details(
+                    agent.hass,
+                    pending.event,
+                    new_title=pending.new_title,
+                    new_duration_minutes=pending.new_duration_minutes,
+                    recurrence_scope=pending.recurrence_scope,
+                )
+                response.async_set_speech("Der Termin wurde geändert.")
         except Exception as err:  # noqa: BLE001
             _LOGGER.error("Calendar mutation failed: %s", err)
             response.async_set_error(

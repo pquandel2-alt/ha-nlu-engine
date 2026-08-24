@@ -139,3 +139,25 @@ def test_homeintent_listing_can_be_filtered_by_floor_name():
         request, [ROLLLADE], (PERSISTENT, MANUAL)
     )
     assert selection.automations == (PERSISTENT,)
+
+
+def test_detail_selection_accepts_automation_alias_or_area():
+    by_alias = select_automation_management(
+        parse_automation_management("Zeige die Details der Automation zu Küche dauerhaft"),
+        [ROLLLADE],
+        (PERSISTENT, TRIGGERED),
+    )
+    by_area = select_automation_management(
+        parse_automation_management("Zeige die Details der Automation zu Büro"),
+        [ROLLLADE],
+        (PERSISTENT, TRIGGERED),
+    )
+    assert by_alias.automations == (PERSISTENT,)
+    assert by_area.automations == (PERSISTENT, TRIGGERED)
+
+
+def test_rollback_phrase_is_classified():
+    request = parse_automation_management(
+        "Mache die letzte HomeIntent-Automationsänderung rückgängig"
+    )
+    assert request is not None and request.kind is AutomationManagementKind.ROLLBACK

@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
 
-- Aktuelle Version: **4.33.0**
+- Aktuelle Version: **4.34.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Lizenz: **MIT**
@@ -171,7 +171,7 @@ HomeIntent kann aktuell unter anderem folgende Home-Assistant-Domänen verwenden
 | `lock` | ver- und entriegeln; Entriegeln nur nach Bestätigung |
 | `sensor` | Werte und Vergleiche abfragen (nur lesend) |
 | `binary_sensor` | Zustände abfragen, zum Beispiel Fenster oder Türen (nur lesend) |
-| `calendar` | Termine anlegen und abfragen; bei unterstützter Fähigkeit löschen oder verschieben |
+| `calendar` | Termine anlegen, abfragen, Verfügbarkeit prüfen sowie bei unterstützter Fähigkeit löschen, verschieben, umbenennen oder die Dauer ändern |
 | `humidifier` | ein-/ausschalten und Zielluftfeuchtigkeit setzen |
 | `water_heater` | Warmwasser-Solltemperatur setzen |
 | `select` | eine tatsächlich angebotene Option auswählen |
@@ -213,6 +213,9 @@ wählt niemals zufällig Geräte aus, sondern verlangt konkrete Namen.
 Sicherheitskritische direkte Aktionen werden nicht sofort ausgeführt. Das
 Entriegeln eines Schlosses sowie das Öffnen oder Schließen eines als Garage
 klassifizierten Tores erfordern eine ausdrückliche Bestätigung.
+Seit Version 4.34 klassifiziert eine zentrale Risikoregel außerdem Dienst,
+Geräteklasse und Größe einer Mehrgeräteaktion. Dadurch gilt dieselbe
+Bestätigungspolitik auch für neue Parser und Zusatzdomänen.
 
 ### Bereiche, Etagen und mehrere Geräte
 
@@ -409,21 +412,33 @@ Kalender lassen sich außerdem lesend in natürlicher Sprache abfragen:
 Was steht morgen in meinem Kalender?
 Welche Termine habe ich am Wochenende?
 Wann ist mein Zahnarzttermin?
+Habe ich morgen zwischen 14 und 16 Uhr Zeit?
 ```
 
 HomeIntent verwendet dafür `calendar.get_events`, fasst die Ereignisse aller
 ausgewählten Kalender zusammen und kann nach einem Titel filtern. Unterstützt
 die konkrete Kalenderintegration die Home-Assistant-Fähigkeiten
 `DELETE_EVENT` oder `UPDATE_EVENT`, kann HomeIntent einen eindeutig gefundenen
-Termin nach einer ausdrücklichen Bestätigung löschen beziehungsweise auf eine
-andere Uhrzeit verschieben. Fehlen diese Fähigkeiten – was je nach
+Termin nach einer ausdrücklichen Bestätigung löschen, auf ein anderes Datum
+oder eine andere Uhrzeit verschieben, umbenennen oder in seiner Dauer ändern.
+Bei mehreren Treffern bleibt die Trefferliste im Dialog erhalten und kann per
+Titel oder Ordnungsangabe ausgewählt werden. Fehlen diese Fähigkeiten – was je nach
 Apple-/CalDAV-Anbindung vorkommen kann – wird die Änderung klar abgelehnt und
 nicht als erfolgreich ausgegeben.
 
 ```text
 Lösche den Termin Zahnarzt morgen.
 Verschiebe Zahnarzt auf 11 Uhr.
+Verschiebe den Termin Zahnarzt auf morgen um 11 Uhr.
+Benenne den Termin Zahnarzt in Kontrolltermin um.
+Ändere die Dauer vom Termin Training auf 2 Stunden.
 ```
+
+Bei einem bereits wiederkehrenden Termin fragt HomeIntent zusätzlich, ob nur
+dieser Termin, die ganze Serie oder dieser und alle folgenden Termine geändert
+werden sollen. Neue Terminserien werden noch nicht erzeugt, weil der öffentliche
+Home-Assistant-Dienst `calendar.create_event` derzeit kein Wiederholungsfeld
+anbietet.
 
 Solange die Vorschau noch nicht bestätigt wurde, können Angaben korrigiert
 werden:
@@ -496,6 +511,11 @@ Wenn das Küchenfenster geöffnet wird und Samstag ist, schalte das Küchenlicht
 ```
 
 Die zentrale Struktur dafür ist das `AutomationModel`: ein validierter Syntaxbaum aus Triggern, Bedingungen und Aktionen. Erst der HA-Automation-Generator übersetzt dieses Modell in Home-Assistant-YAML.
+
+Das Modell und der Generator unterstützen mehrere alternative Auslöser mit
+Trigger-IDs, native Kalenderauslöser mit Start-/Endereignis und Offset,
+sequentielle oder parallele Aktionsgruppen, begrenzte Wartebedingungen sowie
+`if/then/else`-Verzweigungen.
 
 Zustandsauslöser und Zustandsbedingungen verwenden denselben semantischen
 Predicate-Compiler. Gerätetyp, Zustand und Raum beziehungsweise Etage dürfen
@@ -586,6 +606,8 @@ Deaktiviere die Automation für Küchenlicht.
 Aktiviere die Automation für Küchenlicht.
 Lösche die Automation für Küchenlicht.
 Ändere nur die Aktion, behalte Auslöser und Bedingungen.
+Zeige die Details der Automation für Küchenlicht.
+Mache die letzte HomeIntent-Automationsänderung rückgängig.
 ```
 
 Löschen erfordert eine Bestätigung. Aktivieren und Deaktivieren ändern den dauerhaften `initial_state` in `automations.yaml`; die Einstellung bleibt daher auch nach einem Reload oder Neustart erhalten. Beim Verschieben muss genau ein noch geplanter einmaliger Auftrag passen. Bei mehreren Treffern nennt HomeIntent die Kandidaten und bittet um ein eindeutigeres Gerät, statt einen beliebigen Auftrag zu ändern.
@@ -596,6 +618,10 @@ Aktionen. Beim gezielten Austauschen einer Aktion wählt HomeIntent ausschließl
 eigene Automationen, fragt neue Aktion und Bestätigung ab und schreibt die
 Änderung transaktional. Trigger, Bedingungen, triggerbedingte Verzögerungen,
 Self-Delete und Laufzähler bleiben dabei unverändert.
+Auch Verschieben, Laufbegrenzung, Bereinigung und Rücknahme verlangen eine
+ausdrückliche Bestätigung. Vor jeder Mutation wird zusätzlich ein begrenzter
+Versionsstand gespeichert; die letzte HomeIntent-Änderung kann dadurch
+kontrolliert zurückgenommen werden.
 
 ## Installation über HACS
 
@@ -669,6 +695,11 @@ Beim Erstellen werden `automations.yaml`, der Live-Zustand nach `automation.relo
 
 Alle Executor-Instanzen einer Home-Assistant-Instanz teilen eine Schreibsperre. Zusätzlich vergleicht HomeIntent unmittelbar vor dem Speichern einen kryptografischen Fingerabdruck der gelesenen Datei. Hat Home Assistant oder ein Benutzer die Datei zwischenzeitlich geändert, wird der Vorgang mit einem Konflikt abgebrochen und die fremde Änderung nicht überschrieben. Ein kleines dauerhaftes Transaktionsjournal erlaubt nach einem Absturz die Wiederherstellung des vorherigen Zustands. Ein Rollback erfolgt nur, wenn die aktuelle Datei noch exakt dem von HomeIntent geschriebenen Stand entspricht.
 
+Zusätzlich hält HomeIntent die letzten zehn Automationsstände als begrenzten
+Änderungsverlauf vor. Das Transaktionsjournal schützt einen laufenden
+Schreibvorgang; der Verlauf dient der bewusst bestätigten Rücknahme einer
+bereits abgeschlossenen Änderung.
+
 ### Lokal und privat
 
 Die NLU-Verarbeitung läuft innerhalb von Home Assistant. HomeIntent sendet den gesprochenen Text nicht an einen eigenen Cloud-Dienst.
@@ -683,10 +714,10 @@ speichert keine gesprochenen Texte und kein World Model dauerhaft.
 - Die mitgelieferten Grammatiken sind derzeit auf Deutsch ausgelegt.
 - HomeIntent ist absichtlich kein Chatbot und versteht nur unterstützte Smart-Home-Strukturen.
 - Relative Einmal-Befehle unterstützen aktuell Sekunden, Minuten und Stunden bis maximal 59 Stunden sowie Kombinationen aus zwei Zeiteinheiten.
-- Kalendarische Formulierungen decken die dokumentierten Muster ab, sind aber noch kein allgemeiner Kalenderparser für beliebige deutsche Datumsangaben.
+- Kalendarische Formulierungen decken die dokumentierten Muster ab, sind aber noch kein allgemeiner Kalenderparser für beliebige deutsche Datumsangaben. Neue wiederkehrende Serien können über `calendar.create_event` noch nicht portabel angelegt werden.
 - Ist Home Assistant beim berechneten Zeitpunkt ausgeschaltet, wird der verpasste Auftrag aus Sicherheitsgründen verworfen. Eine automatische verspätete Ausführung findet bewusst nicht statt.
 - Direkte Steuerung neuer Gerätedomänen unterstützt bewusst nur geprüfte Kernaktionen. Erweiterte Klima-, Medien- oder Staubsaugerfunktionen können je nach Gerät noch fehlen.
-- Nicht jeder intern modellierbare Trigger, jede Bedingung oder Aktion besitzt bereits eine sichere Home-Assistant-YAML-Abbildung. Nicht unterstützte Strukturen werden abgelehnt, statt angenähert zu werden.
+- Geräte-Trigger mit integrationsspezifischen Untertypen sowie einige Datumsbedingungen besitzen noch keine portable Home-Assistant-YAML-Abbildung. Nicht unterstützte Strukturen werden abgelehnt, statt angenähert zu werden.
 - Kalendertermine können aufgelistet und nach Titel gesucht werden. Löschen und Verschieben sind nur möglich, wenn die jeweilige Kalenderintegration eine Ereignis-ID sowie `DELETE_EVENT` beziehungsweise `UPDATE_EVENT` bereitstellt; ganztägige Termine werden nicht durch eine reine Uhrzeitänderung in Zeit-Termine umgewandelt.
 - Die Qualität der Zielauflösung hängt von sinnvollen Entity-Namen, Bereichen, Geräteklassen, Fähigkeiten und Assist-Freigaben ab.
 
@@ -706,7 +737,7 @@ Conversation Agent
                   → AutomationValidator
                   → Vorschau und Bestätigung
                   → HA Automation Generator
-                  → AutomationExecutor + Transaktionsjournal
+                  → AutomationExecutor + Transaktionsjournal + Versionsverlauf
 ```
 
 Der Parser führt keine Home-Assistant-Dienste direkt aus. Dadurch können Sprachverständnis, Auflösung, Validierung, Vorschau und Ausführung unabhängig getestet werden. Neue Zuständigkeiten sind in eigene Module für Gerätesteuerung, kalendarische Termine, Automationsverwaltung, Ergebnisobjekte und Dateitransaktionen ausgelagert. Die verbleibenden großen Kernmodule werden schrittweise und verhaltensneutral weiter zerlegt.
@@ -732,7 +763,7 @@ python -m pytest -q
 Aktueller Entwicklungsstand:
 
 ```text
-1890 passed, 12 skipped
+1913 passed, 12 skipped
 ```
 
 Zusätzlich wird HomeIntent gegen die getrennte, agentenneutrale Suite

@@ -199,6 +199,7 @@ def test_planned_query_when_query_and_reschedule_round_trip(monkeypatch, tmp_pat
         "Verschiebe den Auftrag für Büro Rolllade auf 20 Uhr",
         conversation_id="move",
     )
+    moved = _run(entity, "Ja", conversation_id="move")
 
     assert "21.08.2026 um 17:00 Uhr" in planned.response.speech
     assert "21.08.2026 um 17:00 Uhr" in when.response.speech
@@ -237,6 +238,8 @@ def test_existing_automation_can_be_limited_to_three_runs(monkeypatch, tmp_path)
         "Wiederhole die Automation für Küchenlicht nur dreimal",
         conversation_id="limit",
     )
+    assert "wirklich" in result.response.speech
+    result = _run(entity, "Ja", conversation_id="limit")
 
     automations = pyyaml.safe_load(
         (tmp_path / "automations.yaml").read_text(encoding="utf-8")

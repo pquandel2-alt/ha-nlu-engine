@@ -19,6 +19,7 @@ into a second automation AST.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Mapping
 
 CREATED_BY_HOMEINTENT = "homeintent"
 
@@ -55,3 +56,6 @@ class AutomationSummary:
     once: bool = False
     max_runs: int | None = None
     run_count: int = 0
+    triggers: tuple[Mapping[str, Any], ...] = ()
+    conditions: tuple[Mapping[str, Any], ...] = ()
+    actions: tuple[Mapping[str, Any], ...] = ()
