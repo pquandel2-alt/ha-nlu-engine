@@ -105,6 +105,20 @@ def test_turn_on_command_calls_service_and_responds_action_done(monkeypatch):
     assert result.response.speech
 
 
+def test_multi_command_applies_policy_before_any_service_call(monkeypatch):
+    entity = _make_entity(monkeypatch, [FLUR_LICHT_OFF, KUECHE_LICHT])
+    entity.entry.options["read_only_entities"] = ["light.kueche"]
+
+    result = _run(
+        entity,
+        "Schalte das Flurlicht ein und schalte das Küchenlicht aus",
+    )
+
+    entity.hass.services.async_call.assert_not_awaited()
+    assert result.response.error_code == intent.IntentResponseErrorCode.FAILED_TO_HANDLE
+    assert "Lesen" in result.response.speech
+
+
 def test_state_query_returns_query_answer_and_does_not_call_service(monkeypatch):
     entity = _make_entity(monkeypatch, [FLUR_LICHT_ON])
 

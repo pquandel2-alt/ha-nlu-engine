@@ -8,9 +8,12 @@ import pytest
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.history_query import (
     HistoryMetric,
+    ComparativeHistoryQuery,
+    StateHistoryMetric,
     async_execute_history_query,
     parse_history_query,
     render_history_result,
+    render_state_history_result,
 )
 
 
@@ -43,6 +46,50 @@ def test_history_metric_and_period_are_composed(text, metric):
 def test_history_query_requires_explicit_sensor_and_period():
     assert parse_history_query("Wie war der Durchschnitt gestern?", [SENSOR], NOW) is None
     assert parse_history_query("Wie ist die Wohnzimmer Temperatur?", [SENSOR], NOW) is None
+
+
+def test_binary_state_history_count_and_duration_are_composed():
+    window = EntitySnapshot(
+        "binary_sensor.window", "Badezimmer Fenster", "binary_sensor", "off"
+    )
+    count = parse_history_query(
+        "Wie oft war das Badezimmer Fenster gestern offen?", [window], NOW
+    )
+    duration = parse_history_query(
+        "Wie lange war das Badezimmer Fenster heute geöffnet?", [window], NOW
+    )
+
+    assert count is not None and count.metric is StateHistoryMetric.COUNT
+    assert duration is not None and duration.metric is StateHistoryMetric.DURATION
+
+
+def test_period_comparison_is_composed_without_fixed_word_order():
+    query = parse_history_query(
+        "War die Wohnzimmer Temperatur gestern niedriger als heute?", [SENSOR], NOW
+    )
+
+    assert isinstance(query, ComparativeHistoryQuery)
+    assert query.first[3] == "heute"
+    assert query.second[3] == "gestern"
+
+
+def test_state_history_result_counts_transitions_and_sums_duration():
+    window = EntitySnapshot(
+        "binary_sensor.window", "Badezimmer Fenster", "binary_sensor", "off"
+    )
+    query = parse_history_query(
+        "Wie oft war das Badezimmer Fenster gestern offen?", [window], NOW
+    )
+    assert query is not None
+    rows = {
+        window.entity_id: [
+            {"state": "off"},
+            {"state": "on"},
+            {"state": "off"},
+            {"state": "on"},
+        ]
+    }
+    assert "2-mal offen" in render_state_history_result(query, rows)
 
 
 def test_history_result_is_aggregated_defensively():

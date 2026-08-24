@@ -11,3 +11,7 @@ intents:
     data:
       - sentences:
           - "[wenn|sobald|falls] [der|die|das] {name} {comparator} {threshold} [Grad|Watt|Prozent|kWh] [liegt|steigt|fällt]"
+  HassNumericEqualTrigger:
+    data:
+      - sentences:
+          - "[wenn|sobald|falls] [der|die|das] {name} {threshold} [Grad|Watt|Prozent|kWh] [beträgt|erreicht|hat]"

@@ -9,6 +9,13 @@ from .entities import EntitySnapshot, normalize_for_compare
 from .service_call import ServiceCallPlan
 
 
+def conversation_user_id(user_input) -> str | None:
+    """Return the authenticated actor; voice-only input has no user ID."""
+    context = getattr(user_input, "context", None)
+    user_id = getattr(context, "user_id", None)
+    return str(user_id) if user_id else None
+
+
 def _alarm_target(text: str, entities: list[EntitySnapshot]) -> EntitySnapshot | None:
     alarms = [entity for entity in entities if entity.domain == "alarm_control_panel"]
     if len(alarms) == 1:
@@ -63,8 +70,7 @@ def match_alarm_control(
 
 async def user_is_admin(hass, user_input) -> bool:
     """Resolve HA's authenticated conversation user; absence grants no elevation."""
-    context = getattr(user_input, "context", None)
-    user_id = getattr(context, "user_id", None)
+    user_id = conversation_user_id(user_input)
     if not user_id:
         # Voice pipelines and older test stubs may have no user context. Arm
         # operations remain available; disarm/trigger stay protected.
@@ -78,8 +84,7 @@ async def user_is_admin(hass, user_input) -> bool:
 
 
 async def user_display_name(hass, user_input) -> str | None:
-    context = getattr(user_input, "context", None)
-    user_id = getattr(context, "user_id", None)
+    user_id = conversation_user_id(user_input)
     auth = getattr(hass, "auth", None)
     getter = getattr(auth, "async_get_user", None)
     if not user_id or getter is None:

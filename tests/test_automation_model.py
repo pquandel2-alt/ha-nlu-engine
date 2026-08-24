@@ -41,7 +41,7 @@ def test_trigger_type_covers_all_documented_types():
 
 
 def test_numeric_comparator_covers_above_and_below():
-    assert {c.name for c in NumericComparator} == {"ABOVE", "BELOW"}
+    assert {c.name for c in NumericComparator} == {"ABOVE", "BELOW", "EQUAL"}
 
 
 def test_sun_event_covers_sunrise_and_sunset():

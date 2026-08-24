@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from ha_nlu.entities import EntitySnapshot
-from ha_nlu.execution_policy import PolicyOutcome, evaluate_service_plan
+from ha_nlu.execution_policy import (
+    PolicyOutcome,
+    evaluate_service_plan,
+    validate_automation_action_targets,
+)
 from ha_nlu.service_call import ServiceCallPlan
 from ha_nlu.nlu.context import PendingServiceConfirmation
 
@@ -59,6 +63,44 @@ def test_policy_denies_control_of_read_only_entity():
     assert "nur zum Lesen" in (decision.reason or "")
 
 
+def test_policy_can_limit_control_to_selected_users():
+    plan = ServiceCallPlan("light", "turn_on", "light.office", {})
+
+    denied = evaluate_service_plan(
+        plan,
+        [],
+        {"control_user_ids": ["owner"]},
+        is_admin=True,
+        user_id="guest",
+    )
+    allowed = evaluate_service_plan(
+        plan,
+        [],
+        {"control_user_ids": ["owner"]},
+        is_admin=False,
+        user_id="owner",
+    )
+
+    assert denied.outcome is PolicyOutcome.DENY
+    assert allowed.outcome is PolicyOutcome.ALLOW
+
+
+def test_policy_can_reserve_individual_entities_for_admins():
+    plan = ServiceCallPlan("switch", "turn_off", "switch.server", {})
+    options = {"admin_only_entities": ["switch.server"]}
+
+    assert evaluate_service_plan(
+        plan, [], options, is_admin=False, user_id="guest"
+    ).outcome is PolicyOutcome.DENY
+    assert evaluate_service_plan(
+        plan, [], options, is_admin=True, user_id="owner"
+    ).outcome is PolicyOutcome.ALLOW
+
+    assert "Administratoren" in validate_automation_action_targets(
+        {"switch.server"}, options, is_admin=False, user_id="guest"
+    )
+
+
 def test_pending_confirmation_carries_requesting_actor():
     pending = PendingServiceConfirmation(
         ServiceCallPlan("lock", "unlock", "lock.front"),
@@ -66,3 +108,15 @@ def test_pending_confirmation_carries_requesting_actor():
         requested_by_user_id="user-1",
     )
     assert pending.requested_by_user_id == "user-1"
+
+
+def test_automation_target_policy_applies_read_only_and_size_limits():
+    assert "nur lesbar" in validate_automation_action_targets(
+        {"light.read_only"}, {"read_only_entities": ["light.read_only"]}
+    )
+    assert "2 Ziele" in validate_automation_action_targets(
+        {"light.one", "light.two", "light.three"}, {"max_action_targets": 2}
+    )
+    assert validate_automation_action_targets(
+        {"light.one"}, {"max_action_targets": 2}
+    ) is None

@@ -29,13 +29,17 @@ Stand: 24. August 2026
 - Diagnoseinformationen sind vorhanden und enthalten keine Äußerungen,
   Entity-IDs oder Zustände.
 - Lesende und steuernde Freigaben können getrennt werden; zentrale Richtlinien
-  begrenzen Zielanzahl, Bestätigungsstufe sowie Nicht-Administrator-Aktionen.
+  begrenzen Zielanzahl, Bestätigungsstufe, zugelassene Benutzer,
+  Administratorziele sowie Nicht-Administrator-Aktionen.
 - Offene Service- und Automationserstellungsbestätigungen sind an die bekannte
   Home-Assistant-Benutzer-ID gebunden.
 - Gemeinsame Engine und Dialogzustände werden typisiert über
   `ConfigEntry.runtime_data` gehalten; direkte Testkonstruktion besitzt einen
   kompatiblen Fallback.
-- Config-/Options-Flow und interne Dienste besitzen deutsche UI-Übersetzungen.
+- Config-/Options-Flow und interne Dienste besitzen deutsche und englische
+  UI-Übersetzungen.
+- Eine eigene Fehlerdiagnose-Anleitung deckt Auswahl, Ortsbezug, Richtlinien,
+  Recorder, Benachrichtigungen und Automationspersistenz ab.
 
 ## Noch offen vor einer möglichen Aufnahme in Home Assistant Core
 
@@ -60,5 +64,6 @@ Die vormals stark gebündelte Logik wird schrittweise nach Zuständigkeit
 getrennt. Eigene Module kapseln inzwischen unter anderem Gradsemantik,
 semantische Rückfragedialoge, zusätzliche Gerätedomänen, Kalenderabfragen,
 Kalender-Laufzeitzugriffe, Automations-Aktionsänderungen, Metadaten und
-Transaktionen. Weitere Aufteilungen sollen jeweils verhaltensneutral und mit
-Regressionstests erfolgen.
+Transaktionen sowie nun Ortskontext, Rücknahme, lokale Anpassungen,
+Benachrichtigungsautomation und Recorder-Verlauf. Weitere Aufteilungen sollen
+jeweils verhaltensneutral und mit Regressionstests erfolgen.

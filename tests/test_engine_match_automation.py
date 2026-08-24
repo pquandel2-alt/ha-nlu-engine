@@ -44,8 +44,19 @@ WOHNZIMMER_HEIZUNG = EntitySnapshot(
     capabilities=frozenset({"TURN_ON", "TURN_OFF", "TEMPERATURE"}),
     attributes={"temperature": 20},
 )
+TEMP_AUSSEN = EntitySnapshot(
+    "sensor.aussentemperatur",
+    "Außentemperatur",
+    "sensor",
+    "21.5",
+    unit="°C",
+    device_class="temperature",
+)
+NOTIFY_PHILIPP = EntitySnapshot(
+    "notify.mobile_app_philipp", "Philipp Handy", "notify", "unknown"
+)
 
-ENTITIES = [KUECHE_FENSTER, KUECHE_LICHT, BUERO_FENSTER_1, BUERO_FENSTER_2, WOHNZIMMER_HEIZUNG]
+ENTITIES = [KUECHE_FENSTER, KUECHE_LICHT, BUERO_FENSTER_1, BUERO_FENSTER_2, WOHNZIMMER_HEIZUNG, TEMP_AUSSEN, NOTIFY_PHILIPP]
 
 
 def test_non_automation_sentence_is_rejected_by_the_regex_gate(engine):
@@ -69,6 +80,25 @@ def test_valid_trigger_and_action_produces_a_validated_automation_model(engine):
     assert len(result.model.triggers) == 1
     assert len(result.model.actions) == 1
     assert "AutomationModel" in result.response_text
+
+
+def test_action_first_numeric_equality_can_create_a_notification(engine):
+    for text in (
+        "Kannst du mich benachrichtigen wenn die Außentemperatur 28 Grad beträgt?",
+        "Kannst du Philipp benachrichtigen wenn die Außentemperatur 28 Grad beträgt?",
+    ):
+        result = engine.match_automation(text, ENTITIES)
+
+        assert isinstance(result, AutomationMatchResult)
+        assert result.validation_error is None
+        assert result.model.triggers[0].comparator.name == "EQUAL"
+        assert result.model.triggers[0].threshold == 28
+        assert result.model.actions[0].type is ActionType.NOTIFY
+        assert "Außentemperatur" in result.model.actions[0].message
+        if "Philipp" in text:
+            assert result.model.actions[0].target.entity_id == "notify.mobile_app_philipp"
+        else:
+            assert result.model.actions[0].target is None
 
 
 def test_free_order_state_trigger_runs_through_complete_automation_pipeline(engine):

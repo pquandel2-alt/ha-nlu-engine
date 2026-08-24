@@ -198,6 +198,19 @@ def _generate_trigger(trigger: TriggerModel, entities: list[EntitySnapshot]) -> 
         candidates = _resolve_target_entities(trigger.target, entities)
         if not candidates:
             return None, GenerationError.ENTITY_NOT_FOUND
+        if trigger.comparator is NumericComparator.EQUAL:
+            entity_ids = [entity.entity_id for entity in candidates]
+            comparisons = [
+                f"states('{entity_id}') | float(none) == {trigger.threshold:g}"
+                for entity_id in entity_ids
+            ]
+            config = {
+                "trigger": "template",
+                "value_template": "{{ " + " or ".join(comparisons) + " }}",
+            }
+            if trigger.for_seconds is not None:
+                config["for"] = {"seconds": trigger.for_seconds}
+            return identified(config), None
         key = "above" if trigger.comparator is NumericComparator.ABOVE else "below"
         config = {"trigger": "numeric_state", "entity_id": _entity_id_field(candidates), key: trigger.threshold}
         if trigger.for_seconds is not None:

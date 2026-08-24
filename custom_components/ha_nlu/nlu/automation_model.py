@@ -85,11 +85,15 @@ class CalendarSchedule:
 
 
 class NumericComparator(Enum):
-    """"above"/"below" - Home Assistant's own ``numeric_state`` trigger
-    vocabulary (``above``/``below`` keys), not reinvented here."""
+    """Numeric relation requested by the user.
+
+    ``EQUAL`` is generated as an HA template trigger because
+    ``numeric_state`` deliberately only supports above/below thresholds.
+    """
 
     ABOVE = auto()
     BELOW = auto()
+    EQUAL = auto()
 
 
 class SunEvent(Enum):

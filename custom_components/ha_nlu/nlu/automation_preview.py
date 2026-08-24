@@ -136,7 +136,13 @@ def _speak_trigger(
         text = f"{target} wird {state}"
     elif trigger.type is TriggerType.NUMERIC_STATE:
         target = _speak_target(trigger.target, entity_by_id, area_name_by_id)
-        comparator = "über" if trigger.comparator is NumericComparator.ABOVE else "unter"
+        comparator = (
+            "über"
+            if trigger.comparator is NumericComparator.ABOVE
+            else "unter"
+            if trigger.comparator is NumericComparator.BELOW
+            else "genau"
+        )
         text = f"{target} {comparator} {_format_number(trigger.threshold)} liegt"
     elif trigger.type is TriggerType.DEVICE:
         text = f"das Geräteereignis „{trigger.device_trigger_type}“ eintritt"

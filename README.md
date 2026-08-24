@@ -1,93 +1,83 @@
 # HomeIntent
 
-**Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
+**Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.36.0**
+- Aktuelle Version: **4.37.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
+- Verarbeitung: **lokal in Home Assistant**
 - Lizenz: **MIT**
 
 [![HomeIntent in HACS öffnen](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=pquandel2-alt&repository=ha-nlu-engine&category=integration)
+[![GitHub Release](https://img.shields.io/github/v/release/pquandel2-alt/ha-nlu-engine)](https://github.com/pquandel2-alt/ha-nlu-engine/releases/latest)
 
 ## Was ist HomeIntent?
 
-HomeIntent ist ein eigener Conversation Agent für Home Assistant Assist. Die Integration übersetzt deutsche Smart-Home-Sätze in geprüfte Home-Assistant-Befehle, Zustandsabfragen oder echte Automationen.
+HomeIntent ist ein eigener Conversation Agent für Home Assistant Assist. Er
+versteht deutsche Smart-Home-Anweisungen, löst Geräte und Orte gegen die echte
+Home-Assistant-Konfiguration auf und erzeugt daraus geprüfte Serviceaufrufe,
+Abfragen, Dialoge oder Automationen.
 
-Anders als ein allgemeines Sprachmodell versucht HomeIntent nicht, beliebige Gespräche zu verstehen. Es konzentriert sich bewusst auf ein kleineres, klar definiertes Problem:
+Das Ziel ist nicht, ein allgemeiner Chatbot zu sein. HomeIntent konzentriert
+sich auf zuverlässige Haussteuerung:
 
-> Einen Smart-Home-Befehl zuverlässig verstehen, das richtige Gerät finden, die gewünschte Aktion prüfen und erst danach Home Assistant steuern.
+> Bedeutung erkennen, Ziel eindeutig auflösen, Fähigkeiten und Risiken prüfen
+> und erst danach Home Assistant verändern.
 
-HomeIntent benötigt dafür:
+HomeIntent benötigt für die Sprachverarbeitung:
 
 - keine Cloud-API,
-- kein Large Language Model (LLM),
+- kein Large Language Model,
 - keine GPU,
-- keinen externen Server und
-- keine Internetverbindung für die Verarbeitung eines Sprachbefehls.
+- keinen Modell-Download und
+- keinen externen HomeIntent-Server.
 
-Die Erkennung kombiniert bewährte deutsche Hassil-Grammatiken mit einem
-lokalen symbolischen Sprach-Compiler, strukturierten semantischen Modellen
-und deterministischen Resolvern. Der Compiler zerlegt eine Formulierung in
-unabhängige Bedeutungsbausteine wie Aktion, Gerätetyp, Ort, Anzahl und Wert.
-Dadurch müssen diese Bausteine nicht in einer fest vorgegebenen Reihenfolge
-stehen. Derselbe Satz führt bei demselben Home-Assistant-Zustand und
-Gesprächskontext trotzdem immer zum selben Ergebnis.
+Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
+Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
+nach oder führt nichts aus.
 
-## Warum ein deterministischer Ansatz?
+## Was ist in Version 4.37 neu?
 
-Ein allgemeines LLM kann sehr flexibel formulierte Texte verstehen, sein Ergebnis ist aber nicht zwangsläufig reproduzierbar. Bei einem Smart Home ist Vorhersagbarkeit oft wichtiger als Kreativität: Eine mehrdeutige Anweisung soll nicht versehentlich das falsche Licht, die falsche Rolllade oder eine falsche Automation steuern.
+Version 4.37 bündelt die bisher größte Erweiterung des Projekts:
 
-HomeIntent verfolgt daher diese Reihenfolge:
+- freiere Kombination von Aktion, Gerät, Raum, Etage, Menge und Wert,
+- mehrere mit „und“ verbundene Orte,
+- mehrere Ausschlüsse mit „außer“ oder „mit Ausnahme von“,
+- semantische Rückfragen bei fehlendem Ziel, Wert oder genauer Auswahl,
+- Erklärung des zuletzt verstandenen Befehls,
+- erweiterte zeitliche und wiederkehrende Automationen,
+- geführter Dialog zum Erstellen von Automationen,
+- Erinnerungen und Benachrichtigungsziele,
+- umfangreichere Automationsverwaltung einschließlich Rücknahme,
+- Kalender-, Timer- und Aufgabenlistenverwaltung,
+- Recorder-Verlaufsabfragen,
+- Raumbezug des verwendeten Assist-Geräts für „hier“ und „in diesem Raum“,
+- sicheres Rückgängigmachen der letzten reversiblen Geräteaktion,
+- eigene, streng eindeutige Sprach-Aliase,
+- Benutzerfreigaben und nur administrativ steuerbare Ziele,
+- weitere Gerätefähigkeiten,
+- zentrale, konfigurierbare Sicherheitsrichtlinien,
+- getrennte Nur-Lesen-Freigaben und
+- benutzergebundene Bestätigungen.
+
+## Wie HomeIntent Sprache versteht
+
+HomeIntent kombiniert deutsche Hassil-Grammatiken mit einem lokalen
+symbolischen Sprach-Compiler. Ein Satz wird nicht nur mit vollständigen
+Vorlagen verglichen, sondern in Bedeutungsbausteine zerlegt:
 
 ```text
-Gesprochener oder geschriebener Satz
-                │
-                ▼
- Normalisierung, Grammatik und semantischer Compiler
-                │
-                ▼
-       Semantische Bedeutung (AST)
-                │
-                ▼
-     Geräte-, Bereichs- und Kontextauflösung
-                │
-                ▼
-      Fähigkeiten- und Sicherheitsprüfung
-                │
-                ▼
-    Home-Assistant-Service oder Automation
+Eingabe
+  → Normalisierung und semantisches Lexikon
+  → Aktion, Ziel, Ort, Menge, Eigenschaft und Wert
+  → World Model aus Home Assistant
+  → Entity- und Capability-Auflösung
+  → Validierung und Sicherheitsrichtlinie
+  → Antwort, Rückfrage, Serviceplan oder AutomationModel
+  → bestätigte Ausführung
 ```
 
-Wenn ein Ziel nicht eindeutig aufgelöst werden kann, rät HomeIntent nicht. Der Befehl wird abgelehnt oder es wird – sofern der jeweilige Dialogpfad dies unterstützt – nachgefragt.
-
-Der semantische Compiler ist kein eingebautes Sprachmodell. Seit Version
-4.27 zerlegt ein gemeinsames spanbasiertes Lexikon jeden Satz in
-wiederverwendbare Bedeutungen. Jeder Treffer behält seine Position im Text;
-Mehrwortausdrücke, Konflikte und nicht erklärte bedeutungstragende Wörter
-können dadurch geprüft werden. Query und Befehl verwenden denselben einmalig
-erzeugten Analysepass. Die Interpretation wird anschließend gegen die
-tatsächlich in Home Assistant vorhandenen Geräte, Bereiche, Etagen und
-Fähigkeiten geprüft. So entsteht flexible Satzstellung ohne Cloud-Latenz,
-Modell-Download oder hohe Hardware-Anforderungen. Alte Satzgrammatiken bleiben
-als schneller und kompatibler Pfad erhalten.
-
-Dabei werden nicht alle denkbaren deutschen Gespräche vorgetäuscht. Erkennt
-HomeIntent einen wichtigen Zusatz nicht oder ergeben die Bausteine mehrere
-widersprüchliche Bedeutungen, führt es keine Aktion aus. Ein neuer Ausdruck
-erweitert das zentrale Lexikon für alle zulässigen Satzstellungen und muss
-nicht als vollständiger Satz in vielen Varianten eingetragen werden.
-
-## Aktuelles Sprachverständnis
-
-HomeIntent wertet einen Satz nicht mehr nur entlang einzelner fest hinterlegter
-Formulierungen aus. Der gemeinsame semantische Analysepass erkennt unter
-anderem Aktion, Gerätetyp, Zustand, Ort, Etage, Menge, Messgröße,
-Vergleichsoperator und Wert als getrennte Bedeutungsbausteine. Danach werden
-diese Bausteine fachlich geprüft und mit dem aktuellen Home-Assistant-Modell
-abgeglichen.
-
-Dadurch darf sich die Reihenfolge vieler Satzteile ändern, ohne dass für jede
-Variante ein eigener vollständiger Beispielsatz programmiert werden muss:
+Dadurch können viele Satzbestandteile ihre Position ändern:
 
 ```text
 Fahre alle Rollläden im Erdgeschoss hoch.
@@ -98,312 +88,236 @@ Sind im Erdgeschoss offene Fenster?
 Offene Fenster, gibt es die im Erdgeschoss?
 Welche Fenster im Erdgeschoss sind noch geöffnet?
 
-Welche Lichter sind heller als 50 Prozent?
-Mindestens 50 Prozent, welche Lichter sind das?
+Welche Lichter im Wohnzimmer sind heller als 50 Prozent?
 Im Wohnzimmer heller als 50 Prozent: Welche Lichter gibt es?
-
-Flurlicht bitte an.
-Ich möchte, dass das Bürolicht ausgeschaltet wird.
-Komplett hochfahren soll der Rollladen Büro.
-Den Rollladen Büro würd ich gern halb runterfahren.
 ```
 
-HomeIntent trennt dafür die eigentliche Bedeutung von ihrer sprachlichen
-Verpackung. Höflichkeit, Wunsch- und Passivformen, umgangssprachliche
-Verbendungen sowie elliptische Kurzbefehle werden als Satzhülle behandelt;
-Aktion, Ziel, Ort und Wert bleiben dieselben geprüften semantischen Rollen.
-Zusammengesetzte Verben wie „hochfahren“ und Wörter wie „oben“ innerhalb eines
-echten Gerätenamens werden anhand des Registry-Kontexts unterschieden.
+Das ist kein eingebautes LLM. Erlaubte Wörter und Bedeutungen bleiben
+kontrolliert, testbar und reproduzierbar. Unbekannte wichtige Zusätze,
+widersprüchliche Angaben oder fachlich unpassende Einheiten werden nicht
+stillschweigend ignoriert.
 
-Die gemeinsame Auswertung verbessert mehrere Bereiche gleichzeitig:
+### Mengen, Orte und Ausschlüsse
 
-| Bereich | Verbesserung |
-| --- | --- |
-| Befehle | Aktion, Ziel, Bereich oder Etage, Menge und Wert können flexibler angeordnet werden. |
-| Koordinierte Orte | Mehrere ausdrücklich mit „und“ verbundene Räume bilden einen gemeinsamen, geprüften Zielbereich. |
-| Ausnahmen | Ein oder mehrere eindeutig benannte Ziele können mit „außer“ beziehungsweise „mit Ausnahme von“ ausgeschlossen werden. |
-| Zustandsfragen | Einzelne, mehrere, alle, irgendeine oder keine passende Entität können abgefragt werden. |
-| Messwerte | Temperatur, Luftfeuchtigkeit, Batterie, Leistung, Energie und Helligkeit verwenden dieselbe Orts- und Vergleichslogik. |
-| Vergleiche | Ausdrücke wie „über“, „unter“, „mindestens“, „höchstens“, „heller“ und „dunkler“ werden unabhängig von ihrer Position erkannt. |
-| Abstufungen | „etwas“, „deutlich“ und „stark“ verändern Helligkeit oder Solltemperatur in reproduzierbaren, gerätegerechten Schritten. |
-| Unvollständige Befehle | Fehlt Ziel, Wert oder eine exakte Auswahl, fragt HomeIntent gezielt nach, statt ein Gerät oder eine Menge zu erraten. |
-| Automationen | Zustandsauslöser und Zustandsbedingungen verwenden denselben geprüften Predicate-Compiler. |
-| Folgefragen | Gerät, Raum, Etage und abgefragte Eigenschaft können als Dialogfokus sicher weiterverwendet werden. |
-| Gemischte Sätze | Eine Aktion und eine unabhängige Zustandsfrage können gemeinsam vollständig validiert werden. Beziehen sich beide auf dasselbe Gerät, wird die Kombination wegen eines möglicherweise veralteten Abfragewerts abgelehnt. |
-| Sicherheit | Widersprüche, unbekannte wichtige Zusätze und fachlich unpassende Einheiten werden abgelehnt statt geraten. |
-
-Beispielsweise kann nach einer Temperaturabfrage eine verkürzte Anweisung den
-sicheren Dialogkontext nutzen:
+HomeIntent berücksichtigt Friendly Names, Entity-IDs, Aliase, Bereiche,
+Bereichs-Aliase, Etagen, Domänen, Geräteklassen und Fähigkeiten.
 
 ```text
-Du: Wie hoch ist die Temperatur im Erdgeschoss?
-Assist: 21,6 Grad.
-Du: Kannst du die Temperatur auf 22 Grad erhöhen?
-Assist: Erdgeschoss Heizung auf 22 Grad gestellt.
+Fahre beide Rollläden im Wohnzimmer hoch.
+Schalte alle Lichter in Küche und Flur aus.
+Mach alle Lichter aus außer der Stehlampe.
+Schalte alle Lichter aus, außer Kücheninsel und Nachtlicht.
+Mach die drei Lampen im Büro an.
 ```
 
-Auch dabei bleibt HomeIntent vollständig lokal und deterministisch. Es wird
-kein Text an einen LLM-Anbieter gesendet, kein Modell heruntergeladen und keine
-leistungsstarke Spezialhardware benötigt. Die semantische Analyse braucht in
-den Projektmessungen nur wenige Millisekunden, selbst wenn das World Model
-mehrere tausend Entitäten enthält.
+„Ein paar“ oder „einige“ führt nie zu einer zufälligen Auswahl. HomeIntent
+fragt nach den konkreten Gerätenamen.
 
-Diese Flexibilität hat bewusst eine Sicherheitsgrenze: HomeIntent ist kein
-allgemeiner Chatbot und behauptet nicht, jeden beliebigen deutschen Satz zu
-verstehen. Fehlt eine eindeutige, unterstützte Smart-Home-Bedeutung, wird
-nachgefragt oder nichts ausgeführt. So bleibt das Ergebnis reproduzierbar.
+### Abstufungen und Zahlen
 
-Der zuletzt aufgelöste Plan kann transparent abgefragt werden:
+Prozentwerte, Grad Celsius und Gerätestufen werden intern als typisierte Werte
+geführt. Relative Wörter besitzen feste, reproduzierbare Schritte:
+
+```text
+Mach die dimmbare Lampe etwas heller.
+Mach die dimmbare Lampe deutlich heller.
+Mach die Heizung im Büro stark wärmer.
+Fahre die Rolllade halb runter.
+Fahre die Rolllade komplett hoch.
+```
+
+### Erklärung statt Blackbox
+
+Nach einem verstandenen Befehl oder während einer Automationsvorschau kann der
+aufgelöste Plan abgefragt werden:
 
 ```text
 Du: Schalte in Küche und Flur alle Lichter aus, außer dem Nachtlicht.
 Du: Was hast du verstanden?
-Assist: Ich habe Folgendes verstanden: Aktion: ausschalten; Ziel: …;
-        Orte: Küche, Flur; Ausgenommen: Nachtlicht.
+Assist: Ich habe Folgendes verstanden: Aktion: ausschalten; Orte: Küche,
+        Flur; ausgenommen: Nachtlicht; …
 ```
 
-Diese Erklärung verwendet ausschließlich bereits aufgelöste semantische
-Fakten. Sie startet keine neue Interpretation und führt keine Aktion aus.
+Die Erklärung verwendet bereits aufgelöste Fakten und startet keine Aktion.
 
-## Funktionsumfang
+## Unterstützte Geräte und Aktionen
 
-### Direkte Gerätesteuerung
+Die tatsächliche Aktion hängt immer von den Fähigkeiten ab, die das jeweilige
+Home-Assistant-Gerät meldet.
 
-HomeIntent kann aktuell unter anderem folgende Home-Assistant-Domänen verwenden:
-
-| Domäne | Beispiele |
+| Domäne | Unterstützte Kernfunktionen |
 | --- | --- |
-| `light` | ein-/ausschalten, dimmen, Helligkeit, Farbe, Farbtemperatur |
-| `switch` | ein-/ausschalten, umschalten |
-| `fan` | ein-/ausschalten, Geschwindigkeit, Preset, Drehrichtung und Oszillation steuern |
-| `cover` | öffnen, schließen, Position und – sofern unterstützt – Lamellenneigung setzen |
-| `script` | Home-Assistant-Skripte starten |
-| `climate` | Solltemperatur, Betriebs-, Preset-, Lüfter- und Schwenkmodus setzen |
-| `media_player` | Wiedergabe, Lautstärke und Quelle steuern |
-| `vacuum` | starten, pausieren, stoppen, Saugstufe setzen und zur Station schicken |
-| `scene` | Szenen aktivieren |
-| `lock` | ver- und entriegeln; Entriegeln nur nach Bestätigung |
-| `sensor` | Werte und Vergleiche abfragen (nur lesend) |
-| `binary_sensor` | Zustände abfragen, zum Beispiel Fenster oder Türen (nur lesend) |
-| `calendar` | Termine anlegen, abfragen, Verfügbarkeit prüfen sowie bei unterstützter Fähigkeit löschen, verschieben, umbenennen oder die Dauer ändern |
-| `humidifier` | ein-/ausschalten, Zielluftfeuchtigkeit und angebotenen Modus setzen |
-| `water_heater` | Warmwasser-Solltemperatur und angebotenen Betriebsmodus setzen |
-| `select` | eine tatsächlich angebotene Option auswählen |
-| `number`, `input_number` | Werte innerhalb des gemeldeten Bereichs setzen |
-| `input_boolean` | ein-/ausschalten und umschalten |
-| `button` | Taster nach ausdrücklicher Bestätigung betätigen |
-| `valve` | Ventile nach Fähigkeitsprüfung und Bestätigung öffnen, schließen oder positionieren |
-| `lawn_mower` | Mähen starten, pausieren oder zur Ladestation fahren |
-| `camera` | Kamerastream auf einem eindeutig genannten Media Player anzeigen |
-| `notify` | eine Nachricht über eine eindeutig genannte Notify-Entität senden |
-| `todo` | Einkaufs- und Aufgabenlisten lesen sowie mehrere Einträge hinzufügen, abhaken oder entfernen |
-| `timer` | Timer starten, verlängern, verkürzen, pausieren, fortsetzen, abbrechen und abfragen |
+| `light` | ein/aus, umschalten, Helligkeit, Farbe, Farbtemperatur, relative Helligkeit |
+| `switch` | ein/aus und umschalten |
+| `cover` | öffnen, schließen, Position und Lamellenneigung |
+| `fan` | ein/aus, Prozent, Stufe, Preset, Richtung und Oszillation |
+| `climate` | Solltemperatur, HVAC-, Preset-, Lüfter- und Schwenkmodus |
+| `media_player` | Wiedergabe, Pause, Stopp, Lautstärke und Quelle |
+| `vacuum` | starten, pausieren, stoppen, Saugstufe und Ladestation |
+| `scene` | aktivieren |
+| `script` | starten |
+| `lock` | verriegeln und bestätigtes Entriegeln |
+| `humidifier` | ein/aus, Zielfeuchte und angebotener Modus |
+| `water_heater` | Solltemperatur und angebotener Betriebsmodus |
+| `select` | tatsächlich angebotene Option auswählen |
+| `number`, `input_number` | Wert innerhalb der gemeldeten Grenzen setzen |
+| `input_boolean` | ein/aus und umschalten |
+| `button` | nach Bestätigung drücken |
+| `valve` | nach Bestätigung öffnen, schließen oder positionieren |
+| `lawn_mower` | starten, pausieren und zur Ladestation fahren |
+| `camera` | Stream auf einem eindeutig genannten Media Player anzeigen |
+| `notify` | Nachricht an ein eindeutig genanntes Notify-Ziel senden |
+| `alarm_control_panel` | bestätigte Alarmaktionen; kritische Aktionen nur für Administratoren |
+| `group` | explizit ausgewählte Gruppen nach Bestätigung steuern |
+| `sensor`, `binary_sensor` | Zustände, Messwerte und Vergleiche abfragen |
+| `calendar` | Termine lesen, anlegen und – je nach Integration – ändern oder löschen |
+| `todo` | Listen lesen und Einträge verwalten |
+| `timer` | starten, ändern, pausieren, fortsetzen, beenden und abfragen |
 
 Beispiele:
 
 ```text
 Mach das Wohnzimmerlicht an.
-Schalte alle Lichter im Erdgeschoss aus.
-Stell das Wohnzimmerlicht auf 40 Prozent.
-Mach das Licht blau.
-Fahre die Rolllade im Wohnzimmer auf 30 Prozent.
-Auf halbe Höhe im Erdgeschoss bitte sämtliche Rollläden fahren.
-Nach oben fahren sollen im Erdgeschoss alle Rollläden.
+Fahre alle Rollläden im Erdgeschoss auf 50 Prozent.
 Stelle den Ventilator auf Stufe 3.
-Starte Gute Nacht.
 Stelle die Heizung im Wohnzimmer auf 21 Grad.
-Pausiere die Wiedergabe auf Wohnzimmer TV.
+Wähle beim Heizprogramm Eco.
+Pausiere die Wiedergabe auf dem Wohnzimmer TV.
 Schicke den Saugroboter zur Ladestation.
 Aktiviere die Szene Filmabend.
-Stelle den Luftbefeuchter im Schlafzimmer auf 45 Prozent Luftfeuchtigkeit.
-Wähle beim Heizprogramm Eco.
-Stelle den Bewässerungswert auf 20.
+Stelle den Luftbefeuchter auf 45 Prozent.
 Zeige die Einfahrtkamera auf dem Wohnzimmer TV.
 ```
 
-Bei fehlenden Angaben führt HomeIntent einen begrenzten, semantischen Dialog.
-„Stell auf 22 Grad“ fragt bei mehreren Heizungen nach dem Ziel. „Stelle die
-Heizung im Büro“ fragt nach der Solltemperatur. „Mach ein paar Lichter an“
-wählt niemals zufällig Geräte aus, sondern verlangt konkrete Namen.
+## Zustände, Messwerte und Verlauf
 
-Sicherheitskritische direkte Aktionen werden nicht sofort ausgeführt. Das
-Entriegeln eines Schlosses sowie das Öffnen oder Schließen eines als Garage
-klassifizierten Tores erfordern eine ausdrückliche Bestätigung.
-Seit Version 4.34 klassifiziert eine zentrale Risikoregel außerdem Dienst,
-Geräteklasse und Größe einer Mehrgeräteaktion. Dadurch gilt dieselbe
-Bestätigungspolitik auch für neue Parser und Zusatzdomänen.
+Abfragen sind lesend und erzeugen keinen steuernden Serviceplan.
 
-### Bereiche, Etagen und mehrere Geräte
-
-HomeIntent berücksichtigt nicht nur den Anzeigenamen einer Entität, sondern auch:
-
-- Entity-ID und Friendly Name,
-- in Home Assistant hinterlegte Aliase,
-- Bereich und Bereichs-Aliase,
-- Etage,
-- Domäne und Geräteklasse,
-- unterstützte Fähigkeiten,
-- Quantifizierer wie „alle“, „beide“ oder Anzahlen,
-- Ausschlüsse mit „außer“ sowie
-- den bisherigen Gesprächskontext.
-
-Beispiele:
+### Aktueller Zustand
 
 ```text
-Mach oben die Lichter aus.
-Fahre beide Rollläden im Wohnzimmer hoch.
-Mach alle Lichter aus außer der Stehlampe.
-Mach die drei Lampen an.
-```
-
-### Zustands- und Vergleichsabfragen
-
-Abfragen sind lesend aufgebaut und führen keinen Home-Assistant-Service aus.
-
-```text
-Welche Fenster sind offen?
-Welche Fenster sind im Erdgeschoss?
-Gibt es offene Fenster im Keller?
-Gibt es im Dachgeschoss Fenster?
-Ist das Schlafzimmerfenster geöffnet?
-Ist das Badezimmer Fenster geschlossen?
-Ist das Fenster vom Badezimmer geschlossen?
-Welchen Zustand hat das Badezimmer Fenster?
-Was ist der Status vom Badezimmer Fenster?
+Ist das Badezimmerfenster geschlossen?
+Welchen Zustand hat das Badezimmerfenster?
 Sind alle Rollläden hochgefahren?
-Sind sämtliche Rollläden oben?
 Sind im Erdgeschoss offene Fenster?
-Offene Fenster, gibt es die im Erdgeschoss?
 Ist irgendein Fenster offen?
 Ist kein Fenster offen?
 Wie viele Fenster sind im Erdgeschoss geöffnet?
 Wo sind Fenster offen?
 Was ist im Badezimmer eingeschaltet?
-Wie viel Grad sind im Badezimmer?
-Wie warm ist es im Wohnzimmer?
-Welche Lichter sind heller als 50 Prozent?
-Mindestens 50 Prozent, welche Lichter sind das?
-Im Wohnzimmer unter 20 Grad, welche Räume betrifft das?
-Warum ist das Küchenlicht an?
 ```
 
-Messwerte können über einen einzelnen Raum oder eine ganze Etage abgefragt
-werden. Unterstützt werden derzeit Temperatur, Luftfeuchtigkeit, Batteriestand,
-Leistung, Energieverbrauch und Helligkeit:
+### Messwerte und Vergleiche
+
+Unterstützt werden unter anderem Temperatur, Luftfeuchtigkeit, Batterie,
+Leistung, Energie und Helligkeit.
 
 ```text
 Wie hoch ist die Temperatur im Erdgeschoss?
-Luftfeuchtigkeit im Wohnzimmer.
-Stromverbrauch Küche.
-Batterien oben unter 20 Prozent.
-Wie hell Wohnzimmer?
-Im Erdgeschoss aktuell die Temperatur wie viel?
-Oben Batterien weniger als 20 Prozent?
+Welche Temperatur hat das Erdgeschoss?
+Wie warm ist es im Wohnzimmer?
+Wie hoch ist die Luftfeuchtigkeit im Badezimmer?
+Welche Batterien oben sind unter 20 Prozent?
+Welche Lichter sind mindestens 50 Prozent hell?
+Welches Gerät verbraucht gerade am meisten Strom?
 ```
 
-Auch Messwertfragen werden aus Eigenschaft, Ort, optionalem Vergleich und
-Zahl zusammengesetzt. Diese Bausteine dürfen frei angeordnet sein. Mehrere
-widersprüchliche Eigenschaften oder unbekannte bedeutungstragende Zusätze
-werden nicht stillschweigend ignoriert.
+Mehrere passende Sensoren werden einzeln genannt. Einen Mittelwert bildet
+HomeIntent nur bei einer ausdrücklichen Durchschnittsfrage.
 
-Auch Vergleichsfragen sind nicht an eine Reihenfolge gebunden. Zielgruppe,
-Ort, Vergleichsoperator, Zahl und Einheit werden unabhängig erkannt. Die
-Kombination muss fachlich zusammenpassen: Grad ist nur für Temperaturziele,
-Prozent nur für unterstützte Licht- oder Rollladenwerte zulässig.
+### Recorder-Statistiken
 
-Gibt es mehrere passende Sensoren, nennt HomeIntent alle Einzelwerte mit ihrem
-Entitätsnamen. Es bildet niemals ungefragt einen Mittelwert. Nur eine
-ausdrückliche Formulierung wie „durchschnittliche Temperatur im Erdgeschoss“
-liefert einen berechneten Durchschnitt. Unbekannte Orte und Orte ohne passenden,
-für Assist freigegebenen Sensor erhalten eine konkrete Fehlermeldung.
-
-Bei der „Warum“-Frage nennt HomeIntent passende Automationen als mögliche Ursache. Es behauptet nicht, einen vollständigen kausalen Ablauf beweisen zu können.
-
-### Gesprächskontext und Rückfragen
-
-HomeIntent speichert Kontext pro Assist-Konversation. Dadurch sind kurze Folgesätze möglich:
+Für eindeutig benannte numerische Sensoren fragt HomeIntent Home Assistants
+`recorder.get_statistics` ab. Unterstützt werden Mittelwert, Minimum, Maximum
+und Veränderung für heute, gestern, diese Woche, letzte Woche und den aktuellen
+Monat.
 
 ```text
-Du: Schalte das Wohnzimmerlicht ein.
-Assist: Wohnzimmerlicht eingeschaltet.
-Du: Und jetzt wieder aus.
+Wie hoch war die durchschnittliche Temperatur im Wohnzimmer gestern?
+Was war heute der höchste Wert vom Stromverbrauch Haus?
+Wie hat sich der Energiezähler diese Woche verändert?
+War die Wohnzimmer Temperatur gestern niedriger als heute?
+Wie oft war das Badezimmerfenster gestern offen?
+Wie lange war das Badezimmerfenster heute geöffnet?
 ```
 
-Auch Pronomen und bereichsbezogene Folgefragen können – innerhalb der unterstützten Grammatik – auf zuvor aufgelöste Entitäten verweisen:
+Fehlen Recorder-Daten, meldet HomeIntent das, statt aus dem aktuellen Zustand
+einen historischen Wert zu erfinden.
 
-```text
-Du: Wie warm ist es im Wohnzimmer?
-Du: Und in der Küche?
-Du: Nein, ich meinte das Büro.
-Du: Wie sieht es oben aus?
-```
+Zustandswechsel und Zustandsdauer werden über Home Assistants Recorder-Historie
+ermittelt. Vergleiche zwischen heute und gestern beziehungsweise dieser und
+letzter Woche verwenden zwei klar begrenzte Statistikzeiträume.
 
-HomeIntent kann außerdem aus einer vorherigen Abfrage den sicheren räumlichen
-Kontext für einen anschließenden Stellbefehl ableiten:
+## Gesprächskontext und Rückfragen
+
+Der Kontext wird getrennt pro Assist-Konversation gespeichert. Er besteht aus
+aufgelösten semantischen Fakten, nicht aus einer unbegrenzten Unterhaltung.
 
 ```text
 Du: Wie hoch ist die Temperatur im Erdgeschoss?
 Assist: 21,6 Grad.
 Du: Kannst du die Temperatur auf 22 Grad erhöhen?
 Assist: Erdgeschoss Heizung auf 22 Grad gestellt.
-```
-
-Der Folgesatz darf auch verkürzt sein. HomeIntent merkt sich dazu nicht nur
-die zuletzt genannten Entitäten, sondern einen expliziten Dialogfokus aus
-Eigenschaft, Raum beziehungsweise Etage und möglichen Zielgeräten:
-
-```text
-Du: Wie warm ist es im Wohnzimmer?
-Du: Auf 22 Grad.
-
-Du: Wie hell ist es in der Küche?
-Du: Auf 35 Prozent.
 
 Du: Wie warm ist es im Wohnzimmer?
-Du: Zwei Grad wärmer.
+Du: Und in der Küche?
+
+Du: Schalte das Wohnzimmerlicht ein.
+Du: Und jetzt wieder aus.
+
+Du: Schalte das Licht hier ein.
+Assist: Bürolicht eingeschaltet.
 ```
 
-Explizite Korrekturen verändern den räumlichen Bezug, ohne die bereits
-verstandene Aktion neu erraten zu müssen:
+Wenn die Assist-Anfrage eine `device_id` oder `satellite_id` enthält und das
+Gerät einem Bereich zugeordnet ist, setzt HomeIntent „hier“, „in diesem Raum“
+und „in diesem Zimmer“ auf diesen Bereich um. Ohne eindeutige Bereichszuordnung
+wird kein Ort geraten.
+
+Nach einer reversiblen direkten Aktion ist außerdem möglich:
 
 ```text
-Du: Mach das Küchenlicht an.
-Du: Nein, nicht Küche, sondern Büro.
+Du: Fahre die Büro-Rolllade auf 40 Prozent.
+Du: Mach das rückgängig.
 ```
 
-Auch bei erweiterten Geräten können kurze Bezüge fortgeführt werden, etwa
-„Pausiere es“ nach einem Medienbefehl oder „Schick ihn zur Ladestation“ nach
-einem Staubsaugerbefehl. Der Kontext ist pro Assist-Konversation getrennt und
-läuft automatisch ab. Die normale Gültigkeitsdauer kann in den Optionen
-zwischen 10 und 600 Sekunden eingestellt werden. Offene Bestätigungen und
-mehrstufige Dialoge besitzen unabhängig davon eine längere, begrenzte Frist.
+HomeIntent speichert dafür nur den unmittelbar vorherigen, tatsächlich
+beobachteten Zustand im kurzlebigen Gesprächskontext. Skripte, Szenen,
+Benachrichtigungen und sicherheitskritische Aktionen werden nicht automatisch
+rückgängig gemacht.
 
-Dasselbe Prinzip gilt für bereits unterstützte Stellgrößen wie Lichthelligkeit,
-Rollladenposition und Ventilatorstufe. Gibt es im zuvor genannten Raum oder auf
-der Etage mehrere passende Geräte, fragt HomeIntent nach. Messwerte ohne sichere
-Aktionszuordnung – beispielsweise Batterie, Luftfeuchtigkeit, Leistung oder
-Energie – bleiben ausschließlich lesend und lösen niemals eine erfundene Aktion
-aus.
+Fehlt genau eine benötigte Angabe, fragt HomeIntent gezielt nach:
 
-### Kalendertermine anlegen und abfragen
+```text
+Du: Stelle die Heizung im Büro ein.
+Assist: Auf welche Temperatur soll ich die Heizung im Büro stellen?
 
-Seit Version 4.30 kann HomeIntent echte Termine über Home Assistants
-`calendar.create_event` anlegen. Das funktioniert auch mit einem über CalDAV
-eingebundenen Apple-/iCloud-Kalender, sofern die betreffende `calendar.*`-
-Entität das Home-Assistant-Feature `CREATE_EVENT` anbietet und für HomeIntent
-freigegeben ist. Nur lesbare Kalender werden nicht als Schreibziel angeboten.
+Du: Stelle auf 22 Grad.
+Assist: Welche Heizung meinst du?
 
-Ein vollständiger Termin kann in einem Satz genannt werden:
+Du: Mach ein paar Lichter an.
+Assist: Welche Geräte genau? Bitte nenne ihre Namen.
+```
+
+Die normale Kontextdauer ist in den Optionen zwischen 10 und 600 Sekunden
+einstellbar. Bestätigungen und mehrstufige Dialoge besitzen eine eigene,
+begrenzte Frist.
+
+## Kalender
+
+HomeIntent verwendet Home Assistants Kalenderdienste. Ein über CalDAV
+eingebundener Apple-/iCloud-Kalender funktioniert, wenn die `calendar.*`-
+Entität die benötigte Funktion meldet und für HomeIntent freigegeben ist.
+
+### Termin in einem Satz erstellen
 
 ```text
 Trag nächsten Dienstag um 10 Uhr für eine Stunde Zahnarzt ein.
 Erstelle am 25. August von 18 bis 20 Uhr den Termin Geburtstag.
 Schreibe Urlaub morgen ganztägig in meinen Kalender ein.
-Kannst du morgen um 10 Uhr einen Termin mit dem Titel Zahnarzt für 60 Minuten erstellen?
 ```
 
-Fehlende Pflichtangaben fragt HomeIntent nacheinander ab. Bereits verstandene
-Angaben bleiben dabei im Kontext der aktuellen Assist-Konversation erhalten:
+### Fehlende Angaben im Dialog ergänzen
 
 ```text
 Du: Trag einen Termin ein.
@@ -417,146 +331,142 @@ Assist: Wann endet der Termin oder wie lange dauert er?
 Du: Eine Stunde.
 ```
 
-Sind mehrere beschreibbare Kalender freigegeben, fragt HomeIntent zusätzlich
-nach dem Zielkalender. Bei genau einem geeigneten Kalender wird er automatisch
-verwendet. Vor dem Schreiben erscheint immer eine vollständige Vorschau mit
-Titel, Datum, Beginn, Ende und Kalender. Erst ein ausdrückliches „Ja“ führt
-`calendar.create_event` aus. „Nein“, „Abbrechen“ oder „Stopp“ verwirft den
-Entwurf ohne Schreibzugriff.
+Vor `calendar.create_event` nennt HomeIntent Titel, Datum, Beginn, Ende und
+Kalender und verlangt eine Bestätigung. Bei mehreren beschreibbaren Kalendern
+wird nach dem Zielkalender gefragt.
 
-Kalender lassen sich außerdem lesend in natürlicher Sprache abfragen:
+### Kalender abfragen und verwalten
 
 ```text
 Was steht morgen in meinem Kalender?
 Welche Termine habe ich am Wochenende?
 Wann ist mein Zahnarzttermin?
 Habe ich morgen zwischen 14 und 16 Uhr Zeit?
+Verschiebe den Zahnarzttermin auf 11 Uhr.
+Benenne den Termin Planung in Projektplanung um.
+Lösche den Termin Zahnarzt.
 ```
 
-HomeIntent verwendet dafür `calendar.get_events`, fasst die Ereignisse aller
-ausgewählten Kalender zusammen und kann nach einem Titel filtern. Unterstützt
-die konkrete Kalenderintegration die Home-Assistant-Fähigkeiten
-`DELETE_EVENT` oder `UPDATE_EVENT`, kann HomeIntent einen eindeutig gefundenen
-Termin nach einer ausdrücklichen Bestätigung löschen, auf ein anderes Datum
-oder eine andere Uhrzeit verschieben, umbenennen oder in seiner Dauer ändern.
-Bei mehreren Treffern bleibt die Trefferliste im Dialog erhalten und kann per
-Titel oder Ordnungsangabe ausgewählt werden. Fehlen diese Fähigkeiten – was je nach
-Apple-/CalDAV-Anbindung vorkommen kann – wird die Änderung klar abgelehnt und
-nicht als erfolgreich ausgegeben.
+Ändern und Löschen funktionieren nur, wenn die Kalenderintegration eine
+Ereignis-ID und die entsprechenden Home-Assistant-Features bereitstellt.
+Mehrdeutige Treffer führen zu einer Auswahlfrage. Schreibende und löschende
+Vorgänge werden bestätigt.
+
+## Aufgabenlisten und Timer
+
+### Mehrere Listeneinträge in einem Satz
 
 ```text
-Lösche den Termin Zahnarzt morgen.
-Verschiebe Zahnarzt auf 11 Uhr.
-Verschiebe den Termin Zahnarzt auf morgen um 11 Uhr.
-Benenne den Termin Zahnarzt in Kontrolltermin um.
-Ändere die Dauer vom Termin Training auf 2 Stunden.
-```
-
-Bei einem bereits wiederkehrenden Termin fragt HomeIntent zusätzlich, ob nur
-dieser Termin, die ganze Serie oder dieser und alle folgenden Termine geändert
-werden sollen. Neue Terminserien werden noch nicht erzeugt, weil der öffentliche
-Home-Assistant-Dienst `calendar.create_event` derzeit kein Wiederholungsfeld
-anbietet.
-
-Solange die Vorschau noch nicht bestätigt wurde, können Angaben korrigiert
-werden:
-
-```text
-Du: Doch um 11 Uhr.
-Du: Der Titel soll Kontrolltermin sein.
-Du: Nimm den Familienkalender.
-```
-
-Für Termine mit Uhrzeit ist eine Endzeit oder Dauer erforderlich; HomeIntent
-erfindet keine Standarddauer. Relative Daten, Wochentage, ausgeschriebene und
-numerische Daten sowie Ganztagstermine werden in der lokalen
-Home-Assistant-Zeitzone aufgelöst. Vergangene oder wegen einer Zeitumstellung
-nicht existierende Zeitpunkte werden abgelehnt.
-
-### Einkaufslisten, Aufgabenlisten und Timer
-
-HomeIntent verwendet die nativen Home-Assistant-Dienste der `todo.*`- und
-`timer.*`-Entitäten. Mehrere Einkaufsartikel können in einem einzigen Satz
-genannt werden; jeder Artikel wird als eigener Listeneintrag angelegt:
-
-```text
-Füge Milch, Brot, Eier und Kaffee zur Einkaufsliste hinzu.
-Setze Äpfel und Bananen auf meine Einkaufsliste.
+Füge Milch, Brot, Butter und Äpfel zur Einkaufsliste hinzu.
 Was steht auf meiner Einkaufsliste?
-Markiere Milch und Brot auf der Einkaufsliste als erledigt.
+Markiere Milch und Brot als erledigt.
 Entferne Milch und Brot von der Einkaufsliste.
-Lösche alle erledigten Einträge aus der Einkaufsliste.
-Füge den Bericht bis morgen mit Priorität hoch und der Beschreibung Entwurf prüfen zur Arbeitsliste hinzu.
+Lösche alle erledigten Einträge.
 Verschiebe Milch von der Einkaufsliste auf die Arbeitsliste.
 ```
 
-Kommas, „und“ sowie „sowie“ trennen die Artikel. Doppelt genannte Artikel
-werden innerhalb desselben Befehls nur einmal angelegt. Bei mehreren
-freigegebenen Listen fragt HomeIntent nach der gewünschten Liste; „die erste“,
-„die zweite“ oder ihr Name setzt den ursprünglichen Auftrag fort. Das Löschen
-aller erledigten Einträge erfordert eine Bestätigung.
+Kommas, „und“ und „sowie“ trennen Einträge. Doppelte Angaben werden innerhalb
+eines Befehls entfernt. HomeIntent kann außerdem Fälligkeit, Beschreibung und
+sichtbare Prioritätspräfixe verwalten. Bei mehreren Listen wird nachgefragt.
 
-Fälligkeit und Beschreibung werden über die nativen `todo`-Felder gespeichert.
-Da Home Assistant kein listenübergreifend portables Prioritätsfeld vorgibt,
-kennzeichnet HomeIntent Prioritäten sichtbar mit `[Hoch]`, `[Mittel]` oder
-`[Niedrig]`. Beim Abhaken, Löschen und Verschieben löst HomeIntent zuerst die
-stabile Eintrags-ID auf. Fehlende oder doppelte Namen führen zu einer
-Rückmeldung statt zu einer geratenen Änderung.
-
-Timer lassen sich ebenso dialogfähig steuern:
+### Timer
 
 ```text
-Stelle den Küchentimer auf 5 Minuten und 30 Sekunden.
-Verlängere den Küchentimer um zwei Minuten.
-Verkürze den Küchentimer um 30 Sekunden.
+Starte den Küchentimer für 20 Minuten.
+Verlängere den Küchentimer um fünf Minuten.
 Pausiere den Küchentimer.
 Setze den Küchentimer fort.
 Wie lange läuft der Küchentimer noch?
 Brich den Küchentimer ab.
 ```
 
-HomeIntent erzeugt dafür keine kurzlebige Automation, sondern steuert die
-vorhandene Timer-Entität direkt. Dadurch bleiben Status, Pause und Restzeit in
-Home Assistant sichtbar.
+## Automationen erstellen
 
-### Mehrteilige Befehle
+HomeIntent erzeugt echte Home-Assistant-Automationen. Parsing, Validierung und
+Vorschau verändern noch nichts. Erst ein ausdrückliches „Ja“ startet Generator
+und Executor.
 
-Mehrere direkte Aktionen können nacheinander formuliert werden. Vor der Ausführung werden alle Teilbefehle aufgelöst und validiert.
+### Zeitversetzte Einmal-Aufträge
 
 ```text
-Mach die Wohnzimmerlampe an und fahre den Rollladen Büro hoch.
+Fahre in 30 Sekunden die Rolllade im Büro auf 50 Prozent.
+Schalte in fünf Minuten das Küchenlicht ein.
+Fahre in zwei Stunden und 30 Minuten die Rollläden herunter.
 ```
 
-## Natürlichsprachige Automationen
+Der relative Zeitpunkt wird bei der Bestätigung in einen absoluten lokalen
+Zeitpunkt umgerechnet. Die Automation erhält einen sekundengenauen Zeittrigger,
+eine Datumsbegrenzung und eine abschließende Self-Delete-Aktion. Nach
+erfolgreicher Ausführung entfernt HomeIntent Automation und Metadaten wieder.
 
-HomeIntent kann Automationen nicht nur verstehen, sondern als echte Home-Assistant-Automationen anlegen, abfragen, aktivieren, deaktivieren und löschen.
+### Kalendarische Einmal-Aufträge
 
-Wer nicht alle Angaben in einen Satz packen möchte, kann mit „Erstelle eine
-Automation“ einen strukturierten Dialog starten. HomeIntent fragt nacheinander
-nach Auslöser, optionaler Bedingung, Aktion und Laufzeit. Jeder Dialogschritt
-wird direkt in das typisierte `AutomationModel` übersetzt; freier
-Gesprächstext wird nicht als ausführbarer Code behandelt.
+```text
+Fahre morgen um 8 Uhr die Rolllade hoch.
+Schalte heute Abend um 20 Uhr das Licht aus.
+Starte am Samstag um 10 Uhr den Staubsauger.
+Aktiviere am 25. August um 18 Uhr die Szene Filmabend.
+Erinnere mich übermorgen früh an die Mülltonnen.
+```
 
-### Wiederkehrende und anhaltende Auslöser
+„Früh“ verwendet einen festen dokumentierten Zeitpunkt von 08:00 Uhr.
+Vergangene und bei einer Zeitumstellung nicht existierende lokale Zeitpunkte
+werden abgelehnt.
+
+### Zustands-, Sonnen-, Zahlen- und Kalenderauslöser
+
+```text
+Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht ein.
+Wenn das Küchenfenster zehn Minuten offen bleibt, schalte das Licht ein.
+Wenn die Temperatur unter 18 Grad fällt, schalte die Heizung ein.
+Kannst du mich benachrichtigen, wenn die Außentemperatur 28 Grad beträgt?
+Kannst du Philipp benachrichtigen, wenn die Außentemperatur 28 Grad beträgt?
+Bei Sonnenuntergang schalte die Außenbeleuchtung ein.
+Zehn Minuten vor dem Termin Müllabfuhr erinnere mich.
+Wenn der Termin Urlaub beginnt, aktiviere die Szene Abwesend.
+```
+
+Zustandsauslöser und Zustandsbedingungen verwenden denselben semantischen
+Predicate-Compiler wie direkte Zustandsfragen. Kalenderauslöser können Start,
+Ende, Offset und eine Titelbedingung enthalten.
+
+Eine exakte numerische Formulierung mit „beträgt“, „erreicht“ oder „hat“ wird
+nicht fälschlich zu „größer als“ beziehungsweise „kleiner als“ gerundet.
+HomeIntent erzeugt dafür einen eng begrenzten Template-Trigger. Bei einem
+genannten Empfänger wird nur dann ein konkretes `notify`-Ziel verwendet, wenn
+es eindeutig über Friendly Name oder Alias aufgelöst werden kann.
+
+### Wiederholungen, Zeiträume und Laufbegrenzungen
 
 ```text
 Jeden Werktag um 7 Uhr schalte das Küchenlicht ein.
-Jeden zweiten Samstag um 10 Uhr starte den Staubsauger.
+Jeden zweiten Samstag um 10 Uhr schalte das Küchenlicht ein.
 Jeden Montag um 8 Uhr, nur zwischen Oktober und März, schalte das Licht ein.
-Wenn das Küchenfenster zehn Minuten offen bleibt, schalte das Küchenlicht ein.
-Wenn das Küchenfenster innerhalb von fünf Minuten zweimal geöffnet wird, schalte das Küchenlicht ein.
+Wenn das Fenster innerhalb von fünf Minuten zweimal geöffnet wird, schalte das Licht ein.
+Wiederhole die Automation für Küchenlicht nur dreimal.
 ```
 
-Wochentage werden als native Home-Assistant-Zeitbedingungen erzeugt.
-„Jeden zweiten …“ erhält bei der Erstellung einen festen ISO-Wochenanker.
-„Bleibt N Minuten“ verwendet das native Trigger-Feld `for` und wird daher
-abgebrochen, wenn der Zustand vorher zurückwechselt; es ist kein
-unkonditioniertes Warten in der Aktionsfolge.
-„Zweimal innerhalb von …“ wartet nach dem ersten Ereignis mit einem nativen,
-zeitlich begrenzten `wait_for_trigger` auf dasselbe zweite Ereignis. Läuft das
-Fenster ab, wird die Aktionsfolge nicht ausgeführt.
+„Bleibt N Minuten“ verwendet Home Assistants natives Trigger-Feld `for`.
+„Zweimal innerhalb von …“ wartet nach dem ersten Ereignis begrenzt auf ein
+zweites passendes Ereignis. Laufbegrenzte Automationen zählen erfolgreiche
+Ausführungen und löschen sich nach dem letzten Lauf.
 
-### Erinnerungen und Benachrichtigungsziele
+### Bedingungen und Aktionsfolgen
+
+Das `AutomationModel` unterstützt mehrere Trigger, logische Bedingungen,
+sequentielle oder parallele Aktionen, Verzögerungen, begrenztes Warten und
+`if/then/else`-Verzweigungen. Unterstützte Zeit-, Datums-, Wochentags-, Sonnen-,
+Zustands-, Anwesenheits- und numerische Bedingungen werden in native
+Home-Assistant-Strukturen beziehungsweise eng begrenzte Templates übersetzt.
+
+### Geführter Automationsdialog
+
+Mit „Erstelle eine Automation“ startet ein strukturierter Dialog. HomeIntent
+fragt nach Auslöser, optionaler Bedingung, Aktion und Laufzeit. Jeder Schritt
+wird sofort in das typisierte `AutomationModel` übersetzt; freier Dialogtext
+wird nicht als ausführbarer Code gespeichert.
+
+### Erinnerungen
 
 ```text
 Erinnere mich in 30 Minuten an die Waschmaschine.
@@ -565,480 +475,279 @@ Sag Philipp morgen um 8 Uhr Bescheid, dass das Fenster offen ist.
 Erinnere mich in 30 Minuten an die Waschmaschine, aber nicht zwischen 22 und 7 Uhr.
 ```
 
-Erinnerungen sind datumsgebundene, einmalige Automationen und durchlaufen
-dieselbe Vorschau und Bestätigung wie Geräteaufträge. „Mich“ erzeugt eine
-lokale persistente Home-Assistant-Benachrichtigung. Eine genannte Person wird
-nur verwendet, wenn genau ein ausgewähltes `notify`-Ziel über Namen oder Alias
-passt; andernfalls lehnt HomeIntent die Erstellung ab.
-Eine ausdrücklich genannte Ruhezeit unterdrückt die Erinnerung nicht: Fällt
-der Zielzeitpunkt hinein, wird der einmalige Auftrag auf das Ende der Ruhezeit
-verschoben und die Verschiebungsregel bereits in der Vorschau genannt.
+„Mich“ verwendet eine lokale persistente Benachrichtigung. Eine Person wird
+nur verwendet, wenn genau ein passendes freigegebenes `notify`-Ziel existiert.
+Eine ausdrücklich genannte Ruhezeit verschiebt eine einmalige Erinnerung auf
+das Ende der Ruhezeit und wird bereits in der Vorschau genannt.
 
-### Dauerhafte Automation erstellen
+## Automationen verwalten
 
-```text
-Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht ein.
-Wenn in der Küche offen die Fenster sind, schalte das Küchenlicht ein.
-```
-
-Der Ablauf ist absichtlich zweistufig:
-
-1. HomeIntent zerlegt den Satz in Trigger, optionale Bedingungen und Aktionen.
-2. Entitäten, Bereiche, Fähigkeiten, Werte und logische Struktur werden validiert.
-3. Assist zeigt eine verständliche Vorschau.
-4. Erst nach einer ausdrücklichen Bestätigung mit „Ja“ wird die Automation geschrieben.
-5. HomeIntent ergänzt `automations.yaml` atomar und ruft `automation.reload` auf.
-6. Die neue Automation erscheint in Home Assistant und erhält die Kategorie **Homeintent**.
-
-Ein „Nein“ bricht die Erstellung ab, ohne etwas zu speichern.
-
-Auslöser und Aktion können außerdem in zwei Gesprächsschritten genannt werden:
+HomeIntent verwaltet ausschließlich eindeutig zugeordnete Automationen und
+fragt bei mehreren Treffern nach.
 
 ```text
-Du: Wenn das Küchenfenster geöffnet wird.
-Assist: Was soll dann passieren?
-Du: Schalte das Küchenlicht ein.
-Assist: Automation erkannt: … Soll diese Automation erstellt werden?
-```
-
-Der unvollständige Entwurf enthält nur den bereits eindeutig geparsten
-Auslöser. Eine unverständliche zweite Antwort führt weder einen Direktbefehl
-aus noch erzeugt sie eine Automation; HomeIntent fragt erneut nach einer
-vollständigen Aktion. Auch hier wird erst nach der anschließenden Vorschau und
-einem ausdrücklichen „Ja“ geschrieben.
-
-### Bedingungen
-
-Trigger können mit Bedingungen kombiniert werden:
-
-```text
-Wenn das Küchenfenster geöffnet wird und es nach 18 Uhr ist, schalte das Küchenlicht ein.
-Wenn das Küchenfenster geöffnet wird und niemand zuhause ist, schalte das Küchenlicht ein.
-Wenn das Küchenfenster geöffnet wird und Samstag ist, schalte das Küchenlicht ein.
-```
-
-Die zentrale Struktur dafür ist das `AutomationModel`: ein validierter Syntaxbaum aus Triggern, Bedingungen und Aktionen. Erst der HA-Automation-Generator übersetzt dieses Modell in Home-Assistant-YAML.
-
-Das Modell und der Generator unterstützen mehrere alternative Auslöser mit
-Trigger-IDs, native Kalenderauslöser mit Start-/Endereignis und Offset,
-sequentielle oder parallele Aktionsgruppen, begrenzte Wartebedingungen sowie
-`if/then/else`-Verzweigungen.
-
-Datumsbedingungen werden als eng begrenzte lokale `now().month/day`-Vorlage
-erzeugt. Bedingtes Warten kann Zustände, Anwesenheit, numerische Schwellen,
-Uhrzeiten, Wochentage, Daten und einfache Sonnenbedingungen verwenden. Ein
-Timeout bricht die weitere Aktionsfolge standardmäßig sicher ab.
-
-Zustandsauslöser und Zustandsbedingungen verwenden denselben semantischen
-Predicate-Compiler. Gerätetyp, Zustand und Raum beziehungsweise Etage dürfen
-dabei in unterschiedlicher Reihenfolge stehen. Widersprüchliche Zustände oder
-nicht erklärte Zusätze werden abgelehnt. Spezialisierte Auslöser wie Uhrzeit,
-Sonne, numerische Schwellen und Geräteereignisse bleiben in ihren streng
-validierten Fachparsern.
-
-### Einmalige Automation
-
-Mit „einmalig“ oder „nur einmal“ wird eine Automation nach ihrer ersten erfolgreichen Ausführung automatisch wieder gelöscht:
-
-```text
-Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht einmalig ein.
-Wenn es 20 Uhr ist, schalte das Küchenlicht nur einmal ein.
-```
-
-Technisch erhält die Automation als letzten Schritt einen internen Aufruf von `ha_nlu.delete_automation`. Dieser entfernt genau die betreffende Automation aus `automations.yaml` und lädt die Automationen neu.
-
-### Zeitversetzter Einmal-Befehl
-
-Relative Zeitangaben erzeugen ebenfalls eine einmalige Automation:
-
-```text
-Fahre in 5 Minuten die Wohnzimmer Rolllade auf 30 Prozent.
-Fahre in 30 Sekunden die Wohnzimmer Rolllade auf 30 Prozent.
-In einer Stunde schalte das Küchenlicht ein.
-In zwei Stunden und 30 Minuten schalte das Küchenlicht ein.
-```
-
-Der Countdown beginnt erst nach der Bestätigung mit „Ja“. HomeIntent berechnet dann aus der lokalen Home-Assistant-Zeit einen absoluten Zeitpunkt mit Sekundenpräzision und speichert zusätzlich das vollständige Zieldatum. Minuten-, Stunden- und Tageswechsel sowie Sommerzeitwechsel werden berücksichtigt. Nach der Aktion löscht sich die Automation selbst; vorübergehende Lösch- oder Reloadfehler werden begrenzt erneut versucht.
-
-Das ist **keine täglich wiederkehrende Automation**. Der intern verwendete Uhrzeit-Trigger wird durch eine Datumsbedingung geschützt und nach dem ersten Auslösen entfernt. War Home Assistant beim Zielzeitpunkt ausgeschaltet, wird der verpasste Auftrag beim nächsten Start sicher verworfen, statt am Folgetag eine veraltete Geräteaktion auszuführen.
-
-### Termine in Alltagssprache
-
-HomeIntent versteht zusätzlich kalendarische einmalige Aufträge:
-
-```text
-Morgen um 8 Uhr fahre die Rolllade im Büro hoch.
-Heute Abend um 20 Uhr schalte das Gartenlicht ein.
-Am Samstag um 10 Uhr starte Gute Nacht.
-Am 25. August um 18 Uhr schalte das Küchenlicht ein.
-Übermorgen früh fahre die Rolllade hoch.
-Morgen halb acht schalte das Küchenlicht ein.
-Morgen viertel vor neun schalte das Küchenlicht ein.
-Nächsten Samstag um 10 Uhr starte Gute Nacht.
-```
-
-Der Termin wird erst bei der Bestätigung in der lokalen Home-Assistant-Zeitzone
-aufgelöst. Nicht existierende Uhrzeiten bei einem Sommerzeitwechsel und bereits
-vergangene Termine werden abgelehnt. Für Tageszeiten ohne Uhrzeit gelten feste,
-reproduzierbare Standardwerte; „früh“ bedeutet derzeit 08:00 Uhr.
-
-Bei zustandsbasierten Automationen darf das trennende Komma entfallen, sofern
-Trigger und Aktion durch ihre Grammatiken genau eine mögliche Trennstelle haben.
-Auch die umgekehrte Satzreihenfolge und wiederkehrende Umgangsformen werden
-verstanden:
-
-```text
-Wenn das Bürofenster geöffnet wird schalte das Küchenlicht ein.
-Schalte das Küchenlicht ein wenn das Bürofenster geöffnet wird.
-Jedes Mal wenn das Bürofenster geöffnet wird schalte das Küchenlicht ein.
-```
-
-### Kalenderereignisse als Automationsauslöser
-
-Ein Termin kann nicht nur angelegt oder abgefragt werden, sondern auch eine
-dauerhafte Automation auslösen:
-
-```text
-Wenn der Termin Müllabfuhr beginnt, erinnere mich.
-Zehn Minuten vor einem Arzttermin schalte das Flurlicht ein.
-Wenn im Familienkalender Urlaub beginnt, aktiviere die Szene Abwesend.
-Schalte das Flurlicht ein, wenn Urlaub im Familienkalender beginnt.
-Wenn ein Termin endet, schalte das Flurlicht aus.
-```
-
-HomeIntent erzeugt einen nativen Home-Assistant-`calendar`-Trigger für Beginn
-oder Ende. „Vor“ und „nach“ werden als Trigger-Offset gespeichert. Wird ein
-Titel genannt, ergänzt HomeIntent eine deterministische, unabhängig von der
-Groß-/Kleinschreibung arbeitende Titelbedingung; andere Termine desselben
-Kalenders lösen die Aktion dann nicht aus. Kalender-Automationen verwenden den
-Modus `queued`, damit ein zweites Ereignis während einer laufenden Aktionsfolge
-nicht verloren geht. Auch hier gelten Vorschau und ausdrückliche Bestätigung.
-
-### Eine Automation begrenzt wiederholen
-
-Mit Formulierungen wie „nur dreimal“ kann die Ausführungszahl einer Automation
-auf zwei bis zehn Läufe begrenzt werden. HomeIntent zählt erfolgreiche Läufe in
-seinen Metadaten und löscht die Automation nach dem letzten Lauf. Die Vorschau
-nennt die Begrenzung vor der Bestätigung.
-
-### Automationen verwalten
-
-```text
-Welche Automationen gibt es?
 Zeige nur HomeIntent-Automationen.
 Wie viele HomeIntent-Automationen sind aktiv?
 Welche einmaligen Aufträge sind noch geplant?
 Wann wird die Rolllade gefahren?
 Welche Automation steuert die Büro Rolllade?
 Was passiert, wenn das Küchenfenster geöffnet wird?
-Verschiebe den Auftrag für die Rolllade auf 20 Uhr.
-Lösche alle abgelaufenen HomeIntent-Automationen.
-Was schaltet das Küchenlicht?
-Warum ist das Küchenlicht an?
-Deaktiviere die Automation für Küchenlicht.
+Warum wurde die Automation für Büro Rollladen nicht ausgelöst?
+
 Aktiviere die Automation für Küchenlicht.
+Deaktiviere die Automation für Küchenlicht.
 Lösche die Automation für Küchenlicht.
-Ändere nur die Aktion, behalte Auslöser und Bedingungen.
-Füge der Automation eine weitere Aktion hinzu.
-Verschiebe die zweite Aktion an die erste Stelle.
-Ändere den Auslöser der Automation auf wenn die Sonne untergeht.
-Füge der Automation die Bedingung hinzu, dass jemand zuhause ist.
-Entferne die zweite Bedingung der Automation.
-Lösche alle Bedingungen der Automation.
+Verschiebe den Auftrag auf 20 Uhr.
+Lösche alle abgelaufenen HomeIntent-Automationen.
+
+Ändere bei der Automation für Küchenlicht nur die Aktion.
+Füge der Automation für Küchenlicht eine weitere Aktion hinzu.
+Verschiebe bei der Automation für Küchenlicht die zweite Aktion an die erste Stelle.
+Ändere den Auslöser der Automation für Küchenlicht auf Sonnenuntergang.
+Füge der Automation für Küchenlicht die Bedingung hinzu, dass jemand zuhause ist.
+Entferne die zweite Bedingung der Automation für Küchenlicht.
+Lösche alle Bedingungen der Automation für Küchenlicht.
+
 Dupliziere die Automation für Küchenlicht.
 Pausiere die Automation für Küchenlicht bis morgen 20 Uhr.
-Zeige die Details der Automation für Küchenlicht.
 Mache die letzte HomeIntent-Automationsänderung rückgängig.
 ```
 
-Löschen erfordert eine Bestätigung. Aktivieren und Deaktivieren ändern den dauerhaften `initial_state` in `automations.yaml`; die Einstellung bleibt daher auch nach einem Reload oder Neustart erhalten. Bei mehreren Treffern nennt HomeIntent die Kandidaten und behält den ursprünglichen Auftrag im Dialog. Die Auswahl kann mit dem Namen oder „die erste“, „die zweite“ beziehungsweise „die dritte“ erfolgen.
+Strukturänderungen an einmaligen Aufträgen werden abgelehnt, wenn dadurch Zeit-
+oder Lebenszyklusmetadaten inkonsistent werden könnten. Löschen, Verschieben,
+Bereinigung, Laufbegrenzung und Rücknahme benötigen eine Bestätigung.
 
-Bei Abfragen unterscheidet HomeIntent die YAML-Rollen: Eine Frage nach dem
-Auslöser durchsucht nur Trigger, eine Frage nach dem gesteuerten Gerät nur
-Aktionen. Beim gezielten Austauschen einer Aktion wählt HomeIntent ausschließlich
-eigene Automationen, fragt neue Aktion und Bestätigung ab und schreibt die
-Änderung transaktional. Trigger, Bedingungen, triggerbedingte Verzögerungen,
-Self-Delete und Laufzähler bleiben dabei unverändert.
-Eine zusätzliche Aktion kann alternativ hinten an die vorhandene Aktionsfolge
-angefügt werden.
+## Beständigkeit und Kategorie „Homeintent“
 
-Bei dauerhaften eigenen Automationen können außerdem Auslöser ersetzt oder
-ergänzt und Bedingungen ersetzt, ergänzt oder vollständig entfernt werden.
-Vor der Bestätigung nennt HomeIntent jeweils die Anzahl der Elemente vorher
-und nachher. Das unklare Löschen nur „einer passenden“ Bedingung wird
-verweigert; HomeIntent entfernt niemals durch Raten einen Strukturteil.
-Einmalige Aufträge sind von solchen Strukturänderungen ausgenommen, weil ihre
-Zeit- und Self-Delete-Metadaten zusammengehören.
-Auch Verschieben, Laufbegrenzung, Bereinigung und Rücknahme verlangen eine
-ausdrückliche Bestätigung. Vor jeder Mutation wird zusätzlich ein begrenzter
-Versionsstand gespeichert; die letzte HomeIntent-Änderung kann dadurch
-kontrolliert zurückgenommen werden.
+Neue HomeIntent-Automationen erhalten die Home-Assistant-Kategorie
+**Homeintent**. Das gilt für dauerhafte, zustandsbasierte einmalige und
+zeitversetzte Automationen.
 
-Bei einer gezielten Positionsangabe darf HomeIntent außerdem eine einzelne
-Bedingung entfernen oder bestehende Aktionen neu anordnen. Beim Duplizieren
-werden neue Automation- und Lebenszyklus-IDs vergeben. Eine zeitlich begrenzte
-Pause deaktiviert die Automation dauerhaft in der YAML und erzeugt einen
-datumsgebundenen Wiederaufnahmeauftrag. Dadurch überlebt die Pause auch einen
-Home-Assistant-Neustart.
+Beim Start gleicht HomeIntent eigene YAML-Einträge, Metadaten und Kategorien
+ab. Fehlende Kategoriezuordnungen werden repariert und verwaiste Metadaten
+entfernt.
 
-## Haushaltszustand, ASR-Korrektur und Sicherheitsfunktionen
+Schreibvorgänge auf `automations.yaml` sind abgesichert durch:
 
-Zusätzliche lokale Abfragen aggregieren den aktuellen, für HomeIntent
-ausgewählten Zustandsbestand:
+- eine gemeinsame Sperre aller Executor-Instanzen,
+- einen Fingerabdruckvergleich unmittelbar vor dem Speichern,
+- Abbruch statt Überschreiben bei konkurrierenden Änderungen,
+- ein dauerhaftes Transaktionsjournal,
+- kontrolliertes Rollback nur bei unverändertem HomeIntent-Schreibstand,
+- Abgleich nach `automation.reload` und
+- einen begrenzten Verlauf der letzten zehn Automationsstände.
+
+## Sicherheit
+
+### Niemals bei Mehrdeutigkeit raten
+
+Mehrere gleichwertige Ziele führen zu einer Rückfrage oder Ablehnung. Die
+erste gefundene Entität wird nicht zufällig verwendet.
+
+### Fähigkeiten vor Ausführung prüfen
+
+Eine Positionsaktion benötigt Positionsunterstützung, eine Farbe ein
+farbfähiges Licht und ein Modus muss in den aktuell gemeldeten Optionen des
+Geräts enthalten sein.
+
+### Zentrale Ausführungsrichtlinie
+
+In den Integrationsoptionen lassen sich einstellen:
+
+- die Risikostufe, ab der eine Bestätigung erforderlich ist,
+- die maximale Zahl gleichzeitig steuerbarer Ziele,
+- ob Nicht-Administratoren kritische Aktionen ausführen dürfen,
+- ob Nicht-Administratoren Automationen erstellen dürfen,
+- welche freigegebenen Entitäten ausschließlich lesbar sind,
+- welche Benutzer überhaupt Geräte steuern dürfen,
+- welche Entitäten ausschließlich Administratoren steuern dürfen,
+- welche zusätzlichen lokalen Sprach-Aliase gelten und
+- wie lange normaler Dialogkontext gültig bleibt.
+
+Nur-Lesen-Entitäten bleiben für Fragen und Recorder-Abfragen sichtbar. Direkte
+Befehle und neu bestätigte HomeIntent-Automationen dürfen sie nicht steuern.
+
+Zusätzliche Aliase werden in den Optionen zeilenweise und explizit definiert:
 
 ```text
-Welche Geräte sind nicht erreichbar?
-Welche Batterien sind unter 20 Prozent?
-Welches Gerät verbraucht gerade am meisten Strom?
-Welche Fenster sind seit mehr als zwei Stunden offen?
-Was wurde heute durch HomeIntent ausgeführt?
-Warum wurde die Automation für Büro Rollladen nicht ausgelöst?
+Leselampe = light.wohnzimmer_sofa
+Sofalicht = light.wohnzimmer_sofa
 ```
 
-Für numerische Sensoren kann HomeIntent zusätzlich Home Assistants Recorder-
-Statistiken abfragen. Unterstützt werden Mittelwert, Minimum, Maximum und
-Veränderung für heute, gestern, diese beziehungsweise letzte Woche und den
-aktuellen Monat. Die Entität muss eindeutig genannt und im Recorder vorhanden
-sein; HomeIntent berechnet keine erfundenen Werte aus dem aktuellen Zustand.
+Ein Alias darf nie auf mehrere Entity-IDs zeigen. Für einen gemeinsamen Namen
+mehrerer Geräte sollte stattdessen eine echte Home-Assistant-Gruppe freigegeben
+werden.
 
-```text
-Wie hoch war die durchschnittliche Temperatur im Wohnzimmer gestern?
-Was war heute der höchste Wert vom Stromverbrauch Haus?
-Wie hat sich der Energiezähler diese Woche verändert?
-```
+### Benutzergebundene Bestätigungen
 
-Die letzte Frage liest ein auf 250 Einträge begrenztes Laufzeitprotokoll. Es
-enthält Zeitpunkt, Dienst, Entitäts-IDs und nur einen gekürzten Hash der
-Benutzer-ID, aber keinen gesprochenen Text und keine Service-Daten. Das
-Protokoll liegt nur im Arbeitsspeicher und beginnt nach einem Neustart neu.
-Bei der Diagnose einer Automation nennt HomeIntent Aktivierungszustand,
-Struktur und den von Home Assistant gemeldeten letzten Auslösezeitpunkt. Ohne
-gespeicherte Home-Assistant-Ablaufverfolgung behauptet es bewusst keine
-eindeutige Ursache, sondern grenzt überprüfbare Auslöser und Bedingungen ein.
+Wenn Home Assistant eine Benutzer-ID bereitstellt, kann nur derselbe Benutzer
+eine offene Service- oder Automationserstellungsbestätigung abschließen.
+Sprach-Pipelines ohne authentifizierte Benutzerkennung bleiben aus
+Kompatibilitätsgründen über die Integrationsoptionen steuerbar.
 
-Bei einer einzelnen wahrscheinlichen Spracherkennungsabweichung in einem
-ausgewählten Entitätsnamen kann HomeIntent eine phonetisch ähnliche Korrektur
-vorschlagen. Die Korrektur verändert ausschließlich Entitätsvokabular und
-wird niemals automatisch ausgeführt: „Meintest du …?“ verlangt immer eine
-Bestätigung. Mehrere plausible Korrekturen werden verworfen.
+### Audit und Diagnose
 
-`alarm_control_panel` und explizit ausgewählte `group`-Entitäten werden
-unterstützt. Jede Alarm- oder Gruppenaktion benötigt eine Bestätigung.
-Entschärfen und manuelles Auslösen einer Alarmanlage sind zusätzlich auf
-angemeldete Home-Assistant-Administratoren begrenzt. Wird bei „meine Liste“
-ein angemeldeter Benutzer erkannt und existiert eine eindeutig nach ihm
-benannte Liste, bevorzugt HomeIntent dieses persönliche Ziel.
+Das Laufzeit-Audit enthält maximal 250 Einträge mit Zeitpunkt, Dienst,
+Entity-ID und gekürztem Benutzer-Hash. Es enthält keinen gesprochenen Text und
+keine Service-Daten und beginnt nach einem Neustart neu.
+
+Die bewusst heruntergeladene Home-Assistant-Diagnose enthält nur technische
+Kennzahlen und Richtlinieneinstellungen, aber keine Äußerungen, Entity-IDs oder
+Zustände.
 
 ## Installation über HACS
 
-HomeIntent wird aktuell als benutzerdefiniertes HACS-Repository installiert. Das Vorgehen entspricht der offiziellen Anleitung für [benutzerdefinierte HACS-Repositories](https://hacs.xyz/docs/faq/custom_repositories/).
+HomeIntent wird derzeit als benutzerdefiniertes HACS-Repository installiert.
 
 1. Öffne **HACS → Integrationen**.
-2. Öffne das Menü oben rechts und wähle **Benutzerdefinierte Repositories**.
-3. Trage dieses Repository ein:
+2. Öffne oben rechts **Benutzerdefinierte Repositories**.
+3. Trage ein:
 
    ```text
    https://github.com/pquandel2-alt/ha-nlu-engine
    ```
 
-4. Wähle als Typ **Integration**.
-5. Suche anschließend in HACS nach **HA NLU Engine** und installiere die aktuelle Version.
+4. Wähle den Typ **Integration**.
+5. Suche nach **HA NLU Engine** und installiere die aktuelle Version.
 6. Starte Home Assistant neu.
-7. Öffne **Einstellungen → Geräte & Dienste → Integration hinzufügen** und füge **HA NLU Engine** hinzu.
+7. Öffne **Einstellungen → Geräte & Dienste → Integration hinzufügen**.
+8. Füge **HA NLU Engine** hinzu.
 
-## Einrichtung in Assist
+Bei einem Update über HACS anschließend Home Assistant neu starten. Wenn eine
+ältere Installation ungewöhnliches Verhalten zeigt, die Integration einmal
+neu laden; ein vollständiges Entfernen ist normalerweise nicht erforderlich.
 
-Nach der Installation steht **HA NLU Engine** als Conversation Agent zur Verfügung.
+## Assist einrichten
 
-1. Öffne die Einstellungen deines Sprachassistenten beziehungsweise deiner Assist-Pipeline.
+1. Öffne die Einstellungen der gewünschten Assist-Pipeline.
 2. Wähle **HA NLU Engine** als Conversation Agent.
-3. Prüfe unter den Assist-/Entitätseinstellungen, welche Entitäten für Assist freigegeben sind.
+3. Gib die benötigten Entitäten für Assist frei.
+4. Öffne bei Bedarf die Optionen von **HA NLU Engine** für eine feste Auswahl
+   und die Sicherheitsrichtlinien.
 
-Standardmäßig verwendet HomeIntent bei jedem Gesprächszug dynamisch die aktuell für Assist freigegebenen Entitäten aus den unterstützten Domänen. In den Optionen der Integration kann stattdessen eine feste Entitätsauswahl gespeichert werden.
+Ohne feste Auswahl liest HomeIntent die aktuell für Assist freigegebenen
+Entitäten bei jedem Gesprächszug neu. Eine gespeicherte feste Auswahl wird
+dagegen nicht automatisch um später hinzugefügte Kalender, Listen, Timer oder
+Geräte ergänzt.
 
-Die Integrationsoptionen bieten außerdem zentrale Sicherheitsgrenzen:
+Für zuverlässige Ergebnisse:
 
-- Entitäten können als **nur lesbar** markiert werden. Sie bleiben für
-  Zustands- und Verlaufsfragen sichtbar, werden aber weder direkt noch durch
-  neu bestätigte HomeIntent-Automationen gesteuert.
-- Die Risikostufe, ab der eine ausdrückliche Bestätigung nötig ist, ist
-  einstellbar.
-- Die maximale Zahl gleichzeitig gesteuerter Ziele begrenzt versehentliche
-  Großaktionen.
-- Kritische Aktionen und Automationserstellung können für
-  Nicht-Administratoren gesperrt werden.
-- Die Gültigkeitsdauer des normalen Dialogkontexts ist konfigurierbar.
-
-Änderungen an diesen Optionen laden die Integration kontrolliert neu. Bereits
-laufende Home-Assistant-Automationen werden dadurch nicht verändert.
-
-Für eine zuverlässige Auflösung empfiehlt es sich:
-
-- verständliche und eindeutige Entity-Namen zu vergeben,
-- Geräte den richtigen Bereichen und Etagen zuzuordnen,
-- sinnvolle Aliase für Entitäten und Bereiche zu hinterlegen und
-- nur die tatsächlich per Sprache benötigten Entitäten für Assist freizugeben.
-
-Für das Anlegen von Terminen muss die gewünschte `calendar.*`-Entität ebenfalls
-für Assist beziehungsweise in den HomeIntent-Integrationsoptionen freigegeben
-sein. Wurde früher bereits eine feste Entitätsauswahl gespeichert, wird ein
-später hinzugefügter Kalender nicht automatisch ergänzt; öffne dann die
-Optionen von **HA NLU Engine** und wähle den Kalender dort zusätzlich aus.
-Dasselbe gilt für neu hinzugefügte `todo.*`-Listen oder `timer.*`-Entitäten.
-
-## Kategorie „Homeintent“
-
-Alle ab Version 4.20.0 neu durch HomeIntent erzeugten Automationen werden automatisch der Home-Assistant-Automationskategorie **Homeintent** zugeordnet. Das gilt für:
-
-- dauerhafte Automationen,
-- einmalige zustandsbasierte Automationen und
-- zeitversetzte Einmal-Automationen.
-
-Existiert die Kategorie bereits mit einer anderen Groß-/Kleinschreibung, wird sie wiederverwendet. Beim Start gleicht HomeIntent bekannte eigene Automationen, Metadaten und Kategorien ab. Dadurch werden fehlende Kategoriezuordnungen repariert und verwaiste HomeIntent-Metadaten entfernt.
-
-Die Kategorie dient nur der übersichtlichen Gruppierung in der Automationsansicht. Sie verändert nicht das Ausführungsverhalten.
-
-## Sicherheit und Datenhaltung
-
-### Keine Ausführung bei Mehrdeutigkeit
-
-Wenn mehrere Entitäten gleich gut passen und kein Bereich oder Kontext die Auswahl eindeutig macht, führt HomeIntent nicht einfach die erste gefundene Entität aus.
-
-### Fähigkeiten werden geprüft
-
-Eine Aktion wird nur erzeugt, wenn die Zielentität die erforderliche Funktion unterstützt. Eine Rollladenposition benötigt beispielsweise Positionsunterstützung; eine Farbe wird nur für ein farbfähiges Licht akzeptiert.
-
-### Automationen brauchen eine Bestätigung
-
-Das Erkennen eines Automationssatzes verändert Home Assistant noch nicht. Erst die Bestätigung startet Generator und Executor.
-
-Eine Bestätigung ist an den angemeldeten Benutzer gebunden, der sie angefordert
-hat. Ein anderer Benutzer kann denselben offenen Schreibauftrag nicht
-bestätigen. Sprach-Pipelines ohne authentifizierte Benutzerkennung behalten
-aus Kompatibilitätsgründen ihren konfigurierbaren Sicherheitsrahmen.
-
-### Transaktionales Schreiben
-
-Beim Erstellen werden `automations.yaml`, der Live-Zustand nach `automation.reload`, die Homeintent-Kategorie und die internen Metadaten aufeinander abgestimmt. Auch Löschen, Aktivieren, Deaktivieren, Verschieben und automatische Bereinigungen verwenden denselben geschützten Ablauf.
-
-Alle Executor-Instanzen einer Home-Assistant-Instanz teilen eine Schreibsperre. Zusätzlich vergleicht HomeIntent unmittelbar vor dem Speichern einen kryptografischen Fingerabdruck der gelesenen Datei. Hat Home Assistant oder ein Benutzer die Datei zwischenzeitlich geändert, wird der Vorgang mit einem Konflikt abgebrochen und die fremde Änderung nicht überschrieben. Ein kleines dauerhaftes Transaktionsjournal erlaubt nach einem Absturz die Wiederherstellung des vorherigen Zustands. Ein Rollback erfolgt nur, wenn die aktuelle Datei noch exakt dem von HomeIntent geschriebenen Stand entspricht.
-
-Zusätzlich hält HomeIntent die letzten zehn Automationsstände als begrenzten
-Änderungsverlauf vor. Das Transaktionsjournal schützt einen laufenden
-Schreibvorgang; der Verlauf dient der bewusst bestätigten Rücknahme einer
-bereits abgeschlossenen Änderung.
-
-### Lokal und privat
-
-Die NLU-Verarbeitung läuft innerhalb von Home Assistant. HomeIntent sendet den gesprochenen Text nicht an einen eigenen Cloud-Dienst.
-
-Über die Home-Assistant-Funktion „Diagnoseinformationen herunterladen“ können
-Nutzer bei Bedarf bewusst technische Eckdaten erzeugen. Diese Diagnose enthält
-weder Gesprächsformulierungen noch Entitäts-IDs oder Zustände. HomeIntent
-speichert keine gesprochenen Texte und kein World Model dauerhaft.
+- eindeutige Friendly Names verwenden,
+- Bereiche und Etagen korrekt zuordnen,
+- sinnvolle Entity- und Bereichs-Aliase hinterlegen,
+- Assist-Satelliten beziehungsweise verwendete Geräte einem Bereich zuordnen,
+- Geräteklassen korrekt setzen und
+- nur benötigte Entitäten freigeben.
 
 ## Bekannte Grenzen
 
-- Die mitgelieferten Grammatiken sind derzeit auf Deutsch ausgelegt.
-- HomeIntent ist absichtlich kein Chatbot und versteht nur unterstützte Smart-Home-Strukturen.
-- Relative Einmal-Befehle unterstützen aktuell Sekunden, Minuten und Stunden bis maximal 59 Stunden sowie Kombinationen aus zwei Zeiteinheiten.
-- Kalendarische Formulierungen decken die dokumentierten Muster ab, sind aber noch kein allgemeiner Kalenderparser für beliebige deutsche Datumsangaben. Neue wiederkehrende Serien können über `calendar.create_event` noch nicht portabel angelegt werden.
-- Ist Home Assistant beim berechneten Zeitpunkt ausgeschaltet, wird der verpasste Auftrag aus Sicherheitsgründen verworfen. Eine automatische verspätete Ausführung findet bewusst nicht statt.
-- Direkte Steuerung neuer Gerätedomänen unterstützt bewusst nur geprüfte Kernaktionen. Erweiterte Klima-, Medien- oder Staubsaugerfunktionen können je nach Gerät noch fehlen.
-- Geräte-Trigger und Gerätebedingungen mit integrationsspezifischen Untertypen besitzen noch keine portable Home-Assistant-YAML-Abbildung. Nicht unterstützte Strukturen werden abgelehnt, statt angenähert zu werden.
-- Kalendertermine können aufgelistet und nach Titel gesucht werden. Löschen und Verschieben sind nur möglich, wenn die jeweilige Kalenderintegration eine Ereignis-ID sowie `DELETE_EVENT` beziehungsweise `UPDATE_EVENT` bereitstellt; ganztägige Termine werden nicht durch eine reine Uhrzeitänderung in Zeit-Termine umgewandelt.
-- Die Qualität der Zielauflösung hängt von sinnvollen Entity-Namen, Bereichen, Geräteklassen, Fähigkeiten und Assist-Freigaben ab.
+- Die mitgelieferte Sprachlogik ist derzeit deutsch.
+- Englische UI- und Diensttexte sind vorhanden; die eigentliche NLU-Grammatik
+  und die dynamischen Sprachantworten bleiben derzeit deutsch.
+- HomeIntent ist kein allgemeiner Chatbot.
+- „Nebenan“ und „drüben“ werden ohne hinterlegte Raumbeziehungen nicht
+  geraten; Home Assistant stellt dafür standardmäßig kein Adjazenzmodell bereit.
+- Relative Einmal-Aufträge unterstützen Sekunden, Minuten und Stunden bis
+  maximal 59 Stunden sowie Kombinationen aus zwei Zeiteinheiten.
+- Ein verpasster einmaliger Zeitpunkt wird nach einem Home-Assistant-Ausfall
+  aus Sicherheitsgründen nicht verspätet ausgeführt.
+- Kalendarische Sprache deckt die dokumentierten Muster ab, ist aber kein
+  universeller Parser für jede denkbare deutsche Datumsform.
+- Neue wiederkehrende Kalendertermine lassen sich über
+  `calendar.create_event` nicht integrationsübergreifend portabel erzeugen.
+- Integrationsspezifische Device-Trigger und Device-Bedingungen werden ohne
+  vollständiges HA-Subtypschema abgelehnt.
+- Kalenderänderungen hängen von Ereignis-ID und den Features der konkreten
+  Kalenderintegration ab.
+- Eine Geräteaktion wird nur angeboten, wenn die benötigte Fähigkeit im
+  aktuellen Home-Assistant-Zustand erkennbar ist.
+- Hassil-Grammatiken bleiben als schneller Spezial- und Kompatibilitätspfad
+  neben dem semantischen Compiler bestehen.
 
 ## Architektur
 
-Die wichtigsten Schichten sind bewusst getrennt:
-
 ```text
-Conversation Agent
-      │
-      ├── Router für Direktbefehl, Gerätesteuerung und Abfrage
-      │       └── Semantic Frame → Resolver → Validator → Service Mapper
-      │
-      └── Automation
-              └── Zeit-/Trigger-/Condition-/Action-Parser
-                  → AutomationModel
-                  → AutomationValidator
-                  → Vorschau und Bestätigung
-                  → HA Automation Generator
-                  → AutomationExecutor + Transaktionsjournal + Versionsverlauf
+Home Assistant Assist
+        │
+        ▼
+Conversation Router
+        │
+        ├── semantischer Direktbefehl / Query / Dialog
+        │     → SemanticFrame
+        │     → WorldModel + Constraint Resolver
+        │     → Capability- und Command-Validator
+        │     → Execution Policy
+        │     → ServiceCallPlan oder QueryResult
+        │
+        └── Automation
+              → Trigger-/Condition-/Action-Semantik
+              → AutomationModel
+              → AutomationValidator
+              → Vorschau + Benutzerbestätigung
+              → HA Automation Generator
+              → AutomationExecutor
+              → Journal + Reload + Metadatenabgleich
 ```
 
-Der Parser führt keine Home-Assistant-Dienste direkt aus. Dadurch können Sprachverständnis, Auflösung, Validierung, Vorschau und Ausführung unabhängig getestet werden. Neue Zuständigkeiten sind in eigene Module für Gerätesteuerung, kalendarische Termine, Automationsverwaltung, Ergebnisobjekte und Dateitransaktionen ausgelagert. Die verbleibenden großen Kernmodule werden schrittweise und verhaltensneutral weiter zerlegt.
+Parser führen keine Home-Assistant-Dienste direkt aus. Sprachverständnis,
+Auflösung, Validierung, Richtlinie, Vorschau und Ausführung bleiben getrennt
+testbar.
 
-Weiterführende technische Dokumentation liegt im Verzeichnis [`docs`](docs/).
-Der aktuelle, bewusst ehrliche Abgleich mit der Home-Assistant Integration
-Quality Scale steht in [`docs/quality-checklist.md`](docs/quality-checklist.md).
+Weitere Dokumentation:
+
+- [`docs/architecture-v6.md`](docs/architecture-v6.md)
+- [`docs/language-understanding-v2.md`](docs/language-understanding-v2.md)
+- [`docs/quality-checklist.md`](docs/quality-checklist.md)
+- [`docs/troubleshooting.md`](docs/troubleshooting.md)
 
 ## Entwicklung und Tests
 
-Die reproduzierbaren Testabhängigkeiten stehen in `requirements-dev.txt`:
-
 ```bash
 python -m pip install --requirement requirements-dev.txt
-```
-
-Danach kann die komplette Testsuite so ausgeführt werden:
-
-```bash
 python -m pytest -q
 ```
 
-Aktueller Entwicklungsstand:
+Geprüfter Stand von Version 4.37.0:
 
 ```text
-1949 passed, 12 skipped
+2003 passed, 12 skipped
 ```
 
-Zusätzlich wird HomeIntent gegen die getrennte, agentenneutrale Suite
-`ha-conversation-benchmark-de` geprüft. Der aktuelle öffentliche Korpus enthält
-1.176 Fälle aus einer systematischen Gerätematrix und handgeprüften Aufgaben
-für freie Wortstellung, Mehrturn-Kontext, Mehrdeutigkeit, Mixed-Intent,
-Klima/Medien/Saugroboter/Szenen, zeitgesteuerte Automationen, Kalenderdialoge,
-typische STT-Umschriften und sichere Ablehnungen. Der aktuelle Stand besteht
-1.176 von 1.176 Fällen in fünf identischen Läufen bei null unsicheren
-Falschausführungen. Erwartungswerte werden unabhängig vom HomeIntent-Code
-festgelegt; eine höhere Quote darf nicht durch das Abschwächen der Sollwerte
-entstehen.
+Zusätzlich wurden ausgeführt:
 
-### Aktuelles Benchmark-Ergebnis
+- Pyflakes für Integration und Tests,
+- JSON-Validierung der deutschen UI-Texte und
+- `git diff --check`.
 
-![HomeIntent besteht 1.176 von 1.176 Fällen im HA Conversation Benchmark DE](docs/benchmark-result.svg)
-
-Die Grafik zeigt den reproduzierbaren Lauf vom 24. August 2026 gegen den
-HomeIntent-Entwicklungsstand `09d4a3a`: fünf identische Durchläufe, keine
-unsichere Falschausführung und 100 Prozent im öffentlichen Korpus. Sie ist eine
-versionierte Momentaufnahme und kein automatisch aktualisiertes Werbe-Badge.
-Ein perfektes Ergebnis in diesem bekannten Datensatz bedeutet nicht, dass jede
-denkbare Formulierung abgedeckt ist. Deshalb sollen reale anonymisierte
-Nutzersätze und ein verdecktes Challenge-Set die Suite künftig ergänzen.
-
-Zusätzlich enthält `tests/eval/dialog_cases.json` ein datengetriebenes
-Mehrturn-Sprachkorpus. Das separate Sicherheitsgate garantiert, dass negative
-und nur lesende Fälle keinen Serviceplan erzeugen:
+Neue Sprachlogik sollte positive Fälle, Mehrdeutigkeit, sichere Ablehnung und
+Regressionen abdecken. Das datengetriebene Mehrturn-Korpus kann separat über
+folgenden Befehl ausgeführt werden:
 
 ```bash
 ./scripts/run_language_eval.sh
 ```
 
-GitHub Actions prüft zusätzlich Python 3.12 und 3.13, Hassfest, HACS und den Import gegen das aktuelle stabile Home-Assistant-Containerimage.
+### Benchmark-Momentaufnahme
 
-Neue Grammatik oder Ausführungslogik sollte immer mit positiven Fällen, Mehrdeutigkeitsfällen, Negativfällen und einem Regressionstest für bestehendes Verhalten ergänzt werden.
+![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
+
+Die Grafik ist eine versionierte Momentaufnahme eines älteren
+Entwicklungsstands und kein aktueller Nachweis für Version 4.37.0. Benchmark,
+Fehlerdiagnose und Messungen auf schwacher Hardware werden bewusst separat
+aktualisiert. Ein perfektes Ergebnis in einem bekannten Korpus bedeutet nicht,
+dass jede mögliche Formulierung verstanden wird.
 
 ## Mitwirken
 
-Beiträge und Fehlermeldungen sind willkommen. Bitte beachte dabei die Grundprinzipien des Projekts:
+Fehlermeldungen und Beiträge sind willkommen. Für Änderungen gelten die
+Grundprinzipien:
 
-- deterministisch statt geraten,
-- lokal statt cloudabhängig,
-- Bedeutung und Ausführung getrennt halten,
-- Fähigkeiten und Parameter vor jeder Aktion validieren,
-- neue Formulierungen mit Tests absichern und
-- bestehendes Verhalten nicht stillschweigend verändern.
+- lokal und deterministisch,
+- niemals bei Mehrdeutigkeit raten,
+- Bedeutung und Ausführung trennen,
+- Fähigkeiten und Risiken vor jeder Aktion prüfen,
+- neue Ausdrücke möglichst zentral statt als Satzvarianten modellieren und
+- jedes neue Verhalten mit Tests absichern.
 
 Repository: [github.com/pquandel2-alt/ha-nlu-engine](https://github.com/pquandel2-alt/ha-nlu-engine)
 

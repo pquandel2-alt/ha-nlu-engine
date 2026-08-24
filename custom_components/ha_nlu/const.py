@@ -11,6 +11,9 @@ CONF_MAX_ACTION_TARGETS = "max_action_targets"
 CONF_ALLOW_NON_ADMIN_CRITICAL = "allow_non_admin_critical"
 CONF_ALLOW_NON_ADMIN_AUTOMATIONS = "allow_non_admin_automations"
 CONF_CONTEXT_TTL_SECONDS = "context_ttl_seconds"
+CONF_CUSTOM_ALIASES = "custom_aliases"
+CONF_CONTROL_USER_IDS = "control_user_ids"
+CONF_ADMIN_ONLY_ENTITIES = "admin_only_entities"
 
 # Domains the intent set can act on or (for "sensor"/"binary_sensor") read
 # state from. Mirrors service_call.py's IntentSpec/QueryIntentSpec.allowed_domains.

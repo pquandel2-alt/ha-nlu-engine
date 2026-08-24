@@ -61,6 +61,7 @@ from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
 from .nlu.semantic_location import resolve_coordinated_locations
 from .nlu.validator import validate_command
 from .automation_action_parser import AutomationActionParser
+from .automation_notification import notification_action_from_request
 from .automation_condition_parser import AutomationConditionParser, split_on_top_level_and
 from .calendar_automation import parse_calendar_automation_draft
 from .automation_trigger_parser import _AUTOMATION_TRIGGER_RE, AutomationTriggerParser
@@ -1500,10 +1501,21 @@ class NluEngine:
             for marker in re.finditer(r"\s+(wenn|sobald|falls)\s+", normalized, re.IGNORECASE):
                 action_candidate = normalized[: marker.start()].strip(" ,")
                 trigger_candidate = normalized[marker.start() :].strip(" ,")
+                parsed_trigger = self._automation_trigger_parser.parse(
+                    trigger_candidate, parse_context
+                )
+                parsed_actions = self._parse_action_semantically(
+                    action_candidate, parse_context
+                )
+                if not parsed_actions:
+                    notification = notification_action_from_request(
+                        action_candidate, trigger_candidate, entities
+                    )
+                    parsed_actions = (notification,) if notification is not None else None
                 if (
                     action_candidate
-                    and self._automation_trigger_parser.parse(trigger_candidate, parse_context) is not None
-                    and self._parse_action_semantically(action_candidate, parse_context)
+                    and parsed_trigger is not None
+                    and parsed_actions
                 ):
                     candidates.append((trigger_candidate, action_candidate))
             if len(candidates) != 1:
@@ -1542,6 +1554,11 @@ class NluEngine:
             triggers = (trigger,)
 
         actions = self._parse_action_semantically(action_text, parse_context)
+        if not actions:
+            notification = notification_action_from_request(
+                action_text, trigger_text, entities
+            )
+            actions = (notification,) if notification is not None else None
         if not actions:
             return None
 

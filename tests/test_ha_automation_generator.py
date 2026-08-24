@@ -55,6 +55,9 @@ BUERO_LUEFTER = EntitySnapshot(
     "fan.buero", "Bürolüfter", "fan", "off",
     area_id="buero", area_name="Büro",
 )
+NOTIFY_PHILIPP = EntitySnapshot(
+    "notify.mobile_app_philipp", "Philipp Handy", "notify", "unknown"
+)
 PHILIPP = EntitySnapshot("person.philipp", "Philipp", "person", "home")
 TEMPERATUR_SENSOR = EntitySnapshot(
     "sensor.temperatur", "Temperatur", "sensor", "21.5",
@@ -62,7 +65,8 @@ TEMPERATUR_SENSOR = EntitySnapshot(
 )
 
 ALL_ENTITIES = [
-    KUECHE_FENSTER, KUECHE_LICHT, WOHNZIMMER_ROLLO, HEIZUNG, BUERO_LUEFTER, PHILIPP, TEMPERATUR_SENSOR,
+    KUECHE_FENSTER, KUECHE_LICHT, WOHNZIMMER_ROLLO, HEIZUNG, BUERO_LUEFTER,
+    PHILIPP, TEMPERATUR_SENSOR, NOTIFY_PHILIPP,
 ]
 
 
@@ -496,6 +500,51 @@ def test_notify_uses_persistent_notification():
     result = generate_ha_automation_config(model, ALL_ENTITIES)
     assert result.error is None
     assert result.config["actions"] == [{"action": "persistent_notification.create", "data": {"message": "Fenster ist offen"}}]
+
+
+def test_notify_can_use_one_explicit_notify_entity():
+    model = _model(
+        _trigger(),
+        actions=(
+            ActionModel(
+                type=ActionType.NOTIFY,
+                target=TriggerTarget(entity_id="notify.mobile_app_philipp"),
+                message="Außentemperatur beträgt 28 Grad.",
+            ),
+        ),
+    )
+
+    result = generate_ha_automation_config(model, ALL_ENTITIES)
+
+    assert result.error is None
+    assert result.config["actions"] == [
+        {
+            "action": "notify.send_message",
+            "target": {"entity_id": "notify.mobile_app_philipp"},
+            "data": {"message": "Außentemperatur beträgt 28 Grad."},
+        }
+    ]
+
+
+def test_numeric_equality_uses_an_exact_template_trigger():
+    model = _model(
+        TriggerModel(
+            type=TriggerType.NUMERIC_STATE,
+            target=TriggerTarget(entity_id="sensor.temperatur"),
+            comparator=NumericComparator.EQUAL,
+            threshold=28,
+        )
+    )
+
+    result = generate_ha_automation_config(model, ALL_ENTITIES)
+
+    assert result.error is None
+    assert result.config["triggers"] == [
+        {
+            "trigger": "template",
+            "value_template": "{{ states('sensor.temperatur') | float(none) == 28 }}",
+        }
+    ]
 
 
 def test_delay_action():

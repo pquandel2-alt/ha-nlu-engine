@@ -42,6 +42,7 @@ if TYPE_CHECKING:
         CalendarManagementRequest,
     )
     from ..productivity import ProductivityRequest
+    from ..undo import UndoPlan
 
 __all__ = [
     "ClarificationRequest",
@@ -116,6 +117,7 @@ class PendingServiceConfirmation:
     plan: ServiceCallPlan
     success_text: str
     requested_by_user_id: str | None = None
+    undo: "UndoPlan | None" = None
 
 
 @dataclass(frozen=True)
@@ -281,6 +283,7 @@ class ConversationContext:
     pending_semantic_command: PendingSemanticCommand | None = None
     pending_productivity_command: PendingProductivityCommand | None = None
     pending_automation_wizard: PendingAutomationWizard | None = None
+    pending_undo: "UndoPlan | None" = None
 
 
 class ConversationContextStore:

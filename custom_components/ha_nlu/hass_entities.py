@@ -22,7 +22,8 @@ from homeassistant.helpers import (
     floor_registry as fr,
 )
 
-from .const import CONF_SELECTED_ENTITIES, SELECTABLE_DOMAINS
+from .const import CONF_CUSTOM_ALIASES, CONF_SELECTED_ENTITIES, SELECTABLE_DOMAINS
+from .customization import parse_custom_aliases
 from .devices import DeviceSnapshot
 from .entities import EntitySnapshot
 from .nlu.capabilities import derive_capabilities
@@ -111,6 +112,7 @@ def build_entity_snapshots(
 ) -> list[EntitySnapshot]:
     """Snapshot the selected/exposed entities for a single match() call."""
     snapshots: list[EntitySnapshot] = []
+    custom_aliases = parse_custom_aliases(entry.options.get(CONF_CUSTOM_ALIASES))
     for entity_id in get_selected_entity_ids(hass, entry):
         state = hass.states.get(entity_id)
         if state is None:
@@ -135,7 +137,10 @@ def build_entity_snapshots(
                 unit=state.attributes.get("unit_of_measurement"),
                 device_class=device_class,
                 state_class=state.attributes.get("state_class"),
-                aliases=_entity_aliases(hass, registry_entry),
+                aliases=tuple(dict.fromkeys((
+                    *_entity_aliases(hass, registry_entry),
+                    *custom_aliases.get(entity_id, ()),
+                ))),
                 area_aliases=area_aliases,
                 attributes=state.attributes,
                 capabilities=frozenset(c.name for c in capabilities),

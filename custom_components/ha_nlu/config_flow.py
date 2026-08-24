@@ -34,13 +34,25 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.core import callback
-from homeassistant.helpers.selector import EntitySelector, EntitySelectorConfig
+from homeassistant.helpers.selector import (
+    EntitySelector,
+    EntitySelectorConfig,
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
+)
 
 from .const import (
     CONF_ALLOW_NON_ADMIN_AUTOMATIONS,
     CONF_ALLOW_NON_ADMIN_CRITICAL,
     CONF_CONFIRMATION_LEVEL,
     CONF_CONTEXT_TTL_SECONDS,
+    CONF_CONTROL_USER_IDS,
+    CONF_CUSTOM_ALIASES,
+    CONF_ADMIN_ONLY_ENTITIES,
     CONF_MAX_ACTION_TARGETS,
     CONF_READ_ONLY_ENTITIES,
     CONF_SELECTED_ENTITIES,
@@ -48,6 +60,7 @@ from .const import (
     SELECTABLE_DOMAINS,
 )
 from .hass_entities import default_exposed_entities
+from .customization import parse_custom_aliases
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -82,6 +95,14 @@ class HaNluOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         if user_input is not None:
+            try:
+                parse_custom_aliases(user_input.get(CONF_CUSTOM_ALIASES))
+            except ValueError:
+                return self.async_show_form(
+                    step_id="init",
+                    data_schema=await self._async_schema(user_input),
+                    errors={CONF_CUSTOM_ALIASES: "invalid_alias_rules"},
+                )
             return self.async_create_entry(title="", data=user_input)
 
         current = self.config_entry.options.get(CONF_SELECTED_ENTITIES)
@@ -90,51 +111,84 @@ class HaNluOptionsFlow(OptionsFlow):
 
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(
+            data_schema=await self._async_schema(
+                {**self.config_entry.options, CONF_SELECTED_ENTITIES: current}
+            ),
+        )
+
+    async def _async_schema(self, defaults: dict[str, Any]) -> vol.Schema:
+        selected_user_ids = defaults.get(CONF_CONTROL_USER_IDS, [])
+        users_by_id: dict[str, str] = {}
+        auth = getattr(self.hass, "auth", None)
+        get_users = getattr(auth, "async_get_users", None)
+        if get_users is not None:
+            try:
+                for user in await get_users():
+                    user_id = str(user.id)
+                    users_by_id[user_id] = str(user.name or user_id)
+            except Exception:  # The options form must remain available.
+                _LOGGER.debug("Could not enumerate Home Assistant users", exc_info=True)
+        if isinstance(selected_user_ids, list):
+            for user_id in selected_user_ids:
+                users_by_id.setdefault(str(user_id), str(user_id))
+        user_options: list[SelectOptionDict] = [
+            {"value": user_id, "label": label}
+            for user_id, label in sorted(
+                users_by_id.items(), key=lambda item: item[1].casefold()
+            )
+        ]
+        return vol.Schema(
                 {
                     vol.Optional(
-                        CONF_SELECTED_ENTITIES, default=current
+                        CONF_SELECTED_ENTITIES, default=defaults.get(CONF_SELECTED_ENTITIES, [])
                     ): EntitySelector(
                         EntitySelectorConfig(domain=SELECTABLE_DOMAINS, multiple=True)
                     ),
                     vol.Optional(
                         CONF_READ_ONLY_ENTITIES,
-                        default=self.config_entry.options.get(
-                            CONF_READ_ONLY_ENTITIES, []
-                        ),
+                        default=defaults.get(CONF_READ_ONLY_ENTITIES, []),
                     ): EntitySelector(
                         EntitySelectorConfig(domain=SELECTABLE_DOMAINS, multiple=True)
                     ),
                     vol.Optional(
+                        CONF_ADMIN_ONLY_ENTITIES,
+                        default=defaults.get(CONF_ADMIN_ONLY_ENTITIES, []),
+                    ): EntitySelector(
+                        EntitySelectorConfig(domain=SELECTABLE_DOMAINS, multiple=True)
+                    ),
+                    vol.Optional(
+                        CONF_CONTROL_USER_IDS,
+                        default=defaults.get(CONF_CONTROL_USER_IDS, []),
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=user_options,
+                            multiple=True,
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_CUSTOM_ALIASES,
+                        default=defaults.get(CONF_CUSTOM_ALIASES, ""),
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
+                    vol.Optional(
                         CONF_CONFIRMATION_LEVEL,
-                        default=self.config_entry.options.get(
-                            CONF_CONFIRMATION_LEVEL, "high"
-                        ),
+                        default=defaults.get(CONF_CONFIRMATION_LEVEL, "high"),
                     ): vol.In(("medium", "high", "critical")),
                     vol.Optional(
                         CONF_MAX_ACTION_TARGETS,
-                        default=self.config_entry.options.get(
-                            CONF_MAX_ACTION_TARGETS, 50
-                        ),
+                        default=defaults.get(CONF_MAX_ACTION_TARGETS, 50),
                     ): vol.All(vol.Coerce(int), vol.Range(min=1, max=500)),
                     vol.Optional(
                         CONF_ALLOW_NON_ADMIN_CRITICAL,
-                        default=self.config_entry.options.get(
-                            CONF_ALLOW_NON_ADMIN_CRITICAL, True
-                        ),
+                        default=defaults.get(CONF_ALLOW_NON_ADMIN_CRITICAL, True),
                     ): bool,
                     vol.Optional(
                         CONF_ALLOW_NON_ADMIN_AUTOMATIONS,
-                        default=self.config_entry.options.get(
-                            CONF_ALLOW_NON_ADMIN_AUTOMATIONS, True
-                        ),
+                        default=defaults.get(CONF_ALLOW_NON_ADMIN_AUTOMATIONS, True),
                     ): bool,
                     vol.Optional(
                         CONF_CONTEXT_TTL_SECONDS,
-                        default=self.config_entry.options.get(
-                            CONF_CONTEXT_TTL_SECONDS, 30
-                        ),
+                        default=defaults.get(CONF_CONTEXT_TTL_SECONDS, 30),
                     ): vol.All(vol.Coerce(int), vol.Range(min=10, max=600)),
                 }
-            ),
         )

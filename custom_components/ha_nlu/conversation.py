@@ -66,9 +66,12 @@ from .calendar_event import (
     writable_calendars,
 )
 from .calendar_management import parse_calendar_management
+from .conversation_location import (
+    materialize_local_reference,
+    resolve_conversation_area,
+)
 from .const import (
     CONF_ALLOW_NON_ADMIN_AUTOMATIONS,
-    CONF_READ_ONLY_ENTITIES,
     DOMAIN,
     NOT_UNDERSTOOD_TEXT,
 )
@@ -128,10 +131,20 @@ from .reminder import (
     reminder_quiet_hours,
     reminder_recipient,
 )
-from .security_control import match_alarm_control, user_display_name, user_is_admin
+from .security_control import (
+    conversation_user_id,
+    match_alarm_control,
+    user_display_name,
+    user_is_admin,
+)
 from .extended_device_query import match_extended_device_query
-from .execution_policy import PolicyOutcome, evaluate_service_plan
+from .execution_policy import (
+    PolicyOutcome,
+    evaluate_service_plan,
+    validate_automation_action_targets,
+)
 from .world_model import WorldModel, build_world_model as assemble_world_model
+from .undo import UndoPlan, build_undo_plan, is_undo_request
 from .runtime_data import HaNluRuntimeData
 from .productivity import (
     ProductivityRequest,
@@ -147,12 +160,6 @@ from .phonetic_correction import phonetic_suggestions
 
 _LOGGER = logging.getLogger(__name__)
 
-
-def _conversation_user_id(user_input) -> str | None:
-    """Authenticated actor bound to confirmations; voice-only input is None."""
-    context = getattr(user_input, "context", None)
-    user_id = getattr(context, "user_id", None)
-    return str(user_id) if user_id else None
 
 # Single source of truth for "which intents are queries" (V4.2) - read state
 # and speak, never call a service - so Assist shows them as a QUERY_ANSWER
@@ -314,6 +321,89 @@ class NluConversationEntity(
         devices = build_device_snapshots(self.hass, self.entry)
         self._world_model = assemble_world_model(entities, devices)
         pending = self._context_store.get(user_input.conversation_id)
+        conversation_area = resolve_conversation_area(self.hass, user_input)
+        localized_text = materialize_local_reference(
+            user_input.text, conversation_area
+        )
+        if localized_text != user_input.text:
+            user_input = replace(user_input, text=localized_text)
+        if conversation_area is not None and (
+            pending is None or pending.last_area is None
+        ):
+            pending = (
+                replace(pending, last_area=conversation_area)
+                if pending is not None
+                else ConversationContext(
+                    last_command=None,
+                    last_entities=(),
+                    last_area=conversation_area,
+                    pending_clarification=None,
+                )
+            )
+
+        if is_undo_request(user_input.text):
+            undo = pending.pending_undo if pending is not None else None
+            current_user_id = conversation_user_id(user_input)
+            if undo is None:
+                response.async_set_speech(
+                    "Es gibt keine kürzlich ausgeführte, sicher rückgängig machbare Aktion."
+                )
+            elif (
+                undo.requested_by_user_id is not None
+                and undo.requested_by_user_id != current_user_id
+            ):
+                response.async_set_error(
+                    intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                    "Diese Rücknahme gehört zu einem anderen Benutzer.",
+                )
+            else:
+                is_admin = await user_is_admin(self.hass, user_input)
+                denial = next(
+                    (
+                        decision.reason
+                        for plan in undo.plans
+                        if (
+                            decision := evaluate_service_plan(
+                                plan,
+                                entities,
+                                self.entry.options,
+                                is_admin=is_admin,
+                                user_id=current_user_id,
+                            )
+                        ).outcome
+                        is PolicyOutcome.DENY
+                    ),
+                    None,
+                )
+                if denial is not None:
+                    response.async_set_error(
+                        intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                        denial,
+                    )
+                    return conversation.ConversationResult(
+                        response=response,
+                        conversation_id=user_input.conversation_id,
+                    )
+                self._context_store.clear(user_input.conversation_id)
+                try:
+                    for plan in undo.plans:
+                        await self.hass.services.async_call(
+                            plan.domain,
+                            plan.service,
+                            {"entity_id": plan.entity_id, **plan.data},
+                            blocking=True,
+                        )
+                        self._record_execution(user_input, plan)
+                except Exception as err:  # noqa: BLE001
+                    response.async_set_error(
+                        intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                        f"Fehler beim Rückgängigmachen: {err}",
+                    )
+                else:
+                    response.async_set_speech("Die letzte Aktion wurde rückgängig gemacht.")
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
 
         if is_explanation_request(user_input.text):
             if pending is not None and pending.pending_automation_confirmation is not None:
@@ -420,7 +510,10 @@ class NluConversationEntity(
 
         if pending is not None and pending.pending_service_confirmation is not None:
             return await self._async_handle_service_confirmation_reply(
-                user_input, response, pending.pending_service_confirmation
+                user_input,
+                response,
+                pending.pending_service_confirmation,
+                entities,
             )
 
         if pending is not None and pending.pending_semantic_command is not None:
@@ -474,7 +567,7 @@ class NluConversationEntity(
                         pending_clarification=None,
                         pending_automation_confirmation=PendingAutomationConfirmation(
                             model=completed.model,
-                            requested_by_user_id=_conversation_user_id(user_input),
+                            requested_by_user_id=conversation_user_id(user_input),
                         ),
                     ),
                 )
@@ -928,7 +1021,14 @@ class NluConversationEntity(
                         last_area=None,
                         pending_clarification=None,
                         pending_service_confirmation=PendingServiceConfirmation(
-                            plan, success, _conversation_user_id(user_input)
+                            plan,
+                            success,
+                            conversation_user_id(user_input),
+                            build_undo_plan(
+                                plan,
+                                entities,
+                                requested_by_user_id=conversation_user_id(user_input),
+                            ),
                         ),
                     ),
                 )
@@ -979,12 +1079,55 @@ class NluConversationEntity(
             # transactional). Context isn't carried over for a multi-step
             # turn: "last entities" would be ambiguous across several
             # unrelated sub-commands, so follow-ups just start fresh.
+            is_admin = await user_is_admin(self.hass, user_input)
+            actor_id = conversation_user_id(user_input)
+            for sub_result in result.commands:
+                if sub_result.plan is None:
+                    continue
+                policy = evaluate_service_plan(
+                    sub_result.plan,
+                    entities,
+                    self.entry.options,
+                    is_admin=is_admin,
+                    user_id=actor_id,
+                )
+                if policy.outcome is PolicyOutcome.DENY:
+                    self._context_store.clear(user_input.conversation_id)
+                    response.async_set_error(
+                        intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                        policy.reason or "Mindestens eine Aktion ist nicht erlaubt.",
+                    )
+                    return conversation.ConversationResult(
+                        response=response,
+                        conversation_id=user_input.conversation_id,
+                    )
+                if policy.outcome is PolicyOutcome.CONFIRM:
+                    self._context_store.clear(user_input.conversation_id)
+                    response.async_set_error(
+                        intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                        "Sicherheitskritische Aktionen müssen einzeln bestätigt werden.",
+                    )
+                    return conversation.ConversationResult(
+                        response=response,
+                        conversation_id=user_input.conversation_id,
+                    )
             self._context_store.clear(user_input.conversation_id)
             response_parts: list[str] = []
+            multi_undo_parts: list[UndoPlan] = []
+            multi_undo_supported = True
             for sub_result in result.commands:
                 if sub_result.plan is None:
                     response_parts.append(sub_result.response_text)
                     continue
+                inverse = build_undo_plan(
+                    sub_result.plan,
+                    entities,
+                    requested_by_user_id=actor_id,
+                )
+                if inverse is None:
+                    multi_undo_supported = False
+                else:
+                    multi_undo_parts.append(inverse)
                 try:
                     await self.hass.services.async_call(
                         sub_result.plan.domain,
@@ -1009,6 +1152,24 @@ class NluConversationEntity(
                         response=response, conversation_id=user_input.conversation_id
                     )
                 response_parts.append(sub_result.response_text)
+            if multi_undo_supported and multi_undo_parts:
+                self._context_store.set(
+                    user_input.conversation_id,
+                    ConversationContext(
+                        last_command=None,
+                        last_entities=(),
+                        last_area=None,
+                        pending_clarification=None,
+                        pending_undo=UndoPlan(
+                            tuple(
+                                plan
+                                for undo in reversed(multi_undo_parts)
+                                for plan in undo.plans
+                            ),
+                            actor_id,
+                        ),
+                    ),
+                )
             response.async_set_speech(" ".join(response_parts))
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
@@ -1041,7 +1202,7 @@ class NluConversationEntity(
                         pending_clarification=None,
                         pending_automation_confirmation=PendingAutomationConfirmation(
                             model=result.model,
-                            requested_by_user_id=_conversation_user_id(user_input),
+                            requested_by_user_id=conversation_user_id(user_input),
                         ),
                     ),
                 )
@@ -1157,6 +1318,7 @@ class NluConversationEntity(
                 entities,
                 self.entry.options,
                 is_admin=await user_is_admin(self.hass, user_input),
+                user_id=conversation_user_id(user_input),
             )
             if policy.outcome is PolicyOutcome.DENY:
                 self._context_store.clear(user_input.conversation_id)
@@ -1178,7 +1340,12 @@ class NluConversationEntity(
                         pending_service_confirmation=PendingServiceConfirmation(
                             result.plan,
                             result.response_text,
-                            _conversation_user_id(user_input),
+                            conversation_user_id(user_input),
+                            build_undo_plan(
+                                result.plan,
+                                entities,
+                                requested_by_user_id=conversation_user_id(user_input),
+                            ),
                         ),
                     ),
                 )
@@ -1189,6 +1356,15 @@ class NluConversationEntity(
                     response=response, conversation_id=user_input.conversation_id
                 )
 
+        undo_plan = (
+            build_undo_plan(
+                result.plan,
+                entities,
+                requested_by_user_id=conversation_user_id(user_input),
+            )
+            if result.plan is not None
+            else None
+        )
         if result.command is not None:
             self._context_store.set(
                 user_input.conversation_id,
@@ -1198,6 +1374,7 @@ class NluConversationEntity(
                     last_area=result.command.area,
                     pending_clarification=None,
                     focus=derive_dialog_focus(result.command),
+                    pending_undo=undo_plan,
                 ),
             )
         else:
@@ -1213,6 +1390,7 @@ class NluConversationEntity(
                 )
                 self._record_execution(user_input, result.plan)
             except Exception as err:  # noqa: BLE001 - HA 2025.x service calls can raise beyond HomeAssistantError (vol.Invalid, TimeoutError, ...); must not propagate as "Unexpected error during intent recognition"
+                self._context_store.clear(user_input.conversation_id)
                 _LOGGER.error(
                     "Service call %s.%s on %s failed: %s",
                     result.plan.domain,
@@ -1389,7 +1567,7 @@ class NluConversationEntity(
                     last_area=None,
                     pending_clarification=None,
                     pending_automation_confirmation=PendingAutomationConfirmation(
-                        model, _conversation_user_id(user_input)
+                        model, conversation_user_id(user_input)
                     ),
                 ),
             )
@@ -1789,7 +1967,7 @@ class NluConversationEntity(
         ``generate_ha_automation_config()`` -> ``AutomationExecutor`` path
         ever reaches Home Assistant.
         """
-        current_user_id = _conversation_user_id(user_input)
+        current_user_id = conversation_user_id(user_input)
         if (
             confirmation.requested_by_user_id is not None
             and confirmation.requested_by_user_id != current_user_id
@@ -1832,19 +2010,19 @@ class NluConversationEntity(
                 response=response, conversation_id=user_input.conversation_id
             )
 
-        configured_read_only = self.entry.options.get(CONF_READ_ONLY_ENTITIES, ())
-        read_only_ids = (
-            set(configured_read_only)
-            if isinstance(configured_read_only, (list, tuple, set))
-            else set()
-        )
         controlled_ids = resolve_automation_action_entity_ids(
             confirmation.model, entities
         )
-        if controlled_ids & read_only_ids:
+        target_policy_error = validate_automation_action_targets(
+            controlled_ids,
+            self.entry.options,
+            is_admin=await user_is_admin(self.hass, user_input),
+            user_id=conversation_user_id(user_input),
+        )
+        if target_policy_error is not None:
             response.async_set_error(
                 intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-                "Die Automation würde mindestens ein nur lesbar freigegebenes Ziel steuern.",
+                target_policy_error,
             )
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
@@ -1929,6 +2107,7 @@ class NluConversationEntity(
                 [device_control.entity] if device_control.entity is not None else [],
                 self.entry.options,
                 is_admin=await user_is_admin(self.hass, user_input),
+                user_id=conversation_user_id(user_input),
             )
             if policy.outcome is PolicyOutcome.DENY:
                 self._context_store.clear(user_input.conversation_id)
@@ -1954,7 +2133,14 @@ class NluConversationEntity(
                         pending_service_confirmation=PendingServiceConfirmation(
                             device_control.plan,
                             device_control.response_text,
-                            _conversation_user_id(user_input),
+                            conversation_user_id(user_input),
+                            build_undo_plan(
+                                device_control.plan,
+                                [device_control.entity]
+                                if device_control.entity is not None
+                                else [],
+                                requested_by_user_id=conversation_user_id(user_input),
+                            ),
                         ),
                     ),
                 )
@@ -1998,6 +2184,11 @@ class NluConversationEntity(
                                 scope_id=controlled.entity_id,
                                 candidate_entity_ids=(controlled.entity_id,),
                                 source_intent="DeviceControl:" + device_control.plan.service,
+                            ),
+                            pending_undo=build_undo_plan(
+                                device_control.plan,
+                                [controlled],
+                                requested_by_user_id=conversation_user_id(user_input),
                             ),
                         ),
                     )
@@ -2549,9 +2740,10 @@ class NluConversationEntity(
         user_input: conversation.ConversationInput,
         response: intent.IntentResponse,
         confirmation: PendingServiceConfirmation,
+        entities: list[EntitySnapshot],
     ) -> conversation.ConversationResult:
         """Confirm a high-risk lock or garage movement before execution."""
-        current_user_id = _conversation_user_id(user_input)
+        current_user_id = conversation_user_id(user_input)
         if (
             confirmation.requested_by_user_id is not None
             and confirmation.requested_by_user_id != current_user_id
@@ -2573,6 +2765,11 @@ class NluConversationEntity(
         if reply is ConfirmationReply.NO:
             response.async_set_speech("Abgebrochen. Es wurde nichts ausgeführt.")
         else:
+            undo = build_undo_plan(
+                confirmation.plan,
+                entities,
+                requested_by_user_id=current_user_id,
+            )
             try:
                 await self.hass.services.async_call(
                     confirmation.plan.domain,
@@ -2591,6 +2788,17 @@ class NluConversationEntity(
                 )
             else:
                 response.async_set_speech(confirmation.success_text)
+                if undo is not None:
+                    self._context_store.set(
+                        user_input.conversation_id,
+                        ConversationContext(
+                            last_command=None,
+                            last_entities=(),
+                            last_area=None,
+                            pending_clarification=None,
+                            pending_undo=undo,
+                        ),
+                    )
         return conversation.ConversationResult(
             response=response, conversation_id=user_input.conversation_id
         )

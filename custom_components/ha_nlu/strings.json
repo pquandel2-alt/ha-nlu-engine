@@ -13,6 +13,9 @@
         "data": {
           "selected_entities": "Freigegebene Entitäten",
           "read_only_entities": "Nur lesbare Entitäten",
+          "admin_only_entities": "Nur von Administratoren steuerbare Entitäten",
+          "control_user_ids": "Zur Steuerung berechtigte Benutzer (leer: alle)",
+          "custom_aliases": "Zusätzliche Sprach-Aliase (Alias = entity.id, eine Regel pro Zeile)",
           "confirmation_level": "Ab welcher Risikostufe bestätigen",
           "max_action_targets": "Maximale Ziele pro Aktion",
           "allow_non_admin_critical": "Kritische Aktionen für Nicht-Administratoren erlauben",
@@ -20,6 +23,9 @@
           "context_ttl_seconds": "Dialogkontext in Sekunden"
         }
       }
+    },
+    "error": {
+      "invalid_alias_rules": "Die Aliasregeln sind ungültig oder ein Alias verweist auf mehrere Ziele."
     }
   },
   "services": {
@@ -39,6 +45,13 @@
       "fields": {
         "automation_id": {"name": "Automations-ID"},
         "max_runs": {"name": "Maximale Ausführungen"}
+      }
+    },
+    "enable_automation": {
+      "name": "Automation wieder aktivieren",
+      "description": "Interner Dienst zum Fortsetzen begrenzt pausierter HomeIntent-Automationen.",
+      "fields": {
+        "automation_id": {"name": "Automations-ID"}
       }
     }
   }

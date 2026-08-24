@@ -75,6 +75,7 @@ AUTOMATION_TRIGGER_DIR = Path(__file__).parent / "intents" / "de" / "automation_
 # mirrors the trigger-keyword/bare-time-phrase vocabulary the 7 grammars
 # above actually use.
 import re  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
 
 _AUTOMATION_TRIGGER_RE = re.compile(
     r"\b(wenn|sobald|falls|bei sonnenaufgang|bei sonnenuntergang|^um \d)\b", re.IGNORECASE
@@ -98,6 +99,28 @@ class AutomationTriggerParser:
         self._intents = intents
 
     def parse(self, text: str, context: ParseContext) -> TriggerModel | None:
+        # A wildcard immediately followed by a number can otherwise consume
+        # the first digit ("Außentemperatur 28" -> name ending in 2,
+        # threshold 8). The terminal verb gives this equality shape an
+        # unambiguous, compositional boundary before Hassil is consulted.
+        equality = re.fullmatch(
+            r"(?:wenn|sobald|falls)\s+(?:der|die|das)?\s*"
+            r"(?P<name>.+?)\s+(?P<threshold>\d+(?:[.,]\d+)?)\s*"
+            r"(?:Grad|Watt|Prozent|kWh)?\s*(?:beträgt|erreicht|hat)[?.!]*",
+            text.strip(),
+            re.IGNORECASE,
+        )
+        if equality is not None:
+            target = build_named_target(
+                SimpleNamespace(value=equality.group("name")), context
+            )
+            if target is not None:
+                return TriggerModel(
+                    type=TriggerType.NUMERIC_STATE,
+                    target=target,
+                    comparator=NumericComparator.EQUAL,
+                    threshold=float(equality.group("threshold").replace(",", ".")),
+                )
         slot_lists = {
             "device_class": _DEVICE_CLASS_SLOT_LIST,
             "area": WildcardSlotList(name="area"),
@@ -145,6 +168,7 @@ class AutomationTriggerParser:
         dispatch = {
             "HassStateTrigger": self._parse_state_trigger,
             "HassNumericStateTrigger": self._parse_numeric_state_trigger,
+            "HassNumericEqualTrigger": self._parse_numeric_equal_trigger,
             "HassDeviceTrigger": self._parse_device_trigger,
             "HassPresenceTrigger": self._parse_presence_trigger,
             "HassSunTrigger": self._parse_sun_trigger,
@@ -215,6 +239,24 @@ class AutomationTriggerParser:
             return None
         return TriggerModel(
             type=TriggerType.NUMERIC_STATE, target=target, comparator=comparator, threshold=float(threshold_slot.value)
+        )
+
+    @staticmethod
+    def _parse_numeric_equal_trigger(
+        slots: dict, context: ParseContext
+    ) -> TriggerModel | None:
+        name_slot = slots.get("name")
+        threshold_slot = slots.get("threshold")
+        if name_slot is None or threshold_slot is None:
+            return None
+        target = build_named_target(name_slot, context)
+        if target is None:
+            return None
+        return TriggerModel(
+            type=TriggerType.NUMERIC_STATE,
+            target=target,
+            comparator=NumericComparator.EQUAL,
+            threshold=float(threshold_slot.value),
         )
 
     @staticmethod

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import re
+from functools import partial
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum, auto
 
 from .entities import EntitySnapshot, generate_aliases, normalize_for_compare
@@ -17,6 +18,11 @@ class HistoryMetric(Enum):
     CHANGE = auto()
 
 
+class StateHistoryMetric(Enum):
+    COUNT = auto()
+    DURATION = auto()
+
+
 @dataclass(frozen=True)
 class HistoryQuery:
     entity: EntitySnapshot
@@ -25,6 +31,25 @@ class HistoryQuery:
     end: datetime
     period: str
     period_label: str
+
+
+@dataclass(frozen=True)
+class StateHistoryQuery:
+    entity: EntitySnapshot
+    metric: StateHistoryMetric
+    target_states: frozenset[str]
+    target_label: str
+    start: datetime
+    end: datetime
+    period_label: str
+
+
+@dataclass(frozen=True)
+class ComparativeHistoryQuery:
+    entity: EntitySnapshot
+    metric: HistoryMetric
+    first: tuple[datetime, datetime, str, str]
+    second: tuple[datetime, datetime, str, str]
 
 
 _HISTORY_CUE_RE = re.compile(
@@ -70,13 +95,56 @@ def _time_range(value: str, now: datetime) -> tuple[datetime, datetime, str, str
 
 def parse_history_query(
     text: str, entities: list[EntitySnapshot], now: datetime
-) -> HistoryQuery | None:
+) -> HistoryQuery | StateHistoryQuery | ComparativeHistoryQuery | None:
     """Parse only explicit statistic questions with one named sensor."""
     value = normalize_for_compare(text)
+    comparison = re.search(r"\b(?:vergleich|verglichen|hoeher|niedriger|mehr|weniger)\b", value)
+    if comparison is not None:
+        entity = _mentioned_entity(text, [item for item in entities if item.domain == "sensor"])
+        today = _time_range("heute", now)
+        yesterday = _time_range("gestern", now)
+        this_week = _time_range("diese woche", now)
+        last_week = _time_range("letzte woche", now)
+        periods = (
+            (today, yesterday)
+            if "heute" in value and "gestern" in value
+            else (this_week, last_week)
+            if "woche" in value and re.search(r"\b(?:diese|aktuelle)\w*\b", value)
+            else None
+        )
+        if entity is not None and periods is not None and all(periods):
+            metric = (
+                HistoryMetric.CHANGE
+                if re.search(r"\b(?:verbraucht|verbrauch|erzeugt|produziert)\w*\b", value)
+                else HistoryMetric.MEAN
+            )
+            return ComparativeHistoryQuery(entity, metric, periods[0], periods[1])
+    time_range = _time_range(value, now)
+    state_metric = (
+        StateHistoryMetric.COUNT
+        if re.search(r"\b(?:wie oft|anzahl)\b", value)
+        else StateHistoryMetric.DURATION
+        if re.search(r"\b(?:wie lange|dauer)\b", value)
+        else None
+    )
+    if state_metric is not None and time_range is not None:
+        entity = _mentioned_entity(
+            text,
+            [item for item in entities if item.domain in {"binary_sensor", "switch", "cover", "input_boolean"}],
+        )
+        target: tuple[frozenset[str], str] | None = None
+        if re.search(r"\b(?:offen|geoeffnet|an|aktiv)\b", value):
+            target = frozenset({"on", "open", "opening"}), "offen"
+        elif re.search(r"\b(?:geschlossen|zu|aus|inaktiv)\b", value):
+            target = frozenset({"off", "closed", "closing"}), "geschlossen"
+        if entity is not None and target is not None:
+            start, end, _period, label = time_range
+            return StateHistoryQuery(
+                entity, state_metric, target[0], target[1], start, end, label
+            )
     if _HISTORY_CUE_RE.search(value) is None:
         return None
     entity = _mentioned_entity(text, [item for item in entities if item.domain == "sensor"])
-    time_range = _time_range(value, now)
     if entity is None or time_range is None:
         return None
     if re.search(r"\b(?:durchschnitt|mittelwert)\w*\b", value):
@@ -102,32 +170,38 @@ def _numeric_values(rows: list[dict], key: str) -> list[float]:
     return values
 
 
+def _aggregate_rows(metric: HistoryMetric, rows: list[dict]) -> float | None:
+    key = {
+        HistoryMetric.MEAN: "mean",
+        HistoryMetric.MIN: "min",
+        HistoryMetric.MAX: "max",
+        HistoryMetric.CHANGE: "change",
+    }[metric]
+    values = _numeric_values(rows, key)
+    if not values and metric is HistoryMetric.CHANGE:
+        sums = _numeric_values(rows, "sum")
+        if len(sums) >= 2:
+            values = [sums[-1] - sums[0]]
+    if not values:
+        return None
+    return (
+        sum(values) / len(values)
+        if metric is HistoryMetric.MEAN
+        else min(values) if metric is HistoryMetric.MIN
+        else max(values) if metric is HistoryMetric.MAX
+        else sum(values)
+    )
+
+
 def render_history_result(query: HistoryQuery, response: object) -> str:
     """Render recorder.get_statistics' response without assuming every key."""
     mapping = response if isinstance(response, dict) else {}
     rows = mapping.get(query.entity.entity_id, [])
     if not isinstance(rows, list) or not rows:
         return f"Für {query.entity.friendly_name} liegen {query.period_label} keine Statistikdaten vor."
-    key = {
-        HistoryMetric.MEAN: "mean",
-        HistoryMetric.MIN: "min",
-        HistoryMetric.MAX: "max",
-        HistoryMetric.CHANGE: "change",
-    }[query.metric]
-    values = _numeric_values(rows, key)
-    if not values and query.metric is HistoryMetric.CHANGE:
-        sums = _numeric_values(rows, "sum")
-        if len(sums) >= 2:
-            values = [sums[-1] - sums[0]]
-    if not values:
+    number = _aggregate_rows(query.metric, rows)
+    if number is None:
         return f"Für {query.entity.friendly_name} liegt {query.period_label} kein passender Zahlenwert vor."
-    number = (
-        sum(values) / len(values)
-        if query.metric is HistoryMetric.MEAN
-        else min(values) if query.metric is HistoryMetric.MIN
-        else max(values) if query.metric is HistoryMetric.MAX
-        else sum(values)
-    )
     label = {
         HistoryMetric.MEAN: "Der Durchschnitt",
         HistoryMetric.MIN: "Das Minimum",
@@ -138,8 +212,14 @@ def render_history_result(query: HistoryQuery, response: object) -> str:
     return f"{label} von {query.entity.friendly_name} betrug {query.period_label} {number:g}{unit}."
 
 
-async def async_execute_history_query(hass, query: HistoryQuery) -> str:
+async def async_execute_history_query(
+    hass, query: HistoryQuery | StateHistoryQuery | ComparativeHistoryQuery
+) -> str:
     """Call HA's recorder response service only for a parsed history query."""
+    if isinstance(query, StateHistoryQuery):
+        return await _async_execute_state_history_query(hass, query)
+    if isinstance(query, ComparativeHistoryQuery):
+        return await _async_execute_comparative_history_query(hass, query)
     service_data = {
         "start_time": query.start,
         "end_time": query.end,
@@ -165,3 +245,138 @@ async def async_execute_history_query(hass, query: HistoryQuery) -> str:
     except Exception:  # Recorder absent/disabled or API not supported.
         return "Die Home-Assistant-Verlaufsdaten sind momentan nicht verfügbar."
     return render_history_result(query, result)
+
+
+async def _async_execute_comparative_history_query(
+    hass, query: ComparativeHistoryQuery
+) -> str:
+    """Compare two equally bounded recorder-statistics periods."""
+    statistic_type = "change" if query.metric is HistoryMetric.CHANGE else "mean"
+
+    async def fetch(period: tuple[datetime, datetime, str, str]):
+        return await hass.services.async_call(
+            "recorder",
+            "get_statistics",
+            {
+                "start_time": period[0],
+                "end_time": period[1],
+                "statistic_ids": [query.entity.entity_id],
+                "period": period[2],
+                "types": [statistic_type],
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    try:
+        first_response = await fetch(query.first)
+        second_response = await fetch(query.second)
+    except Exception:
+        return "Die Home-Assistant-Verlaufsdaten sind momentan nicht verfügbar."
+    first_rows = first_response.get(query.entity.entity_id, []) if isinstance(first_response, dict) else []
+    second_rows = second_response.get(query.entity.entity_id, []) if isinstance(second_response, dict) else []
+    first_value = _aggregate_rows(query.metric, first_rows if isinstance(first_rows, list) else [])
+    second_value = _aggregate_rows(query.metric, second_rows if isinstance(second_rows, list) else [])
+    if first_value is None or second_value is None:
+        return f"Für den Vergleich von {query.entity.friendly_name} fehlen Statistikdaten."
+    difference = first_value - second_value
+    unit = f" {query.entity.unit}" if query.entity.unit else ""
+    relation = "höher" if difference > 0 else "niedriger" if difference < 0 else "gleich"
+    if relation == "gleich":
+        return (
+            f"{query.entity.friendly_name} war {query.first[3]} und "
+            f"{query.second[3]} gleich: {first_value:g}{unit}."
+        )
+    return (
+        f"{query.entity.friendly_name} lag {query.first[3]} bei {first_value:g}{unit}; "
+        f"das sind {abs(difference):g}{unit} {relation} als {query.second[3]}."
+    )
+
+
+def _state_value(item: object) -> str | None:
+    if isinstance(item, dict):
+        value = item.get("state", item.get("s"))
+    else:
+        value = getattr(item, "state", None)
+    return str(value).casefold() if value is not None else None
+
+
+def _state_time(item: object) -> datetime | None:
+    if isinstance(item, dict):
+        value = item.get("last_changed", item.get("lu"))
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value, tz=timezone.utc)
+    else:
+        value = getattr(item, "last_changed", None) or getattr(item, "last_updated", None)
+    return value if isinstance(value, datetime) else None
+
+
+def render_state_history_result(
+    query: StateHistoryQuery, response: object
+) -> str:
+    """Summarise state transitions returned by recorder.history."""
+    mapping = response if isinstance(response, dict) else {}
+    raw_rows = mapping.get(query.entity.entity_id, [])
+    rows = raw_rows if isinstance(raw_rows, list) else []
+    if not rows:
+        return f"Für {query.entity.friendly_name} liegen {query.period_label} keine Verlaufsdaten vor."
+
+    if query.metric is StateHistoryMetric.COUNT:
+        count = 0
+        previous = _state_value(rows[0])
+        for row in rows[1:]:
+            current = _state_value(row)
+            if current in query.target_states and previous not in query.target_states:
+                count += 1
+            previous = current
+        return (
+            f"{query.entity.friendly_name} war {query.period_label} "
+            f"{count}-mal {query.target_label}."
+        )
+
+    total_seconds = 0.0
+    for index, row in enumerate(rows):
+        if _state_value(row) not in query.target_states:
+            continue
+        start = _state_time(row) or query.start
+        end = (
+            _state_time(rows[index + 1])
+            if index + 1 < len(rows)
+            else query.end
+        )
+        if end is not None:
+            total_seconds += max(0.0, (min(end, query.end) - max(start, query.start)).total_seconds())
+    minutes = round(total_seconds / 60)
+    hours, remainder = divmod(minutes, 60)
+    duration = (
+        f"{hours} Stunden und {remainder} Minuten"
+        if hours and remainder
+        else f"{hours} Stunden" if hours else f"{remainder} Minuten"
+    )
+    return (
+        f"{query.entity.friendly_name} war {query.period_label} insgesamt "
+        f"{duration} {query.target_label}."
+    )
+
+
+async def _async_execute_state_history_query(hass, query: StateHistoryQuery) -> str:
+    """Read one bounded entity history through recorder's supported API."""
+    try:
+        from homeassistant.components.recorder import history
+
+        result = await hass.async_add_executor_job(
+            partial(
+                history.get_significant_states,
+                hass,
+                query.start,
+                query.end,
+                entity_ids=[query.entity.entity_id],
+                include_start_time_state=True,
+                significant_changes_only=False,
+                minimal_response=False,
+                no_attributes=True,
+            )
+        )
+    except Exception:  # Recorder absent/disabled or history API unavailable.
+        return "Die Home-Assistant-Verlaufsdaten sind momentan nicht verfügbar."
+    return render_state_history_result(query, result)

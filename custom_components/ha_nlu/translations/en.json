@@ -1,0 +1,48 @@
+{
+  "title": "HomeIntent",
+  "config": {
+    "abort": {
+      "already_configured": "HomeIntent is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure HomeIntent",
+        "description": "Choose which Home Assistant entities HomeIntent may understand and control. Without an explicit selection, the current Assist exposure is used dynamically.",
+        "data": {
+          "selected_entities": "Allowed entities",
+          "read_only_entities": "Read-only entities",
+          "admin_only_entities": "Admin-only control entities",
+          "control_user_ids": "Users allowed to control devices (empty: all)",
+          "custom_aliases": "Additional spoken aliases (Alias = entity.id, one per line)",
+          "confirmation_level": "Confirmation risk threshold",
+          "max_action_targets": "Maximum targets per action",
+          "allow_non_admin_critical": "Allow critical actions for non-admin users",
+          "allow_non_admin_automations": "Allow non-admin users to create automations",
+          "context_ttl_seconds": "Conversation context in seconds"
+        }
+      }
+    },
+    "error": {
+      "invalid_alias_rules": "The alias rules are invalid or one alias points to multiple targets."
+    }
+  },
+  "services": {
+    "delete_automation": {
+      "name": "Delete automation",
+      "description": "Internal service used by self-deleting HomeIntent automations.",
+      "fields": {"automation_id": {"name": "Automation ID", "description": "ID of the automation to delete."}}
+    },
+    "record_automation_run": {
+      "name": "Record automation run",
+      "description": "Internal service used by run-limited HomeIntent automations.",
+      "fields": {"automation_id": {"name": "Automation ID"}, "max_runs": {"name": "Maximum runs"}}
+    },
+    "enable_automation": {
+      "name": "Re-enable automation",
+      "description": "Internal service used to resume temporarily paused HomeIntent automations.",
+      "fields": {"automation_id": {"name": "Automation ID"}}
+    }
+  }
+}
