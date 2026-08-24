@@ -10,15 +10,10 @@ flat and hass/YAML-shape-free - the ``nlu/`` query pipeline (``QueryExecutor``/
 metadata sidecar even exist, same layering precedent ``EntitySnapshot``/
 ``DeviceSnapshot`` already set for the entity/device registries.
 
-``referenced_entity_ids`` is deliberately shallow: every ``entity_id`` string
-found anywhere in the automation's raw config (trigger, condition, and action
-alike), not a re-derivation of *how* that entity is used (no attempt to tell
-"triggers on" apart from "turns on" - the plan's own scope note: full
-trigger/condition/action semantics re-derivation from raw YAML is out of
-scope, see ``automation_executor.py``'s ``async_list_automations()``
-docstring). This is enough to answer "was schaltet/steuert X?" and "warum
-geht X an?" honestly as "automations that mention X somewhere", without
-overclaiming actual causation.
+Entity references are retained both as a union and separated by trigger,
+condition and action. This lets management queries distinguish "what reacts
+to X?" from "what controls X?" without reverse-engineering arbitrary YAML
+into a second automation AST.
 """
 
 from __future__ import annotations
@@ -46,6 +41,9 @@ class AutomationSummary:
     source_text: str | None = None
     created_by: str | None = None
     referenced_entity_ids: frozenset[str] = frozenset()
+    trigger_entity_ids: frozenset[str] = frozenset()
+    condition_entity_ids: frozenset[str] = frozenset()
+    action_entity_ids: frozenset[str] = frozenset()
     # HomeIntent V5 Teil 8/10 (Wave 11, "Automation Disable/Enable"): mirrors
     # the automation's own ``initial_state`` YAML key (defaults to enabled
     # when the key is absent, same default Home Assistant's own automation

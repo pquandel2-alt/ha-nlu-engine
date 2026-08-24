@@ -29,6 +29,10 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .automation_executor import AutomationExecutor
+from .automation_action_edit import (
+    homeintent_candidates,
+    is_action_edit_request,
+)
 from .automation_management import (
     AutomationManagementKind,
     format_scheduled_time,
@@ -44,8 +48,9 @@ from .calendar_event import (
     update_calendar_event_draft,
     writable_calendars,
 )
+from .calendar_management import parse_calendar_management
 from .const import DOMAIN, NOT_UNDERSTOOD_TEXT
-from .device_control import match_device_control, match_device_control_followup
+from .device_control import DeviceControlResult, match_device_control, match_device_control_followup
 from .engine import (
     AutomationDraftMatchResult,
     AutomationDeletionMatchResult,
@@ -60,6 +65,12 @@ from .engine import (
 )
 from .entities import EntitySnapshot
 from .hass_entities import build_device_snapshots, build_entity_snapshots
+from .management_dialogs import (
+    async_handle_automation_action_edit_turn,
+    async_handle_calendar_management,
+    async_handle_calendar_mutation_confirmation,
+    store_automation_action_edit,
+)
 from .nlu.automation_confirmation import ConfirmationReply, classify_confirmation_reply
 from .nlu.automation_model import resolve_pending_schedule
 from .nlu.automation_preview import render_automation_preview
@@ -69,6 +80,7 @@ from .nlu.context import (
     PendingAutomationConfirmation,
     PendingAutomationDeletion,
     PendingAutomationDraft,
+    PendingAutomationActionEdit,
     PendingCalendarEvent,
     PendingServiceConfirmation,
 )
@@ -76,6 +88,7 @@ from .nlu.dialog_focus import DialogFocus, derive_dialog_focus
 from .nlu.ha_automation_generator import GenerationError, generate_ha_automation_config
 from .nlu.response_generator import _automation_label
 from .service_call import QUERY_INTENTS
+from .semantic_dialog import continue_semantic_dialog, start_semantic_dialog
 from .world_model import WorldModel, build_world_model as assemble_world_model
 
 _LOGGER = logging.getLogger(__name__)
@@ -231,10 +244,16 @@ class NluConversationEntity(
         self._world_model = assemble_world_model(entities, devices)
         pending = self._context_store.get(user_input.conversation_id)
 
+        all_calendars = tuple(entity for entity in entities if entity.domain == "calendar")
         calendars = writable_calendars(entities)
         if pending is not None and pending.pending_calendar_event is not None:
             return await self._async_handle_calendar_event_turn(
                 user_input, response, pending.pending_calendar_event, calendars
+            )
+
+        if pending is not None and pending.pending_calendar_mutation is not None:
+            return await async_handle_calendar_mutation_confirmation(
+                self, user_input, response, pending.pending_calendar_mutation
             )
 
         if pending is not None and pending.pending_automation_confirmation is not None:
@@ -265,6 +284,15 @@ class NluConversationEntity(
                 user_input, response, pending.pending_automation_confirmation, entities
             )
 
+        if pending is not None and pending.pending_automation_action_edit is not None:
+            return await async_handle_automation_action_edit_turn(
+                self,
+                user_input,
+                response,
+                pending.pending_automation_action_edit,
+                entities,
+            )
+
         if pending is not None and pending.pending_automation_deletion is not None:
             return await self._async_handle_automation_deletion_confirmation_reply(
                 user_input, response, pending.pending_automation_deletion
@@ -273,6 +301,30 @@ class NluConversationEntity(
         if pending is not None and pending.pending_service_confirmation is not None:
             return await self._async_handle_service_confirmation_reply(
                 user_input, response, pending.pending_service_confirmation
+            )
+
+        if pending is not None and pending.pending_semantic_command is not None:
+            dialog = continue_semantic_dialog(
+                user_input.text, pending.pending_semantic_command
+            )
+            if dialog.result is not None:
+                self._context_store.clear(user_input.conversation_id)
+                return await self._async_handle_device_control_result(
+                    user_input, response, dialog.result
+                )
+            self._context_store.set(
+                user_input.conversation_id,
+                ConversationContext(
+                    last_command=None,
+                    last_entities=(),
+                    last_area=None,
+                    pending_clarification=None,
+                    pending_semantic_command=dialog.pending,
+                ),
+            )
+            response.async_set_speech(dialog.question)
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
             )
 
         if pending is not None and pending.pending_automation_draft is not None:
@@ -310,6 +362,14 @@ class NluConversationEntity(
                 response=response, conversation_id=user_input.conversation_id
             )
 
+        calendar_management = parse_calendar_management(
+            user_input.text, all_calendars, dt_util.now()
+        )
+        if calendar_management is not None:
+            return await async_handle_calendar_management(
+                self, user_input, response, calendar_management, all_calendars
+            )
+
         calendar_draft = start_calendar_event_draft(
             user_input.text, calendars, dt_util.now()
         )
@@ -336,6 +396,39 @@ class NluConversationEntity(
                 response=response, conversation_id=user_input.conversation_id
             )
 
+        if is_action_edit_request(user_input.text):
+            if self._automation_executor is None:
+                self._automation_executor = AutomationExecutor(self.hass)
+            automations = await self._automation_executor.async_list_automations()
+            candidates = homeintent_candidates(automations, user_input.text)
+            if not candidates:
+                response.async_set_speech("Ich finde keine änderbare HomeIntent-Automation.")
+            elif len(candidates) > 1:
+                store_automation_action_edit(
+                    self,
+                    user_input.conversation_id,
+                    PendingAutomationActionEdit(candidates=candidates),
+                )
+                response.async_set_speech(
+                    "Welche Automation meinst du? "
+                    + ", ".join(_automation_label(item) for item in candidates)
+                    + "."
+                )
+            else:
+                store_automation_action_edit(
+                    self,
+                    user_input.conversation_id,
+                    PendingAutomationActionEdit(
+                        candidates=candidates, automation=candidates[0]
+                    ),
+                )
+                response.async_set_speech(
+                    "Was soll stattdessen passieren? Auslöser und Bedingungen bleiben unverändert."
+                )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
         management_request = parse_automation_management(user_input.text)
         if management_request is not None:
             return await self._async_handle_automation_management(
@@ -346,67 +439,8 @@ class NluConversationEntity(
         if device_control is None:
             device_control = match_device_control_followup(user_input.text, pending)
         if device_control is not None:
-            if device_control.plan is None:
-                self._context_store.clear(user_input.conversation_id)
-                response.async_set_speech(device_control.response_text)
-            elif device_control.requires_confirmation:
-                self._context_store.set(
-                    user_input.conversation_id,
-                    ConversationContext(
-                        last_command=None,
-                        last_entities=(),
-                        last_area=None,
-                        pending_clarification=None,
-                        pending_service_confirmation=PendingServiceConfirmation(
-                            device_control.plan, device_control.response_text
-                        ),
-                    ),
-                )
-                response.async_set_speech(
-                    f"Soll ich wirklich {device_control.response_text.rstrip('.')}?"
-                )
-            else:
-                try:
-                    await self.hass.services.async_call(
-                        device_control.plan.domain,
-                        device_control.plan.service,
-                        {
-                            "entity_id": device_control.plan.entity_id,
-                            **device_control.plan.data,
-                        },
-                        blocking=True,
-                    )
-                except Exception as err:  # noqa: BLE001 - HA service failures are heterogeneous
-                    self._context_store.clear(user_input.conversation_id)
-                    response.async_set_error(
-                        intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-                        f"Fehler beim Ausführen: {err}",
-                    )
-                else:
-                    response.async_set_speech(device_control.response_text)
-                    if device_control.entity is not None:
-                        controlled = device_control.entity
-                        self._context_store.set(
-                            user_input.conversation_id,
-                            ConversationContext(
-                                last_command=None,
-                                last_entities=(controlled,),
-                                last_area=None,
-                                pending_clarification=None,
-                                focus=DialogFocus(
-                                    property=None,
-                                    scope_kind="entity",
-                                    scope_id=controlled.entity_id,
-                                    candidate_entity_ids=(controlled.entity_id,),
-                                    source_intent=(
-                                        "DeviceControl:"
-                                        + device_control.plan.service
-                                    ),
-                                ),
-                            ),
-                        )
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
+            return await self._async_handle_device_control_result(
+                user_input, response, device_control
             )
 
         if pending is not None and pending.pending_clarification is not None:
@@ -517,6 +551,26 @@ class NluConversationEntity(
                 result = self._engine.match(user_input.text, entities, self._world_model)
 
         if result is None:
+            dialog = start_semantic_dialog(user_input.text, entities)
+            if dialog is not None and dialog.result is not None:
+                return await self._async_handle_device_control_result(
+                    user_input, response, dialog.result
+                )
+            if dialog is not None and dialog.pending is not None:
+                self._context_store.set(
+                    user_input.conversation_id,
+                    ConversationContext(
+                        last_command=None,
+                        last_entities=(),
+                        last_area=None,
+                        pending_clarification=None,
+                        pending_semantic_command=dialog.pending,
+                    ),
+                )
+                response.async_set_speech(dialog.question)
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
             response.async_set_error(
                 intent.IntentResponseErrorCode.NO_INTENT_MATCH,
                 self._engine.failure_feedback(user_input.text, entities) or NOT_UNDERSTOOD_TEXT,
@@ -844,6 +898,73 @@ class NluConversationEntity(
             response=response, conversation_id=user_input.conversation_id
         )
 
+    async def _async_handle_device_control_result(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        device_control: DeviceControlResult,
+    ) -> conversation.ConversationResult:
+        """Apply the common safety, execution and context policy once."""
+        if device_control.plan is None:
+            self._context_store.clear(user_input.conversation_id)
+            response.async_set_speech(device_control.response_text)
+        elif device_control.requires_confirmation:
+            self._context_store.set(
+                user_input.conversation_id,
+                ConversationContext(
+                    last_command=None,
+                    last_entities=(),
+                    last_area=None,
+                    pending_clarification=None,
+                    pending_service_confirmation=PendingServiceConfirmation(
+                        device_control.plan, device_control.response_text
+                    ),
+                ),
+            )
+            response.async_set_speech(
+                f"Soll ich wirklich {device_control.response_text.rstrip('.')}?"
+            )
+        else:
+            try:
+                await self.hass.services.async_call(
+                    device_control.plan.domain,
+                    device_control.plan.service,
+                    {
+                        "entity_id": device_control.plan.entity_id,
+                        **device_control.plan.data,
+                    },
+                    blocking=True,
+                )
+            except Exception as err:  # noqa: BLE001 - HA services raise heterogeneous errors
+                self._context_store.clear(user_input.conversation_id)
+                response.async_set_error(
+                    intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                    f"Fehler beim Ausführen: {err}",
+                )
+            else:
+                response.async_set_speech(device_control.response_text)
+                if device_control.entity is not None:
+                    controlled = device_control.entity
+                    self._context_store.set(
+                        user_input.conversation_id,
+                        ConversationContext(
+                            last_command=None,
+                            last_entities=(controlled,),
+                            last_area=None,
+                            pending_clarification=None,
+                            focus=DialogFocus(
+                                property=None,
+                                scope_kind="entity",
+                                scope_id=controlled.entity_id,
+                                candidate_entity_ids=(controlled.entity_id,),
+                                source_intent="DeviceControl:" + device_control.plan.service,
+                            ),
+                        ),
+                    )
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
     def _store_calendar_event(
         self,
         conversation_id: str,
@@ -995,6 +1116,34 @@ class NluConversationEntity(
                 if not labels
                 else "HomeIntent-Automationen: " + ", ".join(labels) + "."
             )
+        elif request.kind in {
+            AutomationManagementKind.COUNT_ACTIVE,
+            AutomationManagementKind.COUNT_DISABLED,
+        }:
+            state = (
+                "aktiv"
+                if request.kind is AutomationManagementKind.COUNT_ACTIVE
+                else "deaktiviert"
+            )
+            response.async_set_speech(
+                f"{len(selection.automations)} HomeIntent-Automationen sind {state}."
+            )
+        elif request.kind in {
+            AutomationManagementKind.EXPLAIN_TRIGGER,
+            AutomationManagementKind.CONTROLS_ENTITY,
+        }:
+            if not selection.automations:
+                response.async_set_speech("Ich finde keine passende HomeIntent-Automation.")
+            else:
+                details = [
+                    item.source_text or item.alias for item in selection.automations
+                ]
+                prefix = (
+                    "Auf diesen Auslöser reagieren: "
+                    if request.kind is AutomationManagementKind.EXPLAIN_TRIGGER
+                    else "Dieses Gerät wird gesteuert durch: "
+                )
+                response.async_set_speech(prefix + "; ".join(details) + ".")
         elif request.kind in (
             AutomationManagementKind.LIST_SCHEDULED,
             AutomationManagementKind.WHEN,

@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
 
-- Aktuelle Version: **4.32.0**
+- Aktuelle Version: **4.33.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Lizenz: **MIT**
@@ -123,6 +123,8 @@ Die gemeinsame Auswertung verbessert mehrere Bereiche gleichzeitig:
 | Zustandsfragen | Einzelne, mehrere, alle, irgendeine oder keine passende Entität können abgefragt werden. |
 | Messwerte | Temperatur, Luftfeuchtigkeit, Batterie, Leistung, Energie und Helligkeit verwenden dieselbe Orts- und Vergleichslogik. |
 | Vergleiche | Ausdrücke wie „über“, „unter“, „mindestens“, „höchstens“, „heller“ und „dunkler“ werden unabhängig von ihrer Position erkannt. |
+| Abstufungen | „etwas“, „deutlich“ und „stark“ verändern Helligkeit oder Solltemperatur in reproduzierbaren, gerätegerechten Schritten. |
+| Unvollständige Befehle | Fehlt Ziel, Wert oder eine exakte Auswahl, fragt HomeIntent gezielt nach, statt ein Gerät oder eine Menge zu erraten. |
 | Automationen | Zustandsauslöser und Zustandsbedingungen verwenden denselben geprüften Predicate-Compiler. |
 | Folgefragen | Gerät, Raum, Etage und abgefragte Eigenschaft können als Dialogfokus sicher weiterverwendet werden. |
 | Gemischte Sätze | Eine Aktion und eine unabhängige Zustandsfrage können gemeinsam vollständig validiert werden. Beziehen sich beide auf dasselbe Gerät, wird die Kombination wegen eines möglicherweise veralteten Abfragewerts abgelehnt. |
@@ -169,7 +171,17 @@ HomeIntent kann aktuell unter anderem folgende Home-Assistant-Domänen verwenden
 | `lock` | ver- und entriegeln; Entriegeln nur nach Bestätigung |
 | `sensor` | Werte und Vergleiche abfragen (nur lesend) |
 | `binary_sensor` | Zustände abfragen, zum Beispiel Fenster oder Türen (nur lesend) |
-| `calendar` | Termine über beschreibbare Home-Assistant-Kalender anlegen |
+| `calendar` | Termine anlegen und abfragen; bei unterstützter Fähigkeit löschen oder verschieben |
+| `humidifier` | ein-/ausschalten und Zielluftfeuchtigkeit setzen |
+| `water_heater` | Warmwasser-Solltemperatur setzen |
+| `select` | eine tatsächlich angebotene Option auswählen |
+| `number`, `input_number` | Werte innerhalb des gemeldeten Bereichs setzen |
+| `input_boolean` | ein-/ausschalten und umschalten |
+| `button` | Taster nach ausdrücklicher Bestätigung betätigen |
+| `valve` | Ventile nach Fähigkeitsprüfung und Bestätigung öffnen oder schließen |
+| `lawn_mower` | Mähen starten, pausieren oder zur Ladestation fahren |
+| `camera` | Kamerastream auf einem eindeutig genannten Media Player anzeigen |
+| `notify` | eine Nachricht über eine eindeutig genannte Notify-Entität senden |
 
 Beispiele:
 
@@ -187,7 +199,16 @@ Stelle die Heizung im Wohnzimmer auf 21 Grad.
 Pausiere die Wiedergabe auf Wohnzimmer TV.
 Schicke den Saugroboter zur Ladestation.
 Aktiviere die Szene Filmabend.
+Stelle den Luftbefeuchter im Schlafzimmer auf 45 Prozent Luftfeuchtigkeit.
+Wähle beim Heizprogramm Eco.
+Stelle den Bewässerungswert auf 20.
+Zeige die Einfahrtkamera auf dem Wohnzimmer TV.
 ```
+
+Bei fehlenden Angaben führt HomeIntent einen begrenzten, semantischen Dialog.
+„Stell auf 22 Grad“ fragt bei mehreren Heizungen nach dem Ziel. „Stelle die
+Heizung im Büro“ fragt nach der Solltemperatur. „Mach ein paar Lichter an“
+wählt niemals zufällig Geräte aus, sondern verlangt konkrete Namen.
 
 Sicherheitskritische direkte Aktionen werden nicht sofort ausgeführt. Das
 Entriegeln eines Schlosses sowie das Öffnen oder Schließen eines als Garage
@@ -343,7 +364,7 @@ Aktionszuordnung – beispielsweise Batterie, Luftfeuchtigkeit, Leistung oder
 Energie – bleiben ausschließlich lesend und lösen niemals eine erfundene Aktion
 aus.
 
-### Kalendertermine anlegen
+### Kalendertermine anlegen und abfragen
 
 Seit Version 4.30 kann HomeIntent echte Termine über Home Assistants
 `calendar.create_event` anlegen. Das funktioniert auch mit einem über CalDAV
@@ -381,6 +402,28 @@ verwendet. Vor dem Schreiben erscheint immer eine vollständige Vorschau mit
 Titel, Datum, Beginn, Ende und Kalender. Erst ein ausdrückliches „Ja“ führt
 `calendar.create_event` aus. „Nein“, „Abbrechen“ oder „Stopp“ verwirft den
 Entwurf ohne Schreibzugriff.
+
+Kalender lassen sich außerdem lesend in natürlicher Sprache abfragen:
+
+```text
+Was steht morgen in meinem Kalender?
+Welche Termine habe ich am Wochenende?
+Wann ist mein Zahnarzttermin?
+```
+
+HomeIntent verwendet dafür `calendar.get_events`, fasst die Ereignisse aller
+ausgewählten Kalender zusammen und kann nach einem Titel filtern. Unterstützt
+die konkrete Kalenderintegration die Home-Assistant-Fähigkeiten
+`DELETE_EVENT` oder `UPDATE_EVENT`, kann HomeIntent einen eindeutig gefundenen
+Termin nach einer ausdrücklichen Bestätigung löschen beziehungsweise auf eine
+andere Uhrzeit verschieben. Fehlen diese Fähigkeiten – was je nach
+Apple-/CalDAV-Anbindung vorkommen kann – wird die Änderung klar abgelehnt und
+nicht als erfolgreich ausgegeben.
+
+```text
+Lösche den Termin Zahnarzt morgen.
+Verschiebe Zahnarzt auf 11 Uhr.
+```
 
 Solange die Vorschau noch nicht bestätigt wurde, können Angaben korrigiert
 werden:
@@ -530,8 +573,11 @@ nennt die Begrenzung vor der Bestätigung.
 ```text
 Welche Automationen gibt es?
 Zeige nur HomeIntent-Automationen.
+Wie viele HomeIntent-Automationen sind aktiv?
 Welche einmaligen Aufträge sind noch geplant?
 Wann wird die Rolllade gefahren?
+Welche Automation steuert die Büro Rolllade?
+Was passiert, wenn das Küchenfenster geöffnet wird?
 Verschiebe den Auftrag für die Rolllade auf 20 Uhr.
 Lösche alle abgelaufenen HomeIntent-Automationen.
 Was schaltet das Küchenlicht?
@@ -539,9 +585,17 @@ Warum ist das Küchenlicht an?
 Deaktiviere die Automation für Küchenlicht.
 Aktiviere die Automation für Küchenlicht.
 Lösche die Automation für Küchenlicht.
+Ändere nur die Aktion, behalte Auslöser und Bedingungen.
 ```
 
 Löschen erfordert eine Bestätigung. Aktivieren und Deaktivieren ändern den dauerhaften `initial_state` in `automations.yaml`; die Einstellung bleibt daher auch nach einem Reload oder Neustart erhalten. Beim Verschieben muss genau ein noch geplanter einmaliger Auftrag passen. Bei mehreren Treffern nennt HomeIntent die Kandidaten und bittet um ein eindeutigeres Gerät, statt einen beliebigen Auftrag zu ändern.
+
+Bei Abfragen unterscheidet HomeIntent die YAML-Rollen: Eine Frage nach dem
+Auslöser durchsucht nur Trigger, eine Frage nach dem gesteuerten Gerät nur
+Aktionen. Beim gezielten Austauschen einer Aktion wählt HomeIntent ausschließlich
+eigene Automationen, fragt neue Aktion und Bestätigung ab und schreibt die
+Änderung transaktional. Trigger, Bedingungen, triggerbedingte Verzögerungen,
+Self-Delete und Laufzähler bleiben dabei unverändert.
 
 ## Installation über HACS
 
@@ -633,7 +687,7 @@ speichert keine gesprochenen Texte und kein World Model dauerhaft.
 - Ist Home Assistant beim berechneten Zeitpunkt ausgeschaltet, wird der verpasste Auftrag aus Sicherheitsgründen verworfen. Eine automatische verspätete Ausführung findet bewusst nicht statt.
 - Direkte Steuerung neuer Gerätedomänen unterstützt bewusst nur geprüfte Kernaktionen. Erweiterte Klima-, Medien- oder Staubsaugerfunktionen können je nach Gerät noch fehlen.
 - Nicht jeder intern modellierbare Trigger, jede Bedingung oder Aktion besitzt bereits eine sichere Home-Assistant-YAML-Abbildung. Nicht unterstützte Strukturen werden abgelehnt, statt angenähert zu werden.
-- Kalendertermine können derzeit angelegt, aber noch nicht über HomeIntent verschoben, bearbeitet, aufgelistet oder gelöscht werden. Diese Funktionen hängen zusätzlich von den Fähigkeiten der jeweiligen Kalenderintegration ab.
+- Kalendertermine können aufgelistet und nach Titel gesucht werden. Löschen und Verschieben sind nur möglich, wenn die jeweilige Kalenderintegration eine Ereignis-ID sowie `DELETE_EVENT` beziehungsweise `UPDATE_EVENT` bereitstellt; ganztägige Termine werden nicht durch eine reine Uhrzeitänderung in Zeit-Termine umgewandelt.
 - Die Qualität der Zielauflösung hängt von sinnvollen Entity-Namen, Bereichen, Geräteklassen, Fähigkeiten und Assist-Freigaben ab.
 
 ## Architektur
@@ -658,6 +712,8 @@ Conversation Agent
 Der Parser führt keine Home-Assistant-Dienste direkt aus. Dadurch können Sprachverständnis, Auflösung, Validierung, Vorschau und Ausführung unabhängig getestet werden. Neue Zuständigkeiten sind in eigene Module für Gerätesteuerung, kalendarische Termine, Automationsverwaltung, Ergebnisobjekte und Dateitransaktionen ausgelagert. Die verbleibenden großen Kernmodule werden schrittweise und verhaltensneutral weiter zerlegt.
 
 Weiterführende technische Dokumentation liegt im Verzeichnis [`docs`](docs/).
+Der aktuelle, bewusst ehrliche Abgleich mit der Home-Assistant Integration
+Quality Scale steht in [`docs/quality-checklist.md`](docs/quality-checklist.md).
 
 ## Entwicklung und Tests
 
@@ -676,7 +732,7 @@ python -m pytest -q
 Aktueller Entwicklungsstand:
 
 ```text
-1853 passed, 12 skipped
+1890 passed, 12 skipped
 ```
 
 Zusätzlich wird HomeIntent gegen die getrennte, agentenneutrale Suite

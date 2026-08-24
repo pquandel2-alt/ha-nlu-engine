@@ -384,6 +384,21 @@ def _generate_action_step(
     return _generate_action_leaf(step, entities)
 
 
+def generate_ha_action_configs(
+    actions: tuple["ActionModel | ActionGroup", ...],
+    entities: list[EntitySnapshot],
+) -> tuple[list[dict[str, Any]] | None, GenerationError | None]:
+    """Public action-only renderer used by safe automation action editing."""
+    rendered: list[dict[str, Any]] = []
+    for action in actions:
+        config, error = _generate_action_step(action, entities)
+        if error is not None:
+            return None, error
+        assert config is not None
+        rendered.append(config)
+    return rendered, None
+
+
 def generate_ha_automation_config(
     model: AutomationModel, entities: list[EntitySnapshot], automation_id: str | None = None
 ) -> GenerationResult:

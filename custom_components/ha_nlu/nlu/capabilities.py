@@ -35,6 +35,16 @@ class Capability(Enum):
     POWER = auto()
     ENERGY = auto()
     CREATE_EVENT = auto()
+    DELETE_EVENT = auto()
+    UPDATE_EVENT = auto()
+    SET_VALUE = auto()
+    SELECT_OPTION = auto()
+    PRESS = auto()
+    OPEN = auto()
+    CLOSE = auto()
+    START = auto()
+    PAUSE = auto()
+    DOCK = auto()
 
 
 # HA light ColorMode values (homeassistant.components.light.ColorMode) that
@@ -52,6 +62,8 @@ _COVER_SET_POSITION_FEATURE = 4
 # Stable Home Assistant CalendarEntityFeature.CREATE_EVENT bit. Calendar
 # entities may be read-only, so the domain alone is deliberately insufficient.
 _CALENDAR_CREATE_EVENT_FEATURE = 1
+_CALENDAR_DELETE_EVENT_FEATURE = 2
+_CALENDAR_UPDATE_EVENT_FEATURE = 4
 
 
 def derive_capabilities(
@@ -68,7 +80,7 @@ def derive_capabilities(
     """
     caps: set[Capability] = set()
 
-    if domain in ("light", "switch", "fan", "climate"):
+    if domain in ("light", "switch", "fan", "climate", "humidifier", "input_boolean"):
         caps.add(Capability.TURN_ON)
         caps.add(Capability.TURN_OFF)
 
@@ -127,6 +139,41 @@ def derive_capabilities(
             supported_features = 0
         if supported_features & _CALENDAR_CREATE_EVENT_FEATURE:
             caps.add(Capability.CREATE_EVENT)
+        if supported_features & _CALENDAR_DELETE_EVENT_FEATURE:
+            caps.add(Capability.DELETE_EVENT)
+        if supported_features & _CALENDAR_UPDATE_EVENT_FEATURE:
+            caps.add(Capability.UPDATE_EVENT)
+
+    if domain in {"number", "input_number"} and "min" in attributes and "max" in attributes:
+        caps.add(Capability.SET_VALUE)
+    if domain == "select" and attributes.get("options"):
+        caps.add(Capability.SELECT_OPTION)
+    if domain == "button":
+        caps.add(Capability.PRESS)
+    if domain == "humidifier" and "humidity" in attributes:
+        caps.add(Capability.HUMIDITY)
+    if domain == "water_heater" and (
+        "temperature" in attributes or "target_temp_high" in attributes
+    ):
+        caps.add(Capability.TEMPERATURE)
+
+    if domain in {"valve", "lawn_mower"}:
+        try:
+            supported_features = int(attributes.get("supported_features", 0))
+        except (TypeError, ValueError):
+            supported_features = 0
+        if domain == "valve":
+            if supported_features & 1:
+                caps.add(Capability.OPEN)
+            if supported_features & 2:
+                caps.add(Capability.CLOSE)
+        else:
+            if supported_features & 1:
+                caps.add(Capability.START)
+            if supported_features & 2:
+                caps.add(Capability.PAUSE)
+            if supported_features & 4:
+                caps.add(Capability.DOCK)
 
     return frozenset(caps)
 

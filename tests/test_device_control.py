@@ -55,6 +55,37 @@ ENTITIES = [
     ),
 ]
 
+EXTENDED_ENTITIES = ENTITIES + [
+    EntitySnapshot(
+        "humidifier.schlafzimmer", "Luftbefeuchter Schlafzimmer", "humidifier", "on",
+        attributes={"min_humidity": 30, "max_humidity": 70},
+    ),
+    EntitySnapshot(
+        "water_heater.boiler", "Warmwasser Boiler", "water_heater", "eco",
+        attributes={"min_temp": 40, "max_temp": 75},
+    ),
+    EntitySnapshot(
+        "select.lueftung", "Lüftungsprofil", "select", "Normal",
+        attributes={"options": ["Leise", "Normal", "Intensiv"]},
+    ),
+    EntitySnapshot(
+        "number.lautstaerke", "Türklingel Lautstärke", "number", "30",
+        attributes={"min": 0, "max": 100},
+    ),
+    EntitySnapshot("input_boolean.gastmodus", "Gastmodus", "input_boolean", "off"),
+    EntitySnapshot("button.neustart", "Router Neustart", "button", "unknown"),
+    EntitySnapshot(
+        "valve.gas", "Gasventil", "valve", "closed", device_class="gas",
+        attributes={"supported_features": 3},
+    ),
+    EntitySnapshot(
+        "lawn_mower.garten", "Mähroboter", "lawn_mower", "docked",
+        attributes={"supported_features": 7},
+    ),
+    EntitySnapshot("camera.einfahrt", "Einfahrt Kamera", "camera", "idle"),
+    EntitySnapshot("notify.handys", "Familienhandys", "notify", "unknown"),
+]
+
 
 def test_climate_mode_is_checked_against_reported_modes():
     result = match_device_control(
@@ -181,6 +212,57 @@ def test_garage_movement_can_be_cancelled(monkeypatch, tmp_path):
 
 
 def test_every_extended_domain_is_selectable_in_live_home_assistant():
-    assert {"climate", "media_player", "vacuum", "scene", "lock", "calendar"} <= set(
+    assert {
+        "climate", "media_player", "vacuum", "scene", "lock", "calendar",
+        "humidifier", "water_heater", "select", "number", "input_number",
+        "input_boolean", "button", "valve", "lawn_mower", "camera", "notify",
+    } <= set(
         SELECTABLE_DOMAINS
     )
+
+
+@pytest.mark.parametrize(
+    ("sentence", "domain", "service", "data"),
+    (
+        ("Stelle die Luftfeuchtigkeit vom Luftbefeuchter Schlafzimmer auf 55 Prozent", "humidifier", "set_humidity", {"humidity": 55}),
+        ("Stelle den Warmwasser Boiler auf 60 Grad", "water_heater", "set_temperature", {"temperature": 60.0}),
+        ("Wähle beim Lüftungsprofil Intensiv", "select", "select_option", {"option": "Intensiv"}),
+        ("Stelle Türklingel Lautstärke auf 45", "number", "set_value", {"value": 45.0}),
+        ("Schalte den Gastmodus ein", "input_boolean", "turn_on", {}),
+        ("Starte den Mähroboter", "lawn_mower", "start_mowing", {}),
+        ("Schicke den Mähroboter zur Ladestation", "lawn_mower", "dock", {}),
+        ("Zeige die Einfahrt Kamera auf dem Wohnzimmer TV", "camera", "play_stream", {"media_player": "media_player.tv"}),
+        ("Sende über Familienhandys die Nachricht Essen ist fertig", "notify", "send_message", {"message": "Essen ist fertig"}),
+    ),
+)
+def test_additional_domains_are_composed_from_entity_operation_and_value(
+    sentence, domain, service, data
+):
+    result = match_device_control(sentence, EXTENDED_ENTITIES)
+    assert result is not None
+    assert result.plan is not None
+    assert (result.plan.domain, result.plan.service) == (domain, service)
+    assert result.plan.data == data
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    ("Drücke Router Neustart", "Öffne Gasventil", "Schließe Gasventil"),
+)
+def test_additional_high_risk_domains_require_confirmation(sentence):
+    result = match_device_control(sentence, EXTENDED_ENTITIES)
+    assert result is not None
+    assert result.plan is not None
+    assert result.requires_confirmation
+
+
+def test_additional_domain_values_and_features_are_checked():
+    assert match_device_control(
+        "Stelle die Luftfeuchtigkeit vom Luftbefeuchter Schlafzimmer auf 90 Prozent",
+        EXTENDED_ENTITIES,
+    ).plan is None
+    unsupported_valve = EntitySnapshot(
+        "valve.gas", "Gasventil", "valve", "closed", device_class="gas",
+        attributes={"supported_features": 2},
+    )
+    assert match_device_control("Öffne Gasventil", [unsupported_valve]) is None

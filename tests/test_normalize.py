@@ -55,6 +55,11 @@ def test_strips_mal_doch_kurz_etwas_ein_bisschen():
     assert normalize("mach ein bisschen das Licht an") == "mach das Licht an"
 
 
+def test_preserves_degree_words_before_relative_adjustments():
+    assert normalize("mach das Licht etwas heller") == "mach das Licht etwas heller"
+    assert normalize("mach es ein bisschen wärmer") == "mach es ein bisschen wärmer"
+
+
 def test_filler_stripping_is_case_insensitive():
     assert normalize("Mach Mal das Licht an") == "Mach das Licht an"
 

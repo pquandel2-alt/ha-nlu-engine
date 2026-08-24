@@ -56,6 +56,21 @@ def test_domain_and_area_constraint_resolves_matching_entities():
     assert result.area == frame.area
 
 
+def test_explicit_entity_constraint_selects_only_that_entity():
+    frame = SemanticFrame(
+        intent="HassTurnOn",
+        target=TargetReference(
+            text="Küchenlicht", entity_id="light.kueche", domain="light"
+        ),
+        area=None,
+        action=SemanticAction.TURN_ON,
+    )
+
+    result = ReasoningEngine.resolve(frame, ALL_ENTITIES)
+
+    assert result.entities == (LIGHT_KUECHE,)
+
+
 def test_property_constraint_filters_by_capability():
     frame = SemanticFrame(
         intent="HassLightSetColor",

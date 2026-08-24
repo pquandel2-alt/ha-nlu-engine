@@ -304,6 +304,11 @@ def _parse_date(text: str, now: datetime) -> tuple[date | None, tuple[int, int] 
     return None, None
 
 
+def parse_calendar_date(text: str, now: datetime) -> date | None:
+    """Public date-only parser shared by event drafting and calendar queries."""
+    return _parse_date(text, now)[0]
+
+
 def _parse_duration(text: str, *, allow_bare: bool) -> tuple[int | None, tuple[int, int] | None]:
     fraction = _FRACTION_DURATION_RE.search(text)
     if fraction is not None:

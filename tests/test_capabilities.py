@@ -105,6 +105,28 @@ def test_calendar_create_event_requires_the_real_supported_feature_bit():
     ) == frozenset()
 
 
+def test_calendar_mutation_capabilities_use_the_real_feature_bits():
+    assert derive_capabilities(
+        "calendar", None, {"supported_features": 7}
+    ) == {Capability.CREATE_EVENT, Capability.DELETE_EVENT, Capability.UPDATE_EVENT}
+
+
+def test_extended_domain_capabilities_are_derived_from_concrete_attributes():
+    assert Capability.SET_VALUE in derive_capabilities(
+        "number", None, {"min": 0, "max": 10}
+    )
+    assert Capability.SELECT_OPTION in derive_capabilities(
+        "select", None, {"options": ["Eco"]}
+    )
+    assert derive_capabilities("button", None, {}) == {Capability.PRESS}
+    assert derive_capabilities(
+        "valve", None, {"supported_features": 3}
+    ) == {Capability.OPEN, Capability.CLOSE}
+    assert derive_capabilities(
+        "lawn_mower", None, {"supported_features": 7}
+    ) == {Capability.START, Capability.PAUSE, Capability.DOCK}
+
+
 def test_required_capability_for_property_covers_every_property_with_a_capability_counterpart():
     assert required_capability_for_property(SemanticProperty.BRIGHTNESS) is Capability.BRIGHTNESS
     assert required_capability_for_property(SemanticProperty.COLOR) is Capability.COLOR

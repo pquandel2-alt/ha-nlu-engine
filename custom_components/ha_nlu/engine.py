@@ -40,6 +40,7 @@ from .entities import EntitySnapshot, ResolveStatus, resolve_entity
 from .nlu.command import SemanticCommand, build_semantic_command
 from .nlu.context import ConversationContext
 from .nlu.debug import DebugTrace, format_command
+from .nlu.degree_semantics import extract_degree
 from .nlu.frame import AreaReference, SemanticFrame, TargetReference
 from .nlu.normalize import normalize
 from .nlu.parser import (
@@ -91,7 +92,6 @@ from .parsers import (
     SingleTargetParser,
     StateQueryParser,
     TemporalParser,
-    _DEFAULT_DIMMING_STEP_PERCENT,
 )
 from .service_call import (
     CLIMATE_EXTENDED_INTENTS,
@@ -461,11 +461,9 @@ class MatchResult:
     # query-vs-action distinction ``conversation.py`` already made in Phase
     # 19/Query-Engine (see its module docstring).
     clarification: ClarificationRequest | None = None
-    # ReasoningEngine's composed view of the same match (V6.25/V6.26) -
-    # additive/observational only, same "no consumer yet" pattern as
-    # ``command`` above: computed centrally in ``_build_match_result`` so
-    # ``ReasoningEngine`` is actually wired into the live pipeline instead
-    # of unreferenced code, but nothing here drives ``plan``/``response_text``.
+    # ReasoningEngine's composed view of the same match (V6.25/V6.26).
+    # ``_build_match_result`` uses it as a consistency gate for explicit,
+    # singular targets before a service plan can be returned.
     # For a current-turn floor reference ("oben"/"unten") this can diverge
     # from ``command`` - ``SemanticFrame`` has no floor field, so
     # ``ReasoningEngine.resolve()`` can only pick up a floor from
@@ -897,16 +895,17 @@ class NluEngine:
             return None
 
         normalized = normalize(text)
-        intent = self._context_followup_parser.parse(normalized)
+        adjustment = extract_degree(normalized)
+        intent = self._context_followup_parser.parse(adjustment.text)
         if intent is None:
             return None
 
         if intent in LIGHT_EXTENDED_INTENTS:
             domain = "light"
-            parameters = {"step_percent": _DEFAULT_DIMMING_STEP_PERCENT}
+            parameters = {"step_percent": adjustment.light_percent}
         elif intent in CLIMATE_EXTENDED_INTENTS:
             domain = "climate"
-            parameters = {}
+            parameters = {"step": adjustment.climate_degrees}
         else:
             return None
 
@@ -1284,6 +1283,17 @@ class NluEngine:
         if action is not None:
             return (action,)
         return self._automation_action_parser.parse(text, context)
+
+    def parse_automation_actions(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
+    ) -> tuple[ActionModel | ActionGroup, ...] | None:
+        """Parse one replacement action through the shared semantic pipeline."""
+        return self._parse_action_semantically(
+            text, create_parse_context(entities, world_model=world_model)
+        )
 
     def match_automation(
         self,
@@ -2062,12 +2072,21 @@ class NluEngine:
         if validate_command(command) is not None:
             return None
 
-        # ReasoningEngine (V6.25/26) composed centrally, once, for every
-        # match that reaches here - additive/observational only (see
-        # MatchResult.resolved_intent's own docstring for the known
-        # current-turn-floor limitation). Not used to drive plan/response_text
-        # below; each parser's own resolution (``matched``) stays authoritative.
+        # Compose the central semantic view once. For an explicitly resolved
+        # singular target it is an execution gate: entity, domain, room/floor
+        # and capability constraints must still agree after composition.
         resolved_intent = ReasoningEngine.resolve(frame, entities, context)
+        if (
+            context is None
+            and frame.target is not None
+            and frame.target.entity_id is not None
+            and (
+                len(matched) != 1
+                or tuple(entity.entity_id for entity in resolved_intent.entities)
+                != (matched[0].entity_id,)
+            )
+        ):
+            return None
 
         percent = frame.parameters.get("percent")
         if percent is not None:

@@ -49,6 +49,18 @@ def test_dim_with_explicit_percent(engine):
     assert result.plan.data == {"brightness_step_pct": -30}
 
 
+def test_degree_words_control_relative_brightness_step(engine):
+    slight = engine.match("mach die Dimmbare Lampe etwas heller", ENTITIES)
+    moderate = engine.match("mach die Dimmbare Lampe deutlich heller", ENTITIES)
+    large = engine.match("mach die Dimmbare Lampe viel dunkler", ENTITIES)
+    assert slight.plan.data == {"brightness_step_pct": 5}
+    assert moderate.plan.data == {"brightness_step_pct": 15}
+    assert large.plan.data == {"brightness_step_pct": -25}
+    assert slight.frame.degree.name == "SLIGHT"
+    assert moderate.frame.degree.name == "MODERATE"
+    assert large.frame.degree.name == "LARGE"
+
+
 def test_set_color(engine):
     result = engine.match("mach die Vollfarblampe rot", ENTITIES)
     assert result.plan.domain == "light"

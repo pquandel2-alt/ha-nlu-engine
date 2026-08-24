@@ -70,8 +70,8 @@ def test_match_followup_brighten(engine):
     assert result.plan.domain == "light"
     assert result.plan.service == "turn_on"
     assert result.plan.entity_id == "light.buerolicht"
-    assert result.plan.data == {"brightness_step_pct": 10}
-    assert result.response_text == "Bürolicht um 10 Prozent heller gestellt."
+    assert result.plan.data == {"brightness_step_pct": 5}
+    assert result.response_text == "Bürolicht um 5 Prozent heller gestellt."
 
 
 def test_match_followup_brighten_short_form(engine):
@@ -85,8 +85,8 @@ def test_match_followup_dim(engine):
     context = _context((DIMMABLE_LIGHT,))
     result = engine.match_followup("Etwas dunkler.", context)
     assert result is not None
-    assert result.plan.data == {"brightness_step_pct": -10}
-    assert result.response_text == "Bürolicht um 10 Prozent dunkler gestellt."
+    assert result.plan.data == {"brightness_step_pct": -5}
+    assert result.response_text == "Bürolicht um 5 Prozent dunkler gestellt."
 
 
 def test_match_followup_returns_none_for_unsupported_capability(engine):
@@ -119,6 +119,13 @@ def test_match_followup_climate_kaelter(engine):
     assert result.response_text == "Heizung Büro kälter gestellt."
 
 
+def test_match_followup_degree_changes_step(engine):
+    light = engine.match_followup("Viel heller.", _context((DIMMABLE_LIGHT,)))
+    climate = engine.match_followup("Etwas wärmer.", _context((CLIMATE,)))
+    assert light.plan.data == {"brightness_step_pct": 25}
+    assert climate.plan.data == {"temperature": 20.5}
+
+
 def test_match_followup_warmer_returns_none_for_light_domain(engine):
     context = _context((DIMMABLE_LIGHT,))
     assert engine.match_followup("Wärmer.", context) is None
@@ -141,4 +148,4 @@ def test_end_to_end_turn_on_then_brighten(engine):
     followup = engine.match_followup("Etwas heller.", context)
     assert followup is not None
     assert followup.plan.entity_id == "light.buerolicht"
-    assert followup.plan.data == {"brightness_step_pct": 10}
+    assert followup.plan.data == {"brightness_step_pct": 5}

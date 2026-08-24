@@ -18,6 +18,8 @@ CONF_SELECTED_ENTITIES = "selected_entities"
 SELECTABLE_DOMAINS = (
     "light", "switch", "fan", "cover", "sensor", "binary_sensor", "script",
     "climate", "media_player", "vacuum", "scene", "lock", "calendar",
+    "humidifier", "water_heater", "select", "number", "input_number",
+    "input_boolean", "button", "valve", "lawn_mower", "camera", "notify",
 )
 
 NOT_UNDERSTOOD_TEXT = "Das habe ich nicht verstanden."

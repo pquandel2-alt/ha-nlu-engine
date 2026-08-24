@@ -460,7 +460,7 @@ class ClimateExtendedIntentSpec:
 _CLIMATE_TEMPERATURE_STEP = 1
 
 
-def _climate_step_plan(es: list[EntitySnapshot], step: int) -> ServiceCallPlan | None:
+def _climate_step_plan(es: list[EntitySnapshot], step: float) -> ServiceCallPlan | None:
     """New absolute target = the resolved entity's current setpoint (its
     ``temperature`` attribute - the same signal nlu/capabilities.py already
     reads to derive Capability.TEMPERATURE) plus/minus the fixed step.
@@ -490,12 +490,12 @@ CLIMATE_EXTENDED_INTENTS: dict[str, ClimateExtendedIntentSpec] = {
     ),
     "HassClimateIncreaseTemperature": ClimateExtendedIntentSpec(
         capability=Capability.TEMPERATURE,
-        build=lambda es, params: _climate_step_plan(es, _CLIMATE_TEMPERATURE_STEP),
+        build=lambda es, params: _climate_step_plan(es, params.get("step", _CLIMATE_TEMPERATURE_STEP)),
         response=lambda es, params: f"{es[0].friendly_name} wärmer gestellt.",
     ),
     "HassClimateDecreaseTemperature": ClimateExtendedIntentSpec(
         capability=Capability.TEMPERATURE,
-        build=lambda es, params: _climate_step_plan(es, -_CLIMATE_TEMPERATURE_STEP),
+        build=lambda es, params: _climate_step_plan(es, -params.get("step", _CLIMATE_TEMPERATURE_STEP)),
         response=lambda es, params: f"{es[0].friendly_name} kälter gestellt.",
     ),
 }

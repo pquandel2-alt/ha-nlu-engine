@@ -26,6 +26,7 @@ from .entities import (
 )
 from .floors import FloorResolveStatus, resolve_floor_by_level_keyword, resolve_floor_name
 from .nlu.constraint_resolver import Constraints, resolve_candidates
+from .nlu.degree_semantics import extract_degree
 from .nlu.frame import AreaReference, Comparison, Quantifier, SemanticFrame, TargetReference, TemporalExpression
 from .nlu.group_semantics import (
     parse_flexible_group_command,
@@ -54,6 +55,7 @@ from .nlu.parse_outcome import ParseFailureReason, UnderstandingFeedback
 from .nlu.query_command import QueryCommand, QueryFilter, QueryResultStatus, QueryScope, QueryTarget, QueryTargetKind
 from .world_model import WorldModel
 from .nlu.query_executor import QueryExecutor
+from .nlu.primitives import SemanticAction, SemanticDirection, SemanticProperty
 from .nlu.semantic_state import SemanticState
 from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
 from .nlu.semantic_location import resolve_semantic_location
@@ -613,12 +615,14 @@ class ClimateExtendedParser:
         self._intents = intents
 
     def parse(self, text: str, context: ParseContext) -> ParseResult | None:
+        adjustment = extract_degree(text)
+        parse_text = adjustment.text
         slot_lists = {
             "name": WildcardSlotList(name="name"),
             "temperature": RangeSlotList(name="temperature", start=5, stop=30, step=1, type=RangeType.NUMBER),
             "comparator": _COMPARATOR_SLOT_LIST,
         }
-        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+        result = recognize(parse_text, self._intents, slot_lists=slot_lists, language="de")
         if result is None or result.intent is None:
             return None
 
@@ -645,8 +649,8 @@ class ClimateExtendedParser:
             comparator_slot = result.entities.get("comparator")
             if comparator_slot is not None:
                 parameters["comparison"] = Comparison(operator=str(comparator_slot.value), value=temperature)
-        else:  # HassClimateIncreaseTemperature / HassClimateDecreaseTemperature - no parameters
-            parameters = {}
+        else:
+            parameters = {"step": adjustment.climate_degrees}
 
         frame = SemanticFrame(
             intent=result.intent.name,
@@ -654,6 +658,20 @@ class ClimateExtendedParser:
             area=None,
             parameters=parameters,
             source_text=text,
+            action=(
+                SemanticAction.ADJUST
+                if result.intent.name != "HassClimateSetTemperature"
+                else SemanticAction.SET
+            ),
+            property=SemanticProperty.TEMPERATURE,
+            direction=(
+                SemanticDirection.INCREASE
+                if result.intent.name == "HassClimateIncreaseTemperature"
+                else SemanticDirection.DECREASE
+                if result.intent.name == "HassClimateDecreaseTemperature"
+                else None
+            ),
+            degree=adjustment.degree,
         )
         return ParseResult(frame=frame, resolved_entities=[resolved.entity])
 
@@ -674,13 +692,15 @@ class LightExtendedParser:
         self._intents = intents
 
     def parse(self, text: str, context: ParseContext) -> ParseResult | None:
+        adjustment = extract_degree(text)
+        parse_text = adjustment.text
         slot_lists = {
             "name": WildcardSlotList(name="name"),
             "percent": RangeSlotList(name="percent", start=0, stop=100, step=1, type=RangeType.PERCENTAGE),
             "color": _COLOR_SLOT_LIST,
             "color_temp": _COLOR_TEMP_SLOT_LIST,
         }
-        result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
+        result = recognize(parse_text, self._intents, slot_lists=slot_lists, language="de")
         if result is None or result.intent is None:
             return None
 
@@ -700,7 +720,7 @@ class LightExtendedParser:
 
         if result.intent.name in ("HassLightBrighten", "HassLightDim"):
             percent_slot = result.entities.get("percent")
-            step = int(percent_slot.value) if percent_slot is not None else _DEFAULT_DIMMING_STEP_PERCENT
+            step = int(percent_slot.value) if percent_slot is not None else adjustment.light_percent
             parameters: dict[str, object] = {"step_percent": step}
         elif result.intent.name == "HassLightSetColor":
             color_slot = result.entities.get("color")
@@ -719,6 +739,26 @@ class LightExtendedParser:
             area=None,
             parameters=parameters,
             source_text=text,
+            action=(
+                SemanticAction.ADJUST
+                if result.intent.name in ("HassLightBrighten", "HassLightDim")
+                else SemanticAction.SET
+            ),
+            property=(
+                SemanticProperty.BRIGHTNESS
+                if result.intent.name in ("HassLightBrighten", "HassLightDim")
+                else SemanticProperty.COLOR
+                if result.intent.name == "HassLightSetColor"
+                else SemanticProperty.COLOR_TEMPERATURE
+            ),
+            direction=(
+                SemanticDirection.INCREASE
+                if result.intent.name == "HassLightBrighten"
+                else SemanticDirection.DECREASE
+                if result.intent.name == "HassLightDim"
+                else None
+            ),
+            degree=adjustment.degree,
         )
         return ParseResult(frame=frame, resolved_entities=[resolved.entity])
 

@@ -48,7 +48,12 @@ _DEGREE_SYMBOL_RE = re.compile(r"(\d)\s*°")
 # readability - alternation order doesn't matter here since none of the
 # other words are prefixes of each other's tokens. "bitte" excluded, see
 # module docstring.
-_FILLER_RE = re.compile(r"\b(ein bisschen|mal|ma|doch|kurz|etwas)\b", re.IGNORECASE)
+_FILLER_RE = re.compile(r"\b(mal|ma|doch|kurz)\b", re.IGNORECASE)
+_NON_DEGREE_FILLER_RE = re.compile(
+    r"\b(?:ein\s+bisschen|etwas)\b"
+    r"(?!\s+(?:heller|dunkler|wärmer|kälter|lauter|leiser|schneller|langsamer)\b)",
+    re.IGNORECASE,
+)
 
 _POLITE_MODAL_RE = re.compile(
     r"\b(?:könntest|koenntest|würdest|wuerdest)\s+du\b", re.IGNORECASE
@@ -84,5 +89,6 @@ def normalize(text: str) -> str:
     for pattern, replacement in _STT_REWRITES:
         text = pattern.sub(replacement, text)
     text = _FILLER_RE.sub(" ", text)
+    text = _NON_DEGREE_FILLER_RE.sub(" ", text)
     text = _WHITESPACE_RE.sub(" ", text)
     return text.strip()

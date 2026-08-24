@@ -23,18 +23,12 @@ already exposes. Only the ``Constraints`` assembly (reading ``SemanticFrame``'s
 ``ConversationContext`` fallback for area/floor scoping on a follow-up turn)
 is this module's own logic.
 
-Wired into ``engine.py::_build_match_result()`` since the Integration Wave
-(2026-08-19) - called unconditionally for every match, its result stored in
-``MatchResult.resolved_intent``. Still purely additive/observational, not
-ahead of the Command Validator: no consumer reads ``resolved_intent`` to
-gate or alter ``plan``/``response_text`` (see that field's own docstring in
-engine.py for the known floor-reference limitation this implies). Wiring
-``ReasoningEngine.resolve()`` so it actually drives behavior ahead of the
-Command Validator would require migrating each parser's own
-``resolve_entity_scored()``-based entity resolution onto
-``constraint_resolver.resolve_candidates()`` first (Regel 6 - see
-docs/architecture-v6.md, section 6a/6c) - that migration has not happened,
-so this module's role stays observational until it does.
+Wired into ``engine.py::_build_match_result()`` and used there as a
+consistency gate for an explicitly resolved singular target. This makes the
+central semantic result behavior-relevant without replacing the mature fuzzy
+name resolver: the parser resolves the spoken name once, the constraint
+resolver verifies that the resulting entity also satisfies the composed
+domain/area/floor/property constraints, and only then may execution proceed.
 """
 
 from __future__ import annotations
@@ -93,6 +87,7 @@ class ReasoningEngine:
         Semantic Composer's job, already done by the time a frame reaches
         here)."""
         domain = frame.target.domain if frame.target is not None else None
+        entity_id = frame.target.entity_id if frame.target is not None else None
         device_class = frame.target.device_class if frame.target is not None else None
 
         area = frame.area
@@ -107,6 +102,7 @@ class ReasoningEngine:
 
         constraints = Constraints(
             domain=domain,
+            entity_id=entity_id,
             area_id=area_id,
             floor_id=floor_id,
             device_class=device_class,

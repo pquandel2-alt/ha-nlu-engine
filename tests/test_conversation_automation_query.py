@@ -246,3 +246,36 @@ def test_existing_automation_can_be_limited_to_three_runs(monkeypatch, tmp_path)
         "action": "ha_nlu.record_automation_run",
         "data": {"automation_id": automations[0]["id"], "max_runs": 3},
     }
+
+
+def test_only_action_can_be_replaced_in_a_confirmed_dialog(monkeypatch, tmp_path):
+    entity = _make_entity(monkeypatch, tmp_path)
+    _run(entity, AUTOMATION_SENTENCE, conversation_id="create")
+    _run(entity, "Ja", conversation_id="create")
+    before = pyyaml.safe_load(
+        (tmp_path / "automations.yaml").read_text(encoding="utf-8")
+    )[0]
+
+    asked = _run(
+        entity,
+        "Ändere nur die Aktion, behalte Auslöser und Bedingungen",
+        conversation_id="edit",
+    )
+    preview = _run(
+        entity, "Fahre die Büro Rolllade auf 50 Prozent", conversation_id="edit"
+    )
+    done = _run(entity, "Ja", conversation_id="edit")
+
+    after = pyyaml.safe_load(
+        (tmp_path / "automations.yaml").read_text(encoding="utf-8")
+    )[0]
+    assert "Was soll stattdessen passieren" in asked.response.speech
+    assert "nur die Aktion" in preview.response.speech
+    assert "Auslöser und Bedingungen blieben unverändert" in done.response.speech
+    assert after["triggers"] == before["triggers"]
+    assert after.get("conditions") == before.get("conditions")
+    assert after["actions"] == [{
+        "action": "cover.set_cover_position",
+        "target": {"entity_id": "cover.buero_rollladen"},
+        "data": {"position": 50},
+    }]

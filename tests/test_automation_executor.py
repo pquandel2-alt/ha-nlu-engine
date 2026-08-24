@@ -620,6 +620,45 @@ def test_async_list_automations_reports_the_enabled_field_from_initial_state():
     assert by_id["def456"].enabled is False
 
 
+def test_replace_actions_preserves_trigger_conditions_delay_and_housekeeping():
+    hass = _make_hass()
+    existing = {
+        "id": "abc123",
+        "alias": "Test",
+        "triggers": [{"trigger": "state", "entity_id": "binary_sensor.window"}],
+        "conditions": [{"condition": "state", "entity_id": "person.philipp", "state": "home"}],
+        "actions": [
+            {"delay": {"seconds": 30}},
+            {"action": "light.turn_on", "target": {"entity_id": "light.old"}},
+            {"action": "ha_nlu.delete_automation", "data": {"automation_id": "abc123"}},
+        ],
+    }
+    with (
+        patch.object(automation_executor.yaml_util, "load_yaml", return_value=[existing]),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml") as dump_mock,
+        patch.object(automation_executor, "write_utf8_file_atomic"),
+    ):
+        executor = AutomationExecutor(hass)
+        executor._metadata_store.async_load_all = AsyncMock(return_value={
+            "abc123": {"created_by": "homeintent", "version": 2}
+        })
+        executor._metadata_store.async_update = AsyncMock()
+        asyncio.run(executor.async_replace_automation_actions(
+            "abc123",
+            [{"action": "cover.close_cover", "target": {"entity_id": "cover.new"}}],
+            "Neue Aktion",
+        ))
+
+    written = dump_mock.call_args.args[0][0]
+    assert written["triggers"] == existing["triggers"]
+    assert written["conditions"] == existing["conditions"]
+    assert written["actions"] == [
+        existing["actions"][0],
+        {"action": "cover.close_cover", "target": {"entity_id": "cover.new"}},
+        existing["actions"][2],
+    ]
+
+
 # --- Wave 12, "Einmalige Automation" (fire-once, then self-delete) --------
 
 

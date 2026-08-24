@@ -269,10 +269,7 @@ def match_device_control(
         value,
         re.IGNORECASE,
     )
-    if match:
-        entity = _resolve_domain(match.group(1), entities, "climate")
-        if entity is None:
-            return None
+    if match and (entity := _resolve_domain(match.group(1), entities, "climate")):
         temperature = float(match.group(2).replace(",", "."))
         minimum = float(entity.attributes.get("min_temp", 7))
         maximum = float(entity.attributes.get("max_temp", 35))
@@ -411,4 +408,11 @@ def match_device_control(
                 f"{entity.friendly_name} {'öffnen' if opening else 'schließen'}.",
                 confirm=True,
             )
-    return _match_compositional(value, entities)
+    compositional = _match_compositional(value, entities)
+    if compositional is not None:
+        return compositional
+    # Imported lazily to keep the shared resolver/result helpers in this
+    # established module without creating an import cycle.
+    from .extended_device_control import match_extended_device_control
+
+    return match_extended_device_control(value, entities, _mentioned_entity, _result)

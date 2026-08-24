@@ -13,7 +13,8 @@ from ha_nlu.automation_summary import AutomationSummary
 from ha_nlu.entities import EntitySnapshot
 
 ROLLLADE = EntitySnapshot(
-    "cover.buero_rollladen", "Büro Rollladen", "cover", "closed"
+    "cover.buero_rollladen", "Büro Rollladen", "cover", "closed",
+    area_id="buero", area_name="Büro", floor_id="eg", floor_name="Erdgeschoss",
 )
 SCHEDULED = AutomationSummary(
     "scheduled",
@@ -29,6 +30,14 @@ PERSISTENT = AutomationSummary(
     "Küche dauerhaft",
     created_by="homeintent",
     referenced_entity_ids=frozenset({ROLLLADE.entity_id}),
+    action_entity_ids=frozenset({ROLLLADE.entity_id}),
+)
+TRIGGERED = AutomationSummary(
+    "triggered",
+    "Bei Rollladenstatus Licht schalten",
+    created_by="homeintent",
+    referenced_entity_ids=frozenset({ROLLLADE.entity_id}),
+    trigger_entity_ids=frozenset({ROLLLADE.entity_id}),
 )
 
 
@@ -58,6 +67,15 @@ def test_management_phrases_are_classified():
         AutomationManagementKind.SET_MAX_RUNS,
         3,
     )
+    assert parse_automation_management(
+        "Wie viele HomeIntent-Automationen sind aktiv?"
+    ).kind is AutomationManagementKind.COUNT_ACTIVE
+    assert parse_automation_management(
+        "Welche Automation steuert Büro Rollladen?"
+    ).kind is AutomationManagementKind.CONTROLS_ENTITY
+    assert parse_automation_management(
+        "Was passiert, wenn Büro Rollladen geöffnet wird?"
+    ).kind is AutomationManagementKind.EXPLAIN_TRIGGER
 
 
 def test_repeat_management_uses_persistent_homeintent_automations_only():
@@ -96,3 +114,28 @@ def test_when_query_resolves_the_entity_before_filtering():
     )
     assert selection.entity == ROLLLADE
     assert selection.automations == (SCHEDULED,)
+
+
+def test_trigger_and_action_queries_do_not_mix_reference_roles():
+    controls = select_automation_management(
+        parse_automation_management("Welche Automation steuert Büro Rollladen?"),
+        [ROLLLADE],
+        (PERSISTENT, TRIGGERED),
+    )
+    reacts = select_automation_management(
+        parse_automation_management("Was passiert, wenn Büro Rollladen geöffnet wird?"),
+        [ROLLLADE],
+        (PERSISTENT, TRIGGERED),
+    )
+    assert controls.automations == (PERSISTENT,)
+    assert reacts.automations == (TRIGGERED,)
+
+
+def test_homeintent_listing_can_be_filtered_by_floor_name():
+    request = parse_automation_management(
+        "Zeige nur HomeIntent-Automationen im Erdgeschoss"
+    )
+    selection = select_automation_management(
+        request, [ROLLLADE], (PERSISTENT, MANUAL)
+    )
+    assert selection.automations == (PERSISTENT,)

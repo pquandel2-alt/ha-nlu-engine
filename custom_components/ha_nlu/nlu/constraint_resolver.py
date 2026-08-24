@@ -43,6 +43,7 @@ class Constraints:
     stay the job of their existing owners (see module docstring)."""
 
     domain: str | None = None
+    entity_id: str | None = None
     area_id: str | None = None
     floor_id: str | None = None
     device_class: str | None = None
@@ -55,6 +56,8 @@ def resolve_candidates(
     """Every entity satisfying ALL of ``constraints`` - AND semantics, never
     OR. An all-``None`` ``Constraints`` matches every entity unchanged."""
     candidates = entities
+    if constraints.entity_id is not None:
+        candidates = [e for e in candidates if e.entity_id == constraints.entity_id]
     if constraints.domain is not None:
         candidates = resolve_entities_by_domain(
             constraints.domain, candidates, area_id=constraints.area_id, floor_id=constraints.floor_id

@@ -35,6 +35,7 @@ from .semantic_state import SemanticState
 
 if TYPE_CHECKING:
     from ..calendar_event import CalendarEventDraft
+    from ..calendar_management import CalendarEventSummary, CalendarManagementKind
 
 __all__ = [
     "ClarificationRequest",
@@ -46,7 +47,10 @@ __all__ = [
     "PendingAutomationDeletion",
     "PendingServiceConfirmation",
     "PendingAutomationDraft",
+    "PendingAutomationActionEdit",
     "PendingCalendarEvent",
+    "PendingCalendarMutation",
+    "PendingSemanticCommand",
 ]
 
 
@@ -111,11 +115,43 @@ class PendingAutomationDraft:
 
 
 @dataclass(frozen=True)
+class PendingAutomationActionEdit:
+    """Selects an automation/action and gates the action-only replacement."""
+
+    candidates: tuple[AutomationSummary, ...]
+    automation: AutomationSummary | None = None
+    rendered_actions: tuple[dict, ...] = ()
+    action_text: str | None = None
+
+
+@dataclass(frozen=True)
 class PendingCalendarEvent:
     """A calendar event being completed or awaiting final confirmation."""
 
     draft: "CalendarEventDraft"
     awaiting_confirmation: bool = False
+
+
+@dataclass(frozen=True)
+class PendingCalendarMutation:
+    """One uniquely identified calendar event awaiting destructive consent."""
+
+    kind: "CalendarManagementKind"
+    event: "CalendarEventSummary"
+    new_start_time: object | None = None
+
+
+@dataclass(frozen=True)
+class PendingSemanticCommand:
+    """A partially understood command waiting for a target, value or selection."""
+
+    missing: str
+    candidates: tuple[EntitySnapshot, ...]
+    service_domain: str
+    service: str
+    data: dict
+    response_verb: str
+    requires_confirmation: bool = False
 
 # No TTL value is specified anywhere in the plan (only the test case name
 # "context expiration", brain node 9ced4390, section 26). 30s covers a
@@ -180,7 +216,10 @@ class ConversationContext:
     # and property from free-form parser parameters.
     focus: DialogFocus | None = None
     pending_automation_draft: PendingAutomationDraft | None = None
+    pending_automation_action_edit: PendingAutomationActionEdit | None = None
     pending_calendar_event: PendingCalendarEvent | None = None
+    pending_calendar_mutation: PendingCalendarMutation | None = None
+    pending_semantic_command: PendingSemanticCommand | None = None
 
 
 class ConversationContextStore:
@@ -222,7 +261,10 @@ class ConversationContextStore:
             or context.pending_automation_deletion is not None
             or context.pending_service_confirmation is not None
             or context.pending_automation_draft is not None
+            or context.pending_automation_action_edit is not None
             or context.pending_calendar_event is not None
+            or context.pending_calendar_mutation is not None
+            or context.pending_semantic_command is not None
             else self._ttl_seconds
         )
         self._entries[conversation_id] = (self._clock(), ttl_seconds, context)

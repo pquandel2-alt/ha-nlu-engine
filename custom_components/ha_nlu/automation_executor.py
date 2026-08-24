@@ -88,9 +88,9 @@ def _collect_entity_ids(value: Any) -> set[str]:
     condition/action shapes), since automation YAML has enough structural
     variety (single trigger dict vs. list of triggers, service-call target
     blocks, nested conditions) that enumerating every shape risks silently
-    missing one. See ``AutomationSummary``'s own docstring for why this
-    shallow "mentions X somewhere" collection - not a re-derivation of
-    trigger/condition/action semantics - is enough for V5.29's scope.
+    missing one. ``async_list_automations`` applies this same walker to the
+    whole config and separately to trigger/condition/action sections, which
+    preserves role information without re-parsing arbitrary YAML semantics.
     """
     found: set[str] = set()
     if isinstance(value, dict):
@@ -508,6 +508,15 @@ class AutomationExecutor:
         for automation in automations:
             automation_id = automation.get("id", "")
             entry = metadata.get(automation_id)
+            trigger_ids = frozenset(
+                _collect_entity_ids(automation.get("triggers", automation.get("trigger", ())))
+            )
+            condition_ids = frozenset(
+                _collect_entity_ids(automation.get("conditions", automation.get("condition", ())))
+            )
+            action_ids = frozenset(
+                _collect_entity_ids(automation.get("actions", automation.get("action", ())))
+            )
             summaries.append(
                 AutomationSummary(
                     automation_id=automation_id,
@@ -515,6 +524,9 @@ class AutomationExecutor:
                     source_text=entry.get("source_text") if entry else None,
                     created_by=entry.get("created_by") if entry else None,
                     referenced_entity_ids=frozenset(_collect_entity_ids(automation)),
+                    trigger_entity_ids=trigger_ids,
+                    condition_entity_ids=condition_ids,
+                    action_entity_ids=action_ids,
                     enabled=automation.get("initial_state", True),
                     scheduled_for=entry.get("scheduled_for") if entry else None,
                     once=bool(entry.get("once")) if entry else False,
@@ -681,6 +693,68 @@ class AutomationExecutor:
                     automation_id,
                     max_runs=max_runs,
                     run_count=0,
+                    version=int(entry.get("version", 1)) + 1,
+                )
+            except Exception:
+                await self._async_rollback_transaction(path, transaction)
+                await self._hass.services.async_call(
+                    "automation", "reload", {}, blocking=True
+                )
+                raise
+            await self._async_complete_transaction()
+
+    async def async_replace_automation_actions(
+        self,
+        automation_id: str,
+        new_actions: list[dict[str, Any]],
+        source_text: str,
+    ) -> None:
+        """Replace only user actions, preserving trigger/conditions and bookkeeping."""
+        if not new_actions:
+            raise ValueError("Mindestens eine neue Aktion ist erforderlich")
+        path = self._hass.config.path(AUTOMATIONS_YAML_FILENAME)
+        async with self._lock:
+            metadata = await self._metadata_store.async_load_all()
+            entry = metadata.get(automation_id)
+            if not entry or entry.get("created_by") != CREATED_BY_HOMEINTENT:
+                raise ValueError("Die Automation wurde nicht von HomeIntent erstellt")
+            snapshot = await self._async_read_snapshot(path)
+            updated: list[dict[str, Any]] = []
+            found = False
+            for automation in snapshot.automations:
+                if automation.get("id") != automation_id:
+                    updated.append(automation)
+                    continue
+                found = True
+                existing = list(automation.get("actions") or [])
+                prefix = existing[:1] if existing and isinstance(existing[0], dict) and "delay" in existing[0] else []
+                housekeeping = [
+                    action for action in existing
+                    if isinstance(action, dict)
+                    and action.get("action") in {
+                        "ha_nlu.delete_automation",
+                        "ha_nlu.record_automation_run",
+                    }
+                ]
+                updated.append(
+                    {**automation, "actions": [*prefix, *new_actions, *housekeeping]}
+                )
+            if not found:
+                raise ValueError(f"No automation with id {automation_id!r} found")
+            transaction = await self._async_begin_transaction(
+                operation="replace_actions",
+                automation_id=automation_id,
+                path=path,
+                snapshot=snapshot,
+                updated=updated,
+            )
+            try:
+                await self._hass.services.async_call(
+                    "automation", "reload", {}, blocking=True
+                )
+                await self._metadata_store.async_update(
+                    automation_id,
+                    source_text=source_text,
                     version=int(entry.get("version", 1)) + 1,
                 )
             except Exception:

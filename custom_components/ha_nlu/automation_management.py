@@ -18,6 +18,10 @@ class AutomationManagementKind(Enum):
     RESCHEDULE = auto()
     CLEAN_EXPIRED = auto()
     SET_MAX_RUNS = auto()
+    COUNT_ACTIVE = auto()
+    COUNT_DISABLED = auto()
+    EXPLAIN_TRIGGER = auto()
+    CONTROLS_ENTITY = auto()
 
 
 @dataclass(frozen=True)
@@ -27,6 +31,7 @@ class AutomationManagementRequest:
     hour: int | None = None
     minute: int = 0
     max_runs: int | None = None
+    scope_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -46,6 +51,15 @@ _RESCHEDULE_RE = re.compile(
 _WHEN_RE = re.compile(
     r"\bwann\s+wird\s+(?P<name>.+?)\s+"
     r"(?:gefahren|geschaltet|eingeschaltet|ausgeschaltet|gestartet|ausgeführt)\b",
+    re.IGNORECASE,
+)
+_EXPLAIN_RE = re.compile(
+    r"\b(?:was\s+passiert|welche\s+automationen?\s+(?:reagier\w*|start\w*))\s*,?\s*"
+    r"(?:wenn\s+)?(?P<name>.+?)(?:\s+(?:geöffnet|geschlossen|an|aus)\s+wird)?$",
+    re.IGNORECASE,
+)
+_CONTROLS_RE = re.compile(
+    r"\b(?:welche\s+automation\s+(?:steuert|schaltet)|was\s+steuert)\s+(?P<name>.+)$",
     re.IGNORECASE,
 )
 _SET_MAX_RUNS_RE = re.compile(
@@ -70,6 +84,19 @@ _RUN_COUNTS = {
 def parse_automation_management(text: str) -> AutomationManagementRequest | None:
     """Recognize the bounded management vocabulary without fuzzy matching."""
     normalized = re.sub(r"[?.!]", "", text).strip()
+    count_match = re.search(
+        r"\bwie\s+viele\s+homeintent[- ]automationen\s+sind\s+"
+        r"(?P<state>aktiv|eingeschaltet|deaktiviert|ausgeschaltet)\b",
+        normalized,
+        re.IGNORECASE,
+    )
+    if count_match is not None:
+        kind = (
+            AutomationManagementKind.COUNT_ACTIVE
+            if count_match.group("state").casefold() in {"aktiv", "eingeschaltet"}
+            else AutomationManagementKind.COUNT_DISABLED
+        )
+        return AutomationManagementRequest(kind)
     if re.search(r"\blösch\w*\s+alle\s+abgelaufenen\b", normalized, re.IGNORECASE):
         return AutomationManagementRequest(AutomationManagementKind.CLEAN_EXPIRED)
     match = _SET_MAX_RUNS_RE.search(normalized)
@@ -98,6 +125,18 @@ def parse_automation_management(text: str) -> AutomationManagementRequest | None
             AutomationManagementKind.WHEN,
             entity_name=match.group("name"),
         )
+    match = _CONTROLS_RE.search(normalized)
+    if match is not None:
+        return AutomationManagementRequest(
+            AutomationManagementKind.CONTROLS_ENTITY,
+            entity_name=match.group("name"),
+        )
+    match = _EXPLAIN_RE.search(normalized)
+    if match is not None:
+        return AutomationManagementRequest(
+            AutomationManagementKind.EXPLAIN_TRIGGER,
+            entity_name=match.group("name"),
+        )
     if re.search(
         r"\b(?:welche|zeige)\b.*\bhomeintent[- ]automationen\b",
         normalized,
@@ -107,7 +146,11 @@ def parse_automation_management(text: str) -> AutomationManagementRequest | None
         normalized,
         re.IGNORECASE,
     ):
-        return AutomationManagementRequest(AutomationManagementKind.LIST_HOMEINTENT)
+        scope = re.search(r"\b(?:im|in der|in den)\s+(.+)$", normalized, re.IGNORECASE)
+        return AutomationManagementRequest(
+            AutomationManagementKind.LIST_HOMEINTENT,
+            scope_name=scope.group(1).strip() if scope else None,
+        )
     if re.search(
         r"\bwelche\s+(?:einmaligen\s+)?(?:aufträge|automationen)\s+sind\s+(?:noch\s+)?geplant\b",
         normalized,
@@ -139,7 +182,34 @@ def select_automation_management(
         )
     )
     if request.kind is AutomationManagementKind.LIST_HOMEINTENT:
+        if request.scope_name:
+            wanted = request.scope_name.casefold().replace(" ", "_")
+            scoped_entity_ids = {
+                entity.entity_id
+                for entity in entities
+                if any(
+                    wanted in (value or "").casefold().replace(" ", "_")
+                    for value in (
+                        entity.area_id,
+                        entity.area_name,
+                        entity.floor_id,
+                        entity.floor_name,
+                    )
+                )
+            }
+            homeintent = tuple(
+                item for item in homeintent
+                if item.referenced_entity_ids & scoped_entity_ids
+            )
         return AutomationManagementSelection(request, homeintent)
+    if request.kind in {
+        AutomationManagementKind.COUNT_ACTIVE,
+        AutomationManagementKind.COUNT_DISABLED,
+    }:
+        enabled = request.kind is AutomationManagementKind.COUNT_ACTIVE
+        return AutomationManagementSelection(
+            request, tuple(item for item in homeintent if item.enabled is enabled)
+        )
     if request.kind in (
         AutomationManagementKind.LIST_SCHEDULED,
         AutomationManagementKind.CLEAN_EXPIRED,
@@ -163,10 +233,18 @@ def select_automation_management(
                     else "Ich habe das genannte Gerät nicht gefunden."
                 ),
             )
+        if request.kind is AutomationManagementKind.EXPLAIN_TRIGGER:
+            candidates = homeintent
+            reference_field = "trigger_entity_ids"
+        elif request.kind is AutomationManagementKind.CONTROLS_ENTITY:
+            candidates = homeintent
+            reference_field = "action_entity_ids"
+        else:
+            reference_field = "referenced_entity_ids"
         matched = tuple(
             automation
             for automation in candidates
-            if resolved.entity.entity_id in automation.referenced_entity_ids
+            if resolved.entity.entity_id in getattr(automation, reference_field)
         )
         return AutomationManagementSelection(request, matched, entity=resolved.entity)
     return AutomationManagementSelection(request, candidates)

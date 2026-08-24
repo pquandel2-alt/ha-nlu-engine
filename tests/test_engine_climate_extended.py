@@ -64,6 +64,15 @@ def test_decrease_temperature_computes_target_from_current_attribute(engine):
     assert result.plan.data == {"temperature": 19}
 
 
+def test_degree_words_control_relative_temperature_step(engine):
+    slight = engine.match("mach die Heizung Büro etwas wärmer", ENTITIES)
+    large = engine.match("mach die Heizung Büro viel kälter", ENTITIES)
+    assert slight.plan.data == {"temperature": 20.5}
+    assert large.plan.data == {"temperature": 18.0}
+    assert slight.frame.degree.name == "SLIGHT"
+    assert large.frame.degree.name == "LARGE"
+
+
 def test_increase_temperature_via_erhoehe_die_temperatur(engine):
     result = engine.match("erhöhe die Temperatur von der Heizung Büro", ENTITIES)
     assert result is not None

@@ -4,6 +4,7 @@ import asyncio
 import sys
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "custom_components"))
@@ -14,7 +15,9 @@ import _ha_stub  # noqa: E402
 _ha_stub.install()
 
 import ha_nlu.conversation as ha_conversation  # noqa: E402
+import ha_nlu.management_dialogs as management_dialogs  # noqa: E402
 from ha_nlu.conversation import NluConversationEntity  # noqa: E402
+from ha_nlu.calendar_management import CalendarEventSummary  # noqa: E402
 from ha_nlu.entities import EntitySnapshot  # noqa: E402
 from homeassistant.components.conversation import ConversationInput  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
@@ -29,6 +32,10 @@ PRIVATE = EntitySnapshot(
 FAMILY = EntitySnapshot(
     "calendar.familie", "Familie", "calendar", "off",
     capabilities=frozenset({"CREATE_EVENT"}),
+)
+MUTABLE = EntitySnapshot(
+    "calendar.lokal", "Lokal", "calendar", "off",
+    capabilities=frozenset({"CREATE_EVENT", "DELETE_EVENT", "UPDATE_EVENT"}),
 )
 
 
@@ -121,3 +128,52 @@ def test_no_writable_calendar_is_reported_without_service_call(monkeypatch):
     result = _run(entity, "Trag morgen um 10 Uhr für eine Stunde Zahnarzt ein")
     assert "keinen für HomeIntent freigegebenen, beschreibbaren Kalender" in result.response.speech
     entity.hass.services.async_call.assert_not_awaited()
+
+
+def test_calendar_agenda_query_uses_get_events_response(monkeypatch):
+    entity = _make_entity(monkeypatch)
+    entity.hass.services.async_call.return_value = {
+        "calendar.privat": {
+            "events": [{
+                "summary": "Zahnarzt",
+                "start": "2026-08-23T10:00:00+02:00",
+                "end": "2026-08-23T11:00:00+02:00",
+            }]
+        }
+    }
+
+    result = _run(entity, "Was steht morgen in meinem Kalender?")
+
+    assert "Zahnarzt" in result.response.speech
+    entity.hass.services.async_call.assert_awaited_once()
+
+
+def test_calendar_delete_is_refused_when_calendar_lacks_capability(monkeypatch):
+    entity = _make_entity(monkeypatch)
+
+    result = _run(entity, "Lösche den Termin Zahnarzt")
+
+    assert "unterstützt das Löschen" in result.response.speech
+    entity.hass.services.async_call.assert_not_awaited()
+
+
+def test_supported_calendar_event_delete_requires_confirmation(monkeypatch):
+    entity = _make_entity(monkeypatch, (MUTABLE,))
+    event = CalendarEventSummary(
+        "calendar.lokal",
+        "Zahnarzt",
+        "2026-08-23T10:00:00+02:00",
+        "2026-08-23T11:00:00+02:00",
+        uid="event-1",
+    )
+    lookup = AsyncMock(return_value=(event,))
+    delete = AsyncMock()
+    monkeypatch.setattr(management_dialogs, "async_get_mutable_calendar_events", lookup)
+    monkeypatch.setattr(management_dialogs, "async_delete_calendar_event", delete)
+
+    preview = _run(entity, "Lösche den Termin Zahnarzt morgen")
+    result = _run(entity, "Ja")
+
+    assert "wirklich löschen" in preview.response.speech
+    assert result.response.speech == "Der Termin wurde gelöscht."
+    delete.assert_awaited_once_with(entity.hass, event)
