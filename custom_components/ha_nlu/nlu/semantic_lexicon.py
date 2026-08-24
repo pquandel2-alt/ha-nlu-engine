@@ -74,25 +74,28 @@ class SemanticAnalysis:
 # meanings, never whole sentences.  Inflection is therefore centralised once.
 LEXEMES: tuple[Lexeme, ...] = (
     Lexeme(SemanticKind.COMMAND_MARKER, True, (
-        r"(?:an|aus)mach(?:e|en)?", r"(?:ein|aus)schalt(?:e|en)?",
-        r"mach(?:e|en)?", r"schalt(?:e|en)?", r"stell(?:e|en)?",
+        r"(?:an|aus|zu)mach(?:e|en|st|t)?", r"(?:ein|aus)schalt(?:e|en|st|t)?",
+        r"mach(?:e|en|st|t)?", r"schalt(?:e|en|st|t)?", r"stell(?:e|en|st|t)?",
         r"setz(?:e|en)?", r"fahr(?:e|en)?", r"gefahren",
+        r"hochfahr(?:e|en)?", r"runterfahr(?:e|en)?", r"herunterfahr(?:e|en)?",
+        r"eingeschaltet", r"ausgeschaltet",
         r"öffn(?:e|en)?", r"schließ(?:e|en)?", r"dreh(?:e|en)?",
         r"lass(?:e|en)?", r"aktivier(?:e|en)?", r"deaktivier(?:e|en)?",
         r"start(?:e|en)?", r"führ(?:e|en)?", r"ausführen",
     )),
     Lexeme(SemanticKind.ACTION, "open", (
-        r"hoch", r"oben", r"hochgefahren", r"öffn(?:e|en)?",
+        r"hoch", r"oben", r"hochfahren", r"hochgefahren", r"öffn(?:e|en)?",
     )),
     Lexeme(SemanticKind.ACTION, "close", (
-        r"runter", r"herunter", r"geschlossen", r"schließ(?:e|en)?", r"zu",
+        r"runter", r"herunter", r"nach\s+unten", r"runterfahren", r"herunterfahren",
+        r"geschlossen", r"schließ(?:e|en)?", r"zumach(?:e|en|st|t)?", r"zu",
     )),
     Lexeme(SemanticKind.ACTION, "turn_on", (
-        r"an", r"ein", r"anmach(?:e|en)?", r"einschalt(?:e|en)?",
+        r"an", r"ein", r"anmach(?:e|en|st|t)?", r"einschalt(?:e|en|st|t)?",
         r"eingeschaltet", r"aktivier(?:e|en)?",
     )),
     Lexeme(SemanticKind.ACTION, "turn_off", (
-        r"aus", r"ausmach(?:e|en)?", r"ausschalt(?:e|en)?",
+        r"aus", r"ausmach(?:e|en|st|t)?", r"ausschalt(?:e|en|st|t)?",
         r"ausgeschaltet", r"deaktivier(?:e|en)?",
     )),
     Lexeme(SemanticKind.ACTION, "toggle", (r"umschalten", r"toggle",)),
@@ -191,7 +194,8 @@ _FILLERS = frozenset(
     for word in (
         "der die das den dem des ein eine einen einem einer bitte kannst du mir mal doch "
         "jetzt vorhanden vorhandenen im in am auf beim nach von zur zum und oder soll sollen dort "
-        "möchte will ich davon denn noch es sind ist hat haben werde werden wird welche welcher welches was wie "
+        "möchte will ich dass davon denn noch es sind ist hat haben werde werden wird welche welcher welches was wie "
+        "kannste könntest koenntest würdest wuerdest würd wuerd gern wär waer nett "
         "komplett ganz ganze ganzen ganzer ganzes vollständig halb halbe halber halben hälfte höhe prozent"
     ).split()
 )

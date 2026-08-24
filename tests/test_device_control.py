@@ -6,6 +6,8 @@ import asyncio
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "custom_components"))
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -100,6 +102,39 @@ def test_vacuum_and_scene_services_are_domain_native():
     scene = match_device_control("Aktiviere Szene Filmabend", ENTITIES)
     assert (vacuum.plan.domain, vacuum.plan.service) == ("vacuum", "return_to_base")
     assert (scene.plan.domain, scene.plan.service) == ("scene", "turn_on")
+
+
+@pytest.mark.parametrize(
+    ("sentence", "domain", "service", "data"),
+    (
+        ("Wohnzimmer Heizung bitte auf 22 Grad stellen", "climate", "set_temperature", {"temperature": 22.0}),
+        ("Auf 35 Prozent bitte die Lautstärke vom Wohnzimmer TV stellen", "media_player", "volume_set", {"volume_level": 0.35}),
+        ("Auf dem Wohnzimmer TV bitte die Wiedergabe starten", "media_player", "media_play", {}),
+        ("Netflix als Quelle auf dem Wohnzimmer TV auswählen", "media_player", "select_source", {"source": "Netflix"}),
+        ("Den Saugroboter bitte starten", "vacuum", "start", {}),
+        ("Zur Ladestation soll der Saugroboter fahren", "vacuum", "return_to_base", {}),
+        ("Filmabend bitte aktivieren", "scene", "turn_on", {}),
+    ),
+)
+def test_extended_domain_slots_are_order_independent(sentence, domain, service, data):
+    result = match_device_control(sentence, ENTITIES)
+
+    assert result is not None
+    assert result.plan is not None
+    assert (result.plan.domain, result.plan.service) == (domain, service)
+    assert result.plan.data == data
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    (
+        "Wohnzimmer Heizung bitte nicht auf 22 Grad stellen",
+        "Vielleicht den Saugroboter starten",
+        "Filmabend normalerweise aktivieren",
+    ),
+)
+def test_extended_domain_composition_rejects_unsafe_modifiers(sentence):
+    assert match_device_control(sentence, ENTITIES) is None
 
 
 def _conversation_entity(monkeypatch, tmp_path):

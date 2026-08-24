@@ -540,7 +540,8 @@ class NluConversationEntity(
             response_parts: list[str] = []
             for sub_result in result.commands:
                 if sub_result.plan is None:
-                    continue  # structurally unreachable - CommandPlan only ever wraps actionable sub-results
+                    response_parts.append(sub_result.response_text)
+                    continue
                 try:
                     await self.hass.services.async_call(
                         sub_result.plan.domain,

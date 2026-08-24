@@ -2,9 +2,9 @@
 die Rollläden hoch." -> ``CommandPlan(commands=(command1, command2))``.
 
 Plan-mandated default: "validate entire plan first -> execute only if
-complete plan is valid" - every "und"-joined segment is matched and
-validated through the normal single-command pipeline before anything is
-returned; one failing/ambiguous/non-actionable segment fails the whole
+complete plan is valid" - every "und"-joined action or query segment is
+matched and validated through the normal single-command pipeline before
+anything is returned; one failing or ambiguous segment fails the whole
 sentence (``engine.match()`` returns ``None``), never a partial
 ``CommandPlan``.
 """
@@ -22,8 +22,12 @@ COVER = EntitySnapshot(
     "cover.buero", "Rollladen Büro", "cover", "closed",
     capabilities=frozenset({"POSITION"}),
 )
+WINDOW = EntitySnapshot(
+    "binary_sensor.bad_fenster", "Badezimmer Fenster", "binary_sensor", "off",
+    area_id="bad", area_name="Badezimmer", device_class="window",
+)
 
-ENTITIES = [LAMP, COVER]
+ENTITIES = [LAMP, COVER, WINDOW]
 
 
 def test_two_step_command_produces_command_plan(engine):
@@ -76,12 +80,23 @@ def test_first_segment_failing_also_fails_entire_plan(engine):
     assert result is None
 
 
-def test_query_segment_is_not_a_valid_multistep_member(engine):
-    # Scope decision: multi-step is action-only (the plan's own example is
-    # two commands, not a query) - a plan-less query segment can't be
-    # sequenced as an "execute" step, so it fails the whole sentence rather
-    # than being silently dropped or guessed into an action.
-    result = engine.match("wie warm ist es im Wohnzimmer und mach die Wohnzimmerlampe an", ENTITIES)
+def test_action_and_read_only_query_form_one_validated_plan(engine):
+    result = engine.match(
+        "mach die Wohnzimmerlampe an und ist das Badezimmer Fenster geschlossen?",
+        ENTITIES,
+    )
+
+    assert isinstance(result, CommandPlan)
+    assert result.commands[0].plan.service == "turn_on"
+    assert result.commands[1].plan is None
+    assert "geschlossen" in result.commands[1].response_text
+
+
+def test_action_and_query_on_same_entity_are_refused_as_stale(engine):
+    result = engine.match(
+        "mach die Wohnzimmerlampe an und ist die Wohnzimmerlampe an?", ENTITIES
+    )
+
     assert result is None
 
 

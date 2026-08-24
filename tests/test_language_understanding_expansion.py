@@ -111,6 +111,24 @@ def test_multiple_measurements_are_listed_and_average_is_opt_in(engine):
     assert averaged.response_text == "Der Durchschnitt für Temperatur beträgt 22 Grad."
 
 
+def test_exact_floor_beats_partial_area_name_for_measurement(engine):
+    entities = ENTITIES + [
+        EntitySnapshot(
+            "sensor.flur_temp", "Flurtemperatur", "sensor", "18",
+            area_id="flur_eg", area_name="Flur Erdgeschoss",
+            floor_id="eg", floor_name="Erdgeschoss", floor_level=0,
+            unit="°C", device_class="temperature",
+        )
+    ]
+
+    result = engine.match("Wie hoch ist die Temperatur im Erdgeschoss?", entities)
+
+    assert result is not None
+    assert {entity.entity_id for entity in result.command.entities} == {
+        "sensor.wohnzimmer_temp", "sensor.kueche_temp", "sensor.flur_temp",
+    }
+
+
 def test_battery_threshold_on_floor(engine):
     result = engine.match("Batterien oben unter 20 Prozent", ENTITIES)
     assert result is not None

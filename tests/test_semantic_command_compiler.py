@@ -41,6 +41,64 @@ HOUSE = [
 
 
 @pytest.mark.parametrize(
+    ("sentence", "service", "entity_id"),
+    (
+        ("Flurlicht bitte an", "turn_on", "light.flur"),
+        ("Ich möchte, dass Flurlicht ausgeschaltet wird", "turn_off", "light.flur"),
+        ("Rollladen Büro nach unten", "close_cover", "cover.dg_buero"),
+        ("Komplett hochfahren soll Rollladen Büro", "open_cover", "cover.dg_buero"),
+        ("Bitte Rollladen Büro auf halbe Höhe", "set_cover_position", "cover.dg_buero"),
+        ("Stelle Rollladen Büro auf fünfzig Prozent", "set_cover_position", "cover.dg_buero"),
+    ),
+)
+def test_request_envelopes_do_not_depend_on_sentence_templates(
+    engine, sentence, service, entity_id
+):
+    result = engine.match(sentence, HOUSE)
+
+    assert result is not None
+    assert result.plan.service == service
+    assert result.plan.entity_id == entity_id
+
+
+def test_direction_word_inside_registered_name_is_not_a_floor_scope(engine):
+    entities = HOUSE + [
+        EntitySnapshot(
+            "light.flur_unten", "Flurlicht unten", "light", "off",
+            area_id="flur_unten", area_name="Flur unten",
+            floor_id="eg", floor_name="Erdgeschoss", floor_level=0,
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        )
+    ]
+
+    result = engine.match("Schalte Flurlicht unten ein", entities)
+
+    assert result is not None
+    assert result.plan.entity_id == "light.flur_unten"
+
+
+def test_explicit_area_is_applied_before_duplicate_name_clarification(engine):
+    entities = [
+        EntitySnapshot(
+            "light.buero", "Deckenlicht", "light", "off",
+            area_id="buero", area_name="Büro",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+        EntitySnapshot(
+            "light.kueche", "Deckenlicht", "light", "off",
+            area_id="kueche", area_name="Küche",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+    ]
+
+    result = engine.match("Mach das Deckenlicht im Büro an", entities)
+
+    assert result is not None
+    assert result.clarification is None
+    assert result.plan.entity_id == "light.buero"
+
+
+@pytest.mark.parametrize(
     "sentence",
     (
         "Sämtliche Rollläden bitte im Erdgeschoss nach oben fahren",

@@ -92,6 +92,24 @@ def test_partial_draft_asks_only_for_the_next_missing_required_field():
     assert calendar_event_question(draft, calendars) is None
 
 
+def test_empty_request_with_punctuation_does_not_turn_ein_into_the_title():
+    draft = start_calendar_event_draft("Trage einen Termin ein.", (PRIVATE,), NOW)
+
+    assert draft.title is None
+    assert calendar_event_question(draft, (PRIVATE,)) == "Wie soll der Termin heißen?"
+
+
+def test_named_calendar_phrase_is_removed_completely_from_inferred_title():
+    draft = start_calendar_event_draft(
+        "Trage morgen um 15 Uhr Zahnarzt für eine Stunde in den Privatkalender ein.",
+        (PRIVATE,),
+        NOW,
+    )
+
+    assert draft.title == "Zahnarzt"
+    assert draft.calendar_entity_id == PRIVATE.entity_id
+
+
 def test_multiple_calendars_are_never_guessed_and_named_selection_is_resolved():
     calendars = (PRIVATE, FAMILY)
     draft = start_calendar_event_draft(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .entities import EntitySnapshot, ResolveStatus, resolve_entity
+from .entities import EntitySnapshot, ResolveStatus, normalize_for_compare, resolve_entity
 from .nlu.context import ConversationContext
 from .service_call import ServiceCallPlan
 
@@ -45,6 +45,150 @@ def _result(
         requires_confirmation=confirm,
         entity=entity,
     )
+
+
+def _mentioned_entity(
+    text: str,
+    entities: list[EntitySnapshot],
+    domains: frozenset[str],
+) -> EntitySnapshot | None:
+    """Resolve one explicitly mentioned registry name independent of order."""
+    normalized = normalize_for_compare(text)
+    ranked: list[tuple[int, EntitySnapshot]] = []
+    for entity in entities:
+        if entity.domain not in domains:
+            continue
+        names = (entity.friendly_name, *entity.aliases)
+        best = max(
+            (
+                len(candidate_norm)
+                for name in names
+                if (candidate_norm := normalize_for_compare(name))
+                and re.search(rf"(?<!\w){re.escape(candidate_norm)}(?!\w)", normalized)
+            ),
+            default=0,
+        )
+        if best:
+            ranked.append((best, entity))
+    if not ranked:
+        return None
+    top = max(score for score, _ in ranked)
+    matches = [entity for score, entity in ranked if score == top]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _match_compositional(
+    text: str, entities: list[EntitySnapshot]
+) -> DeviceControlResult | None:
+    """Compose extended-domain controls from target, action and value.
+
+    This fallback deliberately scans independent meaning components rather
+    than enumerating their sentence order. An exact registry-name mention,
+    one supported operation and all required values are mandatory.
+    """
+    value = _clean(text)
+    if re.search(r"\b(?:nicht|kein\w*|ohne|vielleicht|normalerweise|gestern)\b", value, re.I):
+        return None
+
+    climate = _mentioned_entity(value, entities, frozenset({"climate"}))
+    temperature = re.search(
+        r"\bauf\s+(-?\d{1,2}(?:[,.]\d)?)\s*(?:grad|°c?)\b", value, re.I
+    )
+    if (
+        climate is not None
+        and temperature is not None
+        and re.search(r"\b(?:stell\w*|setz\w*|regel\w*|aender\w*|änder\w*)\b", value, re.I)
+    ):
+        requested = float(temperature.group(1).replace(",", "."))
+        minimum = float(climate.attributes.get("min_temp", 7))
+        maximum = float(climate.attributes.get("max_temp", 35))
+        if not minimum <= requested <= maximum:
+            return DeviceControlResult(
+                None,
+                f"Die Temperatur für {climate.friendly_name} muss zwischen "
+                f"{minimum:g} und {maximum:g} Grad liegen.",
+            )
+        return _result(
+            climate,
+            "set_temperature",
+            f"{climate.friendly_name} auf {requested:g} Grad gestellt.",
+            {"temperature": requested},
+        )
+
+    player = _mentioned_entity(value, entities, frozenset({"media_player"}))
+    if player is not None:
+        volume = re.search(r"\b(100|[1-9]?\d)\s*(?:prozent|%)\b", value, re.I)
+        if (
+            volume is not None
+            and re.search(r"\blautstärke\b", value, re.I)
+            and re.search(r"\b(?:stell\w*|setz\w*|mach\w*|regel\w*)\b", value, re.I)
+        ):
+            percent = int(volume.group(1))
+            return _result(
+                player,
+                "volume_set",
+                f"Lautstärke von {player.friendly_name} auf {percent} Prozent gestellt.",
+                {"volume_level": percent / 100},
+            )
+        if re.search(r"\bquelle\b", value, re.I) and re.search(
+            r"\b(?:aus)?(?:wähl\w*|waehl\w*)\b", value, re.I
+        ):
+            sources = player.attributes.get("source_list") or ()
+            selected = [
+                source for source in sources
+                if re.search(
+                    rf"(?<!\w){re.escape(normalize_for_compare(str(source)))}(?!\w)",
+                    normalize_for_compare(value),
+                )
+            ]
+            if len(selected) == 1:
+                return _result(
+                    player,
+                    "select_source",
+                    f"Quelle {selected[0]} auf {player.friendly_name} ausgewählt.",
+                    {"source": selected[0]},
+                )
+        if re.search(r"\bwiedergabe\b", value, re.I):
+            operations = [
+                (pattern, service, speech)
+                for pattern, service, speech in (
+                    (r"\b(?:start\w*|spiel\w*)\b", "media_play", "Wiedergabe gestartet."),
+                    (r"\bpaus\w*\b", "media_pause", "Wiedergabe pausiert."),
+                    (r"\bstopp\w*\b", "media_stop", "Wiedergabe gestoppt."),
+                )
+                if re.search(pattern, value, re.I)
+            ]
+            if len(operations) == 1:
+                _, service, speech = operations[0]
+                return _result(player, service, f"{player.friendly_name}: {speech}")
+
+    vacuum = _mentioned_entity(value, entities, frozenset({"vacuum"}))
+    if vacuum is not None:
+        if (
+            re.search(r"\bladestation\b", value, re.I)
+            and re.search(r"\b(?:schick\w*|fahr\w*|soll\w*)\b", value, re.I)
+        ):
+            return _result(
+                vacuum, "return_to_base",
+                f"{vacuum.friendly_name} zur Ladestation geschickt.",
+            )
+        operations = [
+            (pattern, service, word)
+            for pattern, service, word in (
+                (r"\bstart\w*\b", "start", "gestartet"),
+                (r"\bpaus\w*\b", "pause", "pausiert"),
+                (r"\bstopp\w*\b", "stop", "gestoppt"),
+            )
+            if re.search(pattern, value, re.I)
+        ]
+        if len(operations) == 1:
+            _, service, word = operations[0]
+            return _result(vacuum, service, f"{vacuum.friendly_name} {word}.")
+
+    scene = _mentioned_entity(value, entities, frozenset({"scene"}))
+    if scene is not None and re.search(r"\b(?:aktivier\w*|einschalt\w*)\b", value, re.I):
+        return _result(scene, "turn_on", f"Szene {scene.friendly_name} aktiviert.")
+    return None
 
 
 def match_device_control_followup(
@@ -237,4 +381,4 @@ def match_device_control(
                 f"{entity.friendly_name} {'öffnen' if opening else 'schließen'}.",
                 confirm=True,
             )
-    return None
+    return _match_compositional(value, entities)

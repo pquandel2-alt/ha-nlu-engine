@@ -26,7 +26,7 @@ from .primitives import SemanticAction, SemanticProperty, SemanticQuantity
 from .query_command import QueryCommand, QueryFilter, QueryScope, QueryTarget
 from .query_executor import QueryExecutor
 from .semantic_lexicon import SemanticAnalysis, SemanticKind, analyse_semantics
-from .semantic_location import resolve_semantic_location
+from .semantic_location import has_explicit_location_cue, resolve_semantic_location
 
 
 @dataclass(frozen=True)
@@ -70,6 +70,14 @@ _PERCENT_RE = re.compile(
     r"\b(?P<unit>100|[1-9]?\d)\s*(?:prozent|%)\b)", re.I
 )
 _ANY_PERCENT_RE = re.compile(r"\b(?P<value>\d+)\s*(?:prozent|%)\b", re.I)
+_FIFTY_PERCENT_RE = re.compile(r"\bfünfzig\s+prozent\b", re.I)
+_DIRECTIVE_RE = re.compile(
+    r"\b(?:bitte|soll(?:st|en|t)?|möchte|will|kannste|könntest|koenntest|"
+    r"würdest|wuerdest|würde\s+gern|würd\s+gern|wuerd\s+gern)\b", re.I
+)
+_COPULA_STATEMENT_RE = re.compile(
+    r"\b(?:ist|sind|war|waren|bleibt|bleiben)\b", re.I
+)
 
 _TOKEN_RE = re.compile(r"[\wäöüß]+", re.I)
 _STOP_WORDS = {
@@ -150,17 +158,47 @@ def _percent(text: str) -> int | None:
         return 0
     if _HUNDRED_RE.search(text):
         return 100
+    if _FIFTY_PERCENT_RE.search(text):
+        return 50
     match = _PERCENT_RE.search(text)
     return int(match.group("after") or match.group("unit")) if match else None
 
 
 def _intents(
-    text: str, domains: frozenset[str], percent: int | None, analysis=None
+    text: str,
+    domains: frozenset[str],
+    percent: int | None,
+    analysis=None,
+    *,
+    location_text: str | None = None,
 ) -> frozenset[str]:
     analysis = analysis or analyse_semantics(text)
-    if not analysis.values(SemanticKind.COMMAND_MARKER):
+    has_command_marker = bool(analysis.values(SemanticKind.COMMAND_MARKER))
+    # Natural voice commands are often elliptical ("Küchenlicht bitte an",
+    # "Rollladen nach oben") or expressed as a wish/passive construction.
+    # Action + resolvable target is sufficient unless the utterance is an
+    # indicative state statement; candidate resolution below remains the
+    # safety boundary and never guesses an entity.
+    actions = frozenset(
+        span.value
+        for span in analysis.matching(SemanticKind.ACTION)
+        if not (
+            location_text is not None
+            and location_text.casefold() in {"oben", "unten"}
+            and span.text.casefold() == location_text.casefold()
+        )
+    )
+    elliptical_request = (
+        bool(actions)
+        and (
+            _DIRECTIVE_RE.search(text) is not None
+            or _COPULA_STATEMENT_RE.search(text) is None
+        )
+    ) or (
+        percent is not None and _DIRECTIVE_RE.search(text) is not None
+    )
+    if not has_command_marker and not elliptical_request:
         return frozenset()
-    actions = analysis.values(SemanticKind.ACTION)
     found: set[str] = set()
     if percent is not None:
         found.add("HassSetPercentage")
@@ -181,20 +219,42 @@ def _intents(
     return frozenset(found)
 
 
-def _entity_candidates(text: str, entities: list[EntitySnapshot], domains: frozenset[str]) -> list[EntitySnapshot]:
+def _entity_candidates(
+    text: str,
+    entities: list[EntitySnapshot],
+    domains: frozenset[str],
+    *,
+    area_id: str | None = None,
+    floor_id: str | None = None,
+) -> list[EntitySnapshot]:
     utterance = _tokens(text) - _SEMANTIC_WORDS
     scored: list[tuple[int, EntitySnapshot]] = []
-    for entity in entities:
+    scoped_entities = resolve_candidates(
+        entities,
+        Constraints(area_id=area_id, floor_id=floor_id),
+    )
+    for entity in scoped_entities:
         if domains and entity.domain not in domains:
             continue
         best = 0
-        names = (entity.friendly_name, *(alias.text for alias in generate_aliases(entity)))
-        for name in names:
+        names = (
+            ((entity.friendly_name, "friendly_name"),)
+            + tuple((alias, "configured") for alias in entity.aliases)
+            + tuple((alias.text, alias.source) for alias in generate_aliases(entity))
+        )
+        for name, source in names:
             name_tokens = _tokens(name)
             distinctive = {token for token in name_tokens if _DOMAIN_CANONICAL.get(token) is None}
             # Generic one-word names ("Rollladen") remain valid, but only
             # when they are unique; ambiguity is handled below.
-            required = distinctive or name_tokens
+            # Humanized entity IDs ("Buero Steckdose") must not match from
+            # the location word alone. Friendly/configured names may omit a
+            # generic domain noun and therefore keep distinctive matching.
+            required = (
+                name_tokens
+                if source in {"entity_name", "entity_id"}
+                else distinctive or name_tokens
+            )
             if required and required <= utterance:
                 best = max(best, len(required) * 10 + len(name_tokens))
         if best:
@@ -232,18 +292,30 @@ class SemanticCommandCompiler:
         # A spoken scope is a hard constraint.  If HA does not know it (or
         # two floors make "oben" ambiguous), never silently widen the
         # request to every device in the house.
-        if location is None and (_LOCATION_CUE_RE.search(text) or _LEVEL_CUE_RE.search(text)):
+        if location is None and has_explicit_location_cue(text, entities):
             return None
         quantity = _quantity(text)
         percent = _percent(text)
 
         # If the user named an entity but omitted a generic device noun, infer
         # only the domain(s) of registry names that are actually present.
-        preliminary = _entity_candidates(text, entities, domains)
+        preliminary = _entity_candidates(
+            text,
+            entities,
+            domains,
+            area_id=location[1] if location else None,
+            floor_id=location[2] if location else None,
+        )
         if not domains and preliminary:
             domains = frozenset(entity.domain for entity in preliminary)
 
-        intents = _intents(text, domains, percent, analysis)
+        intents = _intents(
+            text,
+            domains,
+            percent,
+            analysis,
+            location_text=location[0] if location else None,
+        )
         facts = SemanticFacts(
             intents=intents,
             domains=domains,
@@ -282,7 +354,13 @@ class SemanticCommandCompiler:
                 if facts.area_id is not None else None
             )
         else:
-            candidates = _entity_candidates(text, entities, facts.domains)
+            candidates = _entity_candidates(
+                text,
+                entities,
+                facts.domains,
+                area_id=facts.area_id,
+                floor_id=facts.floor_id,
+            )
             if len(candidates) > 1:
                 return ClarificationRequest(intent, domain, tuple(candidates), {"percent": percent} if percent is not None else {})
             if len(candidates) != 1:

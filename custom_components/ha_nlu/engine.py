@@ -487,11 +487,10 @@ class CommandPlan:
     ``None``), same "never guess, no partial execution" precedent the rest
     of this engine already follows.
 
-    Deliberately restricted to actionable segments only (every element's
-    ``plan`` is guaranteed not ``None``) - queries (plan-less results) don't
-    have an "execute" step to sequence, and the plan's own example is
-    action-only ("Mach ... und fahr ..."), so mixing a query into a
-    multi-step chain is out of scope here rather than invented.
+    Read-only query segments may be mixed with actions. Every segment is
+    still resolved and validated before execution starts, and action/query
+    segments that refer to the same entity are refused because the query
+    would otherwise describe the pre-execution snapshot.
     """
 
     commands: tuple[MatchResult, ...]
@@ -740,6 +739,16 @@ class NluEngine:
         # not fall through to a broader wildcard parser (for example,
         # "beide" must never degrade into a singular command).
         result = self._select_parser(text).parse(text, parse_context)
+        if isinstance(result, ClarificationRequest):
+            # Legacy wildcard grammars may include politeness words in the
+            # target or detect duplicate names before applying an explicitly
+            # spoken area.  Let the constraint-based semantic compiler prove
+            # a unique interpretation before asking an unnecessary question.
+            semantic_result = SemanticCommandCompiler.compile(
+                text, entities, world_model, semantic_analysis
+            )
+            if isinstance(semantic_result, ParseResult):
+                result = semantic_result
         if result is None:
             result = SemanticQueryCompiler.compile(
                 text, entities, world_model, semantic_analysis
@@ -824,9 +833,25 @@ class NluEngine:
         results: list[MatchResult] = []
         for segment in segments:
             result = self.match(segment, entities, world_model)
-            if not isinstance(result, MatchResult) or result.clarification is not None or result.plan is None:
+            if (
+                not isinstance(result, MatchResult)
+                or result.clarification is not None
+                or result.command is None
+            ):
                 return None
             results.append(result)
+        action_ids = {
+            entity.entity_id
+            for result in results if result.plan is not None
+            for entity in result.command.entities
+        }
+        query_ids = {
+            entity.entity_id
+            for result in results if result.plan is None
+            for entity in result.command.entities
+        }
+        if action_ids & query_ids:
+            return None
         return CommandPlan(commands=tuple(results))
 
     def match_followup(self, text: str, context: ConversationContext | None) -> MatchResult | None:
@@ -1000,7 +1025,14 @@ class NluEngine:
             if natural is not None:
                 normalized = f"Und {natural.group('location')}?"
         previous_query_command = context.last_command.parameters.get("query_command")
-        if context.last_command.intent == "HassLocationPropertyQuery":
+        if (
+            context.last_command.parameters.get("property")
+            and context.last_command.parameters.get("location_kind") in {"area", "floor"}
+            and (
+                context.last_command.intent == "HassLocationPropertyQuery"
+                or context.focus is not None
+            )
+        ):
             location_match = re.match(
                 r"^und\s+(?:(?:im|in der|in dem)\s+)?(?P<location>.+?)[?.!]*$",
                 normalized,

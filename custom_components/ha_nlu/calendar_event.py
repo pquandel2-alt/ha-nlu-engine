@@ -442,17 +442,23 @@ def _clean_title(
     value = "".join(chars)
     for calendar in calendars:
         for name in sorted(_calendar_names(calendar), key=len, reverse=True):
-            value = re.sub(re.escape(name), " ", value, flags=re.IGNORECASE)
+            value = re.sub(
+                rf"(?:\b(?:in|auf)\s+(?:den|dem|meinen?|unseren?)\s+)?{re.escape(name)}",
+                " ",
+                value,
+                flags=re.IGNORECASE,
+            )
     cleanup_patterns = (
         r"\b(?:kannst du|könntest du|koenntest du|ich möchte|ich moechte|ich will|bitte)\b",
         r"\b(?:trag(?:e)?|trage|eintragen|einzutragen|erstelle|erstellen|anlegen|anzulegen|lege|füge|fuege|hinzufügen|hinzufuegen|schreib(?:e|en)?|plane|planen|vormerken|mach(?:e|en)?)\b",
         r"\b(?:einen?|den|der|die|das)?\s*(?:termin|kalendertermin|kalendereintrag)\b",
         r"\b(?:(?:in|auf)\s+(?:den|dem|meinen?|unseren?)?|im)\s*kalender\b",
+        r"\bkalender\b",
         r"\b(?:mit\s+dem\s+)?(?:titel|namen)\b",
     )
     for pattern in cleanup_patterns:
         value = re.sub(pattern, " ", value, flags=re.IGNORECASE)
-    value = re.sub(r"\bein\s*$", " ", value, flags=re.IGNORECASE)
+    value = re.sub(r"\bein\s*[.!?]*$", " ", value, flags=re.IGNORECASE)
     value = re.sub(r"^\s*(?:für|fuer|als|namens)\s+", "", value, flags=re.IGNORECASE)
     value = re.sub(r"\s+", " ", value).strip(" .,!?:;\"'")
     value = re.sub(r"^(?:ein|eine|einen|der|die|das)\s+", "", value, flags=re.IGNORECASE)

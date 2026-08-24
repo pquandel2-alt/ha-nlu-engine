@@ -77,7 +77,7 @@ widersprüchliche Bedeutungen, führt es keine Aktion aus. Ein neuer Ausdruck
 erweitert das zentrale Lexikon für alle zulässigen Satzstellungen und muss
 nicht als vollständiger Satz in vielen Varianten eingetragen werden.
 
-## Was ist seit Version 4.29 besser?
+## Aktuelles Sprachverständnis
 
 HomeIntent wertet einen Satz nicht mehr nur entlang einzelner fest hinterlegter
 Formulierungen aus. Der gemeinsame semantische Analysepass erkennt unter
@@ -101,7 +101,19 @@ Welche Fenster im Erdgeschoss sind noch geöffnet?
 Welche Lichter sind heller als 50 Prozent?
 Mindestens 50 Prozent, welche Lichter sind das?
 Im Wohnzimmer heller als 50 Prozent: Welche Lichter gibt es?
+
+Flurlicht bitte an.
+Ich möchte, dass das Bürolicht ausgeschaltet wird.
+Komplett hochfahren soll der Rollladen Büro.
+Den Rollladen Büro würd ich gern halb runterfahren.
 ```
+
+HomeIntent trennt dafür die eigentliche Bedeutung von ihrer sprachlichen
+Verpackung. Höflichkeit, Wunsch- und Passivformen, umgangssprachliche
+Verbendungen sowie elliptische Kurzbefehle werden als Satzhülle behandelt;
+Aktion, Ziel, Ort und Wert bleiben dieselben geprüften semantischen Rollen.
+Zusammengesetzte Verben wie „hochfahren“ und Wörter wie „oben“ innerhalb eines
+echten Gerätenamens werden anhand des Registry-Kontexts unterschieden.
 
 Die gemeinsame Auswertung verbessert mehrere Bereiche gleichzeitig:
 
@@ -113,6 +125,7 @@ Die gemeinsame Auswertung verbessert mehrere Bereiche gleichzeitig:
 | Vergleiche | Ausdrücke wie „über“, „unter“, „mindestens“, „höchstens“, „heller“ und „dunkler“ werden unabhängig von ihrer Position erkannt. |
 | Automationen | Zustandsauslöser und Zustandsbedingungen verwenden denselben geprüften Predicate-Compiler. |
 | Folgefragen | Gerät, Raum, Etage und abgefragte Eigenschaft können als Dialogfokus sicher weiterverwendet werden. |
+| Gemischte Sätze | Eine Aktion und eine unabhängige Zustandsfrage können gemeinsam vollständig validiert werden. Beziehen sich beide auf dasselbe Gerät, wird die Kombination wegen eines möglicherweise veralteten Abfragewerts abgelehnt. |
 | Sicherheit | Widersprüche, unbekannte wichtige Zusätze und fachlich unpassende Einheiten werden abgelehnt statt geraten. |
 
 Beispielsweise kann nach einer Temperaturabfrage eine verkürzte Anweisung den
@@ -663,8 +676,19 @@ python -m pytest -q
 Aktueller Entwicklungsstand:
 
 ```text
-1829 passed, 12 skipped
+1851 passed, 12 skipped
 ```
+
+Zusätzlich wird HomeIntent gegen die getrennte, agentenneutrale Suite
+`ha-conversation-benchmark-de` geprüft. Der aktuelle öffentliche Korpus enthält
+1.139 Fälle aus einer systematischen Gerätematrix und handgeprüften Aufgaben
+für freie Wortstellung, Mehrturn-Kontext, Mehrdeutigkeit, Mixed-Intent,
+Klima/Medien/Saugroboter/Szenen, zeitgesteuerte Automationen, Kalenderdialoge,
+typische STT-Umschriften und sichere Ablehnungen. Der aktuelle Stand besteht
+1.139 von 1.139 Fällen in drei identischen Läufen bei null unsicheren
+Falschausführungen. Erwartungswerte werden unabhängig vom HomeIntent-Code
+festgelegt; eine höhere Quote darf nicht durch das Abschwächen der Sollwerte
+entstehen.
 
 Zusätzlich enthält `tests/eval/dialog_cases.json` ein datengetriebenes
 Mehrturn-Sprachkorpus. Das separate Sicherheitsgate garantiert, dass negative

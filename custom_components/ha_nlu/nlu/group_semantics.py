@@ -12,9 +12,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from ..areas import AreaResolveStatus, resolve_area_name
 from ..entities import EntitySnapshot
-from ..floors import FloorResolveStatus, resolve_floor_name
 from .constraint_resolver import Constraints, resolve_candidates
 from .frame import AreaReference, Quantifier, SemanticFrame, TargetReference
 from .parser import ParseResult
@@ -100,15 +98,12 @@ _EXPLICIT_PERCENT_RE = re.compile(
 def resolve_group_location(
     name: str, entities: list[EntitySnapshot]
 ) -> tuple[str | None, str | None] | None:
-    """Resolve a group scope as ``(area_id, floor_id)``, floor first."""
-    floor = resolve_floor_name(name, entities)
-    if floor.status is FloorResolveStatus.OK:
-        return None, floor.floor_id
+    """Resolve a group scope as ``(area_id, floor_id)``."""
+    # Local import avoids a module cycle while keeping the canonical scoring
+    # policy in semantic_location.
+    from .semantic_location import resolve_location_name
 
-    area = resolve_area_name(name, entities)
-    if area.status is AreaResolveStatus.OK:
-        return area.area_id, None
-    return None
+    return resolve_location_name(name, entities)
 
 
 def _domain(text: str) -> tuple[str, re.Match[str]] | None:

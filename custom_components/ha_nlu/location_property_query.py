@@ -5,9 +5,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .areas import AreaResolveStatus, resolve_area_name
 from .entities import EntitySnapshot, ResolveStatus, resolve_entity
-from .floors import FloorResolveStatus, resolve_floor_by_level_keyword, resolve_floor_name
+from .floors import FloorResolveStatus, resolve_floor_by_level_keyword
 from .nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
 from .nlu.parser import ParseResult
 from .nlu.parse_outcome import ParseFailureReason
@@ -17,7 +16,7 @@ from .nlu.semantic_lexicon import (
     SemanticKind,
     analyse_semantics,
 )
-from .nlu.semantic_location import resolve_semantic_location
+from .nlu.semantic_location import resolve_location_name, resolve_semantic_location
 
 
 @dataclass(frozen=True)
@@ -197,25 +196,16 @@ class LocationPropertyQueryParser:
         if not explicit_location and resolve_entity(location, entities).status is ResolveStatus.OK:
             return None
 
-        area = resolve_area_name(location, entities)
-        floor = None
-        if area.status is AreaResolveStatus.NOT_FOUND:
-            if location.casefold() in {"oben", "unten"}:
-                floor = resolve_floor_by_level_keyword(
-                    "up" if location.casefold() == "oben" else "down", entities
-                )
-            else:
-                floor = resolve_floor_name(location, entities)
-        if area.status is AreaResolveStatus.AMBIGUOUS or (
-            floor is not None and floor.status is FloorResolveStatus.AMBIGUOUS
-        ):
-            return LocationQueryFeedback(
-                f"Der Ort {location} ist nicht eindeutig.",
-                ParseFailureReason.AMBIGUOUS_TARGET,
+        if location.casefold() in {"oben", "unten"}:
+            level = resolve_floor_by_level_keyword(
+                "up" if location.casefold() == "oben" else "down", entities
             )
-        if area.status is AreaResolveStatus.NOT_FOUND and (
-            floor is None or floor.status is FloorResolveStatus.NOT_FOUND
-        ):
+            resolved_location = (
+                (None, level.floor_id) if level.status is FloorResolveStatus.OK else None
+            )
+        else:
+            resolved_location = resolve_location_name(location, entities)
+        if resolved_location is None:
             # Name-based queries ("wie hell ist das Küchenlicht") belong to
             # the established entity query parser, not to this location
             # parser. Only emit a location error for an unmistakably
@@ -230,8 +220,7 @@ class LocationPropertyQueryParser:
             )
 
         domain, device_class, label = spec
-        area_id = area.area_id if area.status is AreaResolveStatus.OK else None
-        floor_id = floor.floor_id if floor is not None and floor.status is FloorResolveStatus.OK else None
+        area_id, floor_id = resolved_location
         matched = [
             entity
             for entity in entities
