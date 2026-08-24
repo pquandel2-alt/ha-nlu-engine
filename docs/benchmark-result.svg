@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
+  <title id="title">HomeIntent – Ergebnis im HA Conversation Benchmark DE</title>
+  <desc id="description">HomeIntent besteht 1176 von 1176 deutschen Sprachfällen in fünf deterministischen Läufen ohne unsichere Falschausführung.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="1" stop-color="#16283d"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2dd4bf"/>
+      <stop offset="1" stop-color="#38bdf8"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000" flood-opacity=".28"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="630" rx="28" fill="url(#background)"/>
+  <circle cx="1090" cy="85" r="190" fill="#38bdf8" opacity=".07"/>
+  <circle cx="80" cy="610" r="230" fill="#2dd4bf" opacity=".06"/>
+
+  <g transform="translate(64 54)">
+    <path d="M4 29 32 6l28 23v32H39V41H25v20H4z" fill="none" stroke="#38bdf8" stroke-width="5" stroke-linejoin="round"/>
+    <path d="m19 29 10 10 18-20" fill="none" stroke="#2dd4bf" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="82" y="30" fill="#f0f6fc" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="30" font-weight="700">HA Conversation Benchmark DE</text>
+    <text x="82" y="61" fill="#8b949e" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18">Reproduzierbarer deutscher NLU-Benchmark für Home Assistant</text>
+  </g>
+
+  <g transform="translate(64 155)" filter="url(#shadow)">
+    <rect width="1072" height="174" rx="20" fill="#161b22" stroke="#30363d"/>
+    <text x="32" y="45" fill="#8b949e" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18" letter-spacing="1">HOMEINTENT · GESAMTERGEBNIS</text>
+    <text x="32" y="119" fill="#f0f6fc" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="66" font-weight="800">1.176 / 1.176</text>
+    <text x="431" y="116" fill="#2dd4bf" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="42" font-weight="750">100,00 %</text>
+    <rect x="32" y="143" width="1008" height="8" rx="4" fill="#30363d"/>
+    <rect x="32" y="143" width="1008" height="8" rx="4" fill="url(#accent)"/>
+  </g>
+
+  <g transform="translate(64 357)" font-family="Inter,Segoe UI,Arial,sans-serif">
+    <g filter="url(#shadow)">
+      <rect width="336" height="154" rx="18" fill="#161b22" stroke="#30363d"/>
+      <text x="24" y="38" fill="#8b949e" font-size="17">SICHERHEIT</text>
+      <text x="24" y="91" fill="#2dd4bf" font-size="42" font-weight="800">0</text>
+      <text x="64" y="89" fill="#f0f6fc" font-size="20" font-weight="600">unsichere Aktionen</text>
+      <text x="24" y="127" fill="#8b949e" font-size="16">12 adversariale Sicherheitsfälle</text>
+    </g>
+    <g transform="translate(368)" filter="url(#shadow)">
+      <rect width="336" height="154" rx="18" fill="#161b22" stroke="#30363d"/>
+      <text x="24" y="38" fill="#8b949e" font-size="17">DETERMINISMUS</text>
+      <text x="24" y="91" fill="#38bdf8" font-size="42" font-weight="800">5 / 5</text>
+      <text x="157" y="89" fill="#f0f6fc" font-size="20" font-weight="600">identisch</text>
+      <text x="24" y="127" fill="#8b949e" font-size="16">Antworten, Aktionen und Artefakte</text>
+    </g>
+    <g transform="translate(736)" filter="url(#shadow)">
+      <rect width="336" height="154" rx="18" fill="#161b22" stroke="#30363d"/>
+      <text x="24" y="38" fill="#8b949e" font-size="17">LATENZ</text>
+      <text x="24" y="91" fill="#f0f6fc" font-size="42" font-weight="800">2,42 ms</text>
+      <text x="24" y="127" fill="#8b949e" font-size="16">p50 · p95 5,33 ms · p99 10,49 ms</text>
+    </g>
+  </g>
+
+  <g transform="translate(64 552)" font-family="Inter,Segoe UI,Arial,sans-serif">
+    <rect width="84" height="10" rx="5" fill="#f59e0b"/>
+    <rect x="90" width="6" height="10" rx="3" fill="#a78bfa"/>
+    <rect x="102" width="970" height="10" rx="5" fill="url(#accent)"/>
+    <text y="38" fill="#8b949e" font-size="15">84 handgeprüft</text>
+    <text x="190" y="38" fill="#8b949e" font-size="15">6 Spracheingabe</text>
+    <text x="390" y="38" fill="#8b949e" font-size="15">1.086 semantische Matrixfälle</text>
+    <text x="1072" y="38" fill="#8b949e" font-size="15" text-anchor="end">Stand 24.08.2026</text>
+  </g>
+</svg>

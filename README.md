@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und deterministische Sprachsteuerung für Home Assistant Assist.**
 
-- Aktuelle Version: **4.31.0**
+- Aktuelle Version: **4.32.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Lizenz: **MIT**
@@ -689,6 +689,18 @@ typische STT-Umschriften und sichere Ablehnungen. Der aktuelle Stand besteht
 Falschausführungen. Erwartungswerte werden unabhängig vom HomeIntent-Code
 festgelegt; eine höhere Quote darf nicht durch das Abschwächen der Sollwerte
 entstehen.
+
+### Aktuelles Benchmark-Ergebnis
+
+![HomeIntent besteht 1.176 von 1.176 Fällen im HA Conversation Benchmark DE](docs/benchmark-result.svg)
+
+Die Grafik zeigt den reproduzierbaren Lauf vom 24. August 2026 gegen den
+HomeIntent-Entwicklungsstand `09d4a3a`: fünf identische Durchläufe, keine
+unsichere Falschausführung und 100 Prozent im öffentlichen Korpus. Sie ist eine
+versionierte Momentaufnahme und kein automatisch aktualisiertes Werbe-Badge.
+Ein perfektes Ergebnis in diesem bekannten Datensatz bedeutet nicht, dass jede
+denkbare Formulierung abgedeckt ist. Deshalb sollen reale anonymisierte
+Nutzersätze und ein verdecktes Challenge-Set die Suite künftig ergänzen.
 
 Zusätzlich enthält `tests/eval/dialog_cases.json` ein datengetriebenes
 Mehrturn-Sprachkorpus. Das separate Sicherheitsgate garantiert, dass negative
