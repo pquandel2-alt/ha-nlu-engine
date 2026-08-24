@@ -46,6 +46,16 @@ KUECHE_SWITCH = EntitySnapshot(
     area_id="kueche", area_name="Küche",
     capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
 )
+FLURLICHT_UNTEN = EntitySnapshot(
+    "light.flur_unten", "Flurlicht unten", "light", "on",
+    area_id="flur", area_name="Flur", floor_id="eg", floor_name="Erdgeschoss",
+    floor_level=0, capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+)
+KINDERZIMMER_BATTERY = EntitySnapshot(
+    "sensor.kinderzimmer_fenster_batterie", "Fenster Batterie", "sensor", "76",
+    area_id="kinderzimmer_mia", area_name="Kinderzimmer Mia", unit="%",
+    device_class="battery",
+)
 
 ENTITIES = [WOHNZIMMER_TEMP, KUECHE_TEMP, OBEN_TEMP, LAMP]
 
@@ -117,6 +127,25 @@ def test_temperature_query_resolves_erdgeschoss_as_a_floor(engine):
         assert result is not None
         assert result.command.entities[0].entity_id == "sensor.kueche_temp"
         assert result.response_text == "23.0 Grad."
+
+
+def test_colloquial_temperature_query_resolves_lower_floor(engine):
+    # A device whose name also contains "unten" must not steal the explicit
+    # relative-floor reference from this property question.
+    result = engine.match("wie warm isses unten", ENTITIES + [FLURLICHT_UNTEN])
+    assert result is not None
+    assert result.command.entities[0].entity_id == "sensor.kueche_temp"
+    assert result.response_text == "23.0 Grad."
+
+
+def test_battery_query_with_masculine_article(engine):
+    result = engine.match(
+        "Wie hoch ist der Batteriestand im Kinderzimmer Mia?",
+        ENTITIES + [KINDERZIMMER_BATTERY],
+    )
+    assert result is not None
+    assert result.command.entities[0].entity_id == "sensor.kinderzimmer_fenster_batterie"
+    assert result.response_text == "76 Prozent."
 
 
 def test_floor_temperature_query_lists_multiple_sensors(engine):

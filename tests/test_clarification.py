@@ -62,6 +62,10 @@ def test_resolve_clarification_by_area_within_candidates(engine):
     assert resolved.plan.entity_id == "light.buerolicht_2"
     assert resolved.plan.domain == "homeassistant"
     assert resolved.plan.service == "turn_on"
+    assert resolved.frame is not None
+    assert resolved.frame.intent == "HassTurnOn"
+    assert resolved.command is not None
+    assert resolved.command.intent == "HassTurnOn"
 
 
 def test_resolve_clarification_returns_none_for_unresolvable_reply(engine):

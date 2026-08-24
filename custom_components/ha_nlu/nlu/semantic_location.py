@@ -76,6 +76,11 @@ def resolve_semantic_location(
     text: str, entities: list[EntitySnapshot]
 ) -> tuple[str, str | None, str | None] | None:
     """Return ``(spoken_text, area_id, floor_id)`` for one clear location."""
+    whole_home = re.search(
+        r"\b(?:(?:im|in\s+dem)\s+)?(?:ganzen|gesamten)\s+haus\b", text, re.I
+    )
+    if whole_home is not None:
+        return whole_home.group(0), None, None
     level = next(
         (
             match for match in _LEVEL_CUE_RE.finditer(text)

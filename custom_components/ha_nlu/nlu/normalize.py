@@ -48,7 +48,7 @@ _DEGREE_SYMBOL_RE = re.compile(r"(\d)\s*°")
 # readability - alternation order doesn't matter here since none of the
 # other words are prefixes of each other's tokens. "bitte" excluded, see
 # module docstring.
-_FILLER_RE = re.compile(r"\b(ein bisschen|mal|doch|kurz|etwas)\b", re.IGNORECASE)
+_FILLER_RE = re.compile(r"\b(ein bisschen|mal|ma|doch|kurz|etwas)\b", re.IGNORECASE)
 
 _POLITE_MODAL_RE = re.compile(
     r"\b(?:könntest|koenntest|würdest|wuerdest)\s+du\b", re.IGNORECASE
@@ -61,6 +61,10 @@ _SHORT_DRIVE_IMPERATIVE_RE = re.compile(
 # Frequent speech-to-text tokenizations. These are orthographic rewrites,
 # not semantic guesses: both sides are the same German device/unit/verb.
 _STT_REWRITES = (
+    (re.compile(r"\bkönnteste\b", re.IGNORECASE), "kannst du"),
+    (re.compile(r"\bkoennteste\b", re.IGNORECASE), "kannst du"),
+    (re.compile(r"\bham\s+wir\b", re.IGNORECASE), "haben wir"),
+    (re.compile(r"\bisses\b", re.IGNORECASE), "ist es"),
     (re.compile(r"\bpro\s+cent\b", re.IGNORECASE), "Prozent"),
     (re.compile(r"\broll[\s-]+laden\b", re.IGNORECASE), "Rollladen"),
     (re.compile(r"\bgrad\s+(?:c|celsius)\b", re.IGNORECASE), "Grad"),

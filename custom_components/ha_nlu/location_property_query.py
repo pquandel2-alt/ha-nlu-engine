@@ -60,11 +60,18 @@ _PATTERNS = (
         re.IGNORECASE,
     ),
     re.compile(
-        r"^wie\s+(?:warm|kalt|feucht|hell)\s+(?P<location>.+?)\s*[?.!]*$",
+        r"^wie\s+(?:warm|kalt|feucht|hell)\s+ist\s+es\s+"
+        r"(?P<location>.+?)\s*[?.!]*$",
         re.IGNORECASE,
     ),
     re.compile(
-        rf"^(?:wie\s+(?:hoch|warm|kalt|feucht|hell)\s+ist\s+(?:es|die\s+)?|"
+        r"^wie\s+(?:warm|kalt|feucht|hell)\s+(?!ist\b)"
+        r"(?P<location>.+?)\s*[?.!]*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf"^(?:wie\s+(?:hoch|warm|kalt|feucht|hell)\s+ist\s+"
+        rf"(?:(?:es|der|die|das)\s+)?|"
         rf"welche\s+)(?P<property>{_PROPERTY_WORDS})?\s*(?:hat|ist)?\s*"
         rf"{_LOCATION_PREFIX}(?P<location>.+?)\s*[?.!]*$",
         re.IGNORECASE,
@@ -82,6 +89,12 @@ _PATTERNS = (
     re.compile(
         rf"^(?:wie\s+hoch\s+ist\s+die\s+)(?P<property>{_PROPERTY_WORDS})\s+"
         rf"{_LOCATION_PREFIX}(?P<location>.+?)\s*[?.!]*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf"^(?:wie\s+hoch\s+ist\s+(?:der|die|das)\s+)"
+        rf"(?P<property>{_PROPERTY_WORDS})\s+{_LOCATION_PREFIX}"
+        rf"(?P<location>.+?)\s*[?.!]*$",
         re.IGNORECASE,
     ),
 )
@@ -193,7 +206,11 @@ class LocationPropertyQueryParser:
             or re.search(r"\bhat\s+(?:der|die|das)\b", text, re.IGNORECASE)
             or re.match(rf"^(?:{_PROPERTY_WORDS})\b", text, re.IGNORECASE)
         )
-        if not explicit_location and resolve_entity(location, entities).status is ResolveStatus.OK:
+        if (
+            not explicit_location
+            and location.casefold() not in {"oben", "unten"}
+            and resolve_entity(location, entities).status is ResolveStatus.OK
+        ):
             return None
 
         if location.casefold() in {"oben", "unten"}:

@@ -676,16 +676,16 @@ python -m pytest -q
 Aktueller Entwicklungsstand:
 
 ```text
-1851 passed, 12 skipped
+1853 passed, 12 skipped
 ```
 
 Zusätzlich wird HomeIntent gegen die getrennte, agentenneutrale Suite
 `ha-conversation-benchmark-de` geprüft. Der aktuelle öffentliche Korpus enthält
-1.139 Fälle aus einer systematischen Gerätematrix und handgeprüften Aufgaben
+1.176 Fälle aus einer systematischen Gerätematrix und handgeprüften Aufgaben
 für freie Wortstellung, Mehrturn-Kontext, Mehrdeutigkeit, Mixed-Intent,
 Klima/Medien/Saugroboter/Szenen, zeitgesteuerte Automationen, Kalenderdialoge,
 typische STT-Umschriften und sichere Ablehnungen. Der aktuelle Stand besteht
-1.139 von 1.139 Fällen in drei identischen Läufen bei null unsicheren
+1.176 von 1.176 Fällen in fünf identischen Läufen bei null unsicheren
 Falschausführungen. Erwartungswerte werden unabhängig vom HomeIntent-Code
 festgelegt; eine höhere Quote darf nicht durch das Abschwächen der Sollwerte
 entstehen.

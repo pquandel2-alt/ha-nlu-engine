@@ -55,7 +55,7 @@ from .nlu.parse_outcome import ParseFailureReason, UnderstandingFeedback
 from .nlu.response_generator import ResponseGenerator, _automation_label
 from .nlu.service_mapper import map_to_service_call
 from .nlu.semantic_compiler import SemanticCommandCompiler, SemanticQueryCompiler
-from .nlu.semantic_lexicon import analyse_semantics
+from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
 from .nlu.validator import validate_command
 from .automation_action_parser import AutomationActionParser
 from .automation_condition_parser import AutomationConditionParser, split_on_top_level_and
@@ -409,6 +409,12 @@ _REPEAT_COUNTS = {
     "sieben": 7, "acht": 8, "neun": 9, "zehn": 10,
 }
 
+_UNSAFE_DIRECT_COMMAND_MODIFIER_RE = re.compile(
+    r"\b(?:nicht(?!\s+(?:höher|hoeher|niedriger|mehr|weniger)\s+als\b)|"
+    r"kein\w*|ohne|vielleicht|normalerweise|gestern)\b",
+    re.I,
+)
+
 # Per-domain question word for the clarification round-trip (v2 plan Phase
 # 25). Same kind of small, explicit German-grammar lookup as
 # service_call.py's ``_DOMAIN_PLURAL_DE`` - only covers the domains
@@ -726,6 +732,11 @@ class NluEngine:
 
         text = normalize(text)
         semantic_analysis = analyse_semantics(text)
+        if (
+            semantic_analysis.values(SemanticKind.COMMAND_MARKER)
+            and _UNSAFE_DIRECT_COMMAND_MODIFIER_RE.search(text)
+        ):
+            return None
         location_query = self._location_property_query_parser.parse(
             text, entities, semantic_analysis
         )
@@ -1840,7 +1851,28 @@ class NluEngine:
         matched = [entity]
         spec = INTENTS.get(clarification.pending_intent)
         if spec is not None:
-            return MatchResult(plan=spec.build(matched), response_text=spec.response(matched))
+            area = (
+                AreaReference(text=entity.area_name, area_id=entity.area_id)
+                if entity.area_id is not None and entity.area_name is not None
+                else None
+            )
+            return self._build_match_result(
+                ParseResult(
+                    frame=SemanticFrame(
+                        intent=clarification.pending_intent,
+                        target=TargetReference(
+                            text=entity.friendly_name,
+                            entity_id=entity.entity_id,
+                            domain=entity.domain,
+                        ),
+                        area=area,
+                        parameters=dict(clarification.pending_parameters),
+                        source_text=reply_text,
+                    ),
+                    resolved_entities=matched,
+                ),
+                entities,
+            )
         if (
             clarification.pending_intent in QUERY_INTENTS
             or clarification.pending_intent in CLIMATE_EXTENDED_INTENTS

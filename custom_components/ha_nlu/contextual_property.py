@@ -150,7 +150,8 @@ class ContextualPropertyResolver:
             re.IGNORECASE,
         )
         relative = re.match(
-            r"^(?:mach(?:e)?(?:\s+es|\s+die\s+temperatur)?|temperatur)?\s*"
+            r"^(?:jetzt\s+)?(?:noch\s+)?"
+            r"(?:mach(?:e)?(?:\s+es|\s+die\s+temperatur)?|temperatur)?\s*"
             r"(?P<amount>.+?)\s+grad\s+(?P<direction>wärmer|kälter)\s*[?.!]*$",
             normalized,
             re.IGNORECASE,

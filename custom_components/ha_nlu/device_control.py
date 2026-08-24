@@ -25,7 +25,9 @@ def _clean(text: str) -> str:
 def _resolve_domain(
     name: str, entities: list[EntitySnapshot], domain: str
 ) -> EntitySnapshot | None:
-    result = resolve_entity(name.strip(), entities)
+    result = resolve_entity(
+        name.strip(), [entity for entity in entities if entity.domain == domain]
+    )
     if result.status is not ResolveStatus.OK or result.entity is None:
         return None
     return result.entity if result.entity.domain == domain else None
@@ -232,6 +234,34 @@ def match_device_control(
 ) -> DeviceControlResult | None:
     """Match extended device commands; return None for unrelated language."""
     value = _clean(text)
+    if re.search(r"\b(?:nicht|kein\w*|ohne|vielleicht|normalerweise|gestern)\b", value, re.I):
+        return None
+
+    climate = _mentioned_entity(value, entities, frozenset({"climate"}))
+    mode_match = re.search(
+        r"\b(heizbetrieb|kühlbetrieb|kuehlbetrieb|automatik|entfeuchten|lüften|lueften)\b",
+        value,
+        re.I,
+    )
+    if climate is not None and mode_match is not None and re.search(
+        r"\b(?:stell\w*|schalt\w*|setz\w*)\b", value, re.I
+    ):
+        raw_mode = mode_match.group(1).casefold()
+        mode = {
+            "heizbetrieb": "heat", "kühlbetrieb": "cool", "kuehlbetrieb": "cool",
+            "automatik": "auto", "entfeuchten": "dry", "lüften": "fan_only",
+            "lueften": "fan_only",
+        }[raw_mode]
+        if mode not in (climate.attributes.get("hvac_modes") or ()):
+            return DeviceControlResult(
+                None, f"{climate.friendly_name} unterstützt diesen Betriebsmodus nicht."
+            )
+        return _result(
+            climate,
+            "set_hvac_mode",
+            f"{climate.friendly_name} auf {mode_match.group(1)} gestellt.",
+            {"hvac_mode": mode},
+        )
 
     match = re.fullmatch(
         r"stelle\s+(?:die\s+)?(?:temperatur\s+(?:von|bei)\s+)?(.+?)\s+auf\s+"

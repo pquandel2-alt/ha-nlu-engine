@@ -196,7 +196,7 @@ _FILLERS = frozenset(
         "jetzt vorhanden vorhandenen im in am auf beim nach von zur zum und oder soll sollen dort "
         "möchte will ich dass davon denn noch es sind ist hat haben werde werden wird welche welcher welches was wie "
         "kannste könntest koenntest würdest wuerdest würd wuerd gern wär waer nett "
-        "komplett ganz ganze ganzen ganzer ganzes vollständig halb halbe halber halben hälfte höhe prozent"
+        "komplett ganz ganze ganzen ganzer ganzes vollständig halb halbe halber halben hälfte höhe prozent einmal"
     ).split()
 )
 
