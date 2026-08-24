@@ -16,6 +16,7 @@ class AutomationEditOperation(Enum):
     REPLACE = auto()
     ADD = auto()
     CLEAR = auto()
+    REMOVE = auto()
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,7 @@ class AutomationStructureEditRequest:
     section: AutomationEditSection
     operation: AutomationEditOperation
     payload: str | None = None
+    index: int | None = None
 
 
 _SECTION_RE = re.compile(
@@ -48,9 +50,24 @@ def parse_automation_structure_edit(text: str) -> AutomationStructureEditRequest
     )
     lowered = text.casefold()
     if re.search(r"\b(?:entfern|lösch|loesch)", lowered):
-        if section is not AutomationEditSection.CONDITIONS or not re.search(r"\balle\w*\b", lowered):
-            return None  # Never guess which one of several structural nodes to delete.
-        return AutomationStructureEditRequest(section, AutomationEditOperation.CLEAR)
+        if section is not AutomationEditSection.CONDITIONS:
+            return None
+        if re.search(r"\balle\w*\b", lowered):
+            return AutomationStructureEditRequest(section, AutomationEditOperation.CLEAR)
+        ordinal = re.search(
+            r"\b(?:die\s+)?(erste|zweite|dritte|vierte|fünfte|fuenfte|1\.?|2\.?|3\.?|4\.?|5\.?)\b",
+            lowered,
+        )
+        if ordinal is None:
+            return None
+        indexes = {"erste": 0, "zweite": 1, "dritte": 2, "vierte": 3,
+                   "fünfte": 4, "fuenfte": 4, "1": 0, "1.": 0,
+                   "2": 1, "2.": 1, "3": 2, "3.": 2, "4": 3,
+                   "4.": 3, "5": 4, "5.": 4}
+        return AutomationStructureEditRequest(
+            section, AutomationEditOperation.REMOVE,
+            index=indexes[ordinal.group(1).casefold()],
+        )
     operation = (
         AutomationEditOperation.ADD
         if re.search(r"\b(?:füg|fueg|hinzufüg|hinzufueg)", lowered)

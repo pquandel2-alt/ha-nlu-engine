@@ -118,6 +118,32 @@ def _match_compositional(
             {"temperature": requested},
         )
 
+    if climate is not None:
+        climate_options = (
+            ("preset_modes", "preset", "set_preset_mode", "preset_mode"),
+            ("fan_modes", "lüftermodus", "set_fan_mode", "fan_mode"),
+            ("swing_modes", "schwenkmodus", "set_swing_mode", "swing_mode"),
+        )
+        option_matches: list[tuple[str, str, str]] = []
+        normalized_value = normalize_for_compare(value)
+        for attribute, spoken_kind, service, data_key in climate_options:
+            for option in climate.attributes.get(attribute, ()) or ():
+                option_text = normalize_for_compare(str(option))
+                if option_text and re.search(
+                    rf"(?<!\w){re.escape(option_text)}(?!\w)", normalized_value
+                ):
+                    option_matches.append((service, data_key, str(option)))
+        if len(option_matches) == 1 and re.search(
+            r"\b(?:stell\w*|setz\w*|wähl\w*|waehl\w*|aktivier\w*)\b", value, re.I
+        ):
+            service, data_key, option = option_matches[0]
+            return _result(
+                climate,
+                service,
+                f"{climate.friendly_name} auf {option} gestellt.",
+                {data_key: option},
+            )
+
     player = _mentioned_entity(value, entities, frozenset({"media_player"}))
     if player is not None:
         volume = re.search(r"\b(100|[1-9]?\d)\s*(?:prozent|%)\b", value, re.I)
@@ -165,8 +191,62 @@ def _match_compositional(
                 _, service, speech = operations[0]
                 return _result(player, service, f"{player.friendly_name}: {speech}")
 
+    fan = _mentioned_entity(value, entities, frozenset({"fan"}))
+    if fan is not None:
+        normalized_value = normalize_for_compare(value)
+        presets = [
+            str(option) for option in fan.attributes.get("preset_modes", ()) or ()
+            if (key := normalize_for_compare(str(option)))
+            and re.search(rf"(?<!\w){re.escape(key)}(?!\w)", normalized_value)
+        ]
+        if len(presets) == 1 and re.search(r"\b(?:preset|modus|stell\w*|wähl\w*|waehl\w*)\b", value, re.I):
+            return _result(
+                fan, "set_preset_mode", f"{fan.friendly_name} auf {presets[0]} gestellt.",
+                {"preset_mode": presets[0]},
+            )
+        oscillation = re.search(r"\b(?:oszillier\w*|schwenk\w*)\b", value, re.I)
+        if oscillation:
+            on = re.search(r"\b(?:an|ein|aktivier\w*|einschalt\w*)\b", value, re.I)
+            off = re.search(r"\b(?:aus|deaktivier\w*|ausschalt\w*)\b", value, re.I)
+            if bool(on) != bool(off):
+                return _result(
+                    fan, "oscillate",
+                    f"Oszillation von {fan.friendly_name} {'eingeschaltet' if on else 'ausgeschaltet'}.",
+                    {"oscillating": bool(on)},
+                )
+        direction = re.search(r"\b(?:vorwärts|vorwaerts|rückwärts|rueckwaerts|forward|reverse)\b", value, re.I)
+        if direction and re.search(r"\b(?:richtung|stell\w*|setz\w*)\b", value, re.I):
+            forward = direction.group(0).casefold() in {"vorwärts", "vorwaerts", "forward"}
+            return _result(
+                fan, "set_direction", f"Richtung von {fan.friendly_name} eingestellt.",
+                {"direction": "forward" if forward else "reverse"},
+            )
+
+    cover = _mentioned_entity(value, entities, frozenset({"cover"}))
+    if cover is not None:
+        tilt = re.search(r"\b(100|[1-9]?\d)\s*(?:prozent|%)\b", value, re.I)
+        if tilt and re.search(r"\b(?:lamellen|neigung|winkel|kippposition)\b", value, re.I):
+            percent = int(tilt.group(1))
+            return _result(
+                cover, "set_cover_tilt_position",
+                f"Lamellen von {cover.friendly_name} auf {percent} Prozent gestellt.",
+                {"tilt_position": percent},
+            )
+
     vacuum = _mentioned_entity(value, entities, frozenset({"vacuum"}))
     if vacuum is not None:
+        normalized_value = normalize_for_compare(value)
+        speeds = [
+            str(option) for option in vacuum.attributes.get("fan_speed_list", ()) or ()
+            if (key := normalize_for_compare(str(option)))
+            and re.search(rf"(?<!\w){re.escape(key)}(?!\w)", normalized_value)
+        ]
+        if len(speeds) == 1 and re.search(r"\b(?:saugstärke|saugstaerke|leistung|modus|stell\w*)\b", value, re.I):
+            return _result(
+                vacuum, "set_fan_speed",
+                f"Saugstärke von {vacuum.friendly_name} auf {speeds[0]} gestellt.",
+                {"fan_speed": speeds[0]},
+            )
         if (
             re.search(r"\bladestation\b", value, re.I)
             and re.search(r"\b(?:schick\w*|fahr\w*|soll\w*)\b", value, re.I)
@@ -191,6 +271,21 @@ def _match_compositional(
     scene = _mentioned_entity(value, entities, frozenset({"scene"}))
     if scene is not None and re.search(r"\b(?:aktivier\w*|einschalt\w*)\b", value, re.I):
         return _result(scene, "turn_on", f"Szene {scene.friendly_name} aktiviert.")
+
+    group = _mentioned_entity(value, entities, frozenset({"group"}))
+    if group is not None:
+        if re.search(r"\b(?:einschalt|aktivier|mach\w*\s+an)\w*\b", value, re.I):
+            return DeviceControlResult(
+                ServiceCallPlan("homeassistant", "turn_on", group.entity_id, {}),
+                f"Gruppe {group.friendly_name} eingeschaltet.",
+                requires_confirmation=True, entity=group,
+            )
+        if re.search(r"\b(?:ausschalt|deaktivier|mach\w*\s+aus)\w*\b", value, re.I):
+            return DeviceControlResult(
+                ServiceCallPlan("homeassistant", "turn_off", group.entity_id, {}),
+                f"Gruppe {group.friendly_name} ausgeschaltet.",
+                requires_confirmation=True, entity=group,
+            )
     return None
 
 

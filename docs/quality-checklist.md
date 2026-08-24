@@ -28,6 +28,10 @@ Stand: 24. August 2026
   Änderungen werden über Fingerabdrücke erkannt und nicht überschrieben.
 - Diagnoseinformationen sind vorhanden und enthalten keine Äußerungen,
   Entity-IDs oder Zustände.
+- Lesende und steuernde Freigaben können getrennt werden; zentrale Richtlinien
+  begrenzen Zielanzahl, Bestätigungsstufe sowie Nicht-Administrator-Aktionen.
+- Offene Service- und Automationserstellungsbestätigungen sind an die bekannte
+  Home-Assistant-Benutzer-ID gebunden.
 - Gemeinsame Engine und Dialogzustände werden typisiert über
   `ConfigEntry.runtime_data` gehalten; direkte Testkonstruktion besitzt einen
   kompatiblen Fallback.

@@ -116,3 +116,50 @@ def resolve_semantic_location(
         return None
     area_id, floor_id = resolved.pop()
     return selected[0], area_id, floor_id
+
+
+def resolve_coordinated_locations(
+    text: str, entities: list[EntitySnapshot]
+) -> tuple[tuple[str, str | None, str | None], ...] | None:
+    """Resolve an explicit ``A und B`` location union.
+
+    This is deliberately narrower than :func:`resolve_semantic_location`:
+    two registry locations are combined only when the source text actually
+    coordinates their non-overlapping mentions with ``und``.  Merely naming
+    an area and its floor in the same phrase therefore does not silently turn
+    an intersection into a union, and ``oder`` remains ambiguous instead of
+    being interpreted as "both".
+    """
+    names = {
+        name
+        for entity in entities
+        for name in (entity.area_name, *entity.area_aliases, entity.floor_name)
+        if name
+    }
+    mentions: list[tuple[int, int, str]] = []
+    occupied: list[tuple[int, int]] = []
+    for name in sorted(names, key=len, reverse=True):
+        for match in re.finditer(rf"\b{re.escape(name)}\b", text, re.I):
+            if any(start < match.end() and match.start() < end for start, end in occupied):
+                continue
+            mentions.append((match.start(), match.end(), match.group(0)))
+            occupied.append((match.start(), match.end()))
+    mentions.sort()
+    if len(mentions) < 2:
+        return None
+
+    resolved: list[tuple[str, str | None, str | None]] = []
+    for index, (_, end, spoken) in enumerate(mentions):
+        location = resolve_location_name(spoken, entities)
+        if location is None:
+            return None
+        if index < len(mentions) - 1:
+            next_start = mentions[index + 1][0]
+            connector = text[end:next_start]
+            if re.search(r"\bund\b", connector, re.I) is None:
+                return None
+        area_id, floor_id = location
+        item = (spoken, area_id, floor_id)
+        if item not in resolved:
+            resolved.append(item)
+    return tuple(resolved) if len(resolved) >= 2 else None

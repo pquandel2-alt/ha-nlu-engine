@@ -42,6 +42,7 @@ def test_condition_type_covers_all_documented_types():
         "DEVICE",
         "ENTITY",
         "CALENDAR_EVENT",
+        "TEMPLATE",
     }
 
 

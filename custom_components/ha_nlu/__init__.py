@@ -16,7 +16,8 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from .const import DOMAIN
+from .const import CONF_CONTEXT_TTL_SECONDS, DOMAIN
+from .nlu.context import ConversationContextStore
 from .runtime_data import HaNluRuntimeData
 
 if TYPE_CHECKING:
@@ -29,6 +30,7 @@ _LOGGER = logging.getLogger(__name__)
 
 SERVICE_DELETE_AUTOMATION = "delete_automation"
 SERVICE_RECORD_AUTOMATION_RUN = "record_automation_run"
+SERVICE_ENABLE_AUTOMATION = "enable_automation"
 
 # A self-deleting automation must finish the service action that requested
 # its deletion before ``automation.reload`` removes/unloads that automation.
@@ -39,7 +41,15 @@ SELF_DELETE_RETRY_SECONDS = (1.0, 5.0)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    entry.runtime_data = HaNluRuntimeData()
+    configured_ttl = entry.options.get(CONF_CONTEXT_TTL_SECONDS, 30)
+    context_ttl = (
+        float(configured_ttl)
+        if isinstance(configured_ttl, (int, float)) and configured_ttl >= 10
+        else 30.0
+    )
+    entry.runtime_data = HaNluRuntimeData(
+        context_store=ConversationContextStore(ttl_seconds=context_ttl)
+    )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
@@ -79,6 +89,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             DOMAIN, SERVICE_RECORD_AUTOMATION_RUN, _handle_record_automation_run
         )
 
+    if not hass.services.has_service(DOMAIN, SERVICE_ENABLE_AUTOMATION):
+
+        async def _handle_enable_automation(call: ServiceCall) -> None:
+            automation_id = _automation_id_from_call(call)
+            if automation_id is None:
+                return
+            hass.async_create_task(
+                _async_enable_automation_after_action(hass, automation_id),
+                name=f"HomeIntent resume automation {automation_id}",
+            )
+
+        hass.services.async_register(
+            DOMAIN, SERVICE_ENABLE_AUTOMATION, _handle_enable_automation
+        )
+
     # Reconcile persistence before expiring missed one-shots. This recovers
     # a crash-interrupted transaction, removes orphan sidecar metadata and
     # repairs category assignments for every known HomeIntent automation.
@@ -97,6 +122,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, SERVICE_DELETE_AUTOMATION)
     if unloaded and hass.services.has_service(DOMAIN, SERVICE_RECORD_AUTOMATION_RUN):
         hass.services.async_remove(DOMAIN, SERVICE_RECORD_AUTOMATION_RUN)
+    if unloaded and hass.services.has_service(DOMAIN, SERVICE_ENABLE_AUTOMATION):
+        hass.services.async_remove(DOMAIN, SERVICE_ENABLE_AUTOMATION)
     return unloaded
 
 
@@ -192,6 +219,19 @@ async def _async_record_automation_run_after_action(
                     automation_id,
                     exc_info=True,
                 )
+
+
+async def _async_enable_automation_after_action(
+    hass: HomeAssistant, automation_id: str
+) -> None:
+    """Enable after the calling automation action has returned."""
+    await asyncio.sleep(SELF_DELETE_GRACE_SECONDS)
+    try:
+        from .automation_executor import AutomationExecutor
+
+        await AutomationExecutor(hass).async_enable_automation(automation_id)
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("Resuming automation %s failed", automation_id)
 
 
 async def _async_cleanup_expired_scheduled_automations(

@@ -34,6 +34,7 @@ from .primitives import SemanticProperty
 from .semantic_state import SemanticState
 
 if TYPE_CHECKING:
+    from ..automation_wizard import AutomationWizardState
     from ..calendar_event import CalendarEventDraft
     from ..calendar_management import (
         CalendarEventSummary,
@@ -59,6 +60,7 @@ __all__ = [
     "PendingCalendarMutation",
     "PendingSemanticCommand",
     "PendingProductivityCommand",
+    "PendingAutomationWizard",
 ]
 
 
@@ -85,6 +87,7 @@ class PendingAutomationConfirmation:
     """
 
     model: AutomationModel
+    requested_by_user_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -112,6 +115,7 @@ class PendingServiceConfirmation:
 
     plan: ServiceCallPlan
     success_text: str
+    requested_by_user_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -199,6 +203,13 @@ class PendingProductivityCommand:
     request: "ProductivityRequest"
     awaiting_confirmation: bool = False
 
+
+@dataclass(frozen=True)
+class PendingAutomationWizard:
+    """Structured multi-turn creation dialog, never a free-form transcript."""
+
+    state: "AutomationWizardState"
+
 # No TTL value is specified anywhere in the plan (only the test case name
 # "context expiration", brain node 9ced4390, section 26). 30s covers a
 # natural spoken follow-up ("Mach das Licht an." <pause> "Etwas heller.")
@@ -269,6 +280,7 @@ class ConversationContext:
     pending_calendar_mutation: PendingCalendarMutation | None = None
     pending_semantic_command: PendingSemanticCommand | None = None
     pending_productivity_command: PendingProductivityCommand | None = None
+    pending_automation_wizard: PendingAutomationWizard | None = None
 
 
 class ConversationContextStore:
@@ -317,6 +329,7 @@ class ConversationContextStore:
             or context.pending_calendar_mutation is not None
             or context.pending_semantic_command is not None
             or context.pending_productivity_command is not None
+            or context.pending_automation_wizard is not None
             else self._ttl_seconds
         )
         self._entries[conversation_id] = (self._clock(), ttl_seconds, context)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -73,6 +74,30 @@ def test_todo_word_order_is_not_fixed():
     )
     assert first is not None and second is not None
     assert first.items == second.items == ("Äpfel", "Bananen")
+
+
+def test_todo_add_understands_due_date_description_and_portable_priority():
+    result = parse_productivity_request(
+        "Füge Bericht bis morgen mit Priorität hoch mit der Beschreibung Entwurf prüfen zur Arbeitsliste hinzu",
+        [SHOPPING, WORK], datetime(2026, 8, 24, 12),
+    )
+    assert result is not None
+    assert result.entity_id == WORK.entity_id
+    assert result.due_date == "2026-08-25"
+    assert result.priority == "hoch"
+    assert result.description == "Entwurf prüfen"
+
+
+def test_todo_move_extracts_source_destination_and_payload():
+    result = parse_productivity_request(
+        "Verschiebe Milch von der Einkaufsliste auf die Arbeitsliste",
+        [SHOPPING, WORK],
+    )
+    assert result is not None
+    assert result.operation is TodoOperation.MOVE
+    assert result.entity_id == SHOPPING.entity_id
+    assert result.destination_entity_id == WORK.entity_id
+    assert result.items == ("Milch",)
 
 
 def test_multi_item_add_executes_one_native_call_per_item(monkeypatch):

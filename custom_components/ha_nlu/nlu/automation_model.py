@@ -173,6 +173,13 @@ class TriggerModel:
     # nachdem es 20 Uhr ist" is not a sentence any of the 7 trigger grammars
     # accept.
     delay_seconds: int | None = None
+    # Minimum time for which the triggering state must remain true. Unlike
+    # ``delay_seconds`` this maps to Home Assistant's native trigger ``for``
+    # field and therefore cancels when the state changes back early.
+    for_seconds: int | None = None
+    # Require one further equivalent trigger event within this window.
+    # This models "zweimal innerhalb von ..." using HA wait_for_trigger.
+    repeat_within_seconds: int | None = None
     trigger_id: str | None = None
     calendar_entity_id: str | None = None  # CALENDAR
     calendar_event: str | None = None  # start/end
@@ -209,6 +216,8 @@ class AutomationModel:
     # uses the date as an additional guard around HA's clock-only trigger.
     scheduled_for: datetime | None = None
     calendar_schedule: CalendarSchedule | None = None
+    quiet_start_hour: int | None = None
+    quiet_end_hour: int | None = None
 
 
 def resolve_relative_schedule(model: AutomationModel, now: datetime) -> AutomationModel:
@@ -310,7 +319,32 @@ def resolve_calendar_schedule(model: AutomationModel, now: datetime) -> Automati
 
 def resolve_pending_schedule(model: AutomationModel, now: datetime) -> AutomationModel:
     """Resolve either supported preview-time schedule representation."""
-    return resolve_calendar_schedule(resolve_relative_schedule(model, now), now)
+    resolved = resolve_calendar_schedule(resolve_relative_schedule(model, now), now)
+    if (
+        resolved.scheduled_for is None
+        or resolved.quiet_start_hour is None
+        or resolved.quiet_end_hour is None
+    ):
+        return resolved
+    target = resolved.scheduled_for
+    start, end = resolved.quiet_start_hour, resolved.quiet_end_hour
+    in_quiet = (
+        start <= target.hour < end
+        if start < end
+        else target.hour >= start or target.hour < end
+    )
+    if not in_quiet:
+        return resolved
+    if start > end and target.hour >= start:
+        target = target + timedelta(days=1)
+    target = target.replace(hour=end, minute=0, second=0, microsecond=0)
+    trigger = TriggerModel(
+        type=TriggerType.TIME,
+        time_hour=target.hour,
+        time_minute=target.minute,
+        time_second=target.second,
+    )
+    return replace(resolved, scheduled_for=target, triggers=(trigger,))
 
 
 def _render_target(target: TriggerTarget) -> str:

@@ -39,6 +39,7 @@ class ConditionType(Enum):
     DEVICE = auto()
     ENTITY = auto()
     CALENDAR_EVENT = auto()
+    TEMPLATE = auto()
 
 
 class TimeComparator(Enum):

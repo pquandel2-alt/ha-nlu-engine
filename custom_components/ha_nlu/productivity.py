@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
 from enum import Enum, auto
 
 from .entities import EntitySnapshot, normalize_for_compare
@@ -20,6 +21,7 @@ class TodoOperation(Enum):
     COMPLETE = auto()
     REMOVE = auto()
     CLEAR_COMPLETED = auto()
+    MOVE = auto()
 
 
 class TimerOperation(Enum):
@@ -38,6 +40,10 @@ class TodoRequest:
     items: tuple[str, ...] = ()
     entity_id: str | None = None
     candidates: tuple[EntitySnapshot, ...] = ()
+    due_date: str | None = None
+    description: str | None = None
+    priority: str | None = None
+    destination_entity_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -63,7 +69,7 @@ _ADD_RE = re.compile(
     r"schreib(?:e|t)?|pack(?:e|t)?|notier(?:e|t)?|trag(?:e|t)?)\b", re.IGNORECASE
 )
 _LIST_RE = re.compile(
-    r"\b(?:zeig(?:e|t)?|lies|lese|nenne|was\s+(?:steht|ist)|welche\s+(?:sachen|dinge|"
+    r"\b(?:zeig(?:e|t)?|lies|lese|nenne|was\s+(?:steht|ist|fehlt)|welche\s+(?:sachen|dinge|"
     r"artikel|einträge|eintraege|punkte))\b", re.IGNORECASE
 )
 _COMPLETE_RE = re.compile(
@@ -106,6 +112,23 @@ _DURATION_PART_RE = re.compile(
     r"\b(\d+|[a-zäöüß]+)\s*(stunden?|std\.?|h|minuten?|min\.?|sekunden?|sek\.?)\b",
     re.IGNORECASE,
 )
+_MOVE_RE = re.compile(r"\bverschieb(?:e|en|t)?\b", re.IGNORECASE)
+_DESCRIPTION_RE = re.compile(
+    r"\bmit\s+(?:der\s+)?beschreibung\s+(.+?)(?=\s+\b(?:bis|mit\s+priorität|mit\s+prioritaet|"
+    r"auf|in|zu|zur)\b|[.!?]?$)", re.IGNORECASE
+)
+_PRIORITY_RE = re.compile(
+    r"\b(?:mit\s+)?(?:priorität|prioritaet)\s+(hoch|mittel|niedrig)\b", re.IGNORECASE
+)
+_DUE_RE = re.compile(
+    r"\bbis\s+(heute|morgen|übermorgen|uebermorgen|montag|dienstag|mittwoch|"
+    r"donnerstag|freitag|samstag|sonntag|\d{1,2}\.\d{1,2}\.(?:\d{2,4})?)\b",
+    re.IGNORECASE,
+)
+_WEEKDAYS = {
+    "montag": 0, "dienstag": 1, "mittwoch": 2, "donnerstag": 3,
+    "freitag": 4, "samstag": 5, "sonntag": 6,
+}
 
 
 def _entity_names(entity: EntitySnapshot) -> tuple[str, ...]:
@@ -192,9 +215,78 @@ def _todo_payload(text: str, operation_match: re.Match[str]) -> str:
     return _clean_payload(re.sub(r"\s+", " ", value))
 
 
-def parse_todo_request(text: str, entities: list[EntitySnapshot]) -> TodoRequest | None:
-    if not _TODO_NOUN_RE.search(text):
+def _extract_todo_metadata(
+    text: str, now: datetime | None
+) -> tuple[str, str | None, str | None, str | None]:
+    description_match = _DESCRIPTION_RE.search(text)
+    priority_match = _PRIORITY_RE.search(text)
+    due_match = _DUE_RE.search(text)
+    description = (
+        description_match.group(1).strip(" ,.!?") if description_match else None
+    )
+    priority = priority_match.group(1).casefold() if priority_match else None
+    due_date: str | None = None
+    if due_match and now is not None:
+        raw = due_match.group(1).casefold()
+        if raw == "heute":
+            target = now.date()
+        elif raw == "morgen":
+            target = now.date() + timedelta(days=1)
+        elif raw in {"übermorgen", "uebermorgen"}:
+            target = now.date() + timedelta(days=2)
+        elif raw in _WEEKDAYS:
+            days = (_WEEKDAYS[raw] - now.weekday()) % 7 or 7
+            target = now.date() + timedelta(days=days)
+        else:
+            day, month, year = (int(part) for part in raw.split("."))
+            if year < 100:
+                year += 2000
+            try:
+                target = now.date().replace(year=year, month=month, day=day)
+            except ValueError:
+                target = None
+        due_date = target.isoformat() if target is not None else None
+    cleaned = text
+    for match in sorted(
+        (match for match in (description_match, priority_match, due_match) if match),
+        key=lambda item: item.start(), reverse=True,
+    ):
+        cleaned = cleaned[:match.start()] + " " + cleaned[match.end():]
+    return re.sub(r"\s+", " ", cleaned), due_date, description, priority
+
+
+def parse_todo_request(
+    text: str, entities: list[EntitySnapshot], now: datetime | None = None
+) -> TodoRequest | None:
+    todo_entities = tuple(entity for entity in entities if entity.domain == "todo")
+    mentioned_lists = _mentioned_entities(text, todo_entities)
+    if not _TODO_NOUN_RE.search(text) and not mentioned_lists:
         return None
+    move_match = _MOVE_RE.search(text)
+    if move_match is not None and len(mentioned_lists) == 2:
+        ordered = sorted(
+            mentioned_lists,
+            key=lambda entity: min(
+                (
+                    normalize_for_compare(text).find(normalize_for_compare(name))
+                    for name in _entity_names(entity)
+                    if normalize_for_compare(name) in normalize_for_compare(text)
+                ),
+                default=10**9,
+            ),
+        )
+        payload_match = re.search(
+            r"\bverschieb(?:e|en|t)?\s+(.+?)\s+von\b", text, re.IGNORECASE
+        )
+        items = split_todo_items(payload_match.group(1)) if payload_match else ()
+        if items:
+            return TodoRequest(
+                TodoOperation.MOVE,
+                items=items,
+                entity_id=ordered[0].entity_id,
+                destination_entity_id=ordered[1].entity_id,
+            )
+    text, due_date, description, priority = _extract_todo_metadata(text, now)
     entity_id, candidates = _select_target(text, entities, "todo")
     if _CLEAR_COMPLETED_RE.search(text):
         return TodoRequest(TodoOperation.CLEAR_COMPLETED, entity_id=entity_id, candidates=candidates)
@@ -211,7 +303,10 @@ def parse_todo_request(text: str, entities: list[EntitySnapshot]) -> TodoRequest
         items = () if operation is TodoOperation.LIST else split_todo_items(_todo_payload(text, match))
         if operation is not TodoOperation.LIST and not items:
             return None
-        return TodoRequest(operation, items, entity_id, candidates)
+        return TodoRequest(
+            operation, items, entity_id, candidates,
+            due_date=due_date, description=description, priority=priority,
+        )
     # Natural list query: "Was ist auf meiner Einkaufsliste?"
     if re.search(r"\b(?:was|welche)\b", text, re.IGNORECASE):
         return TodoRequest(TodoOperation.LIST, entity_id=entity_id, candidates=candidates)
@@ -272,8 +367,10 @@ def parse_timer_request(text: str, entities: list[EntitySnapshot]) -> TimerReque
     return TimerRequest(operation, duration_seconds=duration, entity_id=entity_id, candidates=candidates)
 
 
-def parse_productivity_request(text: str, entities: list[EntitySnapshot]) -> ProductivityRequest | None:
-    return parse_todo_request(text, entities) or parse_timer_request(text, entities)
+def parse_productivity_request(
+    text: str, entities: list[EntitySnapshot], now: datetime | None = None
+) -> ProductivityRequest | None:
+    return parse_todo_request(text, entities, now) or parse_timer_request(text, entities)
 
 
 def select_productivity_candidate(

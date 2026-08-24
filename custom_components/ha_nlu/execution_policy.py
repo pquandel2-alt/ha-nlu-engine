@@ -1,0 +1,86 @@
+"""Central, configurable authorization policy for concrete service plans."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum, auto
+from typing import Mapping
+
+from .const import (
+    CONF_ALLOW_NON_ADMIN_CRITICAL,
+    CONF_CONFIRMATION_LEVEL,
+    CONF_MAX_ACTION_TARGETS,
+    CONF_READ_ONLY_ENTITIES,
+)
+from .entities import EntitySnapshot
+from .risk import RiskLevel, classify_service_plan
+from .service_call import ServiceCallPlan
+
+
+class PolicyOutcome(Enum):
+    ALLOW = auto()
+    CONFIRM = auto()
+    DENY = auto()
+
+
+@dataclass(frozen=True)
+class PolicyDecision:
+    outcome: PolicyOutcome
+    risk: RiskLevel
+    reason: str | None = None
+
+
+_RISK_BY_OPTION = {
+    "medium": RiskLevel.MEDIUM,
+    "high": RiskLevel.HIGH,
+    "critical": RiskLevel.CRITICAL,
+}
+
+
+def evaluate_service_plan(
+    plan: ServiceCallPlan,
+    entities: list[EntitySnapshot] | tuple[EntitySnapshot, ...],
+    options: Mapping[str, object],
+    *,
+    is_admin: bool,
+) -> PolicyDecision:
+    """Evaluate one already-resolved plan; callers must not bypass it."""
+    risk = classify_service_plan(plan, entities)
+    target_ids = (plan.entity_id,) if isinstance(plan.entity_id, str) else tuple(plan.entity_id)
+    configured_max = options.get(CONF_MAX_ACTION_TARGETS, 50)
+    max_targets = configured_max if isinstance(configured_max, int) else 50
+    if max_targets < 1:
+        max_targets = 1
+    if len(set(target_ids)) > max_targets:
+        return PolicyDecision(
+            PolicyOutcome.DENY,
+            risk,
+            f"Diese Aktion betrifft mehr als die erlaubten {max_targets} Ziele.",
+        )
+    configured_read_only = options.get(CONF_READ_ONLY_ENTITIES, ())
+    read_only_ids = (
+        set(configured_read_only)
+        if isinstance(configured_read_only, (list, tuple, set))
+        else set()
+    )
+    if set(target_ids) & read_only_ids:
+        return PolicyDecision(
+            PolicyOutcome.DENY,
+            risk,
+            "Mindestens ein Ziel ist in HomeIntent nur zum Lesen freigegeben.",
+        )
+    if (
+        risk is RiskLevel.CRITICAL
+        and not is_admin
+        and not bool(options.get(CONF_ALLOW_NON_ADMIN_CRITICAL, True))
+    ):
+        return PolicyDecision(
+            PolicyOutcome.DENY,
+            risk,
+            "Diese sicherheitskritische Aktion ist nur für Administratoren erlaubt.",
+        )
+    configured_level = options.get(CONF_CONFIRMATION_LEVEL, "high")
+    confirmation_level = _RISK_BY_OPTION.get(str(configured_level), RiskLevel.HIGH)
+    if risk >= confirmation_level:
+        return PolicyDecision(PolicyOutcome.CONFIRM, risk)
+    return PolicyDecision(PolicyOutcome.ALLOW, risk)

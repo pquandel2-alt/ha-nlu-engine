@@ -161,3 +161,24 @@ def test_rollback_phrase_is_classified():
         "Mache die letzte HomeIntent-Automationsänderung rückgängig"
     )
     assert request is not None and request.kind is AutomationManagementKind.ROLLBACK
+
+
+def test_duplicate_and_durable_pause_are_classified():
+    duplicate = parse_automation_management(
+        "Dupliziere die Automation für Büro Rollladen"
+    )
+    pause = parse_automation_management(
+        "Pausiere die Automation für Büro Rollladen bis morgen 20:15 Uhr"
+    )
+    assert duplicate.kind is AutomationManagementKind.DUPLICATE
+    assert duplicate.entity_name == "Büro Rollladen"
+    assert pause.kind is AutomationManagementKind.PAUSE_UNTIL
+    assert (pause.hour, pause.minute, pause.day_offset) == (20, 15, 1)
+
+
+def test_failed_execution_diagnostic_is_classified_without_claiming_a_cause():
+    request = parse_automation_management(
+        "Warum wurde die Automation für Büro Rollladen nicht ausgelöst?"
+    )
+    assert request.kind is AutomationManagementKind.DIAGNOSE
+    assert request.entity_name == "Büro Rollladen"

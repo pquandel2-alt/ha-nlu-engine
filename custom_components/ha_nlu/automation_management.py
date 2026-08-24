@@ -24,6 +24,9 @@ class AutomationManagementKind(Enum):
     CONTROLS_ENTITY = auto()
     DETAIL = auto()
     ROLLBACK = auto()
+    DUPLICATE = auto()
+    PAUSE_UNTIL = auto()
+    DIAGNOSE = auto()
 
 
 @dataclass(frozen=True)
@@ -34,6 +37,7 @@ class AutomationManagementRequest:
     minute: int = 0
     max_runs: int | None = None
     scope_name: str | None = None
+    day_offset: int = 0
 
 
 @dataclass(frozen=True)
@@ -92,6 +96,41 @@ _RUN_COUNTS = {
 def parse_automation_management(text: str) -> AutomationManagementRequest | None:
     """Recognize the bounded management vocabulary without fuzzy matching."""
     normalized = re.sub(r"[?.!]", "", text).strip()
+    duplicate = re.search(
+        r"\b(?:duplizier\w*|kopier\w*)\s+(?:die\s+)?automation(?:\s+(?:von|für|fuer|zu)\s+)?(?P<name>.+)$",
+        normalized, re.IGNORECASE,
+    )
+    if duplicate is not None:
+        return AutomationManagementRequest(
+            AutomationManagementKind.DUPLICATE,
+            entity_name=duplicate.group("name").strip(),
+        )
+    diagnose = re.search(
+        r"\bwarum\s+wurde\s+(?:die\s+)?automation(?:\s+(?:von|für|fuer|zu)\s+)?(?P<name>.+?)\s+"
+        r"nicht\s+(?:ausgelöst|ausgeloest|ausgeführt|ausgefuehrt)\b",
+        normalized, re.IGNORECASE,
+    )
+    if diagnose is not None:
+        return AutomationManagementRequest(
+            AutomationManagementKind.DIAGNOSE,
+            entity_name=diagnose.group("name").strip(),
+        )
+    pause = re.search(
+        r"\bpausier\w*\s+(?:die\s+)?automation(?:\s+(?:von|für|fuer|zu)\s+(?P<name>.+?))?\s+"
+        r"bis\s+(?:(?P<day>morgen|übermorgen|uebermorgen)\s+)?"
+        r"(?P<hour>\d{1,2})(?::(?P<minute>\d{1,2}))?\s*(?:uhr)?\b",
+        normalized, re.IGNORECASE,
+    )
+    if pause is not None:
+        hour, minute = int(pause.group("hour")), int(pause.group("minute") or 0)
+        if hour > 23 or minute > 59:
+            return None
+        day = (pause.group("day") or "").casefold()
+        return AutomationManagementRequest(
+            AutomationManagementKind.PAUSE_UNTIL,
+            entity_name=pause.group("name"), hour=hour, minute=minute,
+            day_offset=2 if day in {"übermorgen", "uebermorgen"} else 1 if day else 0,
+        )
     count_match = re.search(
         r"\bwie\s+viele\s+homeintent[- ]automationen\s+sind\s+"
         r"(?P<state>aktiv|eingeschaltet|deaktiviert|ausgeschaltet)\b",
@@ -239,7 +278,11 @@ def select_automation_management(
 
     candidates = (
         homeintent
-        if request.kind is AutomationManagementKind.DETAIL
+        if request.kind in {
+            AutomationManagementKind.DETAIL, AutomationManagementKind.DUPLICATE,
+            AutomationManagementKind.PAUSE_UNTIL,
+            AutomationManagementKind.DIAGNOSE,
+        }
         else tuple(automation for automation in homeintent if not automation.once)
         if request.kind is AutomationManagementKind.SET_MAX_RUNS
         else scheduled

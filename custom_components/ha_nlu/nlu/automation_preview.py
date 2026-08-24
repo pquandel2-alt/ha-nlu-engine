@@ -173,6 +173,13 @@ def _speak_trigger(
             text = f"es {abs(trigger.offset_minutes)} Minuten {direction} diesem Termin ist"
     else:
         text = "ein unbekannter Auslöser eintritt"
+    if trigger.for_seconds:
+        text = f"{text} und dieser Zustand {_format_delay(trigger.for_seconds)} bestehen bleibt"
+    if trigger.repeat_within_seconds:
+        text = (
+            f"{text} und innerhalb von {_format_delay(trigger.repeat_within_seconds)} "
+            "ein zweites Mal eintritt"
+        )
     if trigger.delay_seconds:
         text = f"{text}, {_format_delay(trigger.delay_seconds)} lang gewartet wird"
     return text
@@ -214,6 +221,8 @@ def _speak_condition_leaf(
         return f"{target} den Zustand „{condition.raw_state}“ hat"
     if condition.type is ConditionType.CALENDAR_EVENT:
         return f"der Kalendertitel „{condition.raw_state}“ enthält"
+    if condition.type is ConditionType.TEMPLATE:
+        return "der angegebene Kalenderzeitraum erfüllt ist"
     return "eine unbekannte Bedingung erfüllt ist"
 
 
@@ -330,5 +339,11 @@ def render_automation_preview(model: AutomationModel, entities: list[EntitySnaps
         sentence = (
             f"{sentence} Diese Automation wird nach {model.max_runs} "
             "Ausführungen automatisch gelöscht."
+        )
+    if model.quiet_start_hour is not None:
+        sentence = (
+            f"{sentence} Fällt der Zeitpunkt in die Ruhezeit von "
+            f"{model.quiet_start_hour:02d}:00 bis {model.quiet_end_hour:02d}:00 Uhr, "
+            "wird die Erinnerung auf deren Ende verschoben."
         )
     return f"Automation erkannt: {sentence} Soll diese Automation erstellt werden?"

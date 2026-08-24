@@ -48,6 +48,7 @@ user was actually told.
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import re
 import uuid
@@ -383,6 +384,91 @@ class AutomationExecutor:
 
         return automation_id
 
+    async def async_duplicate_automation(self, automation_id: str) -> str:
+        """Duplicate one HomeIntent automation with fresh lifecycle IDs."""
+        path = self._hass.config.path(AUTOMATIONS_YAML_FILENAME)
+        automations = await self._hass.async_add_executor_job(
+            self._read_automations, path
+        )
+        source = next(
+            (item for item in automations if item.get("id") == automation_id),
+            None,
+        )
+        if source is None:
+            raise ValueError(f"Automation {automation_id} does not exist")
+        metadata = (await self._metadata_store.async_load_all()).get(automation_id)
+        if not metadata or metadata.get("created_by") != CREATED_BY_HOMEINTENT:
+            raise ValueError("Only HomeIntent automations can be duplicated")
+        new_id = uuid.uuid4().hex
+        config = copy.deepcopy(source)
+        config.pop("id", None)
+        config["alias"] = "Kopie von " + str(config.get("alias") or automation_id)
+
+        def replace_lifecycle_id(value: Any) -> None:
+            if isinstance(value, dict):
+                if value.get("action") in {
+                    "ha_nlu.delete_automation", "ha_nlu.record_automation_run"
+                } and isinstance(value.get("data"), dict):
+                    value["data"]["automation_id"] = new_id
+                for child in value.values():
+                    replace_lifecycle_id(child)
+            elif isinstance(value, list):
+                for child in value:
+                    replace_lifecycle_id(child)
+
+        replace_lifecycle_id(config)
+        scheduled = metadata.get("scheduled_for")
+        return await self.async_create_automation(
+            config,
+            new_id,
+            scheduled_for=datetime.fromisoformat(scheduled) if scheduled else None,
+            once=bool(metadata.get("once")),
+            max_runs=metadata.get("max_runs"),
+        )
+
+    async def async_pause_automation_until(
+        self, automation_id: str, resume_at: datetime
+    ) -> str:
+        """Persistently disable an automation and schedule a durable resume."""
+        await self.async_disable_automation(automation_id)
+        helper_id = uuid.uuid4().hex
+        config = {
+            "alias": f"HomeIntent: Automation {automation_id} fortsetzen",
+            "description": "Von HomeIntent verwalteter einmaliger Fortsetzungsauftrag",
+            "triggers": [{
+                "trigger": "time",
+                "at": resume_at.strftime("%H:%M:%S"),
+            }],
+            "conditions": [{
+                "condition": "template",
+                "value_template": (
+                    "{{ now().date().isoformat() == '"
+                    + resume_at.date().isoformat() + "' }}"
+                ),
+            }],
+            "actions": [
+                {
+                    "action": "ha_nlu.enable_automation",
+                    "data": {"automation_id": automation_id},
+                },
+                {
+                    "action": "ha_nlu.delete_automation",
+                    "data": {"automation_id": helper_id},
+                },
+            ],
+            "mode": "single",
+        }
+        try:
+            await self.async_create_automation(
+                config, helper_id, scheduled_for=resume_at, once=True
+            )
+        except Exception:
+            # Do not leave the requested automation disabled when creating
+            # the durable resume failed.
+            await self.async_enable_automation(automation_id)
+            raise
+        return helper_id
+
     async def async_delete_automation(self, automation_id: str) -> None:
         """V5 Teil 8/10 (V5.28, "Automation Deletion"): removes the
         automation matching ``automation_id`` from ``automations.yaml``,
@@ -578,6 +664,21 @@ class AutomationExecutor:
                 )
             )
         return tuple(summaries)
+
+    def automation_runtime_info(self, automation_id: str) -> dict[str, Any] | None:
+        """Return non-sensitive live execution indicators for diagnostics."""
+        entity_id = er.async_get(self._hass).async_get_entity_id(
+            "automation", "automation", automation_id
+        )
+        state = self._hass.states.get(entity_id) if entity_id else None
+        if state is None:
+            return None
+        return {
+            "entity_id": entity_id,
+            "state": state.state,
+            "last_triggered": state.attributes.get("last_triggered"),
+            "current": state.attributes.get("current"),
+        }
 
     async def async_reschedule_automation(
         self, automation_id: str, scheduled_for: datetime

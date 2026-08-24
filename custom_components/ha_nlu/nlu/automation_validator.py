@@ -119,6 +119,15 @@ def _validate_semantic(model: AutomationModel) -> AutomationValidationError | No
         return AutomationValidationError.INVALID_PARAMETER
     if model.once and model.max_runs is not None:
         return AutomationValidationError.INVALID_PARAMETER
+    if (model.quiet_start_hour is None) != (model.quiet_end_hour is None):
+        return AutomationValidationError.INVALID_PARAMETER
+    if model.quiet_start_hour is not None and (
+        not 0 <= model.quiet_start_hour <= 23
+        or not 0 <= model.quiet_end_hour <= 23
+        or model.quiet_start_hour == model.quiet_end_hour
+        or not model.once
+    ):
+        return AutomationValidationError.INVALID_PARAMETER
     if any(trigger.type is TriggerType.CALENDAR_TIME for trigger in model.triggers):
         schedule = model.calendar_schedule
         if schedule is None:
@@ -164,6 +173,7 @@ _CONDITION_REQUIRED_FIELDS: dict[ConditionType, tuple[str, ...]] = {
     ConditionType.DEVICE: ("device_id", "device_condition_type"),
     ConditionType.ENTITY: ("target", "raw_state"),
     ConditionType.CALENDAR_EVENT: ("raw_state",),
+    ConditionType.TEMPLATE: ("raw_state",),
 }
 
 _ACTION_REQUIRED_FIELDS: dict[ActionType, tuple[str, ...]] = {
@@ -217,6 +227,18 @@ def _validate_trigger(trigger: TriggerModel) -> AutomationValidationError | None
         return AutomationValidationError.INVALID_PARAMETER
     if trigger.delay_seconds is not None and trigger.delay_seconds < 0:
         return AutomationValidationError.INVALID_PARAMETER
+    if trigger.for_seconds is not None and trigger.for_seconds <= 0:
+        return AutomationValidationError.INVALID_PARAMETER
+    if trigger.for_seconds is not None and trigger.type not in {
+        TriggerType.STATE, TriggerType.NUMERIC_STATE
+    }:
+        return AutomationValidationError.INVALID_PARAMETER
+    if trigger.repeat_within_seconds is not None and (
+        trigger.repeat_within_seconds <= 0
+        or trigger.type not in {TriggerType.STATE, TriggerType.NUMERIC_STATE}
+        or trigger.for_seconds is not None
+    ):
+        return AutomationValidationError.INVALID_PARAMETER
     if trigger.trigger_id is not None and not trigger.trigger_id.strip():
         return AutomationValidationError.INVALID_PARAMETER
     if trigger.type is TriggerType.CALENDAR and trigger.calendar_event not in {"start", "end"}:
@@ -233,6 +255,10 @@ def _validate_condition_leaf(condition: ConditionModel) -> AutomationValidationE
         return error
     if condition.type is ConditionType.CALENDAR_EVENT and (
         len(condition.raw_state or "") > 100 or not (condition.raw_state or "").strip()
+    ):
+        return AutomationValidationError.INVALID_PARAMETER
+    if condition.type is ConditionType.TEMPLATE and (
+        len(condition.raw_state or "") > 500 or not (condition.raw_state or "").strip()
     ):
         return AutomationValidationError.INVALID_PARAMETER
     if condition.time_hour is not None and not (0 <= condition.time_hour <= 23):

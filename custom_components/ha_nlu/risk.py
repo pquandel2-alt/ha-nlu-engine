@@ -15,7 +15,7 @@ class RiskLevel(IntEnum):
     CRITICAL = 4
 
 
-_HIGH_RISK_DOMAINS = frozenset({"lock", "valve", "button"})
+_HIGH_RISK_DOMAINS = frozenset({"lock", "valve", "button", "alarm_control_panel"})
 _MEDIUM_RISK_DOMAINS = frozenset({"cover", "vacuum", "lawn_mower", "notify"})
 
 
@@ -28,7 +28,9 @@ def classify_service_plan(
     domains = {entity.domain for entity in targets} or {plan.domain}
     device_classes = {(entity.device_class or "").casefold() for entity in targets}
 
-    if "lock" in domains and plan.service == "unlock":
+    if "alarm_control_panel" in domains:
+        level = RiskLevel.CRITICAL
+    elif "lock" in domains and plan.service == "unlock":
         level = RiskLevel.CRITICAL
     elif device_classes & {"garage", "garage_door"} and plan.service.startswith(("open", "close")):
         level = RiskLevel.CRITICAL

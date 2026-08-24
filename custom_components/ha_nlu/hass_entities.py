@@ -139,6 +139,8 @@ def build_entity_snapshots(
                 area_aliases=area_aliases,
                 attributes=state.attributes,
                 capabilities=frozenset(c.name for c in capabilities),
+                last_changed=getattr(state, "last_changed", None),
+                last_updated=getattr(state, "last_updated", None),
             )
         )
     return snapshots

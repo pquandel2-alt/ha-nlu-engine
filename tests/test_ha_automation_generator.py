@@ -27,7 +27,11 @@ from ha_nlu.nlu.automation_model import (
     TriggerType,
 )
 from ha_nlu.nlu.condition_model import ConditionModel, ConditionNode, ConditionType, LogicalOperator, TimeComparator
-from ha_nlu.nlu.ha_automation_generator import GenerationError, generate_ha_automation_config
+from ha_nlu.nlu.ha_automation_generator import (
+    GenerationError,
+    generate_ha_automation_config,
+    resolve_automation_action_entity_ids,
+)
 from ha_nlu.nlu.semantic_state import SemanticState
 
 KUECHE_FENSTER = EntitySnapshot(
@@ -60,6 +64,52 @@ TEMPERATUR_SENSOR = EntitySnapshot(
 ALL_ENTITIES = [
     KUECHE_FENSTER, KUECHE_LICHT, WOHNZIMMER_ROLLO, HEIZUNG, BUERO_LUEFTER, PHILIPP, TEMPERATUR_SENSOR,
 ]
+
+
+def test_action_entity_ids_include_groups_and_both_choose_branches():
+    choose = ActionModel(
+        type=ActionType.CHOOSE,
+        if_condition=ConditionNode(
+            condition=ConditionModel(
+                type=ConditionType.ENTITY,
+                target=TriggerTarget(entity_id="light.kueche_licht"),
+                raw_state="on",
+            )
+        ),
+        then_steps=(
+            ActionModel(
+                type=ActionType.TURN_ON,
+                target=TriggerTarget(entity_id="fan.buero"),
+            ),
+        ),
+        else_steps=(
+            ActionModel(
+                type=ActionType.SET_POSITION,
+                target=TriggerTarget(entity_id="cover.wohnzimmer_rollo"),
+                value=50,
+            ),
+        ),
+    )
+    model = AutomationModel(
+        actions=(
+            ActionGroup(
+                mode=ExecutionMode.PARALLEL,
+                steps=(
+                    ActionModel(
+                        type=ActionType.TURN_ON,
+                        target=TriggerTarget(entity_id="light.kueche_licht"),
+                    ),
+                    choose,
+                ),
+            ),
+        )
+    )
+
+    assert resolve_automation_action_entity_ids(model, ALL_ENTITIES) == {
+        "light.kueche_licht",
+        "fan.buero",
+        "cover.wohnzimmer_rollo",
+    }
 
 
 def _model(trigger: TriggerModel, *, conditions=(), actions=(ActionModel(type=ActionType.TURN_ON, target=TriggerTarget(entity_id="light.kueche_licht")),)) -> AutomationModel:
@@ -334,11 +384,14 @@ def test_device_condition_is_unsupported():
     assert result.error is GenerationError.UNSUPPORTED_CONDITION_TYPE
 
 
-def test_date_condition_is_unsupported():
+def test_date_condition_uses_bounded_local_time_template():
     model = _model(_trigger(), conditions=(ConditionNode(condition=ConditionModel(type=ConditionType.DATE, date_month=12, date_day=24)),))
     result = generate_ha_automation_config(model, ALL_ENTITIES)
-    assert result.config is None
-    assert result.error is GenerationError.UNSUPPORTED_CONDITION_TYPE
+    assert result.error is None
+    assert result.config["conditions"] == [{
+        "condition": "template",
+        "value_template": "{{ now().month == 12 and now().day == 24 }}",
+    }]
 
 
 def test_condition_with_unresolvable_target_is_entity_not_found():
@@ -493,11 +546,41 @@ def test_parallel_action_group():
 # --- actions: refusals ---------------------------------------------------------
 
 
-def test_wait_action_is_unsupported():
-    model = _model(_trigger(), actions=(ActionModel(type=ActionType.WAIT, wait_condition=ConditionNode(condition=ConditionModel(type=ConditionType.PRESENCE, raw_state="home"))),))
+def test_wait_action_supports_whole_house_presence():
+    people = [
+        EntitySnapshot("person.philipp", "Philipp", "person", "not_home"),
+        EntitySnapshot("person.gast", "Gast", "person", "home"),
+    ]
+    model = _model(_trigger(), actions=(ActionModel(
+        type=ActionType.WAIT,
+        wait_condition=ConditionNode(condition=ConditionModel(type=ConditionType.PRESENCE, raw_state="home")),
+        timeout_seconds=1800,
+    ),))
+    result = generate_ha_automation_config(model, [*ALL_ENTITIES, *people])
+    assert result.error is None
+    wait = result.config["actions"][0]
+    assert "is_state('person.philipp', \"home\")" in wait["wait_template"]
+    assert "is_state('person.gast', \"home\")" in wait["wait_template"]
+    assert wait["timeout"] == {"seconds": 1800}
+
+
+def test_wait_action_supports_sun_condition_without_offset():
+    condition = ConditionModel(
+        type=ConditionType.SUN,
+        sun_event=SunEvent.SUNSET,
+        sun_comparator=TimeComparator.AFTER,
+    )
+    model = _model(_trigger(), actions=(ActionModel(
+        type=ActionType.WAIT,
+        wait_condition=ConditionNode(condition=condition),
+    ),))
+
     result = generate_ha_automation_config(model, ALL_ENTITIES)
-    assert result.config is None
-    assert result.error is GenerationError.UNSUPPORTED_ACTION_TYPE
+
+    assert result.error is None
+    assert result.config["actions"][0]["wait_template"] == (
+        "{{ is_state('sun.sun', 'below_horizon') }}"
+    )
 
 
 def test_action_with_unresolvable_target_is_entity_not_found():
@@ -511,7 +594,7 @@ def test_action_error_short_circuits_before_later_actions_are_translated():
     model = _model(
         _trigger(),
         actions=(
-            ActionModel(type=ActionType.WAIT, wait_condition=ConditionNode(condition=ConditionModel(type=ConditionType.PRESENCE, raw_state="home"))),
+            ActionModel(type=ActionType.WAIT, wait_condition=ConditionNode(condition=ConditionModel(type=ConditionType.DEVICE, device_condition_type="vendor_specific"))),
             ActionModel(type=ActionType.TURN_ON, target=TriggerTarget(entity_id="light.kueche_licht")),
         ),
     )

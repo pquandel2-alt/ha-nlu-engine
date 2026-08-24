@@ -11,7 +11,13 @@
         "title": "HomeIntent-Geräte auswählen",
         "description": "Lege fest, welche Home-Assistant-Entitäten HomeIntent verstehen und steuern darf. Ohne eigene Auswahl gilt dynamisch die Assist-Freigabe.",
         "data": {
-          "selected_entities": "Freigegebene Entitäten"
+          "selected_entities": "Freigegebene Entitäten",
+          "read_only_entities": "Nur lesbare Entitäten",
+          "confirmation_level": "Ab welcher Risikostufe bestätigen",
+          "max_action_targets": "Maximale Ziele pro Aktion",
+          "allow_non_admin_critical": "Kritische Aktionen für Nicht-Administratoren erlauben",
+          "allow_non_admin_automations": "Automationserstellung für Nicht-Administratoren erlauben",
+          "context_ttl_seconds": "Dialogkontext in Sekunden"
         }
       }
     }

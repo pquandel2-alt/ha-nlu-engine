@@ -179,6 +179,68 @@ def test_compiler_exposes_composed_semantic_primitives(engine):
 @pytest.mark.parametrize(
     "sentence",
     (
+        "Mach in Küche und Flur alle Lichter aus",
+        "Alle Lichter ausschalten, und zwar im Flur und in der Küche",
+        "In der Küche und im Flur möchte ich sämtliche Lichter ausgeschaltet haben",
+    ),
+)
+def test_coordinated_locations_form_one_order_independent_scope(engine, sentence):
+    result = engine.match(sentence, HOUSE)
+
+    assert result is not None
+    assert result.plan.service == "turn_off"
+    assert result.plan.entity_id == "light.flur"
+    assert result.frame.parameters["locations"] == (
+        {"text": "Küche", "area_id": "kueche", "floor_id": None},
+        {"text": "Flur", "area_id": "flur", "floor_id": None},
+    ) or result.frame.parameters["locations"] == (
+        {"text": "Flur", "area_id": "flur", "floor_id": None},
+        {"text": "Küche", "area_id": "kueche", "floor_id": None},
+    )
+
+
+def test_multiple_exclusions_are_composed_without_sentence_template(engine):
+    entities = HOUSE + [
+        EntitySnapshot(
+            "light.kueche", "Küchenlicht", "light", "on",
+            area_id="kueche", area_name="Küche",
+            floor_id="eg", floor_name="Erdgeschoss", floor_level=0,
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+        EntitySnapshot(
+            "light.wohnzimmer", "Wohnzimmerlicht", "light", "on",
+            area_id="wohnzimmer", area_name="Wohnzimmer",
+            floor_id="eg", floor_name="Erdgeschoss", floor_level=0,
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+    ]
+
+    result = engine.match(
+        "Im Erdgeschoss alle Lichter aus, mit Ausnahme von Küchenlicht und Flurlicht",
+        entities,
+    )
+
+    assert result is not None
+    assert result.plan.entity_id == "light.wohnzimmer"
+    assert result.frame.quantity.kind.name == "EXCLUDE"
+    assert result.frame.quantity.excluded == ("Küchenlicht", "Flurlicht")
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    (
+        "Mach alle Lichter aus außer Unbekanntes Licht",
+        "Mach beide Lichter aus außer Flurlicht",
+        "Mach alle Lichter aus außer Flurlicht und Flurlicht",
+    ),
+)
+def test_ambiguous_or_invalid_exclusions_never_execute(engine, sentence):
+    assert engine.match(sentence, HOUSE) is None
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    (
         "Fahre sämtliche Rollläden im Erdgeschoss nicht hoch",
         "Fahre vielleicht sämtliche Rollläden im Erdgeschoss hoch",
         "Fahre sämtliche Rollläden im Erdgeschoss normalerweise hoch",

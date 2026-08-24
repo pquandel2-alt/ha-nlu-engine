@@ -17,7 +17,13 @@ import re
 from dataclasses import dataclass
 
 from ..areas import AreaSnapshot
-from ..entities import EntitySnapshot, generate_aliases, normalize_for_compare
+from ..entities import (
+    EntitySnapshot,
+    ResolveStatus,
+    generate_aliases,
+    normalize_for_compare,
+    resolve_entity,
+)
 from ..world_model import WorldModel
 from .constraint_resolver import Constraints, resolve_candidates
 from .frame import AreaReference, Quantifier, SemanticFrame, TargetReference
@@ -26,7 +32,11 @@ from .primitives import SemanticAction, SemanticProperty, SemanticQuantity
 from .query_command import QueryCommand, QueryFilter, QueryScope, QueryTarget
 from .query_executor import QueryExecutor
 from .semantic_lexicon import SemanticAnalysis, SemanticKind, analyse_semantics
-from .semantic_location import has_explicit_location_cue, resolve_semantic_location
+from .semantic_location import (
+    has_explicit_location_cue,
+    resolve_coordinated_locations,
+    resolve_semantic_location,
+)
 
 
 @dataclass(frozen=True)
@@ -61,6 +71,15 @@ _COUNT_WORDS = {
 }
 _COUNT_RE = re.compile(r"\b(" + "|".join(_COUNT_WORDS) + r"|[2-9]|10)\b", re.I)
 _ORDERED_SUBSET_RE = re.compile(r"\b(?:erste\w*|letzte\w*)\b", re.I)
+_EXCLUSION_RE = re.compile(
+    r"\b(?:außer|ausser|mit\s+ausnahme\s+von)\s+(?P<targets>.+?)\s*[?.!]*$",
+    re.I,
+)
+_EXCLUSION_SPLIT_RE = re.compile(r"\s*(?:,|\bund\b)\s*", re.I)
+_EXCLUSION_ARTICLE_RE = re.compile(
+    r"^(?:(?:dem|der|den|die|das|alle[nrms]?|im|in\s+der|in\s+dem)\s+)+",
+    re.I,
+)
 
 _HALF_RE = re.compile(r"\b(?:halb|halbe(?:r|n)?|hälfte|zur\s+hälfte)\b", re.I)
 _ZERO_RE = re.compile(r"\b(?:komplett|ganz|vollständig)\s+(?:runter|herunter|zu)\b", re.I)
@@ -162,6 +181,66 @@ def _percent(text: str) -> int | None:
         return 50
     match = _PERCENT_RE.search(text)
     return int(match.group("after") or match.group("unit")) if match else None
+
+
+def _split_exclusion(text: str) -> tuple[str, tuple[str, ...]]:
+    """Return the positive command and independently named exclusions."""
+    match = _EXCLUSION_RE.search(text)
+    if match is None:
+        return text, ()
+    raw_targets = tuple(
+        cleaned
+        for part in _EXCLUSION_SPLIT_RE.split(match.group("targets"))
+        if (cleaned := _EXCLUSION_ARTICLE_RE.sub("", part).strip(" ,.;:!?"))
+    )
+    return text[:match.start()].rstrip(" ,;:"), raw_targets
+
+
+def _resolve_exclusions(
+    names: tuple[str, ...],
+    entities: list[EntitySnapshot],
+    candidates: list[EntitySnapshot],
+) -> tuple[list[EntitySnapshot], tuple[str, ...]] | None:
+    """Resolve every exclusion exactly and ensure it belongs to the scope."""
+    if not names:
+        return candidates, ()
+    excluded: list[EntitySnapshot] = []
+    for name in names:
+        result = resolve_entity(name, entities)
+        if result.status is not ResolveStatus.OK or result.entity is None:
+            return None
+        if result.entity not in candidates or result.entity in excluded:
+            return None
+        excluded.append(result.entity)
+    excluded_ids = {entity.entity_id for entity in excluded}
+    remaining = [entity for entity in candidates if entity.entity_id not in excluded_ids]
+    if not remaining:
+        return None
+    return remaining, tuple(entity.friendly_name for entity in excluded)
+
+
+def _scoped_candidates(
+    entities: list[EntitySnapshot],
+    domain: str,
+    locations: tuple[tuple[str, str | None, str | None], ...],
+    world_model: WorldModel | None,
+) -> list[EntitySnapshot]:
+    """Return one stable union for one or more explicit location scopes."""
+    scopes = locations or (("", None, None),)
+    selected: list[EntitySnapshot] = []
+    seen: set[str] = set()
+    for _, area_id, floor_id in scopes:
+        matches = list(world_model.select_entities(
+            domain=domain, area_id=area_id, floor_id=floor_id,
+        )) if world_model is not None else resolve_candidates(
+            entities,
+            Constraints(domain=domain, area_id=area_id, floor_id=floor_id),
+        )
+        for entity in matches:
+            if entity.entity_id not in seen:
+                seen.add(entity.entity_id)
+                selected.append(entity)
+    return selected
 
 
 def _intents(
@@ -275,12 +354,18 @@ class SemanticCommandCompiler:
         world_model: WorldModel | None = None,
         analysis: SemanticAnalysis | None = None,
     ) -> ParseResult | ClarificationRequest | None:
-        if _QUESTION_RE.search(text) or re.search(r"\baußer\b", text, re.I):
+        if _QUESTION_RE.search(text):
             return None
         if _ORDERED_SUBSET_RE.search(text):
             return None
-        analysis = analysis or analyse_semantics(text)
-        spoken_percent = _ANY_PERCENT_RE.search(text)
+        positive_text, exclusion_names = _split_exclusion(text)
+        # Analyse only the positive clause: entity names after ``außer`` are
+        # registry data, not command semantics, and must not introduce a
+        # second domain/action into the requested operation.
+        analysis = analyse_semantics(positive_text) if exclusion_names else (
+            analysis or analyse_semantics(text)
+        )
+        spoken_percent = _ANY_PERCENT_RE.search(positive_text)
         if spoken_percent is not None and int(spoken_percent.group("value")) > 100:
             return None
 
@@ -288,19 +373,21 @@ class SemanticCommandCompiler:
             value for value in analysis.values(SemanticKind.DOMAIN)
             if isinstance(value, str)
         )
-        location = resolve_semantic_location(text, entities)
+        coordinated_locations = resolve_coordinated_locations(positive_text, entities)
+        location = None if coordinated_locations else resolve_semantic_location(positive_text, entities)
+        locations = coordinated_locations or ((location,) if location else ())
         # A spoken scope is a hard constraint.  If HA does not know it (or
         # two floors make "oben" ambiguous), never silently widen the
         # request to every device in the house.
-        if location is None and has_explicit_location_cue(text, entities):
+        if not locations and has_explicit_location_cue(positive_text, entities):
             return None
-        quantity = _quantity(text)
-        percent = _percent(text)
+        quantity = _quantity(positive_text)
+        percent = _percent(positive_text)
 
         # If the user named an entity but omitted a generic device noun, infer
         # only the domain(s) of registry names that are actually present.
         preliminary = _entity_candidates(
-            text,
+            positive_text,
             entities,
             domains,
             area_id=location[1] if location else None,
@@ -310,7 +397,7 @@ class SemanticCommandCompiler:
             domains = frozenset(entity.domain for entity in preliminary)
 
         intents = _intents(
-            text,
+            positive_text,
             domains,
             percent,
             analysis,
@@ -321,7 +408,7 @@ class SemanticCommandCompiler:
             domains=domains,
             percent=percent,
             quantity=quantity,
-            location_text=location[0] if location else None,
+            location_text=" und ".join(item[0] for item in locations) if locations else None,
             area_id=location[1] if location else None,
             floor_id=location[2] if location else None,
         )
@@ -333,12 +420,11 @@ class SemanticCommandCompiler:
             return None
 
         if quantity is not None:
-            matches = list(world_model.select_entities(
-                domain=domain, area_id=facts.area_id, floor_id=facts.floor_id,
-            )) if world_model is not None else resolve_candidates(
-                entities,
-                Constraints(domain=domain, area_id=facts.area_id, floor_id=facts.floor_id),
-            )
+            if exclusion_names and quantity.kind in {"both", "count"}:
+                # "genau drei außer X" has two plausible counts (before or
+                # after exclusion). Refuse instead of choosing one silently.
+                return None
+            matches = _scoped_candidates(entities, domain, locations, world_model)
             if percent is not None:
                 capability = "POSITION" if domain == "cover" else "BRIGHTNESS"
                 matches = [entity for entity in matches if capability in entity.capabilities]
@@ -348,12 +434,18 @@ class SemanticCommandCompiler:
                 return None
             if quantity.kind == "count" and len(matches) != quantity.value:
                 return None
+            exclusion_result = _resolve_exclusions(exclusion_names, entities, matches)
+            if exclusion_result is None:
+                return None
+            matches, excluded_names = exclusion_result
             target = TargetReference(text=domain, domain=domain)
             area = (
                 AreaReference(text=facts.location_text or "", area_id=facts.area_id)
-                if facts.area_id is not None else None
+                if facts.area_id is not None and len(locations) == 1 else None
             )
         else:
+            if exclusion_names or len(locations) > 1:
+                return None
             candidates = _entity_candidates(
                 text,
                 entities,
@@ -400,13 +492,24 @@ class SemanticCommandCompiler:
                 else SemanticQuantity.exactly(quantity.value) if quantity.kind == "count" and quantity.value is not None
                 else SemanticQuantity.all()
             )
+            if exclusion_names:
+                semantic_quantity = SemanticQuantity.exclude(*excluded_names)
         return ParseResult(
             frame=SemanticFrame(
                 intent=intent,
                 target=target,
                 area=area,
                 quantifier=quantity,
-                parameters={"percent": percent} if percent is not None else {},
+                parameters={
+                    **({"percent": percent} if percent is not None else {}),
+                    **({"excluded": excluded_names} if exclusion_names else {}),
+                    **({
+                        "locations": tuple(
+                            {"text": spoken, "area_id": area_id, "floor_id": floor_id}
+                            for spoken, area_id, floor_id in locations
+                        )
+                    } if len(locations) > 1 else {}),
+                },
                 source_text=text,
                 action=action,
                 property=property_,
@@ -453,33 +556,45 @@ class SemanticQueryCompiler:
         domain, device_class = targets[0]
         requested_state = states[0] if states else None
 
-        location = resolve_semantic_location(text, entities)
+        coordinated_locations = resolve_coordinated_locations(text, entities)
+        location = None if coordinated_locations else resolve_semantic_location(text, entities)
+        locations = coordinated_locations or ((location,) if location else ())
         has_location_cue = _LOCATION_CUE_RE.search(text) is not None
-        if has_location_cue and location is None:
+        if has_location_cue and not locations:
             return None
         # Unknown modifiers may materially change a question (for example
         # "normalerweise", "gestern" or "nicht").  Do not pretend they were
         # understood. Dynamic registry location names are deliberately
         # removed from this check because they cannot live in the lexicon.
-        if _has_unexplained_meaning(analysis, (location[0],) if location else ()):
+        if _has_unexplained_meaning(
+            analysis, tuple(item[0] for item in locations)
+        ):
             return None
         area_id = location[1] if location else None
         floor_id = location[2] if location else None
         location_name = location[0] if location else None
 
-        candidates = list(world_model.select_entities(
-            domain=domain,
-            device_class=device_class,
-            area_id=area_id,
-            floor_id=floor_id,
-        )) if world_model is not None else resolve_candidates(
-            entities, Constraints(
+        if len(locations) > 1:
+            candidates = _scoped_candidates(entities, domain, locations, world_model)
+            if device_class is not None:
+                candidates = [
+                    entity for entity in candidates
+                    if entity.device_class == device_class
+                ]
+        else:
+            candidates = list(world_model.select_entities(
                 domain=domain,
                 device_class=device_class,
                 area_id=area_id,
                 floor_id=floor_id,
-            ),
-        )
+            )) if world_model is not None else resolve_candidates(
+                entities, Constraints(
+                    domain=domain,
+                    device_class=device_class,
+                    area_id=area_id,
+                    floor_id=floor_id,
+                ),
+            )
         # The target category itself must exist. An empty *state match* is a
         # valid answer, but inventing an answer for a home with no such
         # selected entities would hide configuration errors.
@@ -510,7 +625,7 @@ class SemanticQueryCompiler:
         intent = "HassExistsQuery" if scope is QueryScope.EXISTS else "HassStateQuery"
         area_snapshot = (
             AreaSnapshot(area_id=area_id, name=location_name)
-            if area_id is not None and location_name is not None
+            if area_id is not None and location_name is not None and len(locations) == 1
             else None
         )
         query_command = QueryCommand(
@@ -559,6 +674,10 @@ class SemanticQueryCompiler:
                     "domain": domain,
                     "floor_id": floor_id,
                     "floor_name": location_name if floor_id is not None else None,
+                    "locations": tuple(
+                        {"text": spoken, "area_id": item_area_id, "floor_id": item_floor_id}
+                        for spoken, item_area_id, item_floor_id in locations
+                    ) if len(locations) > 1 else (),
                     "query_command": query_command,
                     "query_result": query_result,
                 },

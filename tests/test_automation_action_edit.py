@@ -24,6 +24,10 @@ def test_only_explicit_action_edit_language_opens_the_dialog():
     assert not is_action_edit_request("Ändere die Temperatur auf 22 Grad")
     assert is_action_edit_request("Füge eine Aktion zur Automation hinzu")
     assert action_edit_operation("Füge eine Aktion hinzu") == "add"
+    assert is_action_edit_request("Verschiebe die zweite Aktion an die erste Stelle")
+    assert action_edit_operation(
+        "Verschiebe die zweite Aktion an die erste Stelle"
+    ) == "reorder:1:0"
 
 
 def test_candidates_never_include_non_homeintent_automations():

@@ -11,7 +11,7 @@ from typing import Any
 from homeassistant.components import conversation
 from homeassistant.helpers import intent
 
-from .automation_action_edit import select_candidate_reply
+from .automation_action_edit import reordered_actions, select_candidate_reply
 from .automation_structure_edit import (
     AutomationEditOperation,
     AutomationEditSection,
@@ -102,6 +102,17 @@ async def async_prepare_automation_structure_edit(
     if request.operation is AutomationEditOperation.CLEAR:
         rendered: list[dict] = []
         spoken_edit = "alle Bedingungen entfernen"
+    elif request.operation is AutomationEditOperation.REMOVE:
+        assert request.index is not None
+        if request.index >= len(existing):
+            response.async_set_speech(
+                f"Diese Automation hat nur {len(existing)} Bedingungen."
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+        rendered = [value for index, value in enumerate(existing) if index != request.index]
+        spoken_edit = f"Bedingung {request.index + 1} entfernen"
     else:
         if not edit_text:
             store_automation_structure_edit(agent, user_input.conversation_id, pending)
@@ -216,7 +227,9 @@ async def async_handle_automation_structure_edit_turn(
             )
         pending = replace(pending, automation=automation)
         payload = pending.request.payload
-        if payload or pending.request.operation is AutomationEditOperation.CLEAR:
+        if payload or pending.request.operation in {
+            AutomationEditOperation.CLEAR, AutomationEditOperation.REMOVE
+        }:
             return await async_prepare_automation_structure_edit(
                 agent, user_input, response, pending, entities, payload
             )
@@ -287,18 +300,30 @@ async def async_handle_automation_action_edit_turn(
                 + "."
             )
         else:
+            reordered = reordered_actions(automation.actions, pending.operation)
+            if pending.operation.startswith("reorder:") and reordered is None:
+                response.async_set_speech(
+                    "Diese Automation hat nicht genügend Aktionen für diese Reihenfolge."
+                )
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
             store_automation_action_edit(
                 agent,
                 user_input.conversation_id,
                 PendingAutomationActionEdit(
                     candidates=pending.candidates,
                     automation=automation,
+                    rendered_actions=reordered or (),
+                    action_text=user_input.text if reordered else None,
                     operation=pending.operation,
                 ),
             )
             response.async_set_speech(
                 (
-                    "Welche Aktion soll zusätzlich danach ausgeführt werden?"
+                    "Soll ich die Reihenfolge der Aktionen wie gewünscht ändern?"
+                    if reordered
+                    else "Welche Aktion soll zusätzlich danach ausgeführt werden?"
                     if pending.operation == "add"
                     else "Was soll stattdessen passieren? Auslöser und Bedingungen bleiben unverändert."
                 )

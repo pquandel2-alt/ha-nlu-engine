@@ -36,7 +36,17 @@ from homeassistant.config_entries import (
 from homeassistant.core import callback
 from homeassistant.helpers.selector import EntitySelector, EntitySelectorConfig
 
-from .const import CONF_SELECTED_ENTITIES, DOMAIN, SELECTABLE_DOMAINS
+from .const import (
+    CONF_ALLOW_NON_ADMIN_AUTOMATIONS,
+    CONF_ALLOW_NON_ADMIN_CRITICAL,
+    CONF_CONFIRMATION_LEVEL,
+    CONF_CONTEXT_TTL_SECONDS,
+    CONF_MAX_ACTION_TARGETS,
+    CONF_READ_ONLY_ENTITIES,
+    CONF_SELECTED_ENTITIES,
+    DOMAIN,
+    SELECTABLE_DOMAINS,
+)
 from .hass_entities import default_exposed_entities
 
 _LOGGER = logging.getLogger(__name__)
@@ -86,7 +96,45 @@ class HaNluOptionsFlow(OptionsFlow):
                         CONF_SELECTED_ENTITIES, default=current
                     ): EntitySelector(
                         EntitySelectorConfig(domain=SELECTABLE_DOMAINS, multiple=True)
-                    )
+                    ),
+                    vol.Optional(
+                        CONF_READ_ONLY_ENTITIES,
+                        default=self.config_entry.options.get(
+                            CONF_READ_ONLY_ENTITIES, []
+                        ),
+                    ): EntitySelector(
+                        EntitySelectorConfig(domain=SELECTABLE_DOMAINS, multiple=True)
+                    ),
+                    vol.Optional(
+                        CONF_CONFIRMATION_LEVEL,
+                        default=self.config_entry.options.get(
+                            CONF_CONFIRMATION_LEVEL, "high"
+                        ),
+                    ): vol.In(("medium", "high", "critical")),
+                    vol.Optional(
+                        CONF_MAX_ACTION_TARGETS,
+                        default=self.config_entry.options.get(
+                            CONF_MAX_ACTION_TARGETS, 50
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=500)),
+                    vol.Optional(
+                        CONF_ALLOW_NON_ADMIN_CRITICAL,
+                        default=self.config_entry.options.get(
+                            CONF_ALLOW_NON_ADMIN_CRITICAL, True
+                        ),
+                    ): bool,
+                    vol.Optional(
+                        CONF_ALLOW_NON_ADMIN_AUTOMATIONS,
+                        default=self.config_entry.options.get(
+                            CONF_ALLOW_NON_ADMIN_AUTOMATIONS, True
+                        ),
+                    ): bool,
+                    vol.Optional(
+                        CONF_CONTEXT_TTL_SECONDS,
+                        default=self.config_entry.options.get(
+                            CONF_CONTEXT_TTL_SECONDS, 30
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=10, max=600)),
                 }
             ),
         )

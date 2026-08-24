@@ -128,3 +128,16 @@ def test_numeric_value_equality_by_value():
     assert NumericValue(50, NumericUnit.PERCENT) == NumericValue(50, NumericUnit.PERCENT)
     assert NumericValue(50, NumericUnit.PERCENT) != NumericValue(50, NumericUnit.CELSIUS)
     assert NumericValue(50, NumericUnit.PERCENT) != NumericValue(21, NumericUnit.PERCENT)
+
+
+def test_semantic_frame_bridges_legacy_numeric_parameter():
+    from ha_nlu.nlu.frame import SemanticFrame
+
+    frame = SemanticFrame(
+        intent="HassSetPercentage",
+        target=None,
+        area=None,
+        parameters={"percent": 50},
+    )
+
+    assert frame.numeric_value == NumericValue(50, NumericUnit.PERCENT)

@@ -30,12 +30,9 @@ condition platforms require an integration-specific ``domain``/``subtype``
 this project's ``DeviceSnapshot`` never records), a bare ``TriggerType.WEEKDAY``
 (Home Assistant has no standalone "this weekday" trigger platform - only
 ``condition: time``'s ``weekday`` field, which is why ``ConditionType.WEEKDAY``
-*is* translated below), ``ConditionType.DATE`` (no native month/day condition
-platform - would require synthesizing a Jinja2 ``template`` condition, a new
-and risky translation subsystem this wave does not add), and
-``ActionType.WAIT`` (HA's ``wait_template``/``wait_for_trigger`` actions take
-a Jinja2 template or a trigger definition, not this project's structured
-``ConditionNode`` - the same "would require a template synthesizer" gap).
+*is* translated below). ``ConditionType.DATE`` is emitted as one bounded
+``now().month/day`` template. ``ActionType.WAIT`` uses the same private,
+bounded condition compiler and never invents integration-specific data.
 Each returns a specific ``GenerationError`` member instead of a best-effort
 guess - the caller (the not-yet-written Executor/``conversation.py`` wiring)
 speaks this back to the user and persists nothing, exactly the same
@@ -134,6 +131,36 @@ def _resolve_target_entities(target: TriggerTarget, entities: list[EntitySnapsho
     return candidates
 
 
+def resolve_automation_action_entity_ids(
+    model: AutomationModel, entities: list[EntitySnapshot]
+) -> frozenset[str]:
+    """Return every concrete entity an automation action may control.
+
+    Conditions and triggers are intentionally excluded because they only read
+    state.  CHOOSE branches are both included: either branch can become the
+    active write path at runtime.
+    """
+    resolved: set[str] = set()
+
+    def visit(step: ActionModel | ActionGroup) -> None:
+        if isinstance(step, ActionGroup):
+            for child in step.steps:
+                visit(child)
+            return
+        if step.target is not None:
+            resolved.update(
+                entity.entity_id
+                for entity in _resolve_target_entities(step.target, entities)
+            )
+        if step.type is ActionType.CHOOSE:
+            for child in (*step.then_steps, *step.else_steps):
+                visit(child)
+
+    for action in model.actions:
+        visit(action)
+    return frozenset(resolved)
+
+
 def _format_offset(minutes: int) -> str:
     """Minutes (already signed - negative = before, positive = after, see
     ``TriggerModel.offset_minutes``' own comment) as the "±HH:MM:SS" string
@@ -161,7 +188,10 @@ def _generate_trigger(trigger: TriggerModel, entities: list[EntitySnapshot]) -> 
         to_raw = _raw_state_for_semantic(domain, device_class, trigger.state)
         if to_raw is None:
             return None, GenerationError.UNSUPPORTED_STATE
-        return identified({"trigger": "state", "entity_id": _entity_id_field(candidates), "to": to_raw}), None
+        config = {"trigger": "state", "entity_id": _entity_id_field(candidates), "to": to_raw}
+        if trigger.for_seconds is not None:
+            config["for"] = {"seconds": trigger.for_seconds}
+        return identified(config), None
 
     if trigger.type is TriggerType.NUMERIC_STATE:
         assert trigger.target is not None and trigger.comparator is not None and trigger.threshold is not None
@@ -169,7 +199,10 @@ def _generate_trigger(trigger: TriggerModel, entities: list[EntitySnapshot]) -> 
         if not candidates:
             return None, GenerationError.ENTITY_NOT_FOUND
         key = "above" if trigger.comparator is NumericComparator.ABOVE else "below"
-        return identified({"trigger": "numeric_state", "entity_id": _entity_id_field(candidates), key: trigger.threshold}), None
+        config = {"trigger": "numeric_state", "entity_id": _entity_id_field(candidates), key: trigger.threshold}
+        if trigger.for_seconds is not None:
+            config["for"] = {"seconds": trigger.for_seconds}
+        return identified(config), None
 
     if trigger.type is TriggerType.PRESENCE:
         assert trigger.target is not None and trigger.target.entity_id is not None
@@ -246,6 +279,16 @@ def _generate_condition_leaf(condition: ConditionModel, entities: list[EntitySna
         key = "before" if condition.time_comparator is TimeComparator.BEFORE else "after"
         return {"condition": "time", key: f"{condition.time_hour:02d}:{minute:02d}:00"}, None
 
+    if condition.type is ConditionType.DATE:
+        assert condition.date_month is not None and condition.date_day is not None
+        return {
+            "condition": "template",
+            "value_template": (
+                "{{ now().month == " + str(condition.date_month)
+                + " and now().day == " + str(condition.date_day) + " }}"
+            ),
+        }, None
+
     if condition.type is ConditionType.WEEKDAY:
         assert condition.weekdays
         # HA's ``time`` condition platform natively supports a bare
@@ -305,7 +348,11 @@ def _generate_condition_leaf(condition: ConditionModel, entities: list[EntitySna
             ),
         }, None
 
-    # ConditionType.DEVICE / ConditionType.DATE - see module docstring.
+    if condition.type is ConditionType.TEMPLATE:
+        assert condition.raw_state is not None
+        return {"condition": "template", "value_template": condition.raw_state}, None
+
+    # ConditionType.DEVICE lacks its integration-specific subtype schema.
     return None, GenerationError.UNSUPPORTED_CONDITION_TYPE
 
 
@@ -336,6 +383,15 @@ def _generate_action_leaf(action: ActionModel, entities: list[EntitySnapshot]) -
 
     if action.type is ActionType.NOTIFY:
         assert action.message is not None
+        if action.target is not None:
+            candidates = _resolve_target_entities(action.target, entities)
+            if not candidates or any(entity.domain != "notify" for entity in candidates):
+                return None, GenerationError.ENTITY_NOT_FOUND
+            return {
+                "action": "notify.send_message",
+                "target": {"entity_id": _entity_id_field(candidates)},
+                "data": {"message": action.message},
+            }, None
         # No fixed notify target exists in this project's model (no
         # notify-service/entity vocabulary anywhere upstream) - Home
         # Assistant's always-available, no-configuration-required
@@ -453,7 +509,16 @@ def _condition_template(
     condition = node.condition
     if condition.type in {ConditionType.STATE, ConditionType.ENTITY, ConditionType.PRESENCE}:
         if condition.target is None:
-            return None, GenerationError.UNSUPPORTED_CONDITION_TYPE
+            if condition.type is not ConditionType.PRESENCE or condition.raw_state is None:
+                return None, GenerationError.UNSUPPORTED_CONDITION_TYPE
+            people = resolve_candidates(entities, Constraints(domain="person"))
+            if not people:
+                return None, GenerationError.ENTITY_NOT_FOUND
+            raw = json.dumps(condition.raw_state)
+            return " or ".join(
+                f"is_state('{entity.entity_id}', {raw})"
+                for entity in people
+            ), None
         candidates = _resolve_target_entities(condition.target, entities)
         if not candidates:
             return None, GenerationError.ENTITY_NOT_FOUND
@@ -469,7 +534,8 @@ def _condition_template(
         if raw is None:
             return None, GenerationError.UNSUPPORTED_STATE
         return " and ".join(
-            f"is_state('{entity.entity_id}', '{raw}')" for entity in candidates
+            f"is_state('{entity.entity_id}', '{raw}')"
+            for entity in candidates
         ), None
     if condition.type is ConditionType.NUMERIC:
         assert condition.target is not None and condition.threshold is not None and condition.comparator is not None
@@ -481,6 +547,46 @@ def _condition_template(
             f"states('{entity.entity_id}') | float(0) {operator} {condition.threshold:g}"
             for entity in candidates
         ), None
+    if condition.type is ConditionType.TIME:
+        assert condition.time_hour is not None and condition.time_comparator is not None
+        value = f"{condition.time_hour:02d}:{(condition.time_minute or 0):02d}:00"
+        operator = "<" if condition.time_comparator is TimeComparator.BEFORE else ">"
+        return f"now().strftime('%H:%M:%S') {operator} {json.dumps(value)}", None
+    if condition.type is ConditionType.DATE:
+        assert condition.date_month is not None and condition.date_day is not None
+        return (
+            f"now().month == {condition.date_month} and now().day == {condition.date_day}",
+            None,
+        )
+    if condition.type is ConditionType.WEEKDAY:
+        weekday_numbers = {
+            "mon": 0,
+            "tue": 1,
+            "wed": 2,
+            "thu": 3,
+            "fri": 4,
+            "sat": 5,
+            "sun": 6,
+        }
+        if not condition.weekdays or any(day not in weekday_numbers for day in condition.weekdays):
+            return None, GenerationError.UNSUPPORTED_CONDITION_TYPE
+        values = ", ".join(str(weekday_numbers[day]) for day in condition.weekdays)
+        return f"now().weekday() in [{values}]", None
+    if condition.type is ConditionType.SUN:
+        assert condition.sun_event is not None and condition.sun_comparator is not None
+        if condition.offset_minutes not in {None, 0}:
+            return None, GenerationError.UNSUPPORTED_CONDITION_TYPE
+        above_horizon = (
+            condition.sun_event is SunEvent.SUNRISE
+            and condition.sun_comparator is TimeComparator.AFTER
+        ) or (
+            condition.sun_event is SunEvent.SUNSET
+            and condition.sun_comparator is TimeComparator.BEFORE
+        )
+        state = "above_horizon" if above_horizon else "below_horizon"
+        return f"is_state('sun.sun', '{state}')", None
+    if condition.type is ConditionType.TEMPLATE and condition.raw_state is not None:
+        return condition.raw_state.removeprefix("{{").removesuffix("}}").strip(), None
     return None, GenerationError.UNSUPPORTED_CONDITION_TYPE
 
 
@@ -575,12 +681,21 @@ def generate_ha_automation_config(
     """
     triggers: list[dict[str, Any]] = []
     triggers_delay_action: dict[str, Any] | None = None
+    repeat_wait_action: dict[str, Any] | None = None
     for trigger in model.triggers:
         trigger_config, error = _generate_trigger(trigger, entities)
         if error is not None:
             return GenerationResult(config=None, error=error)
         assert trigger_config is not None
         triggers.append(trigger_config)
+        if trigger.repeat_within_seconds is not None:
+            repeated_trigger = dict(trigger_config)
+            repeated_trigger.pop("id", None)
+            repeat_wait_action = {
+                "wait_for_trigger": [repeated_trigger],
+                "timeout": {"seconds": trigger.repeat_within_seconds},
+                "continue_on_timeout": False,
+            }
         # A trigger's own post-fire delay (V5.14, "10 Minuten nachdem...")
         # has no Home Assistant trigger-level field - it becomes the first
         # action, run before anything the automation was actually asked to
@@ -609,6 +724,8 @@ def generate_ha_automation_config(
         )
 
     actions: list[dict[str, Any]] = []
+    if repeat_wait_action is not None:
+        actions.append(repeat_wait_action)
     if triggers_delay_action is not None:
         actions.append(triggers_delay_action)
     for step in model.actions:

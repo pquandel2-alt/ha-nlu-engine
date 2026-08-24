@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from hassil import Intents
@@ -57,6 +58,7 @@ from .nlu.response_generator import ResponseGenerator, _automation_label
 from .nlu.service_mapper import map_to_service_call
 from .nlu.semantic_compiler import SemanticCommandCompiler, SemanticQueryCompiler
 from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
+from .nlu.semantic_location import resolve_coordinated_locations
 from .nlu.validator import validate_command
 from .automation_action_parser import AutomationActionParser
 from .automation_condition_parser import AutomationConditionParser, split_on_top_level_and
@@ -66,6 +68,7 @@ from .location_property_query import LocationPropertyQueryParser, LocationQueryF
 from .contextual_property import ContextualPropertyResolver
 from .conversation_correction import ConversationCorrectionResolver
 from .relative_time_command_parser import RelativeTimeCommandParser
+from .productivity import parse_duration_seconds
 from .scheduled_time_command_parser import ScheduledTimeCommandParser
 from .nlu.automation_model import AutomationModel, TriggerModel, TriggerType, render_automation_tree
 from .nlu.automation_model import TriggerTarget
@@ -265,6 +268,45 @@ _CALENDAR_TIME_RE = re.compile(
     r"\bam\s+\d{1,2}\.(?=\s)",
     re.IGNORECASE,
 )
+
+_RECURRING_TIME_RE = re.compile(
+    r"\b(?:jede[nr]?|an\s+jedem)\s+"
+    r"(?:(?P<interval>zweiten?)\s+)?"
+    r"(?P<day>werktag|montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)"
+    r"(?:s|en)?\s+(?:um\s+)?(?P<hour>\d{1,2})(?::(?P<minute>\d{1,2}))?\s*(?:uhr)?\b",
+    re.IGNORECASE,
+)
+_PERSISTENT_STATE_RE = re.compile(
+    r"\b(?P<amount>\d+|ein(?:e|en)?|zwei|drei|vier|fünf|fuenf|sechs|sieben|acht|neun|zehn)\s*"
+    r"(?P<unit>sekunden?|minuten?|stunden?)\s+"
+    r"(?P<state>offen|geöffnet|geschlossen|an|aus)\s+bleib(?:t|en)\b",
+    re.IGNORECASE,
+)
+_REPEATED_EVENT_RE = re.compile(r"\b(?:zweimal|zwei\s*mal|2\s*mal)\b", re.IGNORECASE)
+_WITHIN_WINDOW_RE = re.compile(
+    r"\binnerhalb\s+von\s+"
+    r"(?:\d+|ein(?:e|en|er)?|zwei|drei|vier|fünf|fuenf|sechs|sieben|acht|neun|zehn)\s*"
+    r"(?:sekunden?|minuten?|stunden?)\b",
+    re.IGNORECASE,
+)
+_RECURRING_WEEKDAYS = {
+    "montag": ("mon",), "dienstag": ("tue",), "mittwoch": ("wed",),
+    "donnerstag": ("thu",), "freitag": ("fri",), "samstag": ("sat",),
+    "sonntag": ("sun",),
+    "werktag": ("mon", "tue", "wed", "thu", "fri"),
+}
+_SMALL_NUMBERS = {
+    "ein": 1, "eine": 1, "einen": 1, "zwei": 2, "drei": 3, "vier": 4,
+    "fünf": 5, "fuenf": 5, "sechs": 6, "sieben": 7, "acht": 8,
+    "neun": 9, "zehn": 10,
+}
+
+
+def _weekday_number(day: str) -> int:
+    return {
+        "montag": 0, "dienstag": 1, "mittwoch": 2, "donnerstag": 3,
+        "freitag": 4, "samstag": 5, "sonntag": 6,
+    }.get(day, 0)
 
 # Sentences containing "alle"/"beide[n/r]"/"nur"/a count word are routed to
 # QuantifierParser's separately-compiled grammar rather than mixed into the
@@ -727,6 +769,33 @@ class NluEngine:
     ) -> MatchResult | CommandPlan | None:
         segments = [segment for segment in _AND_SPLIT_RE.split(text) if segment.strip()]
         if len(segments) > 1:
+            # ``und`` can connect two commands, but it can also coordinate
+            # locations or exclusions inside one command. Let the shared
+            # semantic compiler prove the latter interpretation before the
+            # established atomic multi-command path splits the utterance.
+            normalized_whole = normalize(text)
+            is_single_coordinated_meaning = (
+                re.search(r"\b(?:außer|ausser|mit\s+ausnahme\s+von)\b", normalized_whole, re.I)
+                is not None
+                or resolve_coordinated_locations(normalized_whole, entities) is not None
+            )
+            if is_single_coordinated_meaning:
+                whole_analysis = analyse_semantics(normalized_whole)
+                whole_result = SemanticQueryCompiler.compile(
+                    normalized_whole, entities, world_model, whole_analysis
+                )
+                if whole_result is None:
+                    whole_result = SemanticCommandCompiler.compile(
+                        normalized_whole, entities, world_model, whole_analysis
+                    )
+                if isinstance(whole_result, ParseResult):
+                    return self._build_match_result(whole_result, entities)
+                if isinstance(whole_result, ClarificationRequest):
+                    return MatchResult(
+                        plan=None,
+                        response_text=_clarification_question(whole_result),
+                        clarification=whole_result,
+                    )
             return self._match_multi(segments, entities, world_model)
 
         text = normalize(text)
@@ -1716,6 +1785,150 @@ class NluEngine:
         if validation_error is not None:
             response_text = f"{response_text}\nvalidation_error: {validation_error.name}"
         return AutomationMatchResult(model=model, response_text=response_text, validation_error=validation_error)
+
+    def match_recurring_time_automation(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        now: datetime,
+        world_model: WorldModel | None = None,
+        context: ConversationContext | None = None,
+    ) -> AutomationMatchResult | None:
+        """Build native time+weekday rules without enumerating word orders."""
+        schedule = _RECURRING_TIME_RE.search(text)
+        if schedule is None:
+            return None
+        hour = int(schedule.group("hour"))
+        minute = int(schedule.group("minute") or 0)
+        if hour > 23 or minute > 59:
+            return None
+        action_text = (text[:schedule.start()] + " " + text[schedule.end():]).strip(" ,.")
+        action_text = re.sub(
+            r"\bnur\s+zwischen\s+\w+\s+und\s+\w+\b", " ", action_text,
+            flags=re.IGNORECASE,
+        )
+        action_text = re.sub(r"^(?:dann\s+)", "", action_text, flags=re.IGNORECASE)
+        parse_context = create_parse_context(
+            entities,
+            world_model=world_model,
+            last_entities=tuple(context.last_entities) if context is not None else (),
+            last_area=context.last_area if context is not None else None,
+        )
+        actions = self._parse_action_semantically(action_text, parse_context)
+        if not actions:
+            return None
+        day = schedule.group("day").casefold()
+        conditions = [
+            ConditionNode(condition=ConditionModel(
+                type=ConditionType.WEEKDAY,
+                weekdays=_RECURRING_WEEKDAYS[day],
+            ))
+        ]
+        if schedule.group("interval"):
+            # "Jeden zweiten Samstag" starts with the next occurrence and
+            # then follows ISO-week parity. The anchor is fixed at creation.
+            delta = (_weekday_number(day) - now.weekday()) % 7
+            anchor = (now + timedelta(days=delta)).isocalendar().week % 2
+            conditions.append(ConditionNode(condition=ConditionModel(
+                type=ConditionType.TEMPLATE,
+                raw_state=f"{{{{ (now().isocalendar().week % 2) == {anchor} }}}}",
+            )))
+        month_range = re.search(
+            r"\bnur\s+zwischen\s+(?P<start>januar|februar|märz|maerz|april|mai|juni|"
+            r"juli|august|september|oktober|november|dezember)\s+und\s+"
+            r"(?P<end>januar|februar|märz|maerz|april|mai|juni|juli|august|september|"
+            r"oktober|november|dezember)\b",
+            text, re.IGNORECASE,
+        )
+        if month_range:
+            months = {"januar": 1, "februar": 2, "märz": 3, "maerz": 3,
+                      "april": 4, "mai": 5, "juni": 6, "juli": 7,
+                      "august": 8, "september": 9, "oktober": 10,
+                      "november": 11, "dezember": 12}
+            start = months[month_range.group("start").casefold()]
+            end = months[month_range.group("end").casefold()]
+            expression = (
+                f"{start} <= now().month <= {end}" if start <= end
+                else f"now().month >= {start} or now().month <= {end}"
+            )
+            conditions.append(ConditionNode(condition=ConditionModel(
+                type=ConditionType.TEMPLATE,
+                raw_state="{{ " + expression + " }}",
+            )))
+        model = AutomationModel(
+            triggers=(TriggerModel(type=TriggerType.TIME, time_hour=hour, time_minute=minute),),
+            conditions=tuple(conditions), actions=actions, source_text=text,
+        )
+        error = validate_automation(model)
+        return AutomationMatchResult(model, render_automation_tree(model), error)
+
+    def match_persistent_state_automation(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
+        context: ConversationContext | None = None,
+    ) -> AutomationMatchResult | None:
+        """Understand "offen bleibt" as HA trigger ``for``, not an action delay."""
+        persistent = _PERSISTENT_STATE_RE.search(text)
+        if persistent is None:
+            return None
+        raw_amount = persistent.group("amount").casefold()
+        amount = int(raw_amount) if raw_amount.isdigit() else _SMALL_NUMBERS.get(raw_amount)
+        if amount is None:
+            return None
+        unit = persistent.group("unit").casefold()
+        seconds = amount * (3600 if unit.startswith("st") else 60 if unit.startswith("min") else 1)
+        state = persistent.group("state")
+        replacement = f"{state} wird"
+        rewritten = text[:persistent.start()] + replacement + text[persistent.end():]
+        base = self.match_automation(rewritten, entities, world_model, context)
+        if base is None or base.validation_error is not None or len(base.model.triggers) != 1:
+            return None
+        trigger = base.model.triggers[0]
+        if trigger.type not in {TriggerType.STATE, TriggerType.NUMERIC_STATE}:
+            return None
+        model = replace(
+            base.model,
+            triggers=(replace(trigger, for_seconds=seconds),),
+            source_text=text,
+        )
+        error = validate_automation(model)
+        return AutomationMatchResult(model, render_automation_tree(model), error)
+
+    def match_repeated_event_automation(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
+        context: ConversationContext | None = None,
+    ) -> AutomationMatchResult | None:
+        """Require the same state transition twice inside a bounded window."""
+        trigger_clause = text.split(",", 1)[0]
+        repeated = _REPEATED_EVENT_RE.search(trigger_clause)
+        window = _WITHIN_WINDOW_RE.search(trigger_clause)
+        if repeated is None or window is None:
+            return None
+        seconds = parse_duration_seconds(window.group())
+        if seconds is None:
+            return None
+        rewritten = text
+        for match in sorted((repeated, window), key=lambda item: item.start(), reverse=True):
+            rewritten = rewritten[:match.start()] + " " + rewritten[match.end():]
+        rewritten = re.sub(r"\s+", " ", rewritten)
+        base = self.match_automation(rewritten, entities, world_model, context)
+        if base is None or base.validation_error is not None or len(base.model.triggers) != 1:
+            return None
+        trigger = base.model.triggers[0]
+        if trigger.type not in {TriggerType.STATE, TriggerType.NUMERIC_STATE}:
+            return None
+        model = replace(
+            base.model,
+            triggers=(replace(trigger, repeat_within_seconds=seconds),),
+            source_text=text,
+        )
+        error = validate_automation(model)
+        return AutomationMatchResult(model, render_automation_tree(model), error)
 
     @staticmethod
     def _action_from_direct_match(

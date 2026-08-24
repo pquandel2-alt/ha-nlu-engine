@@ -266,11 +266,9 @@ class NumericValue:
     "step_percent" keys) with the unit only implicit from which dict key was
     used.
 
-    Preparatory, like ``SemanticDegree``/this module's other primitives -
-    not yet wired into ``frame.py``/``parsers.py`` (replacing the
-    ``parameters`` dict keys is a later, separate step so it doesn't risk
-    the existing percent/temperature parsing paths; see the Wave 4 results
-    for the explicit scoping decision).
+    ``SemanticFrame.__post_init__`` bridges the established legacy parameter
+    keys into this type. The old keys remain during migration so service
+    mappers and validators retain their stable interface.
     """
 
     value: float

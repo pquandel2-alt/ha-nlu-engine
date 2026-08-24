@@ -30,3 +30,13 @@ record_automation_run:
           min: 2
           max: 10
           mode: box
+
+enable_automation:
+  name: Automation fortsetzen
+  description: Interner Dienst für einen bestätigten, zeitlich begrenzten Pausenauftrag.
+  fields:
+    automation_id:
+      name: Automation-ID
+      required: true
+      selector:
+        text:

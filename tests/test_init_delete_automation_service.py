@@ -79,6 +79,15 @@ def test_async_setup_entry_registers_the_delete_automation_service(tmp_path):
     assert hass.services.has_service(DOMAIN, "record_automation_run") is True
 
 
+def test_async_setup_entry_uses_configured_context_ttl(tmp_path):
+    hass = _make_hass(tmp_path)
+    entry = ConfigEntry(options={"context_ttl_seconds": 90})
+
+    asyncio.run(ha_nlu_init.async_setup_entry(hass, entry))
+
+    assert entry.runtime_data.context_store._ttl_seconds == 90.0
+
+
 def test_async_setup_entry_does_not_double_register_the_service(tmp_path):
     hass = _make_hass(tmp_path)
     entry = ConfigEntry()

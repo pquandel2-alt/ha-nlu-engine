@@ -167,6 +167,17 @@ def match_extended_device_control(
                 f"{entity.friendly_name} auf {humidity} Prozent Luftfeuchtigkeit gestellt.",
                 {"humidity": humidity},
             )
+        modes = entity.attributes.get("available_modes") or ()
+        selected_modes = [
+            str(mode) for mode in modes
+            if normalize_for_compare(str(mode)) in normalize_for_compare(text)
+        ]
+        if len(selected_modes) == 1 and re.search(r"\b(?:modus|stell\w*|setz\w*|wähl\w*|waehl\w*)\b", text, re.I):
+            return build_result(
+                entity, "set_mode",
+                f"{entity.friendly_name} auf {selected_modes[0]} gestellt.",
+                {"mode": selected_modes[0]},
+            )
 
     if entity is not None and entity.domain == "water_heater":
         temperature = _number(text)
@@ -178,6 +189,17 @@ def match_extended_device_control(
                 "set_temperature",
                 f"{entity.friendly_name} auf {temperature:g} Grad gestellt.",
                 {"temperature": temperature},
+            )
+        modes = entity.attributes.get("operation_list") or ()
+        selected_modes = [
+            str(mode) for mode in modes
+            if normalize_for_compare(str(mode)) in normalize_for_compare(text)
+        ]
+        if len(selected_modes) == 1 and re.search(r"\b(?:modus|betrieb|stell\w*|setz\w*|wähl\w*|waehl\w*)\b", text, re.I):
+            return build_result(
+                entity, "set_operation_mode",
+                f"{entity.friendly_name} auf {selected_modes[0]} gestellt.",
+                {"operation_mode": selected_modes[0]},
             )
 
     if entity is not None and entity.domain in {"number", "input_number"}:
@@ -206,6 +228,13 @@ def match_extended_device_control(
         )
 
     if entity is not None and entity.domain == "valve":
+        position = _percent(text)
+        if position is not None and re.search(r"\b(?:position|stell\w*|setz\w*|oeffn\w*|öffn\w*)\b", text, re.I):
+            return build_result(
+                entity, "set_valve_position",
+                f"{entity.friendly_name} auf {position} Prozent gestellt.",
+                {"position": position}, confirm=True,
+            )
         opening = re.search(r"\b(?:öffn\w*|oeffn\w*)\b", text, re.I)
         closing = re.search(r"\bschließ\w*|\bschliess\w*", text, re.I)
         if bool(opening) != bool(closing):

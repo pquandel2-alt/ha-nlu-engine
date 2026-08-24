@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .engine import NluEngine
+from .audit_log import AuditTrail
 from .nlu.context import ConversationContextStore
 
 
@@ -16,3 +17,4 @@ class HaNluRuntimeData:
     context_store: ConversationContextStore = field(
         default_factory=ConversationContextStore
     )
+    audit_trail: AuditTrail = field(default_factory=AuditTrail)

@@ -13,7 +13,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .primitives import SemanticAction, SemanticDegree, SemanticDirection, SemanticProperty, SemanticQuantity
+from .primitives import (
+    NumericUnit,
+    NumericValue,
+    SemanticAction,
+    SemanticDegree,
+    SemanticDirection,
+    SemanticProperty,
+    SemanticQuantity,
+)
 
 
 @dataclass(frozen=True)
@@ -132,3 +140,26 @@ class SemanticFrame:
     direction: SemanticDirection | None = None
     degree: SemanticDegree | None = None
     quantity: SemanticQuantity | None = None
+    numeric_value: NumericValue | None = None
+
+    def __post_init__(self) -> None:
+        """Bridge legacy parameter keys into one typed numeric value."""
+        if self.numeric_value is not None:
+            return
+        keys = (
+            ("percent", NumericUnit.PERCENT),
+            ("temperature", NumericUnit.CELSIUS),
+            ("level", NumericUnit.LEVEL),
+            ("step_percent", NumericUnit.PERCENT),
+            ("step", NumericUnit.CELSIUS),
+        )
+        present = [
+            (self.parameters[key], unit)
+            for key, unit in keys
+            if key in self.parameters
+            and isinstance(self.parameters[key], (int, float))
+            and not isinstance(self.parameters[key], bool)
+        ]
+        if len(present) == 1:
+            value, unit = present[0]
+            object.__setattr__(self, "numeric_value", NumericValue(float(value), unit))

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum, auto
 from typing import Any, Mapping
 
@@ -49,6 +50,8 @@ class EntitySnapshot:
     area_aliases: tuple[str, ...] = ()
     attributes: Mapping[str, Any] = field(default_factory=dict)
     capabilities: frozenset[str] = field(default_factory=frozenset)
+    last_changed: datetime | None = None
+    last_updated: datetime | None = None
 
 
 class ResolveStatus(Enum):

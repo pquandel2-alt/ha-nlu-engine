@@ -140,3 +140,26 @@ def test_every_bare_query_permutation_is_read_only(engine):
             "binary_sensor.wohnzimmer",
             "binary_sensor.kueche",
         }
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    (
+        "Welche Fenster sind in Küche und Büro offen?",
+        "In Büro und Küche: welche offenen Fenster gibt es?",
+        "Offene Fenster in der Küche und im Büro, wo sind sie?",
+    ),
+)
+def test_coordinated_query_locations_are_one_read_only_union(engine, sentence):
+    result = engine.match(sentence, WINDOWS)
+
+    assert result is not None
+    assert result.plan is None
+    assert {entity.entity_id for entity in result.command.entities} == {
+        "binary_sensor.buero",
+    }
+    assert len(result.frame.parameters["locations"]) == 2
+
+
+def test_or_connected_locations_remain_ambiguous(engine):
+    assert engine.match("Sind in Küche oder Büro Fenster offen?", WINDOWS) is None

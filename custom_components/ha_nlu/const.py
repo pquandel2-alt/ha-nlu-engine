@@ -5,6 +5,12 @@ from __future__ import annotations
 DOMAIN = "ha_nlu"
 
 CONF_SELECTED_ENTITIES = "selected_entities"
+CONF_READ_ONLY_ENTITIES = "read_only_entities"
+CONF_CONFIRMATION_LEVEL = "confirmation_level"
+CONF_MAX_ACTION_TARGETS = "max_action_targets"
+CONF_ALLOW_NON_ADMIN_CRITICAL = "allow_non_admin_critical"
+CONF_ALLOW_NON_ADMIN_AUTOMATIONS = "allow_non_admin_automations"
+CONF_CONTEXT_TTL_SECONDS = "context_ttl_seconds"
 
 # Domains the intent set can act on or (for "sensor"/"binary_sensor") read
 # state from. Mirrors service_call.py's IntentSpec/QueryIntentSpec.allowed_domains.
@@ -20,7 +26,7 @@ SELECTABLE_DOMAINS = (
     "climate", "media_player", "vacuum", "scene", "lock", "calendar",
     "humidifier", "water_heater", "select", "number", "input_number",
     "input_boolean", "button", "valve", "lawn_mower", "camera", "notify",
-    "todo", "timer",
+    "todo", "timer", "alarm_control_panel", "group",
 )
 
 NOT_UNDERSTOOD_TEXT = "Das habe ich nicht verstanden."
