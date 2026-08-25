@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.37.0**
+- Aktuelle Version: **4.38.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -707,15 +707,20 @@ python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
 ```
 
-Geprüfter Stand von Version 4.37.0:
+Geprüfter Stand von Version 4.38.0:
 
 ```text
-2003 passed, 12 skipped
+2009 passed, 12 skipped
+84 % Gesamt-Coverage
+64 % Coverage für conversation.py
 ```
 
 Zusätzlich wurden ausgeführt:
 
 - Pyflakes für Integration und Tests,
+- eine blockierende Pyright-Prüfung für den Strict-Scope,
+- eine nicht blockierende Pyright-Gesamtprüfung zur schrittweisen Härtung,
+- ein versionierter XML-Coverage-Bericht als CI-Artefakt,
 - JSON-Validierung der deutschen UI-Texte und
 - `git diff --check`.
 
@@ -732,7 +737,7 @@ folgenden Befehl ausgeführt werden:
 ![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
 
 Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.37.0. Benchmark,
+Entwicklungsstands und kein aktueller Nachweis für Version 4.38.0. Benchmark,
 Fehlerdiagnose und Messungen auf schwacher Hardware werden bewusst separat
 aktualisiert. Ein perfektes Ergebnis in einem bekannten Korpus bedeutet nicht,
 dass jede mögliche Formulierung verstanden wird.

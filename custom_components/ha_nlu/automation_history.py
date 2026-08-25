@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from typing import Any
+from typing import Any, cast
 
 
 def _write_atomic(path: str, content: str) -> None:
@@ -43,7 +43,7 @@ class AutomationHistoryStore:
                 value = json.load(handle)
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             return []
-        return value if isinstance(value, list) else []
+        return cast(list[dict[str, Any]], value) if isinstance(value, list) else []
 
     def append(
         self,

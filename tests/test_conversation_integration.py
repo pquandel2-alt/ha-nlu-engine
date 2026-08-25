@@ -31,8 +31,13 @@ import _ha_stub  # noqa: E402
 _ha_stub.install()
 
 import ha_nlu.conversation as ha_conversation  # noqa: E402
+from ha_nlu.automation_management import (  # noqa: E402
+    AutomationManagementKind,
+    AutomationManagementRequest,
+)
 from ha_nlu.conversation import NluConversationEntity  # noqa: E402
 from ha_nlu.entities import EntitySnapshot  # noqa: E402
+from ha_nlu.nlu.context import PendingAutomationManagement  # noqa: E402
 from homeassistant.components.conversation import ConversationInput  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
 from homeassistant.core import HomeAssistant  # noqa: E402
@@ -288,7 +293,7 @@ def test_unmatched_sentence_returns_not_understood(monkeypatch):
     assert result.response.error_code == intent.IntentResponseErrorCode.NO_INTENT_MATCH
 
 
-def test_service_call_exception_produces_clean_failed_to_handle_response(monkeypatch):
+def test_service_call_exception_produces_clean_failed_to_handle_response(monkeypatch, caplog):
     """Milestone 0 regression: a service-call failure must produce a clean
     FAILED_TO_HANDLE response, not propagate as "Unexpected error during
     intent recognition" (the broadened ``except Exception`` in
@@ -300,6 +305,41 @@ def test_service_call_exception_produces_clean_failed_to_handle_response(monkeyp
 
     assert result.response.error_code == intent.IntentResponseErrorCode.FAILED_TO_HANDLE
     assert "boom" in result.response.speech
+    assert "Service call homeassistant.turn_on" in caplog.text
+
+
+def test_undo_service_failure_is_logged(monkeypatch, caplog):
+    entity = _make_entity(monkeypatch, [FLUR_LICHT_OFF])
+    _run(entity, "Schalte das Flurlicht ein", conversation_id="undo-failure")
+    entity.hass.services.async_call.reset_mock()
+    entity.hass.services.async_call.side_effect = RuntimeError("undo unavailable")
+
+    result = _run(entity, "Mach das rückgängig", conversation_id="undo-failure")
+
+    assert "undo unavailable" in result.response.speech
+    assert "Undo service call failed" in caplog.text
+
+
+def test_automation_management_failure_is_logged(monkeypatch, caplog):
+    entity = _make_entity(monkeypatch, [])
+    entity._automation_executor = AsyncMock()
+    entity._automation_executor.async_cleanup_expired_scheduled_automations.side_effect = (
+        RuntimeError("yaml unavailable")
+    )
+    response = intent.IntentResponse(language="de")
+    user_input = ConversationInput(text="Ja", conversation_id="management-failure")
+    pending = PendingAutomationManagement(
+        AutomationManagementRequest(AutomationManagementKind.CLEAN_EXPIRED)
+    )
+
+    result = asyncio.run(
+        entity._async_handle_automation_management_confirmation(
+            user_input, response, pending
+        )
+    )
+
+    assert "yaml unavailable" in result.response.speech
+    assert "Automation management failed" in caplog.text
 
 
 def test_pronoun_follow_up_reuses_context_from_previous_command(monkeypatch):

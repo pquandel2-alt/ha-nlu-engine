@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from functools import partial
 from dataclasses import dataclass
@@ -9,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum, auto
 
 from .entities import EntitySnapshot, generate_aliases, normalize_for_compare
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class HistoryMetric(Enum):
@@ -235,6 +238,8 @@ async def async_execute_history_query(
         ],
     }
     try:
+        # ``recorder.get_statistics`` is exposed as a HA service, but with
+        # ``return_response=True`` this is a bounded read and never mutates HA.
         result = await hass.services.async_call(
             "recorder",
             "get_statistics",
@@ -242,7 +247,8 @@ async def async_execute_history_query(
             blocking=True,
             return_response=True,
         )
-    except Exception:  # Recorder absent/disabled or API not supported.
+    except Exception as err:  # Recorder absent/disabled or API not supported.
+        _LOGGER.warning("Recorder statistics query failed: %s", err, exc_info=True)
         return "Die Home-Assistant-Verlaufsdaten sind momentan nicht verfügbar."
     return render_history_result(query, result)
 
@@ -271,7 +277,8 @@ async def _async_execute_comparative_history_query(
     try:
         first_response = await fetch(query.first)
         second_response = await fetch(query.second)
-    except Exception:
+    except Exception as err:
+        _LOGGER.warning("Recorder comparison query failed: %s", err, exc_info=True)
         return "Die Home-Assistant-Verlaufsdaten sind momentan nicht verfügbar."
     first_rows = first_response.get(query.entity.entity_id, []) if isinstance(first_response, dict) else []
     second_rows = second_response.get(query.entity.entity_id, []) if isinstance(second_response, dict) else []
@@ -377,6 +384,7 @@ async def _async_execute_state_history_query(hass, query: StateHistoryQuery) -> 
                 no_attributes=True,
             )
         )
-    except Exception:  # Recorder absent/disabled or history API unavailable.
+    except Exception as err:  # Recorder absent/disabled or history API unavailable.
+        _LOGGER.warning("Recorder state-history query failed: %s", err, exc_info=True)
         return "Die Home-Assistant-Verlaufsdaten sind momentan nicht verfügbar."
     return render_state_history_result(query, result)

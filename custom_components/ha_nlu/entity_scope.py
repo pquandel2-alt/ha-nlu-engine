@@ -60,7 +60,7 @@ def resolve_entity_scope(
     normalized = normalize_for_compare(text)
     candidates = [entity for entity in entities if entity.domain in allowed_domains]
 
-    named = []
+    named: list[EntitySnapshot] = []
     for entity in candidates:
         if any(_contains(normalized, name) for name in (entity.friendly_name, *entity.aliases)):
             named.append(entity)

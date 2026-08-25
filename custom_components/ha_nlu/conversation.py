@@ -46,6 +46,7 @@ from .automation_management import (
 )
 from .automation_structure_edit import (
     AutomationEditOperation,
+    AutomationStructureEditRequest,
     parse_automation_structure_edit,
 )
 from .automation_wizard import (
@@ -82,6 +83,7 @@ from .engine import (
     AutomationMatchResult,
     AutomationToggleMatchResult,
     CommandPlan,
+    MatchResult,
     _AUTOMATION_DELETE_RE,
     _AUTOMATION_DISABLE_RE,
     _AUTOMATION_ENABLE_RE,
@@ -89,7 +91,13 @@ from .engine import (
 )
 from .entities import EntitySnapshot, normalize_for_compare
 from .hass_entities import build_device_snapshots, build_entity_snapshots
-from .history_query import async_execute_history_query, parse_history_query
+from .history_query import (
+    ComparativeHistoryQuery,
+    HistoryQuery,
+    StateHistoryQuery,
+    async_execute_history_query,
+    parse_history_query,
+)
 from .management_dialogs import (
     async_handle_automation_action_edit_turn,
     async_handle_automation_structure_edit_turn,
@@ -114,6 +122,7 @@ from .nlu.context import (
     PendingAutomationWizard,
     PendingCalendarEvent,
     PendingServiceConfirmation,
+    PendingSemanticCommand,
     PendingProductivityCommand,
 )
 from .nlu.dialog_focus import DialogFocus, derive_dialog_focus
@@ -342,85 +351,13 @@ class NluConversationEntity(
             )
 
         if is_undo_request(user_input.text):
-            undo = pending.pending_undo if pending is not None else None
-            current_user_id = conversation_user_id(user_input)
-            if undo is None:
-                response.async_set_speech(
-                    "Es gibt keine kürzlich ausgeführte, sicher rückgängig machbare Aktion."
-                )
-            elif (
-                undo.requested_by_user_id is not None
-                and undo.requested_by_user_id != current_user_id
-            ):
-                response.async_set_error(
-                    intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-                    "Diese Rücknahme gehört zu einem anderen Benutzer.",
-                )
-            else:
-                is_admin = await user_is_admin(self.hass, user_input)
-                denial = next(
-                    (
-                        decision.reason
-                        for plan in undo.plans
-                        if (
-                            decision := evaluate_service_plan(
-                                plan,
-                                entities,
-                                self.entry.options,
-                                is_admin=is_admin,
-                                user_id=current_user_id,
-                            )
-                        ).outcome
-                        is PolicyOutcome.DENY
-                    ),
-                    None,
-                )
-                if denial is not None:
-                    response.async_set_error(
-                        intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-                        denial,
-                    )
-                    return conversation.ConversationResult(
-                        response=response,
-                        conversation_id=user_input.conversation_id,
-                    )
-                self._context_store.clear(user_input.conversation_id)
-                try:
-                    for plan in undo.plans:
-                        await self.hass.services.async_call(
-                            plan.domain,
-                            plan.service,
-                            {"entity_id": plan.entity_id, **plan.data},
-                            blocking=True,
-                        )
-                        self._record_execution(user_input, plan)
-                except Exception as err:  # noqa: BLE001
-                    response.async_set_error(
-                        intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-                        f"Fehler beim Rückgängigmachen: {err}",
-                    )
-                else:
-                    response.async_set_speech("Die letzte Aktion wurde rückgängig gemacht.")
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
+            return await self._async_handle_undo_request(
+                user_input, response, pending, entities
             )
 
         if is_explanation_request(user_input.text):
-            if pending is not None and pending.pending_automation_confirmation is not None:
-                speech = (
-                    "Ich habe folgende Automation verstanden:\n"
-                    + render_automation_preview(
-                        pending.pending_automation_confirmation.model, entities
-                    )
-                )
-            elif pending is not None and pending.last_command is not None:
-                speech = explain_command(pending.last_command)
-            else:
-                speech = "In diesem Gespräch gibt es noch keinen verstandenen Befehl."
-            response.async_set_speech(speech)
-            response.response_type = intent.IntentResponseType.QUERY_ANSWER
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
+            return self._handle_explanation_request(
+                user_input, response, pending, entities
             )
 
         all_calendars = tuple(entity for entity in entities if entity.domain == "calendar")
@@ -450,34 +387,11 @@ class NluConversationEntity(
             )
 
         if pending is not None and pending.pending_automation_confirmation is not None:
-            revised = self._engine.revise_pending_automation(
-                user_input.text,
-                pending.pending_automation_confirmation.model,
+            return await self._async_handle_pending_automation_confirmation_turn(
+                user_input,
+                response,
+                pending.pending_automation_confirmation,
                 entities,
-                self._world_model,
-            )
-            if revised is not None and revised.validation_error is None:
-                self._context_store.set(
-                    user_input.conversation_id,
-                    ConversationContext(
-                        last_command=None,
-                        last_entities=(),
-                        last_area=None,
-                        pending_clarification=None,
-                        pending_automation_confirmation=PendingAutomationConfirmation(
-                            model=revised.model,
-                            requested_by_user_id=(
-                                pending.pending_automation_confirmation.requested_by_user_id
-                            ),
-                        ),
-                    ),
-                )
-                response.async_set_speech(render_automation_preview(revised.model, entities))
-                return conversation.ConversationResult(
-                    response=response, conversation_id=user_input.conversation_id
-                )
-            return await self._async_handle_automation_confirmation_reply(
-                user_input, response, pending.pending_automation_confirmation, entities
             )
 
         if pending is not None and pending.pending_automation_action_edit is not None:
@@ -517,106 +431,33 @@ class NluConversationEntity(
             )
 
         if pending is not None and pending.pending_semantic_command is not None:
-            dialog = continue_semantic_dialog(
-                user_input.text, pending.pending_semantic_command
-            )
-            if dialog.result is not None:
-                self._context_store.clear(user_input.conversation_id)
-                return await self._async_handle_device_control_result(
-                    user_input, response, dialog.result
-                )
-            self._context_store.set(
-                user_input.conversation_id,
-                ConversationContext(
-                    last_command=None,
-                    last_entities=(),
-                    last_area=None,
-                    pending_clarification=None,
-                    pending_semantic_command=dialog.pending,
-                ),
-            )
-            response.async_set_speech(dialog.question)
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
+            return await self._async_handle_pending_semantic_command(
+                user_input, response, pending.pending_semantic_command
             )
 
         if pending is not None and pending.pending_automation_draft is not None:
-            draft = pending.pending_automation_draft
-            completed = self._engine.complete_automation_draft(
-                user_input.text,
-                draft.trigger,
-                draft.source_text,
-                entities,
-                self._world_model,
-                pending,
-            )
-            if completed is None:
-                response.async_set_speech(
-                    "Was soll dann passieren? Bitte nenne eine vollständige Aktion."
-                )
-            elif completed.validation_error is not None:
-                self._context_store.clear(user_input.conversation_id)
-                response.async_set_speech(completed.response_text)
-            else:
-                self._context_store.set(
-                    user_input.conversation_id,
-                    ConversationContext(
-                        last_command=None,
-                        last_entities=(),
-                        last_area=None,
-                        pending_clarification=None,
-                        pending_automation_confirmation=PendingAutomationConfirmation(
-                            model=completed.model,
-                            requested_by_user_id=conversation_user_id(user_input),
-                        ),
-                    ),
-                )
-                response.async_set_speech(render_automation_preview(completed.model, entities))
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
+            return await self._async_handle_pending_automation_draft(
+                user_input, response, pending, entities
             )
 
         if starts_automation_wizard(user_input.text):
-            state = AutomationWizardState()
-            self._store_automation_wizard(user_input.conversation_id, state)
-            response.async_set_speech(
-                "Was soll die Automation auslösen? Bitte nenne einen vollständigen Auslöser."
-            )
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
-            )
+            return self._start_automation_wizard(user_input, response)
 
         if re.search(
             r"\bwas\s+wurde\s+heute\s+(?:durch|von)\s+homeintent\s+ausgefuehrt\b",
             normalize_for_compare(user_input.text),
         ):
-            response.async_set_speech(
-                render_today(self._audit_trail.today(dt_util.now()))
-            )
-            response.response_type = intent.IntentResponseType.QUERY_ANSWER
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
-            )
+            return self._handle_audit_query(user_input, response)
 
         history_query = parse_history_query(user_input.text, entities, dt_util.now())
         if history_query is not None:
-            self._context_store.clear(user_input.conversation_id)
-            response.async_set_speech(
-                await async_execute_history_query(self.hass, history_query)
-            )
-            response.response_type = intent.IntentResponseType.QUERY_ANSWER
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
+            return await self._async_handle_history_query_result(
+                user_input, response, history_query
             )
 
         advanced_answer = match_advanced_query(user_input.text, entities, dt_util.now())
         if advanced_answer is not None:
-            self._context_store.clear(user_input.conversation_id)
-            response.async_set_speech(advanced_answer)
-            response.response_type = intent.IntentResponseType.QUERY_ANSWER
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
-            )
+            return self._handle_advanced_answer(user_input, response, advanced_answer)
 
         if re.search(
             r"\b(?:alarm|alarmanlage|sicherung|scharf|unscharf)\b",
@@ -665,26 +506,8 @@ class NluConversationEntity(
             user_input.text, calendars, dt_util.now()
         )
         if calendar_draft is not None:
-            if not calendars:
-                self._context_store.clear(user_input.conversation_id)
-                response.async_set_speech(
-                    "Ich finde keinen für HomeIntent freigegebenen, beschreibbaren Kalender."
-                )
-                return conversation.ConversationResult(
-                    response=response, conversation_id=user_input.conversation_id
-                )
-            question = calendar_event_question(calendar_draft, calendars)
-            awaiting_confirmation = question is None
-            self._store_calendar_event(
-                user_input.conversation_id, calendar_draft, awaiting_confirmation
-            )
-            response.async_set_speech(
-                render_calendar_event_preview(calendar_draft, calendars)
-                if awaiting_confirmation
-                else question
-            )
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
+            return self._handle_calendar_draft(
+                user_input, response, calendar_draft, calendars
             )
 
         structure_edit = (
@@ -693,113 +516,13 @@ class NluConversationEntity(
             else parse_automation_structure_edit(user_input.text)
         )
         if structure_edit is not None:
-            if self._automation_executor is None:
-                self._automation_executor = AutomationExecutor(self.hass)
-            automations = await self._automation_executor.async_list_automations()
-            candidates = tuple(
-                item for item in homeintent_candidates(automations, user_input.text)
-                if not item.once
-            )
-            if not candidates:
-                response.async_set_speech(
-                    "Ich finde keine passende dauerhafte HomeIntent-Automation. "
-                    "Einmalige Aufträge werden aus Sicherheitsgründen nicht strukturell geändert."
-                )
-                return conversation.ConversationResult(
-                    response=response, conversation_id=user_input.conversation_id
-                )
-            pending_edit = PendingAutomationStructureEdit(
-                request=structure_edit,
-                candidates=candidates,
-                automation=candidates[0] if len(candidates) == 1 else None,
-            )
-            if len(candidates) > 1:
-                store_automation_structure_edit(
-                    self, user_input.conversation_id, pending_edit
-                )
-                response.async_set_speech(
-                    "Welche Automation meinst du? "
-                    + ", ".join(_automation_label(item) for item in candidates) + "."
-                )
-                return conversation.ConversationResult(
-                    response=response, conversation_id=user_input.conversation_id
-                )
-            if (
-                structure_edit.payload
-                or structure_edit.operation in {
-                    AutomationEditOperation.CLEAR, AutomationEditOperation.REMOVE
-                }
-            ):
-                return await async_prepare_automation_structure_edit(
-                    self,
-                    user_input,
-                    response,
-                    pending_edit,
-                    entities,
-                    structure_edit.payload,
-                )
-            store_automation_structure_edit(
-                self, user_input.conversation_id, pending_edit
-            )
-            response.async_set_speech(
-                "Wie soll der neue Auslöser lauten?"
-                if structure_edit.section.name == "TRIGGERS"
-                else "Welche Bedingung soll gelten?"
-            )
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
+            return await self._async_handle_structure_edit_request(
+                user_input, response, structure_edit, entities
             )
 
         if is_action_edit_request(user_input.text):
-            if self._automation_executor is None:
-                self._automation_executor = AutomationExecutor(self.hass)
-            automations = await self._automation_executor.async_list_automations()
-            candidates = homeintent_candidates(automations, user_input.text)
-            operation = action_edit_operation(user_input.text)
-            if not candidates:
-                response.async_set_speech("Ich finde keine änderbare HomeIntent-Automation.")
-            elif len(candidates) > 1:
-                store_automation_action_edit(
-                    self,
-                    user_input.conversation_id,
-                    PendingAutomationActionEdit(
-                        candidates=candidates, operation=operation
-                    ),
-                )
-                response.async_set_speech(
-                    "Welche Automation meinst du? "
-                    + ", ".join(_automation_label(item) for item in candidates)
-                    + "."
-                )
-            else:
-                reordered = reordered_actions(candidates[0].actions, operation)
-                if operation.startswith("reorder:") and reordered is None:
-                    response.async_set_speech(
-                        "Diese Automation hat nicht genügend Aktionen für diese Reihenfolge."
-                    )
-                else:
-                    store_automation_action_edit(
-                        self,
-                        user_input.conversation_id,
-                        PendingAutomationActionEdit(
-                            candidates=candidates,
-                            automation=candidates[0],
-                            rendered_actions=reordered or (),
-                            action_text=user_input.text if reordered else None,
-                            operation=operation,
-                        ),
-                    )
-                    response.async_set_speech(
-                        (
-                            "Soll ich die Reihenfolge der Aktionen wie gewünscht ändern?"
-                            if reordered
-                            else "Welche Aktion soll zusätzlich danach ausgeführt werden?"
-                            if operation == "add"
-                            else "Was soll stattdessen passieren? Auslöser und Bedingungen bleiben unverändert."
-                        )
-                    )
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
+            return await self._async_handle_action_edit_request(
+                user_input, response
             )
 
         management_request = parse_automation_management(user_input.text)
@@ -991,230 +714,357 @@ class NluConversationEntity(
                 result = self._engine.match(user_input.text, entities, self._world_model)
 
         if result is None:
-            corrected_plans: dict[tuple, tuple[object, str, EntitySnapshot]] = {}
-            for suggestion in phonetic_suggestions(user_input.text, entities):
-                corrected = self._engine.match(
-                    suggestion.corrected_text, entities, self._world_model
-                )
-                plan = getattr(corrected, "plan", None)
-                success = getattr(corrected, "response_text", None)
-                if plan is None:
-                    device = match_device_control(suggestion.corrected_text, entities)
-                    plan = device.plan if device is not None else None
-                    success = device.response_text if device is not None else None
-                if plan is None or not success:
-                    continue
-                entity_ids = (
-                    tuple(plan.entity_id)
-                    if isinstance(plan.entity_id, list)
-                    else (plan.entity_id,)
-                )
-                key = (plan.domain, plan.service, entity_ids, repr(sorted(plan.data.items())))
-                corrected_plans[key] = (plan, success, suggestion.entity)
-            if len(corrected_plans) == 1:
-                plan, success, corrected_entity = next(iter(corrected_plans.values()))
-                self._context_store.set(
-                    user_input.conversation_id,
-                    ConversationContext(
-                        last_command=None,
-                        last_entities=(),
-                        last_area=None,
-                        pending_clarification=None,
-                        pending_service_confirmation=PendingServiceConfirmation(
-                            plan,
-                            success,
-                            conversation_user_id(user_input),
-                            build_undo_plan(
-                                plan,
-                                entities,
-                                requested_by_user_id=conversation_user_id(user_input),
-                            ),
-                        ),
-                    ),
-                )
-                response.async_set_speech(
-                    f"Meintest du „{corrected_entity.friendly_name}“? "
-                    f"Soll ich {success.rstrip('.')}?"
-                )
-                return conversation.ConversationResult(
-                    response=response, conversation_id=user_input.conversation_id
-                )
-
-            dialog = start_semantic_dialog(user_input.text, entities)
-            if dialog is not None and dialog.result is not None:
-                return await self._async_handle_device_control_result(
-                    user_input, response, dialog.result
-                )
-            if dialog is not None and dialog.pending is not None:
-                self._context_store.set(
-                    user_input.conversation_id,
-                    ConversationContext(
-                        last_command=None,
-                        last_entities=(),
-                        last_area=None,
-                        pending_clarification=None,
-                        pending_semantic_command=dialog.pending,
-                    ),
-                )
-                response.async_set_speech(dialog.question)
-                return conversation.ConversationResult(
-                    response=response, conversation_id=user_input.conversation_id
-                )
-            response.async_set_error(
-                intent.IntentResponseErrorCode.NO_INTENT_MATCH,
-                self._engine.failure_feedback(user_input.text, entities) or NOT_UNDERSTOOD_TEXT,
-            )
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
-            )
+            return await self._async_handle_no_match(user_input, response, entities)
 
         if isinstance(result, CommandPlan):
-            # V4.8 Multi-Step Commands: every sub-command already validated
-            # together before we got here (see CommandPlan's docstring) -
-            # only a runtime HA-side failure can still interrupt this, in
-            # which case we stop at the first failing sub-command rather
-            # than attempt a rollback of already-executed ones (same
-            # fail-fast-on-error handling as the single-command path below,
-            # just without retroactive undo - HA service calls aren't
-            # transactional). Context isn't carried over for a multi-step
-            # turn: "last entities" would be ambiguous across several
-            # unrelated sub-commands, so follow-ups just start fresh.
-            is_admin = await user_is_admin(self.hass, user_input)
-            actor_id = conversation_user_id(user_input)
-            for sub_result in result.commands:
-                if sub_result.plan is None:
-                    continue
-                policy = evaluate_service_plan(
-                    sub_result.plan,
-                    entities,
-                    self.entry.options,
-                    is_admin=is_admin,
-                    user_id=actor_id,
-                )
-                if policy.outcome is PolicyOutcome.DENY:
-                    self._context_store.clear(user_input.conversation_id)
-                    response.async_set_error(
-                        intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-                        policy.reason or "Mindestens eine Aktion ist nicht erlaubt.",
-                    )
-                    return conversation.ConversationResult(
-                        response=response,
-                        conversation_id=user_input.conversation_id,
-                    )
-                if policy.outcome is PolicyOutcome.CONFIRM:
-                    self._context_store.clear(user_input.conversation_id)
-                    response.async_set_error(
-                        intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-                        "Sicherheitskritische Aktionen müssen einzeln bestätigt werden.",
-                    )
-                    return conversation.ConversationResult(
-                        response=response,
-                        conversation_id=user_input.conversation_id,
-                    )
-            self._context_store.clear(user_input.conversation_id)
-            response_parts: list[str] = []
-            multi_undo_parts: list[UndoPlan] = []
-            multi_undo_supported = True
-            for sub_result in result.commands:
-                if sub_result.plan is None:
-                    response_parts.append(sub_result.response_text)
-                    continue
-                inverse = build_undo_plan(
-                    sub_result.plan,
-                    entities,
-                    requested_by_user_id=actor_id,
-                )
-                if inverse is None:
-                    multi_undo_supported = False
-                else:
-                    multi_undo_parts.append(inverse)
-                try:
-                    await self.hass.services.async_call(
-                        sub_result.plan.domain,
-                        sub_result.plan.service,
-                        {"entity_id": sub_result.plan.entity_id, **sub_result.plan.data},
-                        blocking=True,
-                    )
-                    self._record_execution(user_input, sub_result.plan)
-                except Exception as err:  # noqa: BLE001 - HA 2025.x service calls can raise beyond HomeAssistantError (vol.Invalid, TimeoutError, ...); must not propagate as "Unexpected error during intent recognition"
-                    _LOGGER.error(
-                        "Service call %s.%s on %s failed: %s",
-                        sub_result.plan.domain,
-                        sub_result.plan.service,
-                        sub_result.plan.entity_id,
-                        err,
-                    )
-                    response.async_set_error(
-                        intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-                        f"Fehler beim Ausführen: {err}",
-                    )
-                    return conversation.ConversationResult(
-                        response=response, conversation_id=user_input.conversation_id
-                    )
-                response_parts.append(sub_result.response_text)
-            if multi_undo_supported and multi_undo_parts:
-                self._context_store.set(
-                    user_input.conversation_id,
-                    ConversationContext(
-                        last_command=None,
-                        last_entities=(),
-                        last_area=None,
-                        pending_clarification=None,
-                        pending_undo=UndoPlan(
-                            tuple(
-                                plan
-                                for undo in reversed(multi_undo_parts)
-                                for plan in undo.plans
-                            ),
-                            actor_id,
-                        ),
-                    ),
-                )
-            response.async_set_speech(" ".join(response_parts))
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
+            return await self._async_handle_command_plan(
+                user_input, response, result, entities
             )
 
         if isinstance(result, AutomationMatchResult):
-            # V5 Teil 7/10 (V5.23, "Dry Run"): a structurally- and
-            # semantically-valid AutomationModel is never persisted on this
-            # turn - it's spoken back as a preview and held as a
-            # PendingAutomationConfirmation awaiting the user's "ja"/"nein"
-            # (handled at the top of this method, same priority
-            # pending_clarification already has - see PendingAutomationConfirmation's
-            # own docstring). Still never a HA service call/write on *this*
-            # turn - that only happens once the confirmation reply resolves
-            # to YES.
-            #
-            # A validation_error result can never be confirmed (Integration
-            # Wave Migration Step 4's original scope boundary still applies
-            # to this branch unchanged): spoken back as the same debug tree
-            # + error name as before, no context stored, no follow-up
-            # possible - "niemals raten" extends to not offering to persist
-            # something already known to be invalid.
-            if result.validation_error is None:
-                self._context_store.set(
-                    user_input.conversation_id,
-                    ConversationContext(
-                        last_command=None,
-                        last_entities=(),
-                        last_area=None,
-                        pending_clarification=None,
-                        pending_automation_confirmation=PendingAutomationConfirmation(
-                            model=result.model,
-                            requested_by_user_id=conversation_user_id(user_input),
-                        ),
-                    ),
-                )
-                response.async_set_speech(render_automation_preview(result.model, entities))
-            else:
-                self._context_store.clear(user_input.conversation_id)
-                response.async_set_speech(result.response_text)
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
+            return self._handle_automation_match_result(
+                user_input, response, result, entities
             )
 
         if isinstance(result, AutomationDraftMatchResult):
+            return self._handle_automation_draft_match_result(
+                user_input, response, result
+            )
+
+        if isinstance(result, AutomationDeletionMatchResult):
+            return self._handle_automation_deletion_match_result(
+                user_input, response, result
+            )
+
+        if isinstance(result, AutomationToggleMatchResult):
+            return await self._async_handle_automation_toggle_result(
+                user_input, response, result
+            )
+
+        if result.clarification is not None:
+            return self._handle_clarification_result(user_input, response, result)
+
+        return await self._async_handle_match_result(
+            user_input, response, result, entities
+        )
+
+    async def _async_handle_undo_request(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        pending: ConversationContext | None,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult:
+        """Undo the most recent safely reversible action for this user."""
+        undo = pending.pending_undo if pending is not None else None
+        current_user_id = conversation_user_id(user_input)
+        if undo is None:
+            response.async_set_speech(
+                "Es gibt keine kürzlich ausgeführte, sicher rückgängig machbare Aktion."
+            )
+        elif (
+            undo.requested_by_user_id is not None
+            and undo.requested_by_user_id != current_user_id
+        ):
+            response.async_set_error(
+                intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                "Diese Rücknahme gehört zu einem anderen Benutzer.",
+            )
+        else:
+            is_admin = await user_is_admin(self.hass, user_input)
+            denial = next(
+                (
+                    decision.reason
+                    for plan in undo.plans
+                    if (
+                        decision := evaluate_service_plan(
+                            plan,
+                            entities,
+                            self.entry.options,
+                            is_admin=is_admin,
+                            user_id=current_user_id,
+                        )
+                    ).outcome
+                    is PolicyOutcome.DENY
+                ),
+                None,
+            )
+            if denial is not None:
+                response.async_set_error(
+                    intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                    denial,
+                )
+                return conversation.ConversationResult(
+                    response=response,
+                    conversation_id=user_input.conversation_id,
+                )
+            self._context_store.clear(user_input.conversation_id)
+            try:
+                for plan in undo.plans:
+                    await self.hass.services.async_call(
+                        plan.domain,
+                        plan.service,
+                        {"entity_id": plan.entity_id, **plan.data},
+                        blocking=True,
+                    )
+                    self._record_execution(user_input, plan)
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.error("Undo service call failed: %s", err, exc_info=True)
+                response.async_set_error(
+                    intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                    f"Fehler beim Rückgängigmachen: {err}",
+                )
+            else:
+                response.async_set_speech("Die letzte Aktion wurde rückgängig gemacht.")
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    def _handle_explanation_request(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        pending: ConversationContext | None,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult:
+        """Explain the pending automation or the last understood command."""
+        if pending is not None and pending.pending_automation_confirmation is not None:
+            speech = (
+                "Ich habe folgende Automation verstanden:\n"
+                + render_automation_preview(
+                    pending.pending_automation_confirmation.model, entities
+                )
+            )
+        elif pending is not None and pending.last_command is not None:
+            speech = explain_command(pending.last_command)
+        else:
+            speech = "In diesem Gespräch gibt es noch keinen verstandenen Befehl."
+        response.async_set_speech(speech)
+        response.response_type = intent.IntentResponseType.QUERY_ANSWER
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    def _start_automation_wizard(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+    ) -> conversation.ConversationResult:
+        """Start the bounded automation wizard."""
+        state = AutomationWizardState()
+        self._store_automation_wizard(user_input.conversation_id, state)
+        response.async_set_speech(
+            "Was soll die Automation auslösen? Bitte nenne einen vollständigen Auslöser."
+        )
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    def _handle_audit_query(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+    ) -> conversation.ConversationResult:
+        """Render today's bounded HomeIntent execution audit."""
+        response.async_set_speech(render_today(self._audit_trail.today(dt_util.now())))
+        response.response_type = intent.IntentResponseType.QUERY_ANSWER
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    async def _async_handle_history_query_result(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        history_query: HistoryQuery | StateHistoryQuery | ComparativeHistoryQuery,
+    ) -> conversation.ConversationResult:
+        """Execute a read-only recorder query and render its answer."""
+        self._context_store.clear(user_input.conversation_id)
+        response.async_set_speech(
+            await async_execute_history_query(self.hass, history_query)
+        )
+        response.response_type = intent.IntentResponseType.QUERY_ANSWER
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    def _handle_advanced_answer(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        answer: str,
+    ) -> conversation.ConversationResult:
+        """Return an already composed advanced-query answer."""
+        self._context_store.clear(user_input.conversation_id)
+        response.async_set_speech(answer)
+        response.response_type = intent.IntentResponseType.QUERY_ANSWER
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    def _handle_calendar_draft(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        draft: CalendarEventDraft,
+        calendars: tuple[EntitySnapshot, ...],
+    ) -> conversation.ConversationResult:
+        """Store a calendar draft and ask for its next missing value."""
+        if not calendars:
+            self._context_store.clear(user_input.conversation_id)
+            response.async_set_speech(
+                "Ich finde keinen für HomeIntent freigegebenen, beschreibbaren Kalender."
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+        question = calendar_event_question(draft, calendars)
+        awaiting_confirmation = question is None
+        self._store_calendar_event(
+            user_input.conversation_id, draft, awaiting_confirmation
+        )
+        response.async_set_speech(
+            render_calendar_event_preview(draft, calendars)
+            if awaiting_confirmation
+            else question
+        )
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    async def _async_handle_structure_edit_request(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        request: AutomationStructureEditRequest,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult:
+        """Resolve and prepare a trigger or condition edit."""
+        if self._automation_executor is None:
+            self._automation_executor = AutomationExecutor(self.hass)
+        automations = await self._automation_executor.async_list_automations()
+        candidates = tuple(
+            item
+            for item in homeintent_candidates(automations, user_input.text)
+            if not item.once
+        )
+        if not candidates:
+            response.async_set_speech(
+                "Ich finde keine passende dauerhafte HomeIntent-Automation. "
+                "Einmalige Aufträge werden aus Sicherheitsgründen nicht strukturell geändert."
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+        pending_edit = PendingAutomationStructureEdit(
+            request=request,
+            candidates=candidates,
+            automation=candidates[0] if len(candidates) == 1 else None,
+        )
+        if len(candidates) > 1:
+            store_automation_structure_edit(
+                self, user_input.conversation_id, pending_edit
+            )
+            response.async_set_speech(
+                "Welche Automation meinst du? "
+                + ", ".join(_automation_label(item) for item in candidates)
+                + "."
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+        if request.payload or request.operation in {
+            AutomationEditOperation.CLEAR,
+            AutomationEditOperation.REMOVE,
+        }:
+            return await async_prepare_automation_structure_edit(
+                self,
+                user_input,
+                response,
+                pending_edit,
+                entities,
+                request.payload,
+            )
+        store_automation_structure_edit(self, user_input.conversation_id, pending_edit)
+        response.async_set_speech(
+            "Wie soll der neue Auslöser lauten?"
+            if request.section.name == "TRIGGERS"
+            else "Welche Bedingung soll gelten?"
+        )
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    async def _async_handle_action_edit_request(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+    ) -> conversation.ConversationResult:
+        """Resolve an automation and begin its action-only edit dialog."""
+        if self._automation_executor is None:
+            self._automation_executor = AutomationExecutor(self.hass)
+        automations = await self._automation_executor.async_list_automations()
+        candidates = homeintent_candidates(automations, user_input.text)
+        operation = action_edit_operation(user_input.text)
+        if not candidates:
+            response.async_set_speech("Ich finde keine änderbare HomeIntent-Automation.")
+        elif len(candidates) > 1:
+            store_automation_action_edit(
+                self,
+                user_input.conversation_id,
+                PendingAutomationActionEdit(
+                    candidates=candidates, operation=operation
+                ),
+            )
+            response.async_set_speech(
+                "Welche Automation meinst du? "
+                + ", ".join(_automation_label(item) for item in candidates)
+                + "."
+            )
+        else:
+            reordered = reordered_actions(candidates[0].actions, operation)
+            if operation.startswith("reorder:") and reordered is None:
+                response.async_set_speech(
+                    "Diese Automation hat nicht genügend Aktionen für diese Reihenfolge."
+                )
+            else:
+                store_automation_action_edit(
+                    self,
+                    user_input.conversation_id,
+                    PendingAutomationActionEdit(
+                        candidates=candidates,
+                        automation=candidates[0],
+                        rendered_actions=reordered or (),
+                        action_text=user_input.text if reordered else None,
+                        operation=operation,
+                    ),
+                )
+                response.async_set_speech(
+                    "Soll ich die Reihenfolge der Aktionen wie gewünscht ändern?"
+                    if reordered
+                    else "Welche Aktion soll zusätzlich danach ausgeführt werden?"
+                    if operation == "add"
+                    else "Was soll stattdessen passieren? Auslöser und Bedingungen bleiben unverändert."
+                )
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    async def _async_handle_pending_automation_confirmation_turn(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        pending: PendingAutomationConfirmation,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult:
+        """Revise a pending automation or interpret its confirmation reply."""
+        revised = self._engine.revise_pending_automation(
+            user_input.text,
+            pending.model,
+            entities,
+            self._world_model,
+        )
+        if revised is not None and revised.validation_error is None:
             self._context_store.set(
                 user_input.conversation_id,
                 ConversationContext(
@@ -1222,96 +1072,100 @@ class NluConversationEntity(
                     last_entities=(),
                     last_area=None,
                     pending_clarification=None,
-                    pending_automation_draft=PendingAutomationDraft(
-                        trigger=result.trigger,
-                        source_text=result.source_text,
+                    pending_automation_confirmation=PendingAutomationConfirmation(
+                        model=revised.model,
+                        requested_by_user_id=pending.requested_by_user_id,
                     ),
                 ),
             )
-            response.async_set_speech(result.response_text)
+            response.async_set_speech(render_automation_preview(revised.model, entities))
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
             )
+        return await self._async_handle_automation_confirmation_reply(
+            user_input, response, pending, entities
+        )
 
-        if isinstance(result, AutomationDeletionMatchResult):
-            # V5 Teil 8/10 (V5.28, "Automation Deletion"): mirrors the
-            # AutomationMatchResult branch above - nothing is ever deleted
-            # on this turn. A resolved single match is spoken back as a
-            # "ja"/"nein" question and held as a PendingAutomationDeletion
-            # (handled at the top of this method); a refusal (no match, or
-            # 2+ matches) just speaks result.response_text and stores
-            # nothing, same "niemals raten" stance the query path already
-            # takes for ambiguous automation names.
-            if result.automation is not None:
-                self._context_store.set(
-                    user_input.conversation_id,
-                    ConversationContext(
-                        last_command=None,
-                        last_entities=(),
-                        last_area=None,
-                        pending_clarification=None,
-                        pending_automation_deletion=PendingAutomationDeletion(automation=result.automation),
-                    ),
-                )
-            else:
-                self._context_store.clear(user_input.conversation_id)
-            response.async_set_speech(result.response_text)
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
-            )
-
-        if isinstance(result, AutomationToggleMatchResult):
-            # Wave 11 "Automation Disable/Enable": unlike the deletion
-            # branch above, a resolved single match is acted on immediately
-            # on this same turn - no pending state is ever stored (see
-            # ``AutomationToggleMatchResult``'s own docstring for why this
-            # action needs no ja/nein gate). A refusal (no match, or 2+
-            # matches) just speaks ``result.response_text`` with no action,
-            # same "niemals raten" stance the delete/query paths already
-            # take for ambiguous automation names.
+    async def _async_handle_pending_semantic_command(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        pending: PendingSemanticCommand,
+    ) -> conversation.ConversationResult:
+        """Continue a deterministic slot-filling device dialog."""
+        dialog = continue_semantic_dialog(user_input.text, pending)
+        if dialog.result is not None:
             self._context_store.clear(user_input.conversation_id)
-            if result.automation is not None:
-                if self._automation_executor is None:
-                    self._automation_executor = AutomationExecutor(self.hass)
-                try:
-                    if result.enable:
-                        await self._automation_executor.async_enable_automation(
-                            result.automation.automation_id
-                        )
-                    else:
-                        await self._automation_executor.async_disable_automation(
-                            result.automation.automation_id
-                        )
-                except Exception as err:  # noqa: BLE001 - a YAML write + service call can fail in ways beyond HomeAssistantError; must not propagate as "Unexpected error during intent recognition"
-                    verb = "Aktivieren" if result.enable else "Deaktivieren"
-                    _LOGGER.error("Automation %s failed: %s", verb.lower(), err)
-                    response.async_set_error(
-                        intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-                        f"Fehler beim {verb} der Automation: {err}",
-                    )
-                    return conversation.ConversationResult(
-                        response=response, conversation_id=user_input.conversation_id
-                    )
-            response.async_set_speech(result.response_text)
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
+            return await self._async_handle_device_control_result(
+                user_input, response, dialog.result
             )
+        self._context_store.set(
+            user_input.conversation_id,
+            ConversationContext(
+                last_command=None,
+                last_entities=(),
+                last_area=None,
+                pending_clarification=None,
+                pending_semantic_command=dialog.pending,
+            ),
+        )
+        response.async_set_speech(dialog.question)
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
 
-        if result.clarification is not None:
+    async def _async_handle_pending_automation_draft(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        pending: ConversationContext,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult:
+        """Complete the action missing from a pending automation draft."""
+        draft = pending.pending_automation_draft
+        assert draft is not None
+        completed = self._engine.complete_automation_draft(
+            user_input.text,
+            draft.trigger,
+            draft.source_text,
+            entities,
+            self._world_model,
+            pending,
+        )
+        if completed is None:
+            response.async_set_speech(
+                "Was soll dann passieren? Bitte nenne eine vollständige Aktion."
+            )
+        elif completed.validation_error is not None:
+            self._context_store.clear(user_input.conversation_id)
+            response.async_set_speech(completed.response_text)
+        else:
             self._context_store.set(
                 user_input.conversation_id,
                 ConversationContext(
                     last_command=None,
                     last_entities=(),
                     last_area=None,
-                    pending_clarification=result.clarification,
+                    pending_clarification=None,
+                    pending_automation_confirmation=PendingAutomationConfirmation(
+                        model=completed.model,
+                        requested_by_user_id=conversation_user_id(user_input),
+                    ),
                 ),
             )
-            response.async_set_speech(result.response_text)
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
-            )
+            response.async_set_speech(render_automation_preview(completed.model, entities))
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
 
+    async def _async_handle_match_result(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        result: MatchResult,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult:
+        """Authorize, execute and remember one regular engine match."""
         if result.plan is not None:
             policy = evaluate_service_plan(
                 result.plan,
@@ -1409,6 +1263,335 @@ class NluConversationEntity(
         if result.command is not None and result.command.intent in QUERY_INTENT_NAMES:
             response.response_type = intent.IntentResponseType.QUERY_ANSWER
         response.async_set_speech(result.response_text)
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    def _handle_automation_match_result(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        result: AutomationMatchResult,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult:
+        """Store a valid automation preview, or report its validation error."""
+        if result.validation_error is None:
+            self._context_store.set(
+                user_input.conversation_id,
+                ConversationContext(
+                    last_command=None,
+                    last_entities=(),
+                    last_area=None,
+                    pending_clarification=None,
+                    pending_automation_confirmation=PendingAutomationConfirmation(
+                        model=result.model,
+                        requested_by_user_id=conversation_user_id(user_input),
+                    ),
+                ),
+            )
+            response.async_set_speech(render_automation_preview(result.model, entities))
+        else:
+            self._context_store.clear(user_input.conversation_id)
+            response.async_set_speech(result.response_text)
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    def _handle_automation_draft_match_result(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        result: AutomationDraftMatchResult,
+    ) -> conversation.ConversationResult:
+        """Persist a partial automation until its action is supplied."""
+        self._context_store.set(
+            user_input.conversation_id,
+            ConversationContext(
+                last_command=None,
+                last_entities=(),
+                last_area=None,
+                pending_clarification=None,
+                pending_automation_draft=PendingAutomationDraft(
+                    trigger=result.trigger,
+                    source_text=result.source_text,
+                ),
+            ),
+        )
+        response.async_set_speech(result.response_text)
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    def _handle_automation_deletion_match_result(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        result: AutomationDeletionMatchResult,
+    ) -> conversation.ConversationResult:
+        """Store an unambiguous deletion candidate for confirmation."""
+        if result.automation is not None:
+            self._context_store.set(
+                user_input.conversation_id,
+                ConversationContext(
+                    last_command=None,
+                    last_entities=(),
+                    last_area=None,
+                    pending_clarification=None,
+                    pending_automation_deletion=PendingAutomationDeletion(
+                        automation=result.automation
+                    ),
+                ),
+            )
+        else:
+            self._context_store.clear(user_input.conversation_id)
+        response.async_set_speech(result.response_text)
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    async def _async_handle_automation_toggle_result(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        result: AutomationToggleMatchResult,
+    ) -> conversation.ConversationResult:
+        """Apply an unambiguous enable/disable result immediately."""
+        self._context_store.clear(user_input.conversation_id)
+        if result.automation is not None:
+            if self._automation_executor is None:
+                self._automation_executor = AutomationExecutor(self.hass)
+            try:
+                if result.enable:
+                    await self._automation_executor.async_enable_automation(
+                        result.automation.automation_id
+                    )
+                else:
+                    await self._automation_executor.async_disable_automation(
+                        result.automation.automation_id
+                    )
+            except Exception as err:  # noqa: BLE001 - HA/YAML failures are heterogeneous
+                verb = "Aktivieren" if result.enable else "Deaktivieren"
+                _LOGGER.error("Automation %s failed: %s", verb.lower(), err)
+                response.async_set_error(
+                    intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                    f"Fehler beim {verb} der Automation: {err}",
+                )
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
+        response.async_set_speech(result.response_text)
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    def _handle_clarification_result(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        result: MatchResult,
+    ) -> conversation.ConversationResult:
+        """Store an ambiguous match until the user selects a candidate."""
+        self._context_store.set(
+            user_input.conversation_id,
+            ConversationContext(
+                last_command=None,
+                last_entities=(),
+                last_area=None,
+                pending_clarification=result.clarification,
+            ),
+        )
+        response.async_set_speech(result.response_text)
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    async def _async_handle_no_match(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult:
+        """Try bounded correction/dialog fallbacks for an unmatched turn."""
+        corrected_plans: dict[tuple, tuple[object, str, EntitySnapshot]] = {}
+        for suggestion in phonetic_suggestions(user_input.text, entities):
+            corrected = self._engine.match(
+                suggestion.corrected_text, entities, self._world_model
+            )
+            plan = getattr(corrected, "plan", None)
+            success = getattr(corrected, "response_text", None)
+            if plan is None:
+                device = match_device_control(suggestion.corrected_text, entities)
+                plan = device.plan if device is not None else None
+                success = device.response_text if device is not None else None
+            if plan is None or not success:
+                continue
+            entity_ids = (
+                tuple(plan.entity_id)
+                if isinstance(plan.entity_id, list)
+                else (plan.entity_id,)
+            )
+            key = (plan.domain, plan.service, entity_ids, repr(sorted(plan.data.items())))
+            corrected_plans[key] = (plan, success, suggestion.entity)
+        if len(corrected_plans) == 1:
+            plan, success, corrected_entity = next(iter(corrected_plans.values()))
+            self._context_store.set(
+                user_input.conversation_id,
+                ConversationContext(
+                    last_command=None,
+                    last_entities=(),
+                    last_area=None,
+                    pending_clarification=None,
+                    pending_service_confirmation=PendingServiceConfirmation(
+                        plan,
+                        success,
+                        conversation_user_id(user_input),
+                        build_undo_plan(
+                            plan,
+                            entities,
+                            requested_by_user_id=conversation_user_id(user_input),
+                        ),
+                    ),
+                ),
+            )
+            response.async_set_speech(
+                f"Meintest du „{corrected_entity.friendly_name}“? "
+                f"Soll ich {success.rstrip('.')}?"
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
+        dialog = start_semantic_dialog(user_input.text, entities)
+        if dialog is not None and dialog.result is not None:
+            return await self._async_handle_device_control_result(
+                user_input, response, dialog.result
+            )
+        if dialog is not None and dialog.pending is not None:
+            self._context_store.set(
+                user_input.conversation_id,
+                ConversationContext(
+                    last_command=None,
+                    last_entities=(),
+                    last_area=None,
+                    pending_clarification=None,
+                    pending_semantic_command=dialog.pending,
+                ),
+            )
+            response.async_set_speech(dialog.question)
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+        response.async_set_error(
+            intent.IntentResponseErrorCode.NO_INTENT_MATCH,
+            self._engine.failure_feedback(user_input.text, entities) or NOT_UNDERSTOOD_TEXT,
+        )
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    async def _async_handle_command_plan(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        result: CommandPlan,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult:
+        """Authorize and execute an already validated multi-command plan."""
+        # Every sub-command was validated together before this point. A HA-side
+        # runtime failure remains fail-fast because service calls are not
+        # transactional and already executed calls cannot be rolled back safely.
+        is_admin = await user_is_admin(self.hass, user_input)
+        actor_id = conversation_user_id(user_input)
+        for sub_result in result.commands:
+            if sub_result.plan is None:
+                continue
+            policy = evaluate_service_plan(
+                sub_result.plan,
+                entities,
+                self.entry.options,
+                is_admin=is_admin,
+                user_id=actor_id,
+            )
+            if policy.outcome is PolicyOutcome.DENY:
+                self._context_store.clear(user_input.conversation_id)
+                response.async_set_error(
+                    intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                    policy.reason or "Mindestens eine Aktion ist nicht erlaubt.",
+                )
+                return conversation.ConversationResult(
+                    response=response,
+                    conversation_id=user_input.conversation_id,
+                )
+            if policy.outcome is PolicyOutcome.CONFIRM:
+                self._context_store.clear(user_input.conversation_id)
+                response.async_set_error(
+                    intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                    "Sicherheitskritische Aktionen müssen einzeln bestätigt werden.",
+                )
+                return conversation.ConversationResult(
+                    response=response,
+                    conversation_id=user_input.conversation_id,
+                )
+        self._context_store.clear(user_input.conversation_id)
+        response_parts: list[str] = []
+        multi_undo_parts: list[UndoPlan] = []
+        multi_undo_supported = True
+        for sub_result in result.commands:
+            if sub_result.plan is None:
+                response_parts.append(sub_result.response_text)
+                continue
+            inverse = build_undo_plan(
+                sub_result.plan,
+                entities,
+                requested_by_user_id=actor_id,
+            )
+            if inverse is None:
+                multi_undo_supported = False
+            else:
+                multi_undo_parts.append(inverse)
+            try:
+                await self.hass.services.async_call(
+                    sub_result.plan.domain,
+                    sub_result.plan.service,
+                    {"entity_id": sub_result.plan.entity_id, **sub_result.plan.data},
+                    blocking=True,
+                )
+                self._record_execution(user_input, sub_result.plan)
+            except Exception as err:  # noqa: BLE001 - HA service failures are heterogeneous
+                _LOGGER.error(
+                    "Service call %s.%s on %s failed: %s",
+                    sub_result.plan.domain,
+                    sub_result.plan.service,
+                    sub_result.plan.entity_id,
+                    err,
+                )
+                response.async_set_error(
+                    intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                    f"Fehler beim Ausführen: {err}",
+                )
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
+            response_parts.append(sub_result.response_text)
+        if multi_undo_supported and multi_undo_parts:
+            self._context_store.set(
+                user_input.conversation_id,
+                ConversationContext(
+                    last_command=None,
+                    last_entities=(),
+                    last_area=None,
+                    pending_clarification=None,
+                    pending_undo=UndoPlan(
+                        tuple(
+                            plan
+                            for undo in reversed(multi_undo_parts)
+                            for plan in undo.plans
+                        ),
+                        actor_id,
+                    ),
+                ),
+            )
+        response.async_set_speech(" ".join(response_parts))
         return conversation.ConversationResult(
             response=response, conversation_id=user_input.conversation_id
         )
@@ -2163,6 +2346,14 @@ class NluConversationEntity(
                 self._record_execution(user_input, device_control.plan)
             except Exception as err:  # noqa: BLE001 - HA services raise heterogeneous errors
                 self._context_store.clear(user_input.conversation_id)
+                _LOGGER.error(
+                    "Device-control service call %s.%s on %s failed: %s",
+                    device_control.plan.domain,
+                    device_control.plan.service,
+                    device_control.plan.entity_id,
+                    err,
+                    exc_info=True,
+                )
                 response.async_set_error(
                     intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
                     f"Fehler beim Ausführen: {err}",
@@ -2729,6 +2920,7 @@ class NluConversationEntity(
                     f"{_automation_label(pending.automation)} wird nur noch {request.max_runs} Mal ausgeführt."
                 )
         except Exception as err:  # noqa: BLE001
+            _LOGGER.error("Automation management failed: %s", err, exc_info=True)
             response.async_set_error(
                 intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
                 f"Fehler beim Ändern der Automation: {err}",
@@ -2782,6 +2974,14 @@ class NluConversationEntity(
                 )
                 self._record_execution(user_input, confirmation.plan)
             except Exception as err:  # noqa: BLE001 - HA service failures are heterogeneous
+                _LOGGER.error(
+                    "Confirmed service call %s.%s on %s failed: %s",
+                    confirmation.plan.domain,
+                    confirmation.plan.service,
+                    confirmation.plan.entity_id,
+                    err,
+                    exc_info=True,
+                )
                 response.async_set_error(
                     intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
                     f"Fehler beim Ausführen: {err}",

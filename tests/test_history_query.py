@@ -103,7 +103,7 @@ def test_history_result_is_aggregated_defensively():
     assert "21 °C" in text
 
 
-def test_recorder_unavailable_degrades_cleanly():
+def test_recorder_unavailable_degrades_cleanly(caplog):
     query = parse_history_query(
         "Wohnzimmer Temperatur gestern im Durchschnitt", [SENSOR], NOW
     )
@@ -115,3 +115,36 @@ def test_recorder_unavailable_degrades_cleanly():
 
     hass = type("Hass", (), {"services": Services()})()
     assert "nicht verfügbar" in asyncio.run(async_execute_history_query(hass, query))
+    assert "Recorder statistics query failed: recorder disabled" in caplog.text
+
+
+def test_comparative_recorder_failure_is_logged(caplog):
+    query = parse_history_query(
+        "War die Wohnzimmer Temperatur gestern niedriger als heute?", [SENSOR], NOW
+    )
+    assert isinstance(query, ComparativeHistoryQuery)
+
+    class Services:
+        async def async_call(self, *args, **kwargs):
+            raise RuntimeError("comparison unavailable")
+
+    hass = type("Hass", (), {"services": Services()})()
+    assert "nicht verfügbar" in asyncio.run(async_execute_history_query(hass, query))
+    assert "Recorder comparison query failed: comparison unavailable" in caplog.text
+
+
+def test_state_history_failure_is_logged(caplog):
+    window = EntitySnapshot(
+        "binary_sensor.window", "Badezimmer Fenster", "binary_sensor", "off"
+    )
+    query = parse_history_query(
+        "Wie oft war das Badezimmer Fenster gestern offen?", [window], NOW
+    )
+    assert query is not None
+
+    class Hass:
+        async def async_add_executor_job(self, *args, **kwargs):
+            raise RuntimeError("history unavailable")
+
+    assert "nicht verfügbar" in asyncio.run(async_execute_history_query(Hass(), query))
+    assert "Recorder state-history query failed" in caplog.text

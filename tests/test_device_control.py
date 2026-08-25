@@ -201,6 +201,29 @@ def test_unlock_requires_explicit_confirmation(monkeypatch, tmp_path):
     )
 
 
+def test_confirmed_service_failure_is_logged(monkeypatch, tmp_path, caplog):
+    entity = _conversation_entity(monkeypatch, tmp_path)
+
+    preview = _run(entity, "Schließe Haustür auf")
+    assert "wirklich" in preview.response.speech
+    entity.hass.services.async_call.side_effect = RuntimeError("lock unavailable")
+
+    confirmed = _run(entity, "Ja")
+
+    assert "lock unavailable" in confirmed.response.speech
+    assert "Confirmed service call lock.unlock" in caplog.text
+
+
+def test_device_control_service_failure_is_logged(monkeypatch, tmp_path, caplog):
+    entity = _conversation_entity(monkeypatch, tmp_path)
+    entity.hass.services.async_call.side_effect = RuntimeError("player unavailable")
+
+    result = _run(entity, "Starte Wiedergabe auf Wohnzimmer TV")
+
+    assert "player unavailable" in result.response.speech
+    assert "Device-control service call media_player.media_play" in caplog.text
+
+
 def test_garage_movement_can_be_cancelled(monkeypatch, tmp_path):
     entity = _conversation_entity(monkeypatch, tmp_path)
     preview = _run(entity, "Öffne Garagentor")
