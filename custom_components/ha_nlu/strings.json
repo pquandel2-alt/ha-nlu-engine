@@ -1,7 +1,13 @@
 {
   "title": "HomeIntent",
-  "config": {
-    "abort": {
+    "config": {
+        "step": {
+            "user": {
+                "title": "HomeIntent einrichten",
+                "description": "HomeIntent wird als lokaler Conversation Agent für Home Assistant Assist eingerichtet."
+            }
+        },
+        "abort": {
       "already_configured": "HomeIntent ist bereits eingerichtet."
     }
   },
