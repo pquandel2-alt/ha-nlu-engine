@@ -200,7 +200,12 @@ class ContextualPropertyResolver:
                     ParseFailureReason.INVALID_VALUE,
                     "Ich konnte die gewünschte Temperaturänderung nicht bestimmen.",
                 )
-            raw_value = str(current + amount if relative.group("direction") == "wärmer" else current - amount)
+            target = current + amount if relative.group("direction") == "wärmer" else current - amount
+            # Hassil's temperature slot accepts an integer spelling here.
+            # German number normalization can make a relative amount a
+            # float ("zwei" -> "2" -> 2.0), so avoid emitting "23.0" for a
+            # mathematically integral target.
+            raw_value = f"{target:g}" if isinstance(target, float) else str(target)
 
         probe = candidates[0]
         parsed = self._climate_parser.parse(

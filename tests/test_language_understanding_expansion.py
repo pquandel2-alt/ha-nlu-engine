@@ -80,6 +80,14 @@ def test_general_location_properties(engine):
     assert engine.match("Temperatur Obergeschoss", ENTITIES).response_text == "19 Grad."
 
 
+def test_natural_sensor_reading_question_uses_property_and_location_semantics(engine):
+    result = engine.match("Was zeigt der Temperatursensor im Wohnzimmer an?", ENTITIES)
+
+    assert result is not None
+    assert result.plan is None
+    assert result.response_text == "21.5 Grad."
+
+
 def test_measurement_components_have_free_order(engine):
     expected = "Küche Temperatur: 22,5 Grad; Wohnzimmer Temperatur: 21,5 Grad."
 

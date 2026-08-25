@@ -54,6 +54,25 @@ def test_state_query_components_have_free_order(engine, sentence):
     assert "Wohnzimmerfenster" in result.response_text or result.response_text.startswith("Ja")
 
 
+@pytest.mark.parametrize(
+    "sentence",
+    (
+        "Gibt es im Erdgeschoss noch ein offenes Fenster?",
+        "Welche Fenster stehen im Erdgeschoss noch offen?",
+        "Sind im Erdgeschoss offene Fenster vorhanden?",
+        "Sag mir bitte, ob im Erdgeschoss Fenster offen sind",
+    ),
+)
+def test_natural_state_query_shells_share_one_semantic_query_path(engine, sentence):
+    result = engine.match(sentence, WINDOWS)
+
+    assert result is not None
+    assert result.plan is None
+    assert [entity.entity_id for entity in result.command.entities] == [
+        "binary_sensor.wohnzimmer"
+    ]
+
+
 def test_every_order_of_the_same_semantic_components_compiles(engine):
     """24 arrangements, one meaning; no arrangement-specific templates."""
     for parts in permutations(("Sind", "im Erdgeschoss", "offene", "Fenster")):

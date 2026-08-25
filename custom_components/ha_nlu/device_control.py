@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 from .entities import EntitySnapshot, ResolveStatus, normalize_for_compare, resolve_entity
 from .nlu.context import ConversationContext
+from .nlu.normalize import normalize
+from .nlu.semantic_utterance import SpeechAct, analyse_utterance
 from .service_call import ServiceCallPlan
 from .risk import requires_confirmation
 
@@ -20,7 +22,7 @@ class DeviceControlResult:
 
 
 def _clean(text: str) -> str:
-    return re.sub(r"[?.!]", "", text).strip()
+    return re.sub(r"[?.!]", "", normalize(text)).strip()
 
 
 def _resolve_domain(
@@ -292,35 +294,48 @@ def _match_compositional(
 def match_device_control_followup(
     text: str, context: ConversationContext | None
 ) -> DeviceControlResult | None:
-    """Resolve short media/vacuum references against the preceding device."""
+    """Resolve short media/vacuum references against the preceding device.
+
+    Operation lexemes are composed independently of pronoun, filler and word
+    order.  Context contributes only one already resolved entity; conflicting
+    operations are rejected instead of selecting the first matching phrase.
+    """
     if context is None or len(context.last_entities) != 1:
         return None
     entity = context.last_entities[0]
-    value = _clean(text).casefold()
+    value = _clean(text)
+    utterance = analyse_utterance(value)
+    if utterance.speech_act in {SpeechAct.AUTOMATION, SpeechAct.QUERY} or (
+        utterance.speech_act is SpeechAct.COMMAND
+        and not utterance.safe_to_execute_directly
+    ):
+        return None
     if entity.domain == "media_player":
-        commands = {
-            "pausiere es": ("media_pause", "Wiedergabe pausiert."),
-            "pause": ("media_pause", "Wiedergabe pausiert."),
-            "spiel weiter": ("media_play", "Wiedergabe fortgesetzt."),
-            "starte es wieder": ("media_play", "Wiedergabe fortgesetzt."),
-            "stoppe es": ("media_stop", "Wiedergabe gestoppt."),
-        }
-        selected = commands.get(value)
-        if selected is not None:
-            service, speech = selected
+        operations = [
+            (service, speech)
+            for pattern, service, speech in (
+                (r"\bpaus\w*\b", "media_pause", "Wiedergabe pausiert."),
+                (r"\b(?:spiel\w*|weiterspiel\w*|start\w*|fortsetz\w*)\b", "media_play", "Wiedergabe fortgesetzt."),
+                (r"\bstopp\w*\b", "media_stop", "Wiedergabe gestoppt."),
+            )
+            if re.search(pattern, value, re.I)
+        ]
+        if len(operations) == 1:
+            service, speech = operations[0]
             return _result(entity, service, f"{entity.friendly_name}: {speech}")
     if entity.domain == "vacuum":
-        commands = {
-            "pausiere ihn": ("pause", "pausiert"),
-            "pausiere es": ("pause", "pausiert"),
-            "stoppe ihn": ("stop", "gestoppt"),
-            "stoppe es": ("stop", "gestoppt"),
-            "schick ihn zur ladestation": ("return_to_base", "zur Ladestation geschickt"),
-            "schicke ihn zur ladestation": ("return_to_base", "zur Ladestation geschickt"),
-        }
-        selected = commands.get(value)
-        if selected is not None:
-            service, speech = selected
+        operations = [
+            (service, speech)
+            for matched, service, speech in (
+                (re.search(r"\bpaus\w*\b", value, re.I), "pause", "pausiert"),
+                (re.search(r"\bstopp\w*\b", value, re.I), "stop", "gestoppt"),
+                (re.search(r"\bstart\w*\b|\bweitermach\w*\b", value, re.I), "start", "gestartet"),
+                (re.search(r"\b(?:lade)?station\b|\bdock\w*\b", value, re.I), "return_to_base", "zur Ladestation geschickt"),
+            )
+            if matched is not None
+        ]
+        if len(operations) == 1:
+            service, speech = operations[0]
             return _result(entity, service, f"{entity.friendly_name} {speech}.")
     return None
 
@@ -330,6 +345,12 @@ def match_device_control(
 ) -> DeviceControlResult | None:
     """Match extended device commands; return None for unrelated language."""
     value = _clean(text)
+    utterance = analyse_utterance(value)
+    if utterance.speech_act in {SpeechAct.AUTOMATION, SpeechAct.QUERY} or (
+        utterance.speech_act is SpeechAct.COMMAND
+        and not utterance.safe_to_execute_directly
+    ):
+        return None
     if re.search(r"\b(?:nicht|kein\w*|ohne|vielleicht|normalerweise|gestern)\b", value, re.I):
         return None
 

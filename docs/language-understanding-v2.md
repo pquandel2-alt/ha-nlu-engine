@@ -5,6 +5,40 @@ Folgesatz wird nur ausgeführt, wenn Eigenschaft, räumlicher Bezug, Zielgerät,
 Fähigkeit und Wert aus dem aktuellen und dem vorherigen Turn eindeutig
 bestimmt werden können.
 
+## Äußerungs- und Klauselmodell
+
+`nlu/semantic_utterance.py` beschreibt die sprachliche Form vor der
+fachlichen Geräteauflösung. Es unterscheidet Sprechakt, Modalität, Polarität
+und die Rollen Hauptsatz, Aktion, Auslöser und Bedingung. Das Modell enthält
+keine Home-Assistant-Objekte und führt nichts aus.
+
+Die Ausführung bleibt konservativ:
+
+- höfliche oder als Wunsch formulierte eindeutige Befehle sind zulässig,
+- hypothetische, unsichere und negierte Befehle werden nicht ausgeführt,
+- eine Triggerklausel wird an die Automationspipeline übergeben und
+- Informationsfragen bleiben auch dann lesend, wenn sie ein Aktionsverb als
+  Beispiel enthalten.
+
+Die Normalisierung in `nlu/normalize.py` vereinheitlicht rein sprachliche
+Oberflächenformen. Dazu gehören natürliche Anfragehüllen, trennbare Verben,
+Zahlwörter vor Grad/Prozent und Bruchteile. Entity-Namen, Räume und Geräte
+werden dort ausdrücklich nicht aufgelöst.
+
+## Gemeinsame Geräte- und Automationssemantik
+
+Direkte Kernbefehle, erweiterte Gerätebefehle und Automationsaktionen teilen
+Normalisierung und Sicherheitsklassifikation. Entity-, Raum-, Etagen-,
+Gruppen- und Capability-Auflösung bleiben in den vorhandenen gemeinsamen
+Resolvern. Der Automationspfad verwendet das Klauselmodell als zusätzliche
+Strukturquelle, validiert Trigger und Aktion aber weiterhin mit den
+spezialisierten Parsern und dem `AutomationValidator`.
+
+Medien- und Staubsauger-Folgeäußerungen werden als Operation plus genau ein
+zuvor aufgelöstes Gerät verstanden. Wortstellung, Pronomen und harmlose
+Füllpartikel sind dabei variabel; mehrere oder widersprüchliche Operationen
+werden abgelehnt.
+
 ## Dialogfokus
 
 Nach einem erfolgreichen Befehl oder einer Abfrage wird ein `DialogFocus`
@@ -57,6 +91,12 @@ negative und rein lesende Fälle. Es lässt sich mit
 HomeIntent speichert keine Äußerungen und kein World Model dauerhaft. Die
 Home-Assistant-Diagnose wird nur auf ausdrückliche Nutzeraktion erzeugt und
 enthält weder Äußerungen noch Entitäts-IDs oder Zustände.
+
+`tests/test_semantic_paraphrase_matrix.py` bildet zusätzlich 1.024
+komponierte Paraphrasen aus voneinander unabhängigen Bedeutungsdimensionen.
+Der Testkorpus ist strikt von der Produktivlogik getrennt. Neue Sprachregeln
+müssen außerdem positive Fälle, Konflikte, Negation, Mehrdeutigkeit und
+fehlende Fähigkeiten gemeinsam testen.
 
 ## Bewusste Grenze
 

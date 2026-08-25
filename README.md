@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.38.2**
+- Aktuelle Version: **4.39.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -68,7 +68,9 @@ Vorlagen verglichen, sondern in Bedeutungsbausteine zerlegt:
 
 ```text
 Eingabe
-  → Normalisierung und semantisches Lexikon
+  → Normalisierung und Äußerungsanalyse
+  → Sprechakt, Modalität, Negation und Klauselrollen
+  → semantisches Lexikon
   → Aktion, Ziel, Ort, Menge, Eigenschaft und Wert
   → World Model aus Home Assistant
   → Entity- und Capability-Auflösung
@@ -96,6 +98,50 @@ Das ist kein eingebautes LLM. Erlaubte Wörter und Bedeutungen bleiben
 kontrolliert, testbar und reproduzierbar. Unbekannte wichtige Zusätze,
 widersprüchliche Angaben oder fachlich unpassende Einheiten werden nicht
 stillschweigend ignoriert.
+
+### Natürliche Formulierungen ohne Satzschablonen
+
+Seit Version 4.39.0 analysiert HomeIntent zusätzlich die Art einer Äußerung:
+Befehl, Abfrage, Automation, Bestätigung, Korrektur oder Aussage. Außerdem
+werden höfliche Wünsche, hypothetische beziehungsweise unsichere Aussagen,
+Negation und die Rollen einzelner Klauseln unterschieden. Diese Information
+ist ausführungsrelevant: Ein Satz mit „wenn“, ein Gedankenspiel oder ein
+unsicherer Wunsch kann nicht versehentlich als sofortiger Gerätebefehl
+ausgeführt werden.
+
+Unterschiedliche sprachliche Hüllen führen zum selben geprüften semantischen
+Ergebnis:
+
+```text
+Schalte das Küchenlicht ein.
+Kannst du das Küchenlicht anmachen?
+Wäre es möglich, das Küchenlicht einzuschalten?
+Ich hätte gerne das Küchenlicht an.
+Sorge bitte dafür, dass das Küchenlicht an ist.
+Das Küchenlicht soll an sein.
+```
+
+Die gemeinsame Normalisierung versteht außerdem zusammengesetzte deutsche
+Zahlwörter und gebräuchliche Bruchteile in passenden Wertekontexten:
+
+```text
+Stelle die Heizung auf zweiundzwanzig Grad.
+Fahre den Rollladen auf drei Viertel.
+Fahre den Rollladen zur Hälfte.
+```
+
+Diese Sprachschicht wird nicht nur für Licht und Rollläden verwendet. Auch
+Thermostate, Mediengeräte, Ventilatoren, Staubsauger, Szenen und die weiteren
+unterstützten Geräteklassen erhalten dieselbe Normalisierung und denselben
+Sicherheitscheck. Kurze Folgeäußerungen wie „Kannst du es pausieren?“, „Bitte
+weiterspielen“ oder „Und jetzt zur Station“ werden aus Gesprächskontext und
+Operation zusammengesetzt, nicht über eine Liste vollständiger Sätze.
+
+Bei Automationen werden Aktions-, Auslöser- und Bedingungsklauseln getrennt.
+Die konkrete Aktion läuft anschließend durch denselben semantischen Compiler
+und dieselben Entity-/Capability-Prüfungen wie ein direkter Befehl. Eine
+reine Informationsfrage wie „Was passiert, wenn …?“ bleibt dagegen immer
+lesend.
 
 ### Mengen, Orte und Ausschlüsse
 
@@ -707,10 +753,10 @@ python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
 ```
 
-Geprüfter Stand von Version 4.38.2:
+Geprüfter Stand von Version 4.39.0:
 
 ```text
-2009 passed, 12 skipped
+2056 passed, 12 skipped
 84 % Gesamt-Coverage
 64 % Coverage für conversation.py
 ```
@@ -732,12 +778,17 @@ folgenden Befehl ausgeführt werden:
 ./scripts/run_language_eval.sh
 ```
 
+Zusätzlich erzeugt die Test-Suite 1.024 Befehlsparaphrasen aus unabhängigen
+Dimensionen wie Ziel, Operation, sprachlicher Hülle und Füllpartikel. Diese
+Matrix ist nur ein Regressionstest und wird niemals von der Produktivlogik
+eingelesen. Dadurch kann sie dem Parser keine Antworten „beibringen“.
+
 ### Benchmark-Momentaufnahme
 
 ![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
 
 Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.38.2. Benchmark,
+Entwicklungsstands und kein aktueller Nachweis für Version 4.39.0. Benchmark,
 Fehlerdiagnose und Messungen auf schwacher Hardware werden bewusst separat
 aktualisiert. Ein perfektes Ergebnis in einem bekannten Korpus bedeutet nicht,
 dass jede mögliche Formulierung verstanden wird.

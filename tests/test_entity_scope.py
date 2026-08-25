@@ -35,6 +35,13 @@ def test_extended_area_query_reports_concrete_state():
     assert result is not None and "Befeuchter Büro" in result.response_text
 
 
+def test_extended_query_accepts_natural_request_shell():
+    result = match_extended_device_query(
+        "Sag mir bitte, welche Luftbefeuchter im Büro an sind", ENTITIES
+    )
+    assert result is not None and "Befeuchter Büro" in result.response_text
+
+
 def test_extended_group_value_is_checked_for_every_target():
     result = match_extended_device_control(
         "Stelle alle Luftbefeuchter im Obergeschoss auf 55 Prozent Luftfeuchtigkeit",

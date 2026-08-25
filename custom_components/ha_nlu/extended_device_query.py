@@ -7,6 +7,7 @@ import re
 from .entities import EntitySnapshot
 from .entity_scope import DOMAIN_WORDS, resolve_entity_scope
 from .device_control import DeviceControlResult
+from .nlu.normalize import normalize
 
 
 _DOMAINS = frozenset(DOMAIN_WORDS)
@@ -32,6 +33,7 @@ def _state_text(entity: EntitySnapshot) -> str:
 def match_extended_device_query(
     text: str, entities: list[EntitySnapshot]
 ) -> DeviceControlResult | None:
+    text = normalize(text)
     if _QUERY_CUE.search(text) is None:
         return None
     scope = resolve_entity_scope(text, entities, _DOMAINS)

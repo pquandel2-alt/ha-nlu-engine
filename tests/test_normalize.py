@@ -99,3 +99,33 @@ def test_engine_matches_filler_words_end_to_end(engine, entities):
     result = engine.match("mach ein bisschen das Flurlicht an", entities)
     assert result is not None
     assert result.plan.entity_id == "light.flur_licht"
+
+
+def test_normalizes_natural_request_shells_without_resolving_entities():
+    assert normalize("Wäre es möglich, das Küchenlicht einzuschalten?") == (
+        "bitte das Küchenlicht einschalten?"
+    )
+    assert normalize("Ich hätte gerne das Küchenlicht an") == "bitte das Küchenlicht an"
+    assert normalize("Sorge bitte dafür, dass das Küchenlicht an ist") == (
+        "bitte das Küchenlicht an ist"
+    )
+
+
+def test_normalizes_query_shells_and_separable_infinitives():
+    assert normalize("Sag mir bitte, wie warm es im Wohnzimmer ist") == (
+        "wie warm es im Wohnzimmer ist"
+    )
+    assert normalize("Wie steht es um die Luftfeuchtigkeit im Wohnzimmer?") == (
+        "wie ist Luftfeuchtigkeit im Wohnzimmer?"
+    )
+    assert normalize("das Licht ein zu schalten") == "das Licht einschalten"
+    assert normalize("Was zeigt der Temperatursensor im Wohnzimmer an?") == (
+        "Temperatur im Wohnzimmer"
+    )
+
+
+def test_normalizes_fractions_and_german_number_compounds():
+    assert normalize("Rollladen auf drei Viertel") == "Rollladen auf 75 Prozent"
+    assert normalize("Rollladen zur Hälfte") == "Rollladen auf 50 Prozent"
+    assert normalize("auf zweiundzwanzig Grad") == "auf 22 Grad"
+    assert normalize("auf siebzehn Grad") == "auf 17 Grad"

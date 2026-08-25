@@ -168,6 +168,43 @@ def test_extended_domain_composition_rejects_unsafe_modifiers(sentence):
     assert match_device_control(sentence, ENTITIES) is None
 
 
+@pytest.mark.parametrize(
+    ("sentence", "service", "data"),
+    (
+        (
+            "Wäre es möglich, die Wohnzimmer Heizung auf zweiundzwanzig Grad zu stellen?",
+            "set_temperature",
+            {"temperature": 22.0},
+        ),
+        (
+            "Ich hätte gerne die Lautstärke vom Wohnzimmer TV auf fünfunddreißig Prozent",
+            "volume_set",
+            {"volume_level": 0.35},
+        ),
+        ("Sorge bitte dafür, dass der Saugroboter startet", "start", {}),
+    ),
+)
+def test_natural_shells_and_number_words_apply_to_all_device_domains(sentence, service, data):
+    result = match_device_control(sentence, ENTITIES)
+
+    assert result is not None
+    assert result.plan is not None
+    assert result.plan.service == service
+    assert result.plan.data == data
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    (
+        "Wenn es warm ist, stelle die Wohnzimmer Heizung auf 22 Grad",
+        "Was passiert, wenn ich den Saugroboter starte?",
+        "Kann man die Wohnzimmer Heizung auf 22 Grad stellen?",
+    ),
+)
+def test_extended_device_router_never_executes_conditions_or_information_questions(sentence):
+    assert match_device_control(sentence, ENTITIES) is None
+
+
 def _conversation_entity(monkeypatch, tmp_path):
     entity = NluConversationEntity(ConfigEntry())
     entity.hass = HomeAssistant()

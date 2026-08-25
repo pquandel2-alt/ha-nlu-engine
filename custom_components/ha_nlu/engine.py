@@ -58,6 +58,7 @@ from .nlu.response_generator import ResponseGenerator, _automation_label
 from .nlu.service_mapper import map_to_service_call
 from .nlu.semantic_compiler import SemanticCommandCompiler, SemanticQueryCompiler
 from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
+from .nlu.semantic_utterance import ClauseRole, SpeechAct, analyse_utterance
 from .nlu.semantic_location import resolve_coordinated_locations
 from .nlu.validator import validate_command
 from .automation_action_parser import AutomationActionParser
@@ -768,6 +769,16 @@ class NluEngine:
     def match(
         self, text: str, entities: list[EntitySnapshot], world_model: WorldModel | None = None
     ) -> MatchResult | CommandPlan | None:
+        utterance = analyse_utterance(text)
+        # Trigger/condition clauses belong to the automation composer and
+        # must never degrade into an immediate direct command. Likewise, a
+        # hypothetical/uncertain or explicitly negated command is not a safe
+        # service call. This one discourse gate protects every parser below.
+        if utterance.speech_act is SpeechAct.AUTOMATION or (
+            utterance.speech_act is SpeechAct.COMMAND
+            and not utterance.safe_to_execute_directly
+        ):
+            return None
         segments = [segment for segment in _AND_SPLIT_RE.split(text) if segment.strip()]
         if len(segments) > 1:
             # ``und`` can connect two commands, but it can also coordinate
@@ -1453,7 +1464,8 @@ class NluEngine:
         anywhere else - this fallback only ever runs inside this method, for
         this trigger-clause.
         """
-        if not _AUTOMATION_TRIGGER_RE.search(text):
+        utterance = analyse_utterance(text)
+        if utterance.speech_act is SpeechAct.QUERY or not _AUTOMATION_TRIGGER_RE.search(text):
             return None
 
         normalized = normalize(text)
@@ -1485,6 +1497,29 @@ class NluEngine:
         split = split_trigger_action(normalized)
         if split is None:
             candidates: list[tuple[str, str]] = []
+            # The common utterance model already knows an action-first
+            # clause followed by a trigger clause, independent of the
+            # concrete action vocabulary. Let the established trigger and
+            # action compilers validate the two meanings; no service call is
+            # built here.
+            action_clause = next(
+                (clause for clause in utterance.clauses if clause.role is ClauseRole.ACTION),
+                None,
+            )
+            trigger_clause = next(
+                (clause for clause in utterance.clauses if clause.role is ClauseRole.TRIGGER),
+                None,
+            )
+            if action_clause is not None and trigger_clause is not None:
+                semantic_trigger = (
+                    f"{trigger_clause.connector or 'wenn'} {trigger_clause.text}"
+                )
+                if (
+                    self._automation_trigger_parser.parse(semantic_trigger, parse_context)
+                    is not None
+                    and self._parse_action_semantically(action_clause.text, parse_context)
+                ):
+                    candidates.append((semantic_trigger, action_clause.text))
             for marker in re.finditer(
                 r"\b(schalte|mach|fahre|öffne|schließe|stelle|setze|starte|aktiviere|führe|drehe)\b",
                 normalized,
@@ -1518,6 +1553,7 @@ class NluEngine:
                     and parsed_actions
                 ):
                     candidates.append((trigger_candidate, action_candidate))
+            candidates = list(dict.fromkeys(candidates))
             if len(candidates) != 1:
                 return None
             split = candidates[0]

@@ -120,5 +120,30 @@
     "id": "unexplained_measurement_modifier_has_no_action",
     "turns": ["Im Erdgeschoss Temperatur normalerweise?"],
     "expect": {"match": false, "action": false}
+  },
+  {
+    "id": "natural_wish_light_command",
+    "turns": ["Ich hätte gerne das Küchenlicht an"],
+    "expect": {"domain": "homeassistant", "service": "turn_on", "entity_id": "light.kueche"}
+  },
+  {
+    "id": "natural_indirect_light_command",
+    "turns": ["Sorge bitte dafür, dass das Küchenlicht an ist"],
+    "expect": {"domain": "homeassistant", "service": "turn_on", "entity_id": "light.kueche"}
+  },
+  {
+    "id": "natural_query_request",
+    "turns": ["Sag mir bitte, wie warm es im Wohnzimmer ist"],
+    "expect": {"action": false, "response_contains": "Grad"}
+  },
+  {
+    "id": "hypothetical_command_is_never_executed",
+    "turns": ["Mach vielleicht das Küchenlicht an"],
+    "expect": {"match": false, "action": false}
+  },
+  {
+    "id": "conditional_command_is_never_immediate",
+    "turns": ["Mach das Küchenlicht an wenn es dunkel ist"],
+    "expect": {"match": false, "action": false}
   }
 ]

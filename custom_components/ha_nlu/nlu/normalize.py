@@ -62,6 +62,126 @@ _TRIGGER_DISCOURSE_RE = re.compile(r"\b(?:jedes\s+mal|immer)\s+wenn\b", re.IGNOR
 _SHORT_DRIVE_IMPERATIVE_RE = re.compile(
     r"^(?P<prefix>(?:(?:kannst\s+du|bitte)\s+)?)fahr\b", re.IGNORECASE
 )
+_PROPERTY_WISH_RE = re.compile(
+    r"^\s*ich\s+(?:hätte|haette|möchte|moechte)\s+(?:gern|gerne)\s+"
+    r"(?P<body>(?:die\s+)?(?:lautstärke|lautstaerke|temperatur|helligkeit|"
+    r"position|luftfeuchtigkeit)\b.+\bauf\s+.+)$",
+    re.I,
+)
+_SENSOR_READING_QUERY_RE = re.compile(
+    r"^\s*(?:was|welchen\s+wert)\s+zeig\w*\s+(?:der|die|das)\s+"
+    r"(?P<property>temperatur|luftfeuchtigkeit|feuchtigkeit|leistung|energie|batterie)"
+    r"(?:s?sensor)?\s+(?P<location>(?:im|in\s+der|in\s+dem)\s+.+?)"
+    r"\s+an\s*[?.!]*$",
+    re.I,
+)
+
+_NATURAL_SHELL_REWRITES = (
+    (
+        re.compile(r"^\s*(?:wäre|waere)\s+es\s+(?:dir\s+)?möglich[,:]?\s*", re.I),
+        "bitte ",
+    ),
+    (
+        re.compile(r"^\s*ich\s+(?:hätte|haette|möchte|moechte)\s+(?:gern|gerne)\s+", re.I),
+        "bitte ",
+    ),
+    (
+        re.compile(r"^\s*sorg(?:e|en)?\s+(?:bitte\s+)?dafür[,:]?\s+dass\s+", re.I),
+        "bitte ",
+    ),
+    (
+        re.compile(
+            r"^\s*(?:sag|sage|nenn|nenne)\s+(?:mir\s+)?"
+            r"(?:bitte\s*)?[,:]?\s*",
+            re.I,
+        ),
+        "",
+    ),
+    (re.compile(r"^\s*wie\s+steht\s+es\s+um\s+(?:die|den|das)?\s*", re.I), "wie ist "),
+)
+
+_SEPARABLE_INFINITIVE_REWRITES = (
+    (re.compile(r"\bein(?:(?:\s+)?zu)?(?:\s+)?schalten\b", re.I), "einschalten"),
+    (re.compile(r"\baus(?:(?:\s+)?zu)?(?:\s+)?schalten\b", re.I), "ausschalten"),
+    (re.compile(r"\ban(?:(?:\s+)?zu)?(?:\s+)?machen\b", re.I), "anmachen"),
+    (re.compile(r"\baus(?:(?:\s+)?zu)?(?:\s+)?machen\b", re.I), "ausmachen"),
+    (re.compile(r"\bhoch(?:(?:\s+)?zu)?(?:\s+)?fahren\b", re.I), "hochfahren"),
+    (re.compile(r"\bherunter(?:(?:\s+)?zu)?(?:\s+)?fahren\b", re.I), "herunterfahren"),
+)
+
+_FRACTION_REWRITES = (
+    (re.compile(r"\b(?:zu|auf)\s+drei\s+vierteln?\b", re.I), "auf 75 Prozent"),
+    (re.compile(r"\b(?:zu|auf)\s+(?:einem|ein)\s+viertel\b", re.I), "auf 25 Prozent"),
+    (re.compile(r"\b(?:zu|auf)\s+(?:der\s+)?hälfte\b", re.I), "auf 50 Prozent"),
+    (re.compile(r"\bzur\s+hälfte\b", re.I), "auf 50 Prozent"),
+)
+
+_NUMBER_UNITS = {
+    "null": 0,
+    "ein": 1,
+    "eins": 1,
+    "eine": 1,
+    "zwei": 2,
+    "drei": 3,
+    "vier": 4,
+    "fünf": 5,
+    "fuenf": 5,
+    "sechs": 6,
+    "sieben": 7,
+    "acht": 8,
+    "neun": 9,
+    "zehn": 10,
+    "elf": 11,
+    "zwölf": 12,
+    "zwoelf": 12,
+}
+_NUMBER_TENS = {
+    "zwanzig": 20,
+    "dreißig": 30,
+    "dreissig": 30,
+    "vierzig": 40,
+    "fünfzig": 50,
+    "fuenfzig": 50,
+    "sechzig": 60,
+    "siebzig": 70,
+    "achtzig": 80,
+    "neunzig": 90,
+}
+_NUMBER_TEENS = {
+    "dreizehn": 13,
+    "vierzehn": 14,
+    "fünfzehn": 15,
+    "fuenfzehn": 15,
+    "sechzehn": 16,
+    "siebzehn": 17,
+    "achtzehn": 18,
+    "neunzehn": 19,
+}
+_NUMBER_WITH_UNIT_RE = re.compile(
+    r"\b(?P<number>[a-zäöüß]+)\s+(?P<unit>grad|prozent)\b", re.I
+)
+
+
+def _german_number(word: str) -> int | None:
+    value = word.casefold()
+    if value in _NUMBER_UNITS:
+        return _NUMBER_UNITS[value]
+    if value in _NUMBER_TENS:
+        return _NUMBER_TENS[value]
+    if value in _NUMBER_TEENS:
+        return _NUMBER_TEENS[value]
+    if value == "hundert":
+        return 100
+    if "und" in value:
+        one, ten = value.split("und", 1)
+        if one in _NUMBER_UNITS and ten in _NUMBER_TENS and 1 <= _NUMBER_UNITS[one] <= 9:
+            return _NUMBER_UNITS[one] + _NUMBER_TENS[ten]
+    return None
+
+
+def _replace_number_with_unit(match: re.Match[str]) -> str:
+    value = _german_number(match.group("number"))
+    return match.group(0) if value is None else f"{value} {match.group('unit')}"
 
 # Frequent speech-to-text tokenizations. These are orthographic rewrites,
 # not semantic guesses: both sides are the same German device/unit/verb.
@@ -86,6 +206,16 @@ def normalize(text: str) -> str:
     text = _POLITE_MODAL_RE.sub("kannst du", text)
     text = _TRIGGER_DISCOURSE_RE.sub("wenn", text)
     text = _SHORT_DRIVE_IMPERATIVE_RE.sub(r"\g<prefix>fahre", text)
+    text = _SENSOR_READING_QUERY_RE.sub(r"\g<property> \g<location>", text)
+    text = _PROPERTY_WISH_RE.sub(r"bitte stelle \g<body>", text)
+    for pattern, replacement in _NATURAL_SHELL_REWRITES:
+        text = pattern.sub(replacement, text)
+    for pattern, replacement in _SEPARABLE_INFINITIVE_REWRITES:
+        text = pattern.sub(replacement, text)
+    for pattern, replacement in _FRACTION_REWRITES:
+        text = pattern.sub(replacement, text)
+    text = _NUMBER_WITH_UNIT_RE.sub(_replace_number_with_unit, text)
+    text = re.sub(r"\bregl(?:e|en|st|t)?\b", "stelle", text, flags=re.I)
     for pattern, replacement in _STT_REWRITES:
         text = pattern.sub(replacement, text)
     text = _FILLER_RE.sub(" ", text)

@@ -61,6 +61,24 @@ def test_request_envelopes_do_not_depend_on_sentence_templates(
     assert result.plan.entity_id == entity_id
 
 
+@pytest.mark.parametrize(
+    ("sentence", "service"),
+    (
+        ("Wäre es möglich, das Flurlicht einzuschalten?", "turn_on"),
+        ("Ich hätte gerne das Flurlicht an", "turn_on"),
+        ("Sorge bitte dafür, dass das Flurlicht an ist", "turn_on"),
+        ("Das Flurlicht soll an sein", "turn_on"),
+        ("Wäre es möglich, das Flurlicht auszuschalten?", "turn_off"),
+    ),
+)
+def test_natural_request_shells_share_one_semantic_command_path(engine, sentence, service):
+    result = engine.match(sentence, HOUSE)
+
+    assert result is not None
+    assert result.plan.service == service
+    assert result.plan.entity_id == "light.flur"
+
+
 def test_direction_word_inside_registered_name_is_not_a_floor_scope(engine):
     entities = HOUSE + [
         EntitySnapshot(
