@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from .normalize import normalize
+from .domain_operations import COMMAND_MARKER_EXPRESSIONS, DOMAIN_EXPRESSIONS, regex_union
 
 
 class SpeechAct(Enum):
@@ -120,15 +121,14 @@ _NEGATION_RE = re.compile(
     re.I,
 )
 _COMMAND_RE = re.compile(
-    r"\b(?:mach|mache|schalt|schalte|einschalt|ausschalt|stell|stelle|setz|setze|fahr|fahre|"
-    r"öffn|oeffn|schließ|schliess|start|aktivier|deaktivier|regel|regle|zeig|zeige|"
-    r"lass|sorge|pause|pausier|spiel|weiterspiel|stopp|schick|schicke|"
-    r"hätte\s+gern|haette\s+gern|möchte|moechte)\w*\b",
+    r"\b(?:" + regex_union(list(COMMAND_MARKER_EXPRESSIONS))
+    + r"|regel\w*|regle\w*|zeig\w*|sorge\w*|schick\w*|möchte|moechte)\b",
     re.I,
 )
 _ELLIPTICAL_COMMAND_RE = re.compile(
-    r"\b(?:licht|lampe|leuchte|beleuchtung|roll(?:laden|läden|aden|äden)|rollo|jalousie|"
-    r"ventilator|lüfter|heizung|thermostat|schalter|steckdose)\w*\b.*"
+    r"\b" + regex_union([
+        expression for expressions in DOMAIN_EXPRESSIONS.values() for expression in expressions
+    ]) + r"\b.*"
     r"\b(?:an|aus|ein|hoch|runter|herunter|offen|geschlossen)\b",
     re.I,
 )

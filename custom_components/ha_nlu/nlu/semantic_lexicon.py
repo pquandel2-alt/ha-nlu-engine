@@ -21,6 +21,7 @@ from typing import Iterable
 
 from ..entities import normalize_for_compare
 from .semantic_state import SemanticState
+from .domain_operations import ACTION_EXPRESSIONS, COMMAND_MARKER_EXPRESSIONS, DOMAIN_EXPRESSIONS
 
 
 class SemanticKind(Enum):
@@ -73,47 +74,11 @@ class SemanticAnalysis:
 # Expressions are regular-expression fragments.  They describe individual
 # meanings, never whole sentences.  Inflection is therefore centralised once.
 LEXEMES: tuple[Lexeme, ...] = (
-    Lexeme(SemanticKind.COMMAND_MARKER, True, (
-        r"(?:an|aus|zu)mach(?:e|en|st|t)?", r"(?:ein|aus)schalt(?:e|en|st|t)?",
-        r"mach(?:e|en|st|t)?", r"schalt(?:e|en|st|t)?", r"stell(?:e|en|st|t)?",
-        r"setz(?:e|en)?", r"fahr(?:e|en)?", r"gefahren",
-        r"hochfahr(?:e|en)?", r"runterfahr(?:e|en)?", r"herunterfahr(?:e|en)?",
-        r"eingeschaltet", r"ausgeschaltet",
-        r"öffn(?:e|en)?", r"schließ(?:e|en)?", r"dreh(?:e|en)?",
-        r"lass(?:e|en)?", r"aktivier(?:e|en)?", r"deaktivier(?:e|en)?",
-        r"start(?:e|en)?", r"führ(?:e|en)?", r"ausführen",
-    )),
-    Lexeme(SemanticKind.ACTION, "open", (
-        r"hoch", r"oben", r"hochfahren", r"hochgefahren", r"öffn(?:e|en)?",
-    )),
-    Lexeme(SemanticKind.ACTION, "close", (
-        r"runter", r"herunter", r"nach\s+unten", r"runterfahren", r"herunterfahren",
-        r"geschlossen", r"schließ(?:e|en)?", r"zumach(?:e|en|st|t)?", r"zu",
-    )),
-    Lexeme(SemanticKind.ACTION, "turn_on", (
-        r"an", r"ein", r"anmach(?:e|en|st|t)?", r"einschalt(?:e|en|st|t)?",
-        r"eingeschaltet", r"aktivier(?:e|en)?",
-    )),
-    Lexeme(SemanticKind.ACTION, "turn_off", (
-        r"aus", r"ausmach(?:e|en|st|t)?", r"ausschalt(?:e|en|st|t)?",
-        r"ausgeschaltet", r"deaktivier(?:e|en)?",
-    )),
-    Lexeme(SemanticKind.ACTION, "toggle", (r"umschalten", r"toggle",)),
-    Lexeme(SemanticKind.ACTION, "run", (
-        r"start(?:e|en)?", r"aktivier(?:e|en)?", r"ausführen", r"führe",
-    )),
-    Lexeme(SemanticKind.DOMAIN, "light", (
-        r"licht(?:er)?", r"lamp(?:e|en)", r"leucht(?:e|en)", r"beleuchtung",
-    )),
-    Lexeme(SemanticKind.DOMAIN, "switch", (r"schalter", r"steckdos(?:e|en)",)),
-    Lexeme(SemanticKind.DOMAIN, "cover", (
-        r"rol{1,3}[aä]d(?:e|en)", r"rollos?", r"jalousie(?:n)?",
-    )),
-    Lexeme(SemanticKind.DOMAIN, "fan", (r"ventilator(?:en)?", r"lüfter",)),
-    Lexeme(SemanticKind.DOMAIN, "climate", (
-        r"heizung(?:en)?", r"thermostat(?:e)?",
-    )),
-    Lexeme(SemanticKind.DOMAIN, "script", (r"skript(?:e)?",)),
+    Lexeme(SemanticKind.COMMAND_MARKER, True, COMMAND_MARKER_EXPRESSIONS),
+    *(Lexeme(SemanticKind.ACTION, action, expressions)
+      for action, expressions in ACTION_EXPRESSIONS.items()),
+    *(Lexeme(SemanticKind.DOMAIN, domain, expressions)
+      for domain, expressions in DOMAIN_EXPRESSIONS.items()),
     Lexeme(SemanticKind.DEVICE_CLASS, ("binary_sensor", "window"), (
         r"fenster(?:kontakte?)?",
     )),
@@ -196,6 +161,7 @@ _FILLERS = frozenset(
         "jetzt vorhanden vorhandenen im in am auf beim nach von zur zum und oder soll sollen dort "
         "möchte will ich dass ob davon denn noch es sie sein sind ist stehen steht hat haben werde werden wird welche welcher welches was wie "
         "kannste könntest koenntest würdest wuerdest würd wuerd gern wär waer nett "
+        "wiedergabe "
         "komplett ganz ganze ganzen ganzer ganzes vollständig halb halbe halber halben hälfte höhe prozent einmal zwar"
     ).split()
 )

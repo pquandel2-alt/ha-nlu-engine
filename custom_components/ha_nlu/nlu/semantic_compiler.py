@@ -32,6 +32,7 @@ from .primitives import SemanticAction, SemanticProperty, SemanticQuantity
 from .query_command import QueryCommand, QueryFilter, QueryScope, QueryTarget
 from .query_executor import QueryExecutor
 from .semantic_lexicon import SemanticAnalysis, SemanticKind, analyse_semantics
+from .domain_operations import DOMAIN_WORDS, INTENT_BY_DOMAIN_ACTION
 from .semantic_location import (
     has_explicit_location_cue,
     resolve_coordinated_locations,
@@ -60,7 +61,8 @@ _LOCATION_CUE_RE = re.compile(r"\b(?:im|in\s+der|in\s+dem|am|beim)\s+", re.I)
 _LEVEL_CUE_RE = re.compile(r"(?<!nach\s)\b(?:oben|unten)\b", re.I)
 _PLURAL_RE = re.compile(
     r"\b(?:lichter|lampen|leuchten|steckdosen|rollläden|rolläden|rollos|"
-    r"jalousien|ventilatoren|heizungen|thermostate|skripte)\b",
+    r"jalousien|ventilatoren|heizungen|thermostate|skripte|lautsprecher|"
+    r"staubsauger|ventile)\b",
     re.I,
 )
 _ALL_RE = re.compile(r"\b(?:alle|sämtliche|sämtlichen|jede|jeden|jedes|die\s+ganzen)\b", re.I)
@@ -112,16 +114,14 @@ _SEMANTIC_WORDS = {
     "halb", "halbe", "halber", "halben", "hälfte", "höhe", "prozent", "komplett", "ganz", "vollständig", "einschalten",
     "ausschalten", "anmachen", "ausmachen", "aktivieren", "aktiviere", "starten",
     "starte", "ausführen", "führe", "umschalten", "toggle",
+    "spiele", "spielen", "spiel", "weiter", "weiterspielen", "pausiere",
+    "pausieren", "pausiert", "halte", "halten", "stoppe", "stoppen", "gestoppt",
 }
+# Concrete surface forms are used for entity-name scoring. Regex lexemes
+# remain the authoritative recognition source; this table merely marks
+# generic nouns as non-distinctive.
 _DOMAIN_CANONICAL = {
-    "licht": "light", "lichter": "light", "lampe": "light", "lampen": "light",
-    "leuchte": "light", "leuchten": "light", "beleuchtung": "light",
-    "schalter": "switch", "steckdose": "switch", "steckdosen": "switch",
-    "rollladen": "cover", "rollläden": "cover", "rolladen": "cover", "rolläden": "cover",
-    "rollo": "cover", "rollos": "cover", "jalousie": "cover", "jalousien": "cover",
-    "ventilator": "fan", "ventilatoren": "fan", "lüfter": "fan",
-    "heizung": "climate", "heizungen": "climate", "thermostat": "climate", "thermostate": "climate",
-    "skript": "script", "skripte": "script",
+    word: domain for domain, words in DOMAIN_WORDS.items() for word in words
 }
 
 _QUERY_MARKER_RE = re.compile(
@@ -281,20 +281,11 @@ def _intents(
     found: set[str] = set()
     if percent is not None:
         found.add("HassSetPercentage")
-    if "cover" in domains and percent is None:
-        if "open" in actions:
-            found.add("HassOpenCover")
-        if "close" in actions:
-            found.add("HassCloseCover")
-    if domains & {"light", "switch", "fan", "climate"}:
-        if "toggle" in actions:
-            found.add("HassToggle")
-        if "turn_on" in actions:
-            found.add("HassTurnOn")
-        if "turn_off" in actions:
-            found.add("HassTurnOff")
-    if "script" in domains and "run" in actions:
-        found.add("HassRunScript")
+    for domain in domains:
+        for action in actions:
+            intent = INTENT_BY_DOMAIN_ACTION.get((domain, str(action)))
+            if intent is not None:
+                found.add(intent)
     return frozenset(found)
 
 
@@ -480,6 +471,14 @@ class SemanticCommandCompiler:
             "HassOpenCover": SemanticAction.OPEN,
             "HassCloseCover": SemanticAction.CLOSE,
             "HassRunScript": SemanticAction.TURN_ON,
+            "HassActivateScene": SemanticAction.TURN_ON,
+            "HassMediaPlay": SemanticAction.START,
+            "HassMediaPause": SemanticAction.PAUSE,
+            "HassMediaStop": SemanticAction.STOP,
+            "HassVacuumStart": SemanticAction.START,
+            "HassVacuumStop": SemanticAction.STOP,
+            "HassOpenValve": SemanticAction.OPEN,
+            "HassCloseValve": SemanticAction.CLOSE,
             "HassSetPercentage": SemanticAction.SET,
         }[intent]
         property_ = None

@@ -94,6 +94,9 @@ class SemanticAction(Enum):
     SET = auto()
     ADJUST = auto()
     QUERY = auto()
+    START = auto()
+    PAUSE = auto()
+    STOP = auto()
 
 
 class SemanticProperty(Enum):

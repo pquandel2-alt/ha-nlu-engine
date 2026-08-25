@@ -29,6 +29,7 @@ class IntentSpec:
     allowed_domains: frozenset[str]
     build: Callable[[list[EntitySnapshot]], ServiceCallPlan]
     response: Callable[[list[EntitySnapshot]], str]
+    required_capability: str | None = None
 
 
 def _entity_id_field(entities: list[EntitySnapshot]) -> str | list[str]:
@@ -40,7 +41,9 @@ def _entity_id_field(entities: list[EntitySnapshot]) -> str | list[str]:
 
 _DOMAIN_PLURAL_DE = {
     "light": "Lichter", "switch": "Schalter", "fan": "Ventilatoren", "cover": "Rollläden",
-    "script": "Skripte",
+    "script": "Skripte", "media_player": "Medienplayer", "vacuum": "Saugroboter",
+    "humidifier": "Luftbefeuchter", "input_boolean": "Helfer", "valve": "Ventile",
+    "scene": "Szenen",
 }
 
 
@@ -55,17 +58,17 @@ def _plural_response(entities: list[EntitySnapshot], singular_suffix: str, plura
 
 INTENTS: dict[str, IntentSpec] = {
     "HassTurnOn": IntentSpec(
-        allowed_domains=frozenset({"light", "switch", "fan", "climate"}),
+        allowed_domains=frozenset({"light", "switch", "fan", "climate", "humidifier", "input_boolean"}),
         build=lambda es: ServiceCallPlan("homeassistant", "turn_on", _entity_id_field(es)),
         response=lambda es: _plural_response(es, "eingeschaltet.", "eingeschaltet."),
     ),
     "HassTurnOff": IntentSpec(
-        allowed_domains=frozenset({"light", "switch", "fan", "climate"}),
+        allowed_domains=frozenset({"light", "switch", "fan", "climate", "humidifier", "input_boolean"}),
         build=lambda es: ServiceCallPlan("homeassistant", "turn_off", _entity_id_field(es)),
         response=lambda es: _plural_response(es, "ausgeschaltet.", "ausgeschaltet."),
     ),
     "HassToggle": IntentSpec(
-        allowed_domains=frozenset({"light", "switch", "fan", "climate"}),
+        allowed_domains=frozenset({"light", "switch", "fan", "climate", "humidifier", "input_boolean"}),
         build=lambda es: ServiceCallPlan("homeassistant", "toggle", _entity_id_field(es)),
         response=lambda es: _plural_response(es, "umgeschaltet.", "umgeschaltet."),
     ),
@@ -91,6 +94,48 @@ INTENTS: dict[str, IntentSpec] = {
         build=lambda es: ServiceCallPlan("script", "turn_on", _entity_id_field(es)),
         response=lambda es: _plural_response(es, "ausgeführt.", "ausgeführt."),
     ),
+    "HassActivateScene": IntentSpec(
+        allowed_domains=frozenset({"scene"}),
+        build=lambda es: ServiceCallPlan("scene", "turn_on", _entity_id_field(es)),
+        response=lambda es: _plural_response(es, "aktiviert.", "aktiviert."),
+    ),
+    "HassMediaPlay": IntentSpec(
+        allowed_domains=frozenset({"media_player"}),
+        build=lambda es: ServiceCallPlan("media_player", "media_play", _entity_id_field(es)),
+        response=lambda es: _plural_response(es, "spielt weiter.", "gestartet."),
+    ),
+    "HassMediaPause": IntentSpec(
+        allowed_domains=frozenset({"media_player"}),
+        build=lambda es: ServiceCallPlan("media_player", "media_pause", _entity_id_field(es)),
+        response=lambda es: _plural_response(es, "pausiert.", "pausiert."),
+    ),
+    "HassMediaStop": IntentSpec(
+        allowed_domains=frozenset({"media_player"}),
+        build=lambda es: ServiceCallPlan("media_player", "media_stop", _entity_id_field(es)),
+        response=lambda es: _plural_response(es, "gestoppt.", "gestoppt."),
+    ),
+    "HassVacuumStart": IntentSpec(
+        allowed_domains=frozenset({"vacuum"}),
+        build=lambda es: ServiceCallPlan("vacuum", "start", _entity_id_field(es)),
+        response=lambda es: _plural_response(es, "gestartet.", "gestartet."),
+    ),
+    "HassVacuumStop": IntentSpec(
+        allowed_domains=frozenset({"vacuum"}),
+        build=lambda es: ServiceCallPlan("vacuum", "stop", _entity_id_field(es)),
+        response=lambda es: _plural_response(es, "gestoppt.", "gestoppt."),
+    ),
+    "HassOpenValve": IntentSpec(
+        allowed_domains=frozenset({"valve"}),
+        build=lambda es: ServiceCallPlan("valve", "open_valve", _entity_id_field(es)),
+        response=lambda es: _plural_response(es, "wird geöffnet.", "geöffnet."),
+        required_capability="OPEN",
+    ),
+    "HassCloseValve": IntentSpec(
+        allowed_domains=frozenset({"valve"}),
+        build=lambda es: ServiceCallPlan("valve", "close_valve", _entity_id_field(es)),
+        response=lambda es: _plural_response(es, "wird geschlossen.", "geschlossen."),
+        required_capability="CLOSE",
+    ),
 }
 
 
@@ -109,6 +154,12 @@ ACTION_OPPOSITES: dict[str, str] = {
     "HassTurnOff": "HassTurnOn",
     "HassOpenCover": "HassCloseCover",
     "HassCloseCover": "HassOpenCover",
+    "HassMediaPlay": "HassMediaPause",
+    "HassMediaPause": "HassMediaPlay",
+    "HassVacuumStart": "HassVacuumStop",
+    "HassVacuumStop": "HassVacuumStart",
+    "HassOpenValve": "HassCloseValve",
+    "HassCloseValve": "HassOpenValve",
 }
 
 

@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.39.0**
+- Aktuelle Version: **4.40.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -35,6 +35,44 @@ HomeIntent benötigt für die Sprachverarbeitung:
 Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
+
+## Was ist in Version 4.40 neu?
+
+Version 4.40 erweitert den lokalen semantischen Compiler über die bisherigen
+Kerndomänen hinaus. Licht, Schalter, Ventilator, Rollladen, Heizung,
+Medienplayer, Saugroboter, Luftbefeuchter und Ventile werden in einer
+gemeinsamen, kompositionalen Sprachschicht geprüft.
+
+Dabei wurden keine Listen vollständiger Sätze hinzugefügt. Ein HA-freies
+Operationsregister beschreibt stattdessen unabhängig voneinander:
+
+- Gerätebegriffe und ihre deutschen Formen,
+- Aktionen wie Ein-/Ausschalten, Öffnen/Schließen, Starten, Pausieren und
+  Stoppen,
+- die zulässigen Kombinationen aus Domäne und Aktion sowie
+- das daraus entstehende interne Intent.
+
+Dadurch gelten neue sprachliche Hüllen, Füllpartikel und Wortstellungen für
+alle registrierten Domänen zugleich. Beispielsweise führen diese Aussagen
+zum gleichen geprüften Medienbefehl:
+
+```text
+Starte die Wiedergabe auf dem Medienplayer Atlas.
+Der Medienplayer Atlas soll die Wiedergabe starten.
+Ich hätte gerne auf dem Medienplayer Atlas die Wiedergabe gestartet.
+Bitte auf dem Medienplayer Atlas weiterspielen.
+```
+
+Ventile bleiben trotz der allgemeineren Sprachschicht besonders geschützt:
+Die gemeldete Gerätefähigkeit wird geprüft, und die bestehende
+Sicherheitsrichtlinie verlangt weiterhin eine Bestätigung. Alte
+domänenspezifische Parser bleiben vorerst als Kompatibilitätspfad erhalten;
+der neue Compiler ist jedoch zusätzlich unabhängig davon getestet.
+
+Das Vokabular für Lexikon, Sprechakt-Erkennung, Entity-Gruppen und
+Dialogergänzung stammt nun aus einer gemeinsamen Quelle. Das verhindert,
+dass eine neue Gerätebezeichnung nur in einem Teil der Sprachpipeline
+bekannt ist.
 
 ## Was ist in Version 4.37 neu?
 
@@ -753,10 +791,10 @@ python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
 ```
 
-Geprüfter Stand von Version 4.39.0:
+Geprüfter Stand von Version 4.40.0:
 
 ```text
-2056 passed, 12 skipped
+2075 passed, 12 skipped
 84 % Gesamt-Coverage
 64 % Coverage für conversation.py
 ```
@@ -778,17 +816,21 @@ folgenden Befehl ausgeführt werden:
 ./scripts/run_language_eval.sh
 ```
 
-Zusätzlich erzeugt die Test-Suite 1.024 Befehlsparaphrasen aus unabhängigen
-Dimensionen wie Ziel, Operation, sprachlicher Hülle und Füllpartikel. Diese
-Matrix ist nur ein Regressionstest und wird niemals von der Produktivlogik
-eingelesen. Dadurch kann sie dem Parser keine Antworten „beibringen“.
+Zusätzlich erzeugt die Test-Suite weiterhin 1.024 intensive Lichtparaphrasen.
+Die neue domänenübergreifende Matrix kombiniert außerdem 2.304 fachlich
+passende Formulierungen aus Domäne, Ziel, Operation, sprachlicher Hülle und
+Füllpartikel. Jeder Fall wird einmal direkt gegen den semantischen Compiler
+und einmal über die echte Live-Routingreihenfolge geprüft – insgesamt 4.608
+domänenübergreifende Routingprüfungen. Die Matrizen sind ausschließlich
+Regressionstests und werden niemals von der Produktivlogik eingelesen.
+Dadurch können sie dem Parser keine Antworten „beibringen“.
 
 ### Benchmark-Momentaufnahme
 
 ![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
 
 Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.39.0. Benchmark,
+Entwicklungsstands und kein aktueller Nachweis für Version 4.40.0. Benchmark,
 Fehlerdiagnose und Messungen auf schwacher Hardware werden bewusst separat
 aktualisiert. Ein perfektes Ergebnis in einem bekannten Korpus bedeutet nicht,
 dass jede mögliche Formulierung verstanden wird.

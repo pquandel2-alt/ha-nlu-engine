@@ -144,6 +144,12 @@ def validate_command(command: SemanticCommand) -> ValidationError | None:
         for entity in command.entities:
             if required_climate_capability.name not in entity.capabilities:
                 return ValidationError.UNSUPPORTED_CAPABILITY
+    elif command.intent in INTENTS:
+        required_capability = INTENTS[command.intent].required_capability
+        if required_capability is not None:
+            for entity in command.entities:
+                if required_capability not in entity.capabilities:
+                    return ValidationError.UNSUPPORTED_CAPABILITY
 
     # 7. Parameter vorhanden?
     if is_percent_intent and "percent" not in command.parameters:

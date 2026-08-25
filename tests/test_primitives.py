@@ -29,6 +29,9 @@ def test_semantic_action_has_expected_members():
         "SET",
         "ADJUST",
         "QUERY",
+        "START",
+        "PAUSE",
+        "STOP",
     }
 
 

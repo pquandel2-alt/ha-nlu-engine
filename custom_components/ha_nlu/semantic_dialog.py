@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from .device_control import DeviceControlResult, _mentioned_entity
 from .entities import EntitySnapshot, ResolveStatus, normalize_for_compare, resolve_entity
 from .nlu.context import PendingSemanticCommand
+from .nlu.domain_operations import DOMAIN_WORDS
 from .service_call import ServiceCallPlan
 
 
@@ -22,26 +23,15 @@ _COMMAND_RE = re.compile(r"\b(?:stell\w*|setz\w*|regel\w*|mach\w*|schalt\w*|fahr
 _SOME_RE = re.compile(r"\b(?:ein\s+paar|einige\w*|mehrere\w*)\b", re.I)
 _NUMBER_RE = re.compile(r"\b(-?\d+(?:[,.]\d+)?)\s*(grad|prozent|%)?\b", re.I)
 
-_DOMAIN_WORDS = {
-    "light": ("licht", "lichter", "lampen", "beleuchtung"),
-    "switch": ("schalter", "steckdosen"),
-    "cover": ("rollladen", "rollläden", "rollos", "jalousien"),
-    "fan": ("ventilatoren", "lüfter"),
-    "climate": ("heizungen", "thermostate"),
-    "input_boolean": ("helfer", "modi"),
-    "humidifier": ("luftbefeuchter", "befeuchter"),
-    "water_heater": ("warmwasser", "boiler", "wasserheizer"),
-    "number": ("regler", "wert"),
-    "input_number": ("regler", "wert", "helfer"),
-    "select": ("profil", "programm", "auswahl"),
-}
-
-
 def _spoken_domain(text: str) -> str | None:
     normalized = normalize_for_compare(text)
     matches = [
         domain
-        for domain, words in _DOMAIN_WORDS.items()
+        for domain, words in DOMAIN_WORDS.items()
+        if domain in {
+            "light", "switch", "cover", "fan", "climate", "input_boolean",
+            "humidifier", "water_heater", "number", "input_number", "select",
+        }
         if any(re.search(rf"(?<!\w){re.escape(word)}(?!\w)", normalized) for word in words)
     ]
     return matches[0] if len(matches) == 1 else None

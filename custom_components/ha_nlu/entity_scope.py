@@ -6,20 +6,17 @@ import re
 from dataclasses import dataclass
 
 from .entities import EntitySnapshot, normalize_for_compare
+from .nlu.domain_operations import DOMAIN_WORDS as SHARED_DOMAIN_WORDS
 
 
+# This resolver belongs to the extended-device router. Core domains keep
+# their established WorldModel resolver and must not be intercepted here.
+_SCOPE_DOMAINS = frozenset({
+    "humidifier", "water_heater", "select", "number", "input_number",
+    "input_boolean", "valve", "lawn_mower", "vacuum", "media_player", "camera",
+})
 DOMAIN_WORDS: dict[str, tuple[str, ...]] = {
-    "humidifier": ("luftbefeuchter", "befeuchter"),
-    "water_heater": ("warmwasser", "boiler", "wasserheizer"),
-    "select": ("auswahl", "profil", "programm"),
-    "number": ("wert", "regler"),
-    "input_number": ("wert", "regler", "helfer"),
-    "input_boolean": ("helfer", "modus", "modi"),
-    "valve": ("ventil", "ventile"),
-    "lawn_mower": ("maehroboter", "maeher", "rasenmaeher"),
-    "vacuum": ("saugroboter", "staubsauger", "sauger"),
-    "media_player": ("lautsprecher", "player", "radio", "fernseher"),
-    "camera": ("kamera", "kameras"),
+    domain: SHARED_DOMAIN_WORDS[domain] for domain in _SCOPE_DOMAINS
 }
 
 
