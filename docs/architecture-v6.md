@@ -447,43 +447,28 @@ wird jetzt bei jedem echten Conversation-Turn zusätzlich zu
 `build_entity_snapshots()` aufgerufen und über `world_model.build_world_model()`
 zu `self._world_model` gebündelt. `entities` (die tatsächlich an
 `match()`/`match_followup()`/etc. übergebene Liste) bleibt exakt der
-vorherige Aufruf, unverändert – `tests/test_conversation_integration.py`s
-`monkeypatch.setattr(ha_conversation, "build_entity_snapshots", ...)` greift
-weiterhin unverändert, keine Anpassung an dieser WIP-Datei nötig
-(`build_device_snapshots()` liefert dort mangels ausgewählter Entities
-einfach `[]`, kein Crash). `WorldModel` läuft damit ab sofort real in jedem
-HA-Turn, nicht mehr nur in Tests – **aber** noch immer ohne Konsumenten:
-kein Parser liest `self._world_model`, weil keine deutsche Grammatik heute
-nach Geräte-Ebene fragt. Das ist kein technisches Defizit, sondern die
-Grenze von "niemals raten" – eine neue Sprachfähigkeit dafür zu erfinden
-wäre Scope, den niemand beauftragt hat. 1072 Tests weiterhin grün
-(inkl. `test_conversation_integration.py`, unverändert).
+vorherige Aufruf. Das `WorldModel` läuft damit real in jedem HA-Turn und wird
+inzwischen von semantischen Zustands-, Standort-, Geräte- und
+Kontextabfragen konsumiert. Resolver erhalten weiterhin nur typisierte
+Snapshots; ein fehlendes Geräte-, Bereichs- oder Etagenmerkmal führt zu
+einem leeren Ergebnis beziehungsweise einer Rückfrage und nie zu einer
+geratenen Zuordnung.
 
-**Weiterhin bewusst NICHT Teil dieser Wave:**
-- `parsers.py`/`engine.py` auf Device-Daten migrieren – keine
-  Satzvorlage fragt heute nach Geräte-Ebene; würde jeden Parser-Call-Site
-  anfassen, ohne dass etwas Testbares dabei gewonnen wird.
-- `AreaIndex`/`FloorIndex` (separates, bereits verzeichnetes V6.7-Item).
-- Gesprochene Geräte-Namensauflösung ("welches Gerät") – keine
-  Lexikon-Evidenz vorhanden.
+Die historische Entscheidung, nicht alle Parser in einem einzigen Schritt
+auf Geräte-Daten umzustellen, bleibt richtig. Neue Konsumenten werden
+schrittweise über den gemeinsamen World-Model- und Constraint-Pfad ergänzt
+und jeweils mit Live-Routingtests abgesichert.
 
-**Tests:** `tests/test_devices.py` (3, hass-frei),
-`tests/test_world_model.py` (5, hass-frei, handgebaute
-Entity/Device-Fixtures), `tests/test_hass_entities_devices.py` (5,
-Hass-Bridge-Ebene – nutzt `tests/_ha_stub.py::install()` read-only wieder,
-da dessen Registry-Fakes fest auf `None` stehen; per-Test-Registry-Daten
-über `monkeypatch` auf `hass_entities.er/dr/ar/fr` statt den geteilten
-WIP-Stub selbst anzufassen). Gesamtsuite: 1059 → **1072 grün**
-(`pytest -q`, venv `ha-nlu-engine-venv`), keine bestehende Testdatei
-verändert.
+**Tests:** Die World-Model-, Registry-Bridge-, Standort-, Query- und
+Conversation-Routingtests prüfen sowohl handgebaute HA-freie Snapshots als
+auch die Live-Verdrahtung über den Home-Assistant-Stub. Der jeweils aktuelle
+Gesamtstand wird im README dokumentiert; historische Testzahlen werden hier
+nicht mehr als aktueller Nachweis geführt.
 
-**DoD-Update:** "World Model semantisch nutzbar" gilt jetzt sowohl für
-die strukturelle Filterung (6c) als auch für ein echtes, bündelndes
-Datenmodell mit Devices und Beziehungen (6d) – die Vision "500 Konzepte,
-nicht 50.000 Sätze" hat damit erstmals ein reales Objekt, nicht nur einen
-vereinheitlichten Filterpfad. Volle Pipeline-Verdrahtung (`conversation.py`,
-Parser-Migration) bleibt offen für eine künftige Wave, sobald eine
-Grammatik/ein Feature tatsächlich Device-Daten braucht.
+**DoD-Update:** "World Model semantisch nutzbar" umfasst strukturelle
+Filterung, Devices, Bereiche, Etagen und die reale Verdrahtung im
+Conversation-Turn. Weitere Parser werden nur dann migriert, wenn eine
+konkrete Sprachfähigkeit die zusätzlichen Beziehungen benötigt.
 
 ⸻
 

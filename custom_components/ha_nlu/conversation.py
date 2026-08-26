@@ -67,6 +67,7 @@ from .calendar_event import (
     writable_calendars,
 )
 from .calendar_management import parse_calendar_management
+from .capability_audit import match_capability_audit_query
 from .conversation_location import (
     materialize_local_reference,
     resolve_conversation_area,
@@ -532,9 +533,11 @@ class NluConversationEntity(
                 user_input, response, management_request, entities
             )
 
-        device_control = match_household_query(
-            user_input.text, entities, dt_util.now()
-        )
+        device_control = match_capability_audit_query(user_input.text, entities)
+        if device_control is None:
+            device_control = match_household_query(
+                user_input.text, entities, dt_util.now()
+            )
         if device_control is None:
             device_control = match_extended_device_query(user_input.text, entities)
         if device_control is None:

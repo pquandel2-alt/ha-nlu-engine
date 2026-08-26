@@ -61,6 +61,10 @@ jobs:
           custom_components/ha_nlu/entity_scope.py
           custom_components/ha_nlu/risk.py
           custom_components/ha_nlu/automation_history.py
+          custom_components/ha_nlu/query_target.py
+          custom_components/ha_nlu/capability_audit.py
+          custom_components/ha_nlu/household_query.py
+          custom_components/ha_nlu/nlu/automation_operations.py
       - name: Statische Importprüfung
         run: python -m pyflakes custom_components tests scripts
 

@@ -7,9 +7,9 @@ from datetime import datetime, timedelta
 
 from .device_control import DeviceControlResult
 from .entities import EntitySnapshot, normalize_for_compare
-from .entity_scope import resolve_entity_scope
 from .nlu.domain_operations import DOMAIN_WORDS
 from .nlu.normalize import normalize
+from .query_target import list_attribute_values, mentioned_entities, resolve_query_targets
 
 
 _WEEKDAYS_DE = (
@@ -73,74 +73,10 @@ def _format_datetime(value: object, now: datetime) -> str | None:
     return f"{day} um {value:%H:%M} Uhr"
 
 
-def _mentioned(text: str, entities: list[EntitySnapshot]) -> list[EntitySnapshot]:
-    normalized = normalize_for_compare(text)
-    found: list[tuple[int, EntitySnapshot]] = []
-    for entity in entities:
-        score = max(
-            (
-                len(key)
-                for name in (entity.friendly_name, *entity.aliases)
-                if (key := normalize_for_compare(name))
-                and re.search(rf"(?<!\w){re.escape(key)}(?!\w)", normalized)
-            ),
-            default=0,
-        )
-        if score:
-            found.append((score, entity))
-    if not found:
-        return []
-    best = max(score for score, _ in found)
-    return [entity for score, entity in found if score == best]
-
-
 def _target_for_capability_query(
     text: str, entities: list[EntitySnapshot]
 ) -> tuple[EntitySnapshot, ...]:
-    mentioned = _mentioned(text, entities)
-    if mentioned:
-        return tuple(mentioned)
-    scope = resolve_entity_scope(text, entities, frozenset(_CAPABILITY_LABELS))
-    if scope is not None:
-        return tuple(scope.entities)
-    normalized = normalize_for_compare(text)
-    spoken_domains = {
-        domain
-        for domain, words in DOMAIN_WORDS.items()
-        if domain in _CAPABILITY_LABELS
-        and any(
-            re.search(
-                rf"(?<!\w){re.escape(normalize_for_compare(word))}(?!\w)",
-                normalized,
-            )
-            for word in words
-        )
-    }
-    candidates = [entity for entity in entities if entity.domain in spoken_domains]
-    spoken_areas = {
-        entity.area_id
-        for entity in candidates
-        if entity.area_id
-        and any(
-            area
-            and re.search(
-                rf"(?<!\w){re.escape(normalize_for_compare(area))}(?!\w)",
-                normalized,
-            )
-            for area in (entity.area_name, *entity.area_aliases)
-        )
-    }
-    if spoken_areas:
-        candidates = [entity for entity in candidates if entity.area_id in spoken_areas]
-    return tuple(candidates)
-
-
-def _list_values(entity: EntitySnapshot, keys: tuple[str, ...]) -> tuple[str, ...]:
-    for key in keys:
-        raw = entity.attributes.get(key)
-        if isinstance(raw, (list, tuple)):
-            return tuple(str(value) for value in raw if str(value).strip())
-    return ()
+    return resolve_query_targets(text, entities, frozenset(_CAPABILITY_LABELS))
 
 
 def match_household_query(
@@ -175,7 +111,7 @@ def match_household_query(
 
     presence = re.search(r"\bist\s+(.+?)\s+(?:zu\s*hause|daheim|anwesend)\b", key)
     if presence is not None:
-        people = _mentioned(value, [e for e in entities if e.domain == "person"])
+        people = mentioned_entities(value, [e for e in entities if e.domain == "person"])
         if len(people) == 1:
             person = people[0]
             return _read_only(
@@ -203,8 +139,8 @@ def match_household_query(
         key,
     ):
         weather_entities = [e for e in entities if e.domain == "weather"]
-        mentioned = _mentioned(value, weather_entities)
-        choices = mentioned or weather_entities
+        mentioned = mentioned_entities(value, weather_entities)
+        choices = list(mentioned) or weather_entities
         if len(choices) > 1:
             return _read_only("Welche Wetter-Entität meinst du?")
         if not choices:
@@ -258,7 +194,7 @@ def match_household_query(
             "presets": ("preset_modes",),
             "stufen": ("fan_speed_list", "preset_modes"),
         }[option_query.group(1)]
-        options = _list_values(entity, attribute_keys)
+        options = list_attribute_values(entity, attribute_keys)
         if not options:
             return _read_only(f"{entity.friendly_name} meldet dafür keine Auswahlmöglichkeiten.")
         return _read_only(f"{entity.friendly_name} bietet: " + ", ".join(options) + ".")

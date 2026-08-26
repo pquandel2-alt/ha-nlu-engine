@@ -158,3 +158,23 @@ def validate_registered_operation(
         if value is not None and (not isinstance(value, (int, float)) or not 0 <= value <= 100):
             return False
     return True
+
+
+def operation_registry_is_consistent() -> bool:
+    """Return whether allow-list, preview labels and data vocabulary agree."""
+    registered = frozenset(REGISTERED_AUTOMATION_OPERATIONS)
+    if frozenset(_OPERATION_LABELS_DE) != registered:
+        return False
+    data_keys = frozenset(
+        key
+        for spec in REGISTERED_AUTOMATION_OPERATIONS.values()
+        for key in spec.required_data | spec.optional_data
+    )
+    if not data_keys <= frozenset(_DATA_LABELS_DE):
+        return False
+    high_risk_domains = frozenset({"alarm_control_panel", "button", "group", "lock"})
+    return all(
+        domain not in high_risk_domains
+        and not spec.target_domains & high_risk_domains
+        for (domain, _service), spec in REGISTERED_AUTOMATION_OPERATIONS.items()
+    )

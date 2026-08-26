@@ -145,6 +145,16 @@ def test_household_presence_query_is_live_and_strictly_read_only(monkeypatch):
     assert "Zuhause: Philipp" in result.response.speech
 
 
+def test_capability_readiness_audit_is_live_and_strictly_read_only(monkeypatch):
+    entity = _make_entity(monkeypatch, [FLUR_LICHT_OFF, EG_TEMPERATUR])
+
+    result = _run(entity, "Ist HomeIntent bereit?")
+
+    entity.hass.services.async_call.assert_not_awaited()
+    assert result.response.response_type == intent.IntentResponseType.QUERY_ANSWER
+    assert "2 freigegebene Entities" in result.response.speech
+
+
 def test_cover_group_without_floor_assignment_returns_actionable_error(monkeypatch):
     cover = EntitySnapshot(
         "cover.buero", "Rollladen Büro", "cover", "closed",

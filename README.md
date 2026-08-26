@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.44.0**
+- Aktuelle Version: **4.45.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -35,6 +35,30 @@ HomeIntent benötigt für die Sprachverarbeitung:
 Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
+
+## Was ist in Version 4.45 neu?
+
+Version 4.45 macht den Einrichtungszustand direkt über Assist prüfbar:
+
+```text
+Ist HomeIntent bereit?
+Welche Geräte kannst du steuern?
+Welche Geräte kannst du nicht steuern?
+Welche Geräte haben keinen Bereich?
+Warum kannst du die Garagensirene nicht steuern?
+```
+
+Der Audit wertet ausschließlich die für diesen Conversation-Turn
+freigegebenen Entity-Snapshots aus. Er nennt Anzahlen, fehlende
+Bereichszuordnungen und noch nicht unterstützte Domänen, ohne Zustände oder
+Entity-IDs aus einem anderen Sichtbarkeitsbereich offenzulegen. Auch dieser
+Pfad ist strikt lesend.
+
+Die Zielauflösung für Fähigkeits- und Optionsfragen liegt nun in einem
+gemeinsamen HA-freien Modul. Ein zusätzlicher Driftschutz prüft, dass jede für
+Automationen freigegebene Operation eine Vorschau und bekannte Datenfelder
+besitzt und keine Hochrisiko-Domäne versehentlich in das Register gelangt.
+Vier weitere Module gehören jetzt zum blockierenden Pyright-Strict-Scope.
 
 ## Was ist in Version 4.44 neu?
 
@@ -781,6 +805,11 @@ Die bewusst heruntergeladene Home-Assistant-Diagnose enthält nur technische
 Kennzahlen und Richtlinieneinstellungen, aber keine Äußerungen, Entity-IDs oder
 Zustände.
 
+Der gesprochene Bereitschaftscheck „Ist HomeIntent bereit?“ arbeitet dagegen
+nur mit den Entities, die im aktuellen Assist-Turn ohnehin sichtbar sind. Er
+hilft dabei, fehlende Bereichszuordnungen und noch nicht unterstützte Domänen
+zu finden, bevor eine konkrete Formulierung getestet wird.
+
 ## Installation über HACS
 
 HomeIntent wird derzeit als benutzerdefiniertes HACS-Repository installiert.
@@ -893,10 +922,10 @@ python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
 ```
 
-Geprüfter Stand von Version 4.44.0:
+Geprüfter Stand von Version 4.45.0:
 
 ```text
-2132 passed, 12 skipped
+2144 passed, 12 skipped
 84 % Gesamt-Coverage
 64 % Coverage für conversation.py
 ```
@@ -932,7 +961,7 @@ Dadurch können sie dem Parser keine Antworten „beibringen“.
 ![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
 
 Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.44.0. Benchmark,
+Entwicklungsstands und kein aktueller Nachweis für Version 4.45.0. Benchmark,
 Fehlerdiagnose und Messungen auf schwacher Hardware werden bewusst separat
 aktualisiert. Ein perfektes Ergebnis in einem bekannten Korpus bedeutet nicht,
 dass jede mögliche Formulierung verstanden wird.
