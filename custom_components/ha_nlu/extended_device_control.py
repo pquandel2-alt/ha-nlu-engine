@@ -127,6 +127,7 @@ def match_extended_device_control(
                 plan,
                 f"{len(scope.entities)} Geräte {spoken}.",
                 requires_confirmation=requires_confirmation(plan, list(scope.entities)),
+                entities=tuple(scope.entities),
             )
 
     entity = mentioned_entity(

@@ -928,6 +928,26 @@ class NluEngine:
         for segment in segments:
             result = self.match(segment, entities, world_model)
             if (
+                result is None
+                and results
+                and results[-1].command is not None
+                and results[-1].plan is not None
+            ):
+                previous = results[-1].command
+                # The splitter removes the conjunction. Re-add only its
+                # discourse role and let the established follow-up grammar
+                # prove whether this fragment can inherit the prior action.
+                result = self.match_command_followup(
+                    f"und {segment.strip()}",
+                    entities,
+                    ConversationContext(
+                        last_command=previous,
+                        last_entities=previous.entities,
+                        last_area=previous.area,
+                        pending_clarification=None,
+                    ),
+                )
+            if (
                 not isinstance(result, MatchResult)
                 or result.clarification is not None
                 or result.command is None

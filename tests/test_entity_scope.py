@@ -28,6 +28,9 @@ def test_extended_group_control_uses_one_multi_target_plan():
     assert result is not None and result.plan is not None
     assert result.plan.service == "turn_off"
     assert set(result.plan.entity_id) == {"humidifier.office", "humidifier.bed"}
+    assert {item.entity_id for item in result.resolved_entities} == {
+        "humidifier.office", "humidifier.bed",
+    }
 
 
 def test_extended_area_query_reports_concrete_state():

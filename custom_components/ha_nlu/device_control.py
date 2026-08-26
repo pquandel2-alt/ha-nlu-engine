@@ -19,6 +19,14 @@ class DeviceControlResult:
     response_text: str
     requires_confirmation: bool = False
     entity: EntitySnapshot | None = None
+    entities: tuple[EntitySnapshot, ...] = ()
+
+    @property
+    def resolved_entities(self) -> tuple[EntitySnapshot, ...]:
+        """Return every exact target while preserving singular compatibility."""
+        if self.entities:
+            return self.entities
+        return (self.entity,) if self.entity is not None else ()
 
 
 def _clean(text: str) -> str:
@@ -49,6 +57,7 @@ def _result(
         response,
         requires_confirmation=confirm or requires_confirmation(plan, [entity]),
         entity=entity,
+        entities=(entity,),
     )
 
 
@@ -292,13 +301,16 @@ def _match_compositional(
 
 
 def match_device_control_followup(
-    text: str, context: ConversationContext | None
+    text: str,
+    context: ConversationContext | None,
+    entities: list[EntitySnapshot] | None = None,
 ) -> DeviceControlResult | None:
-    """Resolve short media/vacuum references against the preceding device.
+    """Resolve a safe, target-elliptical operation against prior focus.
 
-    Operation lexemes are composed independently of pronoun, filler and word
-    order.  Context contributes only one already resolved entity; conflicting
-    operations are rejected instead of selecting the first matching phrase.
+    The existing device parser remains the single source of operation and
+    capability semantics.  This function supplies only one exact previous
+    target.  Longer utterances require an explicit anaphoric cue; this keeps
+    an unknown new device name from being redirected to the previous device.
     """
     if context is None or len(context.last_entities) != 1:
         return None
@@ -310,6 +322,26 @@ def match_device_control_followup(
         and not utterance.safe_to_execute_directly
     ):
         return None
+    words = re.findall(r"\b\w+\b", value, re.UNICODE)
+    has_reference = re.search(
+        r"\b(?:und|es|ihn|sie|das|dies(?:e|er|es)?|dort|auch|weiter|wieder)\b",
+        value,
+        re.I,
+    ) is not None
+    if len(words) > 4 and not has_reference:
+        return None
+
+    # Do not steal a turn that names another known entity.  The ordinary
+    # router has already had its chance, but an unsupported operation on a
+    # newly named device must still fail rather than affect old context.
+    if entities is not None:
+        named = _mentioned_entity(
+            value,
+            entities,
+            frozenset(entity.domain for entity in entities),
+        )
+        if named is not None and named.entity_id != entity.entity_id:
+            return None
     if entity.domain == "media_player":
         operations = [
             (service, speech)
@@ -337,6 +369,13 @@ def match_device_control_followup(
         if len(operations) == 1:
             service, speech = operations[0]
             return _result(entity, service, f"{entity.friendly_name} {speech}.")
+
+    # Reuse the complete capability-driven router by adding the exact prior
+    # registry name, never by guessing an entity from free text.  "stelle"
+    # supplies the omitted command marker for terse value/option follow-ups;
+    # operation-specific parsers still have to prove a unique valid action.
+    contextual_text = f"stelle {entity.friendly_name} {value}"
+    return match_device_control(contextual_text, [entity])
     return None
 
 

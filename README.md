@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.42.0**
+- Aktuelle Version: **4.43.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -35,6 +35,34 @@ HomeIntent benötigt für die Sprachverarbeitung:
 Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
+
+## Was ist in Version 4.43 neu?
+
+Version 4.43 erweitert den Gesprächskontext auf alle bereits sicher
+unterstützten Geräteoperationen. Nach einem eindeutig aufgelösten Ziel sind
+dadurch kurze, natürliche Ergänzungen möglich, ohne das Gerät zu wiederholen:
+
+```text
+Du: Stelle die Heizung im Büro auf 21 Grad.
+Du: Und jetzt auf Automatik.
+
+Du: Wähle beim Heizprofil Komfort.
+Du: Und jetzt Eco.
+
+Du: Stelle den Luftbefeuchter im Bad ein.
+Du: Und auf 45 Prozent Luftfeuchtigkeit.
+```
+
+Die Folgeäußerung wird nicht als eigener Sonderfall implementiert. HomeIntent
+setzt den bereits exakt aufgelösten Kontext mit der neuen Operation zusammen
+und lässt das Ergebnis erneut durch denselben Geräte-, Werte-, Capability-
+und Sicherheitsparser laufen. Nennt der Nutzer ein anderes bekanntes Gerät,
+wird der alte Kontext nicht verwendet.
+
+Mehrzielaktionen behalten nun außerdem alle kontrollierten Entities im
+Dialog- und Undo-Kontext. Auch koordinierte Folgeklauseln wie „Mach das Licht
+im Wohnzimmer an und im Schlafzimmer auch“ können die vorherige Aktion
+übernehmen; vor der Ausführung muss weiterhin der gesamte Plan gültig sein.
 
 ## Was ist in Version 4.42 neu?
 
@@ -840,10 +868,10 @@ python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
 ```
 
-Geprüfter Stand von Version 4.42.0:
+Geprüfter Stand von Version 4.43.0:
 
 ```text
-2110 passed, 12 skipped
+2115 passed, 12 skipped
 84 % Gesamt-Coverage
 64 % Coverage für conversation.py
 ```
@@ -879,7 +907,7 @@ Dadurch können sie dem Parser keine Antworten „beibringen“.
 ![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
 
 Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.42.0. Benchmark,
+Entwicklungsstands und kein aktueller Nachweis für Version 4.43.0. Benchmark,
 Fehlerdiagnose und Messungen auf schwacher Hardware werden bewusst separat
 aktualisiert. Ein perfektes Ergebnis in einem bekannten Korpus bedeutet nicht,
 dass jede mögliche Formulierung verstanden wird.

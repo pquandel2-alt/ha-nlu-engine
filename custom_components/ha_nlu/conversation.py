@@ -535,7 +535,9 @@ class NluConversationEntity(
         if device_control is None:
             device_control = match_device_control(user_input.text, entities)
         if device_control is None:
-            device_control = match_device_control_followup(user_input.text, pending)
+            device_control = match_device_control_followup(
+                user_input.text, pending, entities
+            )
         if device_control is not None:
             return await self._async_handle_device_control_result(
                 user_input, response, device_control
@@ -2285,9 +2287,10 @@ class NluConversationEntity(
             self._context_store.clear(user_input.conversation_id)
             response.async_set_speech(device_control.response_text)
         else:
+            resolved_entities = list(device_control.resolved_entities)
             policy = evaluate_service_plan(
                 device_control.plan,
-                [device_control.entity] if device_control.entity is not None else [],
+                resolved_entities,
                 self.entry.options,
                 is_admin=await user_is_admin(self.hass, user_input),
                 user_id=conversation_user_id(user_input),
@@ -2319,9 +2322,7 @@ class NluConversationEntity(
                             conversation_user_id(user_input),
                             build_undo_plan(
                                 device_control.plan,
-                                [device_control.entity]
-                                if device_control.entity is not None
-                                else [],
+                                resolved_entities,
                                 requested_by_user_id=conversation_user_id(user_input),
                             ),
                         ),
@@ -2360,25 +2361,27 @@ class NluConversationEntity(
                 )
             else:
                 response.async_set_speech(device_control.response_text)
-                if device_control.entity is not None:
-                    controlled = device_control.entity
+                if resolved_entities:
+                    controlled = resolved_entities[0]
                     self._context_store.set(
                         user_input.conversation_id,
                         ConversationContext(
                             last_command=None,
-                            last_entities=(controlled,),
+                            last_entities=tuple(resolved_entities),
                             last_area=None,
                             pending_clarification=None,
                             focus=DialogFocus(
                                 property=None,
-                                scope_kind="entity",
-                                scope_id=controlled.entity_id,
-                                candidate_entity_ids=(controlled.entity_id,),
+                                scope_kind=("entity" if len(resolved_entities) == 1 else None),
+                                scope_id=(controlled.entity_id if len(resolved_entities) == 1 else None),
+                                candidate_entity_ids=tuple(
+                                    entity.entity_id for entity in resolved_entities
+                                ),
                                 source_intent="DeviceControl:" + device_control.plan.service,
                             ),
                             pending_undo=build_undo_plan(
                                 device_control.plan,
-                                [controlled],
+                                resolved_entities,
                                 requested_by_user_id=conversation_user_id(user_input),
                             ),
                         ),
