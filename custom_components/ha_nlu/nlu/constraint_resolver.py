@@ -28,7 +28,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..entities import EntitySnapshot, resolve_entities_by_domain
+from ..entities import EntitySnapshot
+from .entity_resolution import resolve_entities_by_domain
 from .capabilities import required_capability_for_property
 from .primitives import SemanticProperty
 

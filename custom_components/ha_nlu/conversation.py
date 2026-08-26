@@ -115,6 +115,7 @@ from .nlu.automation_validator import validate_automation
 from .nlu.automation_preview import render_automation_preview
 from .nlu.context import (
     ConversationContext,
+    DialogTurnMemory,
     PendingAutomationConfirmation,
     PendingAutomationDeletion,
     PendingAutomationDraft,
@@ -848,8 +849,15 @@ class NluConversationEntity(
             )
         elif pending is not None and pending.last_command is not None:
             speech = explain_command(pending.last_command)
-        elif pending is not None and pending.last_explanation is not None:
-            speech = pending.last_explanation
+        elif pending is not None and (
+            pending.memory is not None and pending.memory.explanation is not None
+            or pending.last_explanation is not None
+        ):
+            speech = (
+                pending.memory.explanation
+                if pending.memory is not None and pending.memory.explanation is not None
+                else pending.last_explanation
+            )
         else:
             speech = "In diesem Gespräch gibt es noch keinen verstandenen Befehl."
         response.async_set_speech(speech)
@@ -1255,6 +1263,12 @@ class NluConversationEntity(
                     focus=derive_dialog_focus(result.command),
                     pending_undo=undo_plan,
                     last_explanation=result.explanation_text,
+                    memory=DialogTurnMemory(
+                        source_text=user_input.text,
+                        entities=tuple(result.command.entities),
+                        explanation=result.explanation_text,
+                        command=result.command,
+                    ),
                 ),
             )
         elif result.context_entities:
@@ -1267,6 +1281,12 @@ class NluConversationEntity(
                     pending_clarification=None,
                     last_query_predicate=result.context_predicate,
                     last_explanation=result.explanation_text,
+                    memory=DialogTurnMemory(
+                        source_text=user_input.text,
+                        entities=result.context_entities,
+                        predicate=result.context_predicate,
+                        explanation=result.explanation_text,
+                    ),
                 ),
             )
         else:

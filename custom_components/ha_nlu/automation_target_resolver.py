@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .areas import AreaResolutionStatus, resolve_area_scored
-from .entities import ResolutionStatus, resolve_entity_scored
+from .nlu.entity_resolution import ResolutionStatus, resolve_entity_scored
 from .nlu.automation_model import TriggerTarget
 from .nlu.constraint_resolver import Constraints, resolve_candidates
 from .nlu.parser import ParseContext

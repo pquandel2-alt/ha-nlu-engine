@@ -48,6 +48,7 @@ __all__ = [
     "ClarificationRequest",
     "ConversationContext",
     "ConversationContextStore",
+    "DialogTurnMemory",
     "DEFAULT_CONTEXT_TTL_SECONDS",
     "AUTOMATION_CONFIRMATION_TTL_SECONDS",
     "PendingAutomationConfirmation",
@@ -63,6 +64,22 @@ __all__ = [
     "PendingProductivityCommand",
     "PendingAutomationWizard",
 ]
+
+
+@dataclass(frozen=True)
+class DialogTurnMemory:
+    """Canonical, read-only memory of the last understood turn.
+
+    The older ``last_*`` fields remain as a compatibility surface for pending
+    dialogs.  New discourse features consume this coherent snapshot instead
+    of reconstructing one turn from several independently optional fields.
+    """
+
+    source_text: str
+    entities: tuple[EntitySnapshot, ...] = ()
+    predicate: str | None = None
+    explanation: str | None = None
+    command: SemanticCommand | None = None
 
 
 @dataclass(frozen=True)
@@ -289,6 +306,7 @@ class ConversationContext:
     # "Woher weißt du das?" without manufacturing an executable command.
     last_query_predicate: str | None = None
     last_explanation: str | None = None
+    memory: DialogTurnMemory | None = None
 
 
 class ConversationContextStore:

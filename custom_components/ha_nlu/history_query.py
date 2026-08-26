@@ -60,6 +60,40 @@ _HISTORY_CUE_RE = re.compile(
     r"hoechst|groesst|verbraucht|verbrauch|erzeugt|produziert)\w*\b"
 )
 
+_STATE_HISTORY_DOMAINS = frozenset({
+    "binary_sensor", "switch", "cover", "input_boolean", "light", "fan",
+    "humidifier", "media_player", "vacuum", "lawn_mower", "valve",
+})
+
+
+def _history_state_target(
+    value: str, domain: str
+) -> tuple[frozenset[str], str] | None:
+    """Map a spoken historical predicate to raw HA states per domain."""
+    if re.search(r"\b(?:spielte|gespielt|wiedergabe)\b", value):
+        return (
+            (frozenset({"playing", "buffering"}), "bei der Wiedergabe")
+            if domain == "media_player" else None
+        )
+    if re.search(r"\b(?:lief|gelaufen|arbeitete|gearbeitet|reinigte|gereinigt|saugte|maehte)\b", value):
+        states = {
+            "media_player": frozenset({"playing", "buffering"}),
+            "vacuum": frozenset({"cleaning", "returning"}),
+            "lawn_mower": frozenset({"mowing", "returning"}),
+            "fan": frozenset({"on"}),
+            "humidifier": frozenset({"on"}),
+        }.get(domain)
+        return (states, "aktiv") if states is not None else None
+    if re.search(r"\b(?:offen|geoeffnet)\b", value):
+        return frozenset({"on", "open", "opening"}), "offen"
+    if re.search(r"\b(?:geschlossen|zu)\b", value):
+        return frozenset({"off", "closed", "closing"}), "geschlossen"
+    if re.search(r"\b(?:an|aktiv)\b", value):
+        return frozenset({"on"}), "aktiv"
+    if re.search(r"\b(?:aus|inaktiv)\b", value):
+        return frozenset({"off"}), "inaktiv"
+    return None
+
 
 def _mentioned_entity(text: str, entities: list[EntitySnapshot]) -> EntitySnapshot | None:
     value = normalize_for_compare(text)
@@ -132,14 +166,9 @@ def parse_history_query(
     )
     if state_metric is not None and time_range is not None:
         entity = _mentioned_entity(
-            text,
-            [item for item in entities if item.domain in {"binary_sensor", "switch", "cover", "input_boolean"}],
+            text, [item for item in entities if item.domain in _STATE_HISTORY_DOMAINS]
         )
-        target: tuple[frozenset[str], str] | None = None
-        if re.search(r"\b(?:offen|geoeffnet|an|aktiv)\b", value):
-            target = frozenset({"on", "open", "opening"}), "offen"
-        elif re.search(r"\b(?:geschlossen|zu|aus|inaktiv)\b", value):
-            target = frozenset({"off", "closed", "closing"}), "geschlossen"
+        target = _history_state_target(value, entity.domain) if entity is not None else None
         if entity is not None and target is not None:
             start, end, _period, label = time_range
             return StateHistoryQuery(

@@ -6,9 +6,48 @@ import re
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from ..entities import EntitySnapshot, normalize_for_compare
+from ..entities import (
+    EntitySnapshot,
+    ResolutionResult,
+    ResolutionStatus,
+    ResolveResult,
+    ResolveStatus,
+    normalize_for_compare,
+    resolve_entities_by_domain,
+    resolve_entity,
+    resolve_entity_scored,
+)
 from ..entity_scope import resolve_entity_scope
 from .domain_operations import DOMAIN_WORDS
+
+__all__ = (
+    "GroundedEntities", "GroundingStatus", "ResolutionResult",
+    "ResolutionStatus", "ResolveResult", "ResolveStatus", "ground_entities",
+    "all_mentioned_entities", "mentioned_entities", "resolve_entities_by_domain", "resolve_entity",
+    "resolve_entity_scored", "resolve_query_targets",
+)
+
+
+def all_mentioned_entities(
+    text: str, entities: list[EntitySnapshot]
+) -> tuple[EntitySnapshot, ...]:
+    """Return every explicitly named entity, longest names first."""
+    normalized = normalize_for_compare(text)
+    found: list[tuple[int, EntitySnapshot]] = []
+    for entity in entities:
+        score = max(
+            (
+                len(key)
+                for name in (entity.friendly_name, *entity.aliases)
+                if (key := normalize_for_compare(name))
+                and re.search(rf"(?<!\w){re.escape(key)}(?!\w)", normalized)
+            ),
+            default=0,
+        )
+        if score:
+            found.append((score, entity))
+    found.sort(key=lambda item: (-item[0], item[1].entity_id))
+    return tuple(entity for _, entity in found)
 
 
 class GroundingStatus(Enum):

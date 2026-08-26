@@ -37,7 +37,12 @@ from .automation_results import (
     AutomationMatchResult,
     AutomationToggleMatchResult,
 )
-from .entities import EntitySnapshot, ResolveStatus, resolve_entity
+from .entities import EntitySnapshot
+from .nlu.entity_resolution import (
+    ResolveStatus,
+    all_mentioned_entities,
+    resolve_entity,
+)
 from .nlu.command import SemanticCommand, build_semantic_command
 from .nlu.context import ConversationContext
 from .nlu.debug import DebugTrace, format_command
@@ -58,7 +63,7 @@ from .nlu.response_generator import ResponseGenerator, _automation_label
 from .nlu.service_mapper import map_to_service_call
 from .nlu.semantic_compiler import SemanticCommandCompiler, SemanticQueryCompiler
 from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
-from .nlu.meaning import analyse_turn
+from .nlu.meaning import SemanticTurn, analyse_turn
 from .nlu.semantic_utterance import ClauseRole, SpeechAct, analyse_utterance
 from .nlu.verb_state_query import (
     match_contextual_verb_state_query,
@@ -803,6 +808,11 @@ class NluEngine:
             and not utterance.safe_to_execute_directly
         ):
             return None
+        coordinated_targets = self._match_coordinated_named_targets(
+            text, entities, world_model, turn
+        )
+        if coordinated_targets is not None:
+            return coordinated_targets
         segments = [segment for segment in _AND_SPLIT_RE.split(text) if segment.strip()]
         if len(segments) > 1:
             # ``und`` can connect two commands, but it can also coordinate
@@ -895,6 +905,47 @@ class NluEngine:
                 plan=None, response_text=_clarification_question(result), clarification=result,
             )
         return self._build_match_result(result, entities)
+
+    def _match_coordinated_named_targets(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None,
+        turn: SemanticTurn,
+    ) -> CommandPlan | None:
+        """Distribute one direct action over explicitly coordinated names."""
+        if (
+            turn.speech_act is not SpeechAct.COMMAND
+            or not turn.safe_to_execute_directly
+            or len(turn.semantic_analysis.matching(SemanticKind.COMMAND_MARKER)) != 1
+            or re.search(r"\b(?:außer|ausser|oder)\b", text, re.I)
+            or re.search(r"\b(?:und|sowie)\b", text, re.I) is None
+        ):
+            return None
+        targets = all_mentioned_entities(text, entities)
+        if len(targets) < 2:
+            return None
+        rendered: list[MatchResult] = []
+        for selected in targets:
+            candidate = text
+            for entity in targets:
+                if entity.entity_id == selected.entity_id:
+                    continue
+                names = sorted(
+                    (entity.friendly_name, *entity.aliases), key=len, reverse=True
+                )
+                for name in names:
+                    candidate = re.sub(
+                        rf"(?<!\w){re.escape(name)}(?!\w)", " ", candidate,
+                        flags=re.I,
+                    )
+            candidate = re.sub(r"\b(?:und|sowie)\b", " ", candidate, flags=re.I)
+            candidate = re.sub(r"\s+", " ", candidate).strip(" ,")
+            result = self.match(candidate, entities, world_model)
+            if not isinstance(result, MatchResult) or result.plan is None:
+                return None
+            rendered.append(result)
+        return CommandPlan(tuple(rendered))
 
     def failure_feedback(self, text: str, entities: list[EntitySnapshot] | None = None) -> str | None:
         """Best-effort explanation after every deterministic parser failed."""
@@ -1115,7 +1166,12 @@ class NluEngine:
         normalized = re.sub(
             r"^(?:dann|danach|also)\s+", "", normalize(text), flags=re.IGNORECASE
         )
-        result = self._reference_parser.parse(normalized, entities, context.last_entities, context.last_area)
+        remembered_entities = (
+            context.memory.entities if context.memory is not None else context.last_entities
+        )
+        result = self._reference_parser.parse(
+            normalized, entities, remembered_entities, context.last_area
+        )
         if result is None or isinstance(result, AmbiguousReference):
             return None
         return self._build_match_result(result, entities, context)
@@ -1160,11 +1216,19 @@ class NluEngine:
         if context is None:
             return None
 
+        remembered_entities = (
+            context.memory.entities if context.memory is not None else context.last_entities
+        )
+        remembered_predicate = (
+            context.memory.predicate
+            if context.memory is not None and context.memory.predicate is not None
+            else context.last_query_predicate
+        )
         contextual_answer = match_contextual_verb_state_query(
             text,
             entities,
-            context.last_entities,
-            context.last_query_predicate,
+            remembered_entities,
+            remembered_predicate,
         )
         if contextual_answer is not None:
             return MatchResult(

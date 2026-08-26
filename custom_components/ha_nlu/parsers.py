@@ -19,13 +19,15 @@ from .areas import AreaResolutionStatus, AreaResolveStatus, AreaSnapshot, resolv
 from .automation_summary import AutomationSummary
 from .entities import (
     EntitySnapshot,
+)
+from .floors import FloorResolveStatus, resolve_floor_by_level_keyword, resolve_floor_name
+from .nlu.constraint_resolver import Constraints, resolve_candidates
+from .nlu.entity_resolution import (
     ResolutionStatus,
     ResolveStatus,
     resolve_entity,
     resolve_entity_scored,
 )
-from .floors import FloorResolveStatus, resolve_floor_by_level_keyword, resolve_floor_name
-from .nlu.constraint_resolver import Constraints, resolve_candidates
 from .nlu.degree_semantics import extract_degree
 from .nlu.frame import AreaReference, Comparison, Quantifier, SemanticFrame, TargetReference, TemporalExpression
 from .nlu.group_semantics import (

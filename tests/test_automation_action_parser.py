@@ -507,18 +507,29 @@ def test_single_action_still_returns_one_tuple_not_a_group(parser, context):
 
 
 # ============================================================================
-# Section 11: Ellipsis Scope Limitation (stated plainly, V5.8's own
-# documented boundary) (1 Test)
+# Section 11: Shared predicate over explicitly named targets
 # ============================================================================
 
 
-def test_sequence_refuses_when_second_chunk_has_no_verb_of_its_own(parser, context):
-    """Cross-clause ellipsis ("mach das Licht und den Rollladen an" - only
-    one verb for two objects) is out of scope this wave (see
-    automation_action_parser.py's own module docstring) - each chunk must be
-    independently grammatical, so this whole sentence is refused."""
-    result = parser.parse("mach gleichzeitig das Licht an und die Rollläden hoch", context)
-    assert result is None
+def test_one_action_is_distributed_over_explicit_named_targets(parser, context):
+    result = parser.parse("schalte Küchenlicht und Flurlicht aus", context)
+
+    assert result is not None
+    assert [step.target.area_id for step in result] == ["kueche", "flur"]
+    assert all(step.type is ActionType.TURN_OFF for step in result)
+
+
+def test_shared_action_is_atomic_when_one_target_is_not_actionable(parser, context):
+    sensor = EntitySnapshot("sensor.flur", "Flurwert", "sensor", "20")
+    all_entities = [*context.entities, sensor]
+    world_model = build_world_model(all_entities, [])
+    extended = ParseContext(
+        entities=all_entities,
+        index=world_model.entity_index,
+        world_model=world_model,
+    )
+
+    assert parser.parse("schalte Küchenlicht und Flurwert aus", extended) is None
 
 
 # ============================================================================

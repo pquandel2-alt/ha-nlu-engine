@@ -6,7 +6,8 @@ import re
 from dataclasses import dataclass
 
 from .device_control import DeviceControlResult, _mentioned_entity
-from .entities import EntitySnapshot, ResolveStatus, normalize_for_compare, resolve_entity
+from .entities import EntitySnapshot, normalize_for_compare
+from .nlu.entity_resolution import ResolveStatus, resolve_entity
 from .nlu.context import PendingSemanticCommand
 from .nlu.domain_operations import DOMAIN_WORDS
 from .service_call import ServiceCallPlan

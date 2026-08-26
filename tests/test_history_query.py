@@ -63,6 +63,37 @@ def test_binary_state_history_count_and_duration_are_composed():
     assert duration is not None and duration.metric is StateHistoryMetric.DURATION
 
 
+@pytest.mark.parametrize(
+    ("text", "entity", "states", "label"),
+    (
+        (
+            "Wie lange lief der Saugroboter Atlas gestern?",
+            EntitySnapshot("vacuum.atlas", "Saugroboter Atlas", "vacuum", "docked"),
+            frozenset({"cleaning", "returning"}),
+            "aktiv",
+        ),
+        (
+            "Wie oft spielte das Radio Atlas gestern?",
+            EntitySnapshot("media_player.atlas", "Radio Atlas", "media_player", "off"),
+            frozenset({"playing", "buffering"}),
+            "bei der Wiedergabe",
+        ),
+        (
+            "Wie lange war der Ventilator Büro heute an?",
+            EntitySnapshot("fan.office", "Ventilator Büro", "fan", "off"),
+            frozenset({"on"}),
+            "aktiv",
+        ),
+    ),
+)
+def test_operational_state_history_is_composed(text, entity, states, label):
+    query = parse_history_query(text, [entity], NOW)
+
+    assert query is not None
+    assert query.target_states == states
+    assert query.target_label == label
+
+
 def test_period_comparison_is_composed_without_fixed_word_order():
     query = parse_history_query(
         "War die Wohnzimmer Temperatur gestern niedriger als heute?", [SENSOR], NOW

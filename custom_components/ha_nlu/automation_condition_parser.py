@@ -54,7 +54,7 @@ from pathlib import Path
 
 from hassil import Intents, RangeSlotList, RangeType, WildcardSlotList, recognize
 
-from .entities import ResolutionStatus, resolve_entity_scored
+from .nlu.entity_resolution import ResolutionStatus, resolve_entity_scored
 from .automation_target_resolver import build_device_class_target, build_named_target
 from .nlu.automation_model import NumericComparator, SunEvent, TriggerTarget
 from .nlu.condition_model import ConditionModel, ConditionNode, ConditionType, LogicalOperator, TimeComparator, condition_tree_depth

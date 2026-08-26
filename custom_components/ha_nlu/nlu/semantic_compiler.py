@@ -19,13 +19,12 @@ from dataclasses import dataclass
 from ..areas import AreaSnapshot
 from ..entities import (
     EntitySnapshot,
-    ResolveStatus,
     generate_aliases,
     normalize_for_compare,
-    resolve_entity,
 )
 from ..world_model import WorldModel
 from .constraint_resolver import Constraints, resolve_candidates
+from .entity_resolution import ResolveStatus, resolve_entity
 from .frame import AreaReference, Quantifier, SemanticFrame, TargetReference
 from .parser import ClarificationRequest, ParseResult
 from .primitives import SemanticAction, SemanticProperty, SemanticQuantity

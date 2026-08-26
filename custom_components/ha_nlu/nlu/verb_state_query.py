@@ -9,6 +9,7 @@ from ..entities import EntitySnapshot, normalize_for_compare
 from ..floors import FloorResolveStatus, resolve_floor_by_level_keyword
 from ..query_target import resolve_query_targets
 from .semantic_state import QUERYABLE_STATE_DOMAINS
+from .grounded_answer import join_german, render_state_answer
 
 
 @dataclass(frozen=True)
@@ -248,21 +249,14 @@ def _answer_targets(
         entity = targets[0]
         evaluation = evaluations[0]
         current = _current_description(entity)
-        if evaluation is None:
-            return VerbStateQueryAnswer(
-                f"Ob {entity.friendly_name} das gerade tut, kann ich aus dem "
-                f"verfügbaren Zustand nicht sicher erkennen. "
-                f"{entity.friendly_name} {current}.",
-                targets,
-                predicate,
-                explanation,
-            )
-        if _NEGATED_RE.search(text):
-            prefix = "Doch" if evaluation else "Nein"
-        else:
-            prefix = "Ja" if evaluation else "Nein"
+        grounded = render_state_answer(
+            entity.friendly_name,
+            current,
+            evaluation,
+            negated_question=bool(_NEGATED_RE.search(text)),
+        )
         return VerbStateQueryAnswer(
-            f"{prefix}, {entity.friendly_name} {current}.",
+            grounded.speech,
             targets,
             predicate,
             explanation,
@@ -278,16 +272,16 @@ def _answer_targets(
         if not true_entities:
             speech = "Keines der passenden Geräte erfüllt diesen Zustand."
         else:
-            speech = "Das trifft auf " + ", ".join(
-                entity.friendly_name for entity in true_entities
+            speech = "Das trifft auf " + join_german(
+                [entity.friendly_name for entity in true_entities]
             ) + " zu."
         if unknown_entities:
-            speech += " Nicht sicher bestimmbar: " + ", ".join(
-                entity.friendly_name for entity in unknown_entities
+            speech += " Nicht sicher bestimmbar: " + join_german(
+                [entity.friendly_name for entity in unknown_entities]
             ) + "."
     elif unknown_entities:
-        speech = "Das kann ich nicht für alle sicher beantworten. Unklar sind: " + ", ".join(
-            entity.friendly_name for entity in unknown_entities
+        speech = "Das kann ich nicht für alle sicher beantworten. Unklar sind: " + join_german(
+            [entity.friendly_name for entity in unknown_entities]
         ) + "."
     elif len(true_entities) == len(targets):
         speech = f"Ja, das trifft auf alle {len(targets)} passenden Geräte zu."
@@ -297,7 +291,7 @@ def _answer_targets(
             for entity, value in zip(targets, evaluations)
             if value is False
         ]
-        speech = "Nein. Nicht zutreffend: " + ", ".join(false_names) + "."
+        speech = "Nein. Nicht zutreffend: " + join_german(false_names) + "."
     return VerbStateQueryAnswer(
         speech, targets, predicate, explanation
     )

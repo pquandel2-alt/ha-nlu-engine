@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .entities import EntitySnapshot, ResolveStatus, resolve_entity
+from .entities import EntitySnapshot
+from .nlu.entity_resolution import ResolveStatus, resolve_entity
 from .floors import FloorResolveStatus, resolve_floor_by_level_keyword
 from .nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
 from .nlu.parser import ParseResult

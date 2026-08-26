@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.47.0**
+- Aktuelle Version: **4.48.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -35,6 +35,29 @@ HomeIntent benötigt für die Sprachverarbeitung:
 Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
+
+## Was ist in Version 4.48 neu?
+
+Version 4.48 führt die in 4.47 begonnene semantische Vereinheitlichung bis in
+Geräteauflösung, Dialog, Zeitfragen, Automationen und Antworten fort:
+
+- Ein kanonischer Entity-Resolver ist jetzt die gemeinsame Fassade für direkte
+  Befehle, Abfragen, Bedingungen, Trigger und Automationsaktionen.
+- Ein gemeinsames Prädikat kann mehrere ausdrücklich benannte Geräte atomar
+  steuern, zum Beispiel „Schalte Küchenlicht und Flurlicht aus“. Sobald ein
+  Ziel nicht sicher ausführbar ist, wird nichts davon ausgeführt.
+- Der Dialog speichert den letzten verstandenen Zug als zusammenhängenden
+  semantischen Snapshot. Referenzen, Anschlussfragen und Erklärungen greifen
+  damit auf dieselbe Bedeutung zurück.
+- Natürliche Verlaufsfragen wie „Wie lange lief der Saugroboter gestern?“ oder
+  „Wie oft spielte das Radio gestern?“ werden rein lesend über den Recorder
+  beantwortet.
+- Automationen unterstützen ebenfalls eine gemeinsame Aktion für mehrere
+  benannte Geräte. Nicht schaltbare Domänen wie Sensoren werden dabei strikt
+  abgelehnt.
+- Zustandsantworten unterscheiden ausdrücklich zwischen wahr, falsch und nicht
+  sicher bestimmbar. Fehlende Daten können dadurch nicht zu einem erfundenen
+  „Nein“ werden.
 
 ## Was ist in Version 4.47 neu?
 
@@ -964,10 +987,10 @@ python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
 ```
 
-Geprüfter Stand von Version 4.47.0:
+Geprüfter Stand von Version 4.48.0:
 
 ```text
-2211 passed, 12 skipped
+2220 passed, 12 skipped
 84 % Gesamt-Coverage
 64 % Coverage für conversation.py
 ```
@@ -1003,7 +1026,7 @@ Dadurch können sie dem Parser keine Antworten „beibringen“.
 ![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
 
 Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.47.0. Benchmark,
+Entwicklungsstands und kein aktueller Nachweis für Version 4.48.0. Benchmark,
 Fehlerdiagnose und Messungen auf schwacher Hardware werden bewusst separat
 aktualisiert. Ein perfektes Ergebnis in einem bekannten Korpus bedeutet nicht,
 dass jede mögliche Formulierung verstanden wird.

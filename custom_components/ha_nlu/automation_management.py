@@ -8,7 +8,8 @@ from datetime import datetime
 from enum import Enum, auto
 
 from .automation_summary import AutomationSummary, CREATED_BY_HOMEINTENT
-from .entities import EntitySnapshot, ResolveStatus, normalize_for_compare, resolve_entity
+from .entities import EntitySnapshot, normalize_for_compare
+from .nlu.entity_resolution import ResolveStatus, resolve_entity
 
 
 class AutomationManagementKind(Enum):

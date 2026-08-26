@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .entities import EntitySnapshot, ResolveStatus, normalize_for_compare, resolve_entity
+from .entities import EntitySnapshot, normalize_for_compare
+from .nlu.entity_resolution import ResolveStatus, resolve_entity
 from .nlu.context import ConversationContext
 from .nlu.normalize import normalize
 from .nlu.semantic_utterance import SpeechAct, analyse_utterance

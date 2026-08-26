@@ -36,15 +36,12 @@ only sequencing and (optionally) an explicit parallel grouping:
    "one ``Intents`` object, one dispatch dict on ``result.intent.name``"
    shape every other parser in this project already established.
 
-Scope limitation (stated plainly, not hidden): each chunk must be its own
-independently-grammatical clause - "mach das Licht an und fahr die Rollläden
-hoch" parses (two full clauses), but a genuinely elliptical variant with an
-implicit shared verb ("mach gleichzeitig das Licht an und die Rollläden
-hoch" - the second clause has no verb of its own) does not. Resolving
-cross-clause ellipsis is real, separate NLU work no other leaf-dispatch
-parser in this project attempts either (``AutomationConditionParser``'s own
-leaf conditions are every bit as independently-grammatical) - not invented
-here ahead of it.
+Named targets may share one action predicate: "schalte Küchenlicht und
+Flurlicht aus" is projected into two independently validated leaves. This
+is deliberately narrower than unrestricted cross-clause ellipsis: every
+target must be explicitly named, exactly one command marker must govern the
+sentence, and every projected action must resolve. Otherwise the complete
+sentence is refused, so no partial automation is ever created.
 
 ``ActionType.WAIT``'s condition delegates straight to
 ``AutomationConditionParser`` (composition, not a second condition grammar,
@@ -74,7 +71,12 @@ from hassil import Intents, RangeSlotList, RangeType, WildcardSlotList, recogniz
 
 from .areas import AreaResolutionStatus, resolve_area_scored
 from .automation_condition_parser import AutomationConditionParser
-from .entities import EntitySnapshot, ResolutionStatus, resolve_entity_scored
+from .entities import EntitySnapshot
+from .nlu.entity_resolution import (
+    ResolutionStatus,
+    all_mentioned_entities,
+    resolve_entity_scored,
+)
 from .nlu.action_model import ActionGroup, ActionModel, ActionType, ExecutionMode
 from .nlu.automation_model import TriggerTarget
 from .nlu.capabilities import Capability
@@ -86,6 +88,8 @@ from .nlu.lexicon import (
     _COUNT_SLOT_LIST,
     _QUANTIFIER_SLOT_LIST,
 )
+from .nlu.meaning import analyse_turn
+from .nlu.semantic_lexicon import SemanticKind
 from .nlu.parser import ParseContext
 from .parsers import _strip_locative_prepositions
 
@@ -135,6 +139,9 @@ _CHOOSE_RE = re.compile(
     r"(?:\s*,?\s+sonst\s+(?P<else>.+))?$",
     re.I,
 )
+_TURN_ACTION_DOMAINS = frozenset({
+    "light", "switch", "fan", "climate", "humidifier", "input_boolean", "cover",
+})
 
 
 def _split_chunks(text: str) -> tuple[list[str], bool]:
@@ -230,7 +237,52 @@ class AutomationActionParser:
         for chunk in chunks:
             action = self._parse_leaf(chunk, context)
             if action is None:
-                return None  # any unparseable chunk refuses the whole sentence - never partially guess (Regel 4)
+                # One predicate may govern several explicitly named targets:
+                # ``Schalte Küchenlicht und Flurlicht aus``.  Projection is
+                # allowed only with exactly one command marker and succeeds
+                # atomically for every target; genuine multi-step commands
+                # continue through the established independent-clause path.
+                return self._parse_shared_named_action(text, context, is_parallel)
+            actions.append(action)
+        if is_parallel:
+            return (ActionGroup(mode=ExecutionMode.PARALLEL, steps=tuple(actions)),)
+        return tuple(actions)
+
+    def _parse_shared_named_action(
+        self, text: str, context: ParseContext, is_parallel: bool
+    ) -> tuple["ActionModel | ActionGroup", ...] | None:
+        turn = analyse_turn(text)
+        if (
+            len(turn.semantic_analysis.matching(SemanticKind.COMMAND_MARKER)) != 1
+            or re.search(r"\b(?:außer|ausser|oder)\b", text, re.I)
+        ):
+            return None
+        targets = all_mentioned_entities(text, context.entities)
+        if len(targets) < 2:
+            return None
+        actions: list[ActionModel] = []
+        for selected in targets:
+            candidate = text
+            for entity in targets:
+                if entity.entity_id == selected.entity_id:
+                    continue
+                for name in sorted((entity.friendly_name, *entity.aliases), key=len, reverse=True):
+                    candidate = re.sub(
+                        rf"(?<!\w){re.escape(name)}(?!\w)", " ", candidate, flags=re.I
+                    )
+            candidate = re.sub(r"\b(?:und|sowie)\b", " ", candidate, flags=re.I)
+            candidate = _WHITESPACE_RE.sub(" ", candidate).strip(" ,")
+            action = self._parse_leaf(candidate, context)
+            if action is None:
+                return None
+            target = action.target
+            if (
+                target is None
+                or target.domain != selected.domain
+                or target.entity_id is not None and target.entity_id != selected.entity_id
+                or target.area_id is not None and target.area_id != selected.area_id
+            ):
+                return None
             actions.append(action)
         if is_parallel:
             return (ActionGroup(mode=ExecutionMode.PARALLEL, steps=tuple(actions)),)
@@ -476,13 +528,13 @@ class AutomationActionParser:
 
     def _parse_turn_on(self, slots: dict, context: ParseContext) -> ActionModel | None:
         target = self._build_target(slots, context)
-        if target is None:
+        if target is None or target.domain not in _TURN_ACTION_DOMAINS:
             return None
         return ActionModel(type=ActionType.TURN_ON, target=target, duration_seconds=self._optional_duration_seconds(slots))
 
     def _parse_turn_off(self, slots: dict, context: ParseContext) -> ActionModel | None:
         target = self._build_target(slots, context)
-        if target is None:
+        if target is None or target.domain not in _TURN_ACTION_DOMAINS:
             return None
         return ActionModel(type=ActionType.TURN_OFF, target=target)
 
