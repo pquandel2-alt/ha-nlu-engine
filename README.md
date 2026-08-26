@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.49.0**
+- Aktuelle Version: **4.50.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -35,6 +35,30 @@ HomeIntent benötigt für die Sprachverarbeitung:
 Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
+
+## Was ist in Version 4.50 neu?
+
+Version 4.50 schließt eine wichtige Sicherheits- und Verständnislücke bei
+Ausnahmen und vereinfacht gleichzeitig die semantische Architektur:
+
+- Ausschlüsse funktionieren sowohl nach als auch vor einer trennbaren
+  Verbpartikel: „Schalte alle Lichter aus außer dem Küchenlicht“ und
+  „Schalte alle Lichter außer dem Küchenlicht aus“ sind gleichbedeutend.
+- Neben `außer` werden auch die ASR-Schreibweise `ausser` und „mit Ausnahme
+  von“ sicher verarbeitet. Eine nicht auflösbare Ausnahme kann niemals zu
+  einem unbeschränkten Befehl für alle Geräte herabgestuft werden.
+- Dieselbe Ausschlusslogik gilt für direkte Befehle und beim Erstellen von
+  Automationen.
+- Direkte Befehle und Automationsaktionen verwenden jetzt dasselbe zentrale
+  Kompositions-Gate. Dadurch funktionieren additive Formulierungen mit
+  „außerdem“ in beiden Pfaden konsistent.
+- Vergangenheitsformen wie „Spielte das Radio?“ werden nicht mehr anhand des
+  aktuellen Home-Assistant-Zustands beantwortet.
+- Reine Zwischenrepräsentationen ohne Produktionsleser wurden entfernt. Die
+  tatsächlich genutzte Entity-Auflösung bleibt als schlankerer gemeinsamer
+  Pfad erhalten.
+- Eine neue Wortstellungs-Matrix prüft Ausschlüsse domänenübergreifend und
+  ist Teil des blockierenden Pyright-Strict-Scope.
 
 ## Was ist in Version 4.49 neu?
 
@@ -1013,10 +1037,10 @@ python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
 ```
 
-Geprüfter Stand von Version 4.49.0:
+Geprüfter Stand von Version 4.50.0:
 
 ```text
-2235 passed, 12 skipped
+2253 passed, 12 skipped
 84 % Gesamt-Coverage
 64 % Coverage für conversation.py
 ```
@@ -1052,7 +1076,7 @@ Dadurch können sie dem Parser keine Antworten „beibringen“.
 ![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
 
 Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.49.0. Für echte
+Entwicklungsstands und kein aktueller Nachweis für Version 4.50.0. Für echte
 Zielhardware lässt sich seit 4.49 ein reproduzierbarer JSON-Bericht samt
 P95-Budget erzeugen:
 

@@ -88,8 +88,8 @@ from .nlu.lexicon import (
     _COUNT_SLOT_LIST,
     _QUANTIFIER_SLOT_LIST,
 )
+from .nlu.semantic_compiler import canonicalize_exclusion_clause
 from .nlu.meaning import analyse_turn
-from .nlu.semantic_lexicon import SemanticKind
 from .nlu.parser import ParseContext
 from .parsers import _strip_locative_prepositions
 
@@ -230,6 +230,7 @@ class AutomationActionParser:
                     else_steps=else_steps or (),
                 ),
             )
+        text = canonicalize_exclusion_clause(text)
         chunks, is_parallel = _split_chunks(text)
         if not chunks:
             return None
@@ -252,11 +253,6 @@ class AutomationActionParser:
         self, text: str, context: ParseContext, is_parallel: bool
     ) -> tuple["ActionModel | ActionGroup", ...] | None:
         turn = analyse_turn(text)
-        if (
-            len(turn.semantic_analysis.matching(SemanticKind.COMMAND_MARKER)) != 1
-            or re.search(r"\b(?:außer|ausser|oder)\b", text, re.I)
-        ):
-            return None
         plan = build_compositional_plan(turn, context.entities)
         if plan is None:
             return None

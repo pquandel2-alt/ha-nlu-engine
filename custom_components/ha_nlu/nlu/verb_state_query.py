@@ -10,6 +10,7 @@ from ..floors import FloorResolveStatus, resolve_floor_by_level_keyword
 from ..query_target import resolve_query_targets
 from .semantic_state import QUERYABLE_STATE_DOMAINS
 from .grounded_answer import join_german, render_state_answer
+from .meaning import TemporalPerspective
 
 
 @dataclass(frozen=True)
@@ -298,10 +299,12 @@ def _answer_targets(
 
 
 def match_verb_state_query(
-    text: str, entities: list[EntitySnapshot]
+    text: str,
+    entities: list[EntitySnapshot],
+    temporal_perspective: TemporalPerspective = TemporalPerspective.UNSPECIFIED,
 ) -> VerbStateQueryAnswer | None:
     """Answer one current-state query and never create an action."""
-    if _HISTORY_RE.search(text):
+    if temporal_perspective is TemporalPerspective.PAST or _HISTORY_RE.search(text):
         return None
     predicate = _predicate_from_text(text)
     if predicate is None:

@@ -16,6 +16,7 @@ from ..entities import EntitySnapshot
 from .constraint_resolver import Constraints, resolve_candidates
 from .frame import AreaReference, Quantifier, SemanticFrame, TargetReference
 from .parser import ParseResult
+from .semantic_compiler import has_exclusion_clause
 
 
 @dataclass(frozen=True)
@@ -203,7 +204,10 @@ def parse_flexible_group_command(
     text: str, entities: list[EntitySnapshot]
 ) -> ParseResult | None:
     """Compose a safe group command from freely ordered semantic slots."""
-    if re.search(r"\baußer\b", text, re.IGNORECASE):
+    # Exclusions require exact name resolution and subtraction.  They belong
+    # exclusively to SemanticCommandCompiler; never degrade an unrecognised
+    # spelling/word order into an unrestricted "all" command here.
+    if has_exclusion_clause(text):
         return None  # exclusions stay on the stricter established grammar
 
     domain_result = _domain(text)

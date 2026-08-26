@@ -73,13 +73,23 @@ _COUNT_WORDS = {
 }
 _COUNT_RE = re.compile(r"\b(" + "|".join(_COUNT_WORDS) + r"|[2-9]|10)\b", re.I)
 _ORDERED_SUBSET_RE = re.compile(r"\b(?:erste\w*|letzte\w*)\b", re.I)
+_EXCLUSION_CUE_RE = re.compile(
+    r"\b(?:außer|ausser|mit\s+ausnahme\s+von)\b", re.I
+)
+# German separable particles can follow the exclusion: ``alle Lichter außer
+# Küchenlicht aus``.  The first alternative deliberately claims a recognised
+# command tail before the general end-of-sentence alternative can absorb it
+# into the registry name.
 _EXCLUSION_RE = re.compile(
-    r"\b(?:außer|ausser|mit\s+ausnahme\s+von)\s+(?P<targets>.+?)\s*[?.!]*$",
+    r"\b(?:außer|ausser|mit\s+ausnahme\s+von)\s+(?P<targets>.+?)"
+    r"(?:\s+(?P<tail>an|ein|aus|auf|zu|hoch|runter|herunter|hinauf|hinunter|"
+    r"anmachen|ausmachen|einschalten|ausschalten|anschalten|abschalten|"
+    r"öffnen|schließen)\s*[?.!]*$|\s*[?.!]*$)",
     re.I,
 )
 _EXCLUSION_SPLIT_RE = re.compile(r"\s*(?:,|\bund\b)\s*", re.I)
 _EXCLUSION_ARTICLE_RE = re.compile(
-    r"^(?:(?:dem|der|den|die|das|alle[nrms]?|im|in\s+der|in\s+dem)\s+)+",
+    r"^(?:(?:dem|der|den|die|das|des|vom|alle[nrms]?|im|in\s+der|in\s+dem)\s+)+",
     re.I,
 )
 
@@ -193,7 +203,29 @@ def _split_exclusion(text: str) -> tuple[str, tuple[str, ...]]:
         for part in _EXCLUSION_SPLIT_RE.split(match.group("targets"))
         if (cleaned := _EXCLUSION_ARTICLE_RE.sub("", part).strip(" ,.;:!?"))
     )
-    return text[:match.start()].rstrip(" ,;:"), raw_targets
+    positive = text[:match.start()].rstrip(" ,;:")
+    if tail := match.group("tail"):
+        positive = f"{positive} {tail}"
+    return positive, raw_targets
+
+
+def has_exclusion_clause(text: str) -> bool:
+    """Return whether *text* explicitly introduces one or more exceptions."""
+    return _EXCLUSION_CUE_RE.search(text) is not None
+
+
+def canonicalize_exclusion_clause(text: str) -> str:
+    """Move an exclusion behind a separable particle for legacy grammars.
+
+    The semantic compiler itself consumes the split representation directly.
+    Automation action Hassil grammars still use the established canonical
+    ``... aus außer Name`` shape, so this small adapter lets both word orders
+    share the same safe entity-resolution path.
+    """
+    positive, targets = _split_exclusion(text)
+    if not targets:
+        return text
+    return f"{positive} außer {' und '.join(targets)}"
 
 
 def _resolve_exclusions(

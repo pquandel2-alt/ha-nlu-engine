@@ -26,6 +26,15 @@ def test_one_verb_is_distributed_over_two_explicit_targets(engine):
     assert {command.plan.service for command in result.commands} == {"turn_off"}
 
 
+def test_central_composition_gate_accepts_additive_ausserdem(engine):
+    result = engine.match("Schalte Küchenlicht außerdem Flurlicht aus", LIGHTS)
+
+    assert isinstance(result, CommandPlan)
+    assert {command.plan.entity_id for command in result.commands} == {
+        "light.kueche", "light.flur",
+    }
+
+
 def test_coordinated_targets_remain_atomic_on_one_invalid_target(engine):
     unsupported = EntitySnapshot("sensor.flur", "Flursensor", "sensor", "12")
 

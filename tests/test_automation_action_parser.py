@@ -107,6 +107,17 @@ def test_setup_loads_eleven_action_types_grammar(parser):
     assert parser is not None
 
 
+def test_central_composition_gate_matches_direct_command_for_ausserdem(
+    parser, context
+):
+    result = parser.parse(
+        "Schalte Küchenlicht außerdem Flurlicht aus", context
+    )
+
+    assert result is not None
+    assert {action.target.area_id for action in result} == {"kueche", "flur"}
+
+
 # ============================================================================
 # Section 2: TURN_ON (2+ Tests)
 # ============================================================================
@@ -225,6 +236,26 @@ def test_turn_off_quantifier_all_with_exclusion(parser, context):
     """"schalte alle Lichter aus außer dem Flurlicht" -> quantifier=all,
     Flurlicht excluded from both the match set and the count check."""
     result = parser.parse("schalte alle Lichter aus außer dem Flurlicht", context)
+    assert result is not None
+    action = result[0]
+    assert action.type is ActionType.TURN_OFF
+    assert action.target.quantifier == "all"
+    assert action.target.exclude_entity_ids == ("light.flur_licht",)
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    (
+        "schalte alle Lichter außer dem Flurlicht aus",
+        "schalte alle Lichter ausser dem Flurlicht aus",
+        "schalte alle Lichter mit Ausnahme von dem Flurlicht aus",
+    ),
+)
+def test_turn_off_exclusion_accepts_particle_final_word_order(
+    parser, context, sentence
+):
+    result = parser.parse(sentence, context)
+
     assert result is not None
     action = result[0]
     assert action.type is ActionType.TURN_OFF

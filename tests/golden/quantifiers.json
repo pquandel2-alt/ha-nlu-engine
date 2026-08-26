@@ -296,12 +296,13 @@
       "domain": "cover",
       "service": "close_cover",
       "entity_id": [
-        "cover.poleraum_links",
-        "cover.poleraum_rechts"
+        "cover.buero",
+        "cover.poleraum_rechts",
+        "cover.schlafzimmer"
       ],
       "data": {}
     },
-    "response_text": "2 Rollläden geschlossen."
+    "response_text": "3 Rollläden geschlossen."
   },
   {
     "text": "fahre die beiden Rollläden im Poleraum hoch",

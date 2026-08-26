@@ -14,10 +14,10 @@
     "custom_components/ha_nlu/alias_learning.py",
     "custom_components/ha_nlu/nlu/composition.py",
     "custom_components/ha_nlu/nlu/entity_resolution.py",
-    "custom_components/ha_nlu/nlu/german_morphology.py",
     "custom_components/ha_nlu/nlu/grounded_answer.py",
     "custom_components/ha_nlu/nlu/meaning.py",
-    "custom_components/ha_nlu/nlu/verb_state_query.py"
+    "custom_components/ha_nlu/nlu/verb_state_query.py",
+    "tests/test_exclusion_word_order.py"
   ],
   "reportMissingImports": false
 }

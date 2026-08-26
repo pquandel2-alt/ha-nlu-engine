@@ -62,7 +62,11 @@ from .nlu.response import NluError, NluResponse
 from .nlu.parse_outcome import ParseFailureReason, UnderstandingFeedback
 from .nlu.response_generator import ResponseGenerator, _automation_label
 from .nlu.service_mapper import map_to_service_call
-from .nlu.semantic_compiler import SemanticCommandCompiler, SemanticQueryCompiler
+from .nlu.semantic_compiler import (
+    SemanticCommandCompiler,
+    SemanticQueryCompiler,
+    has_exclusion_clause,
+)
 from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
 from .nlu.meaning import SemanticTurn, analyse_turn
 from .nlu.semantic_utterance import ClauseRole, SpeechAct, analyse_utterance
@@ -791,7 +795,9 @@ class NluEngine:
         turn = analyse_turn(text)
         utterance = turn.utterance
         if utterance.speech_act is SpeechAct.QUERY:
-            verb_answer = match_verb_state_query(text, entities)
+            verb_answer = match_verb_state_query(
+                text, entities, turn.temporal_perspective
+            )
             if verb_answer is not None:
                 return MatchResult(
                     plan=None,
@@ -814,6 +820,26 @@ class NluEngine:
         )
         if coordinated_targets is not None:
             return coordinated_targets
+        # An explicit exception is a safety boundary: only the compiler that
+        # resolves and subtracts every named exclusion may accept it.  Never
+        # fall through to a broader legacy group grammar that could silently
+        # execute the command for all entities, including the exception.
+        if has_exclusion_clause(turn.normalized_text):
+            exclusion_result = SemanticCommandCompiler.compile(
+                turn.normalized_text,
+                entities,
+                world_model,
+                turn.semantic_analysis,
+            )
+            if isinstance(exclusion_result, ParseResult):
+                return self._build_match_result(exclusion_result, entities)
+            if isinstance(exclusion_result, ClarificationRequest):
+                return MatchResult(
+                    plan=None,
+                    response_text=_clarification_question(exclusion_result),
+                    clarification=exclusion_result,
+                )
+            return None
         segments = [segment for segment in _AND_SPLIT_RE.split(text) if segment.strip()]
         if len(segments) > 1:
             # ``und`` can connect two commands, but it can also coordinate
@@ -915,14 +941,6 @@ class NluEngine:
         turn: SemanticTurn,
     ) -> CommandPlan | None:
         """Distribute one direct action over explicitly coordinated names."""
-        if (
-            turn.speech_act is not SpeechAct.COMMAND
-            or not turn.safe_to_execute_directly
-            or len(turn.semantic_analysis.matching(SemanticKind.COMMAND_MARKER)) != 1
-            or re.search(r"\b(?:außer|ausser|oder)\b", text, re.I)
-            or re.search(r"\b(?:und|sowie)\b", text, re.I) is None
-        ):
-            return None
         plan = build_compositional_plan(turn, entities)
         if plan is None:
             return None

@@ -210,6 +210,5 @@ def test_past_verb_question_is_not_answered_from_current_state(engine):
         "media_player.atlas", "Radio Atlas", "media_player", "playing"
     )
 
-    result = engine.match("Spielte das Radio Atlas gestern?", [radio])
-
-    assert result is None
+    assert engine.match("Spielte das Radio Atlas gestern?", [radio]) is None
+    assert engine.match("Spielte das Radio Atlas?", [radio]) is None

@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from .semantic_lexicon import SemanticAnalysis, analyse_semantics
-from .german_morphology import GermanToken, analyse_german_morphology
 from .semantic_utterance import (
     MeaningClause,
     Modality,
@@ -48,18 +47,6 @@ _FUTURE_RE = re.compile(
     re.I,
 )
 _CURRENT_RE = re.compile(r"\b(?:jetzt|gerade|aktuell|momentan|noch)\b", re.I)
-_REFERENCE_RE = re.compile(
-    r"\b(?:er|sie|es|ihn|ihm|ihr|das|dieser|diese|dieses|dort|da|"
-    r"andere[nmrs]?|beide|davon)\b",
-    re.I,
-)
-_QUANTIFIER_RE = re.compile(
-    r"\b(?:alle|keine?|beide|jeder|jede|jedes|irgendein\w*|"
-    r"mindestens|höchstens|mehrere|einige)\b",
-    re.I,
-)
-
-
 @dataclass(frozen=True)
 class SemanticTurn:
     """One compositional view shared before routing and entity resolution."""
@@ -68,9 +55,6 @@ class SemanticTurn:
     semantic_analysis: SemanticAnalysis
     temporal_perspective: TemporalPerspective
     coordination: CoordinationKind
-    references: tuple[str, ...]
-    quantifiers: tuple[str, ...]
-    morphology: tuple[GermanToken, ...]
 
     @property
     def source_text(self) -> str:
@@ -112,7 +96,9 @@ def _temporal_perspective(text: str) -> TemporalPerspective:
 
 
 def _coordination(text: str) -> CoordinationKind:
-    if re.search(r"\b(?:aber|jedoch|außer|ausser)\b", text, re.I):
+    if re.search(
+        r"\b(?:aber|jedoch|außer|ausser|mit\s+ausnahme\s+von)\b", text, re.I
+    ):
         return CoordinationKind.CONTRASTIVE
     if re.search(r"\b(?:oder|entweder)\b", text, re.I):
         return CoordinationKind.ALTERNATIVE
@@ -130,7 +116,4 @@ def analyse_turn(text: str) -> SemanticTurn:
         semantic_analysis=analyse_semantics(normalized),
         temporal_perspective=_temporal_perspective(normalized),
         coordination=_coordination(normalized),
-        references=tuple(match.group(0) for match in _REFERENCE_RE.finditer(normalized)),
-        quantifiers=tuple(match.group(0) for match in _QUANTIFIER_RE.finditer(normalized)),
-        morphology=analyse_german_morphology(normalized),
     )
