@@ -73,6 +73,12 @@ KUECHE_LICHT = EntitySnapshot(
     area_id="kueche", area_name="Küche",
     capabilities=frozenset({"TURN_ON", "TURN_OFF", "BRIGHTNESS"}),
 )
+RADIO_ATLAS = EntitySnapshot(
+    "media_player.atlas", "Radio Atlas", "media_player", "playing"
+)
+SAUGROBOTER_ATLAS = EntitySnapshot(
+    "vacuum.atlas", "Saugroboter Atlas", "vacuum", "cleaning"
+)
 
 
 def _make_entity(monkeypatch, entities: list[EntitySnapshot]) -> NluConversationEntity:
@@ -132,6 +138,111 @@ def test_state_query_returns_query_answer_and_does_not_call_service(monkeypatch)
     entity.hass.services.async_call.assert_not_awaited()
     assert result.response.response_type == intent.IntentResponseType.QUERY_ANSWER
     assert "Flurlicht" in result.response.speech
+
+
+@pytest.mark.parametrize(
+    ("entity_snapshot", "question", "expected"),
+    (
+        (RADIO_ATLAS, "Spielt das Radio Atlas?", "Ja,"),
+        (RADIO_ATLAS, "Pausiert das Radio Atlas?", "Nein,"),
+        (SAUGROBOTER_ATLAS, "Startet der Saugroboter Atlas?", "nicht sicher"),
+        (SAUGROBOTER_ATLAS, "Stoppt der Saugroboter Atlas?", "nicht sicher"),
+    ),
+)
+def test_verb_first_state_question_is_live_and_never_calls_service(
+    monkeypatch, entity_snapshot, question, expected
+):
+    entity = _make_entity(monkeypatch, [entity_snapshot])
+
+    result = _run(entity, question)
+
+    entity.hass.services.async_call.assert_not_awaited()
+    assert result.response.error_code is None
+    assert result.response.response_type == intent.IntentResponseType.QUERY_ANSWER
+    assert expected in result.response.speech
+
+
+def test_verb_question_keeps_focus_for_pronoun_and_explanation(monkeypatch):
+    entity = _make_entity(monkeypatch, [RADIO_ATLAS])
+
+    first = _run(entity, "Spielt das Radio Atlas?", "verb-context")
+    followup = _run(entity, "Läuft es noch?", "verb-context")
+    explanation = _run(entity, "Woher weißt du das?", "verb-context")
+
+    entity.hass.services.async_call.assert_not_awaited()
+    assert first.response.speech.startswith("Ja,")
+    assert followup.response.speech.startswith("Ja,")
+    assert "Home-Assistant-Zustand" in explanation.response.speech
+    assert "kein Dienst" in explanation.response.speech
+
+
+def test_elliptical_query_reuses_predicate_for_new_explicit_target(monkeypatch):
+    second_radio = EntitySnapshot(
+        "media_player.birke", "Radio Birke", "media_player", "paused"
+    )
+    entity = _make_entity(monkeypatch, [RADIO_ATLAS, second_radio])
+
+    _run(entity, "Spielt das Radio Atlas?", "verb-new-target")
+    followup = _run(entity, "Und das Radio Birke?", "verb-new-target")
+
+    entity.hass.services.async_call.assert_not_awaited()
+    assert followup.response.speech.startswith("Nein,")
+    assert "Radio Birke" in followup.response.speech
+    assert followup.response.response_type == intent.IntentResponseType.QUERY_ANSWER
+
+
+def test_other_reference_uses_remaining_device_in_same_area(monkeypatch):
+    first = EntitySnapshot(
+        "media_player.atlas", "Radio Atlas", "media_player", "playing",
+        area_id="wohnzimmer", area_name="Wohnzimmer",
+    )
+    second = EntitySnapshot(
+        "media_player.birke", "Radio Birke", "media_player", "paused",
+        area_id="wohnzimmer", area_name="Wohnzimmer",
+    )
+    entity = _make_entity(monkeypatch, [first, second])
+
+    _run(entity, "Spielt das Radio Atlas?", "verb-other")
+    followup = _run(entity, "Und der andere?", "verb-other")
+
+    entity.hass.services.async_call.assert_not_awaited()
+    assert followup.response.speech.startswith("Nein,")
+    assert "Radio Birke" in followup.response.speech
+
+
+def test_ambiguous_verb_question_names_candidates_and_accepts_short_reply(monkeypatch):
+    second_radio = EntitySnapshot(
+        "media_player.birke", "Radio Birke", "media_player", "paused"
+    )
+    entity = _make_entity(monkeypatch, [RADIO_ATLAS, second_radio])
+
+    question = _run(entity, "Spielt das Radio?", "verb-clarification")
+    answer = _run(entity, "Radio Birke", "verb-clarification")
+
+    entity.hass.services.async_call.assert_not_awaited()
+    assert "Radio Atlas oder Radio Birke" in question.response.speech
+    assert answer.response.speech.startswith("Nein,")
+    assert "Radio Birke" in answer.response.speech
+
+
+def test_location_only_followup_reuses_verb_predicate(monkeypatch):
+    kitchen_radio = EntitySnapshot(
+        "media_player.atlas", "Radio Atlas", "media_player", "playing",
+        area_id="kueche", area_name="Küche",
+    )
+    living_radio = EntitySnapshot(
+        "media_player.birke", "Radio Birke", "media_player", "paused",
+        area_id="wohnzimmer", area_name="Wohnzimmer",
+    )
+    entity = _make_entity(monkeypatch, [kitchen_radio, living_radio])
+
+    _run(entity, "Spielt das Radio Atlas?", "verb-location")
+    followup = _run(entity, "Und im Wohnzimmer?", "verb-location")
+
+    entity.hass.services.async_call.assert_not_awaited()
+    assert followup.response.speech.startswith("Nein,")
+    assert "Radio Birke" in followup.response.speech
+    assert followup.response.response_type == intent.IntentResponseType.QUERY_ANSWER
 
 
 def test_household_presence_query_is_live_and_strictly_read_only(monkeypatch):

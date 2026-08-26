@@ -135,6 +135,7 @@ from .nlu.ha_automation_generator import (
     resolve_automation_action_entity_ids,
 )
 from .nlu.response_generator import _automation_label
+from .nlu.semantic_utterance import SpeechAct, analyse_utterance
 from .service_call import QUERY_INTENTS, ServiceCallPlan
 from .semantic_dialog import continue_semantic_dialog, start_semantic_dialog
 from .reminder import (
@@ -847,6 +848,8 @@ class NluConversationEntity(
             )
         elif pending is not None and pending.last_command is not None:
             speech = explain_command(pending.last_command)
+        elif pending is not None and pending.last_explanation is not None:
+            speech = pending.last_explanation
         else:
             speech = "In diesem Gespräch gibt es noch keinen verstandenen Befehl."
         response.async_set_speech(speech)
@@ -1176,6 +1179,18 @@ class NluConversationEntity(
         entities: list[EntitySnapshot],
     ) -> conversation.ConversationResult:
         """Authorize, execute and remember one regular engine match."""
+        if (
+            result.plan is not None
+            and analyse_utterance(user_input.text).speech_act is SpeechAct.QUERY
+        ):
+            self._context_store.clear(user_input.conversation_id)
+            response.async_set_error(
+                intent.IntentResponseErrorCode.NO_INTENT_MATCH,
+                "Ich habe eine Frage erkannt und führe deshalb keine Aktion aus.",
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
         if result.plan is not None:
             policy = evaluate_service_plan(
                 result.plan,
@@ -1239,6 +1254,19 @@ class NluConversationEntity(
                     pending_clarification=None,
                     focus=derive_dialog_focus(result.command),
                     pending_undo=undo_plan,
+                    last_explanation=result.explanation_text,
+                ),
+            )
+        elif result.context_entities:
+            self._context_store.set(
+                user_input.conversation_id,
+                ConversationContext(
+                    last_command=None,
+                    last_entities=result.context_entities,
+                    last_area=None,
+                    pending_clarification=None,
+                    last_query_predicate=result.context_predicate,
+                    last_explanation=result.explanation_text,
                 ),
             )
         else:
@@ -1270,7 +1298,12 @@ class NluConversationEntity(
                     response=response, conversation_id=user_input.conversation_id
                 )
 
-        if result.command is not None and result.command.intent in QUERY_INTENT_NAMES:
+        if (
+            result.command is not None and result.command.intent in QUERY_INTENT_NAMES
+        ) or (
+            analyse_utterance(user_input.text).speech_act is SpeechAct.QUERY
+            or result.context_predicate is not None
+        ):
             response.response_type = intent.IntentResponseType.QUERY_ANSWER
         response.async_set_speech(result.response_text)
         return conversation.ConversationResult(
@@ -1422,8 +1455,11 @@ class NluConversationEntity(
         entities: list[EntitySnapshot],
     ) -> conversation.ConversationResult:
         """Try bounded correction/dialog fallbacks for an unmatched turn."""
+        is_query = analyse_utterance(user_input.text).speech_act is SpeechAct.QUERY
         corrected_plans: dict[tuple, tuple[object, str, EntitySnapshot]] = {}
-        for suggestion in phonetic_suggestions(user_input.text, entities):
+        for suggestion in (
+            () if is_query else phonetic_suggestions(user_input.text, entities)
+        ):
             corrected = self._engine.match(
                 suggestion.corrected_text, entities, self._world_model
             )
@@ -1471,7 +1507,7 @@ class NluConversationEntity(
                 response=response, conversation_id=user_input.conversation_id
             )
 
-        dialog = start_semantic_dialog(user_input.text, entities)
+        dialog = None if is_query else start_semantic_dialog(user_input.text, entities)
         if dialog is not None and dialog.result is not None:
             return await self._async_handle_device_control_result(
                 user_input, response, dialog.result
@@ -1507,6 +1543,18 @@ class NluConversationEntity(
         entities: list[EntitySnapshot],
     ) -> conversation.ConversationResult:
         """Authorize and execute an already validated multi-command plan."""
+        if (
+            analyse_utterance(user_input.text).speech_act is SpeechAct.QUERY
+            and any(command.plan is not None for command in result.commands)
+        ):
+            self._context_store.clear(user_input.conversation_id)
+            response.async_set_error(
+                intent.IntentResponseErrorCode.NO_INTENT_MATCH,
+                "Ich habe eine Frage erkannt und führe deshalb keine Aktion aus.",
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
         # Every sub-command was validated together before this point. A HA-side
         # runtime failure remains fail-fast because service calls are not
         # transactional and already executed calls cannot be rolled back safely.
@@ -2291,6 +2339,18 @@ class NluConversationEntity(
         device_control: DeviceControlResult,
     ) -> conversation.ConversationResult:
         """Apply the common safety, execution and context policy once."""
+        if (
+            device_control.plan is not None
+            and analyse_utterance(user_input.text).speech_act is SpeechAct.QUERY
+        ):
+            self._context_store.clear(user_input.conversation_id)
+            response.async_set_error(
+                intent.IntentResponseErrorCode.NO_INTENT_MATCH,
+                "Ich habe eine Frage erkannt und führe deshalb keine Aktion aus.",
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
         if device_control.plan is None:
             self._context_store.clear(user_input.conversation_id)
             if device_control.is_query:

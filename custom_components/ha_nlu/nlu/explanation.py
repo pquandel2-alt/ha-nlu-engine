@@ -14,7 +14,10 @@ _EXPLANATION_RE = re.compile(
     r"was\s+hast\s+du\s+(?:gerade\s+)?verstanden|"
     r"wie\s+hast\s+du\s+(?:das|mich)\s+verstanden|"
     r"was\s+willst\s+du\s+(?:jetzt\s+)?machen|"
-    r"welchen\s+befehl\s+hast\s+du\s+verstanden"
+    r"welchen\s+befehl\s+hast\s+du\s+verstanden|"
+    r"warum(?:\s+nicht)?|wieso(?:\s+nicht)?|"
+    r"woher\s+wei(?:ßt|sst)\s+du\s+(?:das|es)|"
+    r"wie\s+kommst\s+du\s+darauf"
     r")[?.!]*$",
     re.I,
 )

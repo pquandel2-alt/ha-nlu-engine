@@ -56,7 +56,7 @@ from .nlu.query_command import QueryCommand, QueryFilter, QueryResultStatus, Que
 from .world_model import WorldModel
 from .nlu.query_executor import QueryExecutor
 from .nlu.primitives import SemanticAction, SemanticDirection, SemanticProperty
-from .nlu.semantic_state import SemanticState
+from .nlu.semantic_state import SemanticState, supports_state_predicate
 from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
 from .nlu.semantic_location import resolve_semantic_location
 from .service_call import (
@@ -1936,6 +1936,18 @@ class StateQueryParser:
                 return None
 
         requested_state = _STATE_NAME_TO_SEMANTIC[str(state_slot.value)] if state_slot is not None else None
+        if requested_state is not None:
+            if domain is None:
+                candidates = [
+                    entity for entity in candidates
+                    if supports_state_predicate(
+                        entity.domain, requested_state, entity.device_class
+                    )
+                ]
+                if not candidates:
+                    return None
+            elif not supports_state_predicate(domain, requested_state, device_class):
+                return None
         count_only = bool(re.search(r"\bwie viele\b", text, re.IGNORECASE))
         all_requested = bool(re.search(r"\b(alle|sämtliche|beide)\b", text, re.IGNORECASE))
         none_requested = bool(re.search(r"\b(kein|keine)\b", text, re.IGNORECASE))
@@ -2012,6 +2024,8 @@ class StateQueryParser:
         requested_state = None
         if state_slot is not None:
             requested_state = _STATE_NAME_TO_SEMANTIC[str(state_slot.value)]
+            if not supports_state_predicate(domain, requested_state, device_class):
+                return None
 
         area_snapshot = AreaSnapshot(area_id=area_id, name=area_name) if area_id is not None else None
         query_command = QueryCommand(
@@ -2096,6 +2110,10 @@ class StateQueryParser:
             if state_slot is None
             else _STATE_NAME_TO_SEMANTIC[str(state_slot.value)]
         )
+        if not supports_state_predicate(
+            entity.domain, requested_state, entity.device_class
+        ):
+            return None
         area_snapshot = AreaSnapshot(area_id=area_id, name=area_name) if area_id is not None else None
         # device_class is inert here (QueryExecutor.SINGLE with a pre-resolved
         # entity_id never looks at it - only entity_id decides membership),

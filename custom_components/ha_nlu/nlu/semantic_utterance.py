@@ -155,6 +155,23 @@ _COPULAR_STATE_QUESTION_RE = re.compile(
     r"^\s*(?:ist|sind|welch\w*|was\s+(?:ist|macht)|wie\s+ist)\b",
     re.I,
 )
+_DEVICE_NOUN_EXPRESSION = regex_union([
+    expression
+    for expressions in DOMAIN_EXPRESSIONS.values()
+    for expression in expressions
+])
+_VERB_FIRST_DEVICE_RE = re.compile(
+    rf"^\s*(?P<verb>[a-zäöüß]+(?:t|en))\b(?P<body>.*\b{_DEVICE_NOUN_EXPRESSION}\b.*)[?.!]*$",
+    re.I,
+)
+_VERB_FIRST_MODAL_RE = re.compile(
+    r"^(?:kannst|koenntest|könntest|wuerdest|würdest|moechtest|möchtest|sollst)$",
+    re.I,
+)
+_SUBJECT_START_RE = re.compile(
+    r"^\s*(?:der|die|das|ein|eine|mein\w*|dein\w*|unser\w*|dies\w*|alle)\b",
+    re.I,
+)
 _TRIGGER_CUE_RE = re.compile(r"\b(?P<cue>wenn|sobald|falls)\b", re.I)
 _CONDITION_CUE_RE = re.compile(r"\b(?P<cue>nur\s+wenn|sofern)\b", re.I)
 
@@ -169,6 +186,22 @@ def _modality(text: str) -> Modality:
     if _POLITE_RE.search(text):
         return Modality.POLITE
     return Modality.DIRECT
+
+
+def _is_verb_first_device_question(text: str) -> bool:
+    """Recognize German finite-verb-first questions structurally.
+
+    Third-person questions (``Spielt das Radio?``) share operation lexemes
+    with commands, but not the usual imperative morphology (``Spiele ...``)
+    or modal command shell (``Kannst du ...?``).  A question mark is strong
+    evidence; without punctuation, a nominative subject directly after the
+    finite verb is accepted conservatively.  Ambiguity always resolves to
+    QUERY because failing to act is safer than executing a question.
+    """
+    match = _VERB_FIRST_DEVICE_RE.match(text)
+    if match is None or _VERB_FIRST_MODAL_RE.fullmatch(match.group("verb")):
+        return False
+    return text.rstrip().endswith("?") or _SUBJECT_START_RE.match(match.group("body")) is not None
 
 
 def _clauses(text: str, speech_act: SpeechAct) -> tuple[MeaningClause, ...]:
@@ -203,6 +236,8 @@ def analyse_utterance(text: str) -> SemanticUtterance:
         speech_act = SpeechAct.QUERY
     elif _AUTOMATION_RE.search(normalized):
         speech_act = SpeechAct.AUTOMATION
+    elif _is_verb_first_device_question(normalized):
+        speech_act = SpeechAct.QUERY
     # A polite question that contains an executable operation is still a
     # command ("Kannst du das Licht einschalten?").  The generic question
     # shape is evaluated afterwards.  "Kann man ...?" remains an

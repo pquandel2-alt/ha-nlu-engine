@@ -284,6 +284,11 @@ class ConversationContext:
     pending_productivity_command: PendingProductivityCommand | None = None
     pending_automation_wizard: PendingAutomationWizard | None = None
     pending_undo: "UndoPlan | None" = None
+    # Read-only, non-command answers (for example "Spielt das Radio?") use
+    # these fields to support "Läuft es noch?", "Und das andere?" and
+    # "Woher weißt du das?" without manufacturing an executable command.
+    last_query_predicate: str | None = None
+    last_explanation: str | None = None
 
 
 class ConversationContextStore:

@@ -157,6 +157,16 @@ def test_precise_location_failures(engine):
     ).reason is ParseFailureReason.UNKNOWN_LOCATION
 
 
+def test_unanswered_question_returns_structured_feedback(engine):
+    feedback = engine.understanding_feedback(
+        "Warum blinkt das unbekannte Gerät?", ENTITIES
+    )
+
+    assert feedback is not None
+    assert feedback.reason is ParseFailureReason.UNSUPPORTED_PROPERTY
+    assert "Frage erkannt" in feedback.speech
+
+
 def test_query_correction_and_natural_floor_followup(engine):
     first = engine.match("Wie warm ist es im Wohnzimmer", ENTITIES)
     corrected = engine.match_query_followup("Nein, ich meinte Küche", ENTITIES, _context(first))

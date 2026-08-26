@@ -31,7 +31,11 @@ Never touches Home Assistant - it doesn't even see a ``hass`` object, only a
 from __future__ import annotations
 
 from .query_command import QueryResult, QueryResultStatus, QueryScope, QueryTargetKind
-from .semantic_state import SemanticState, derive_semantic_state, matches_semantic_state
+from .semantic_state import (
+    SemanticState,
+    derive_semantic_state,
+    evaluate_semantic_state,
+)
 
 _SEMANTIC_STATE_SPOKEN_DE = {
     SemanticState.OPEN: "geöffnet",
@@ -271,6 +275,12 @@ class ResponseGenerator:
                 return f"Der Zustand von {entity.friendly_name} ist unbekannt."
             return f"{entity.friendly_name} ist {_SEMANTIC_STATE_SPOKEN_DE[current]}."
         state_word = _SEMANTIC_STATE_SPOKEN_DE[requested]
-        if matches_semantic_state(entity, requested):
+        evaluation = evaluate_semantic_state(entity, requested)
+        if evaluation is None:
+            return (
+                f"Ob {entity.friendly_name} {state_word} ist, kann ich aus dem "
+                f"aktuellen Zustand „{entity.state}“ nicht sicher ableiten."
+            )
+        if evaluation:
             return f"Ja, {entity.friendly_name} ist {state_word}."
         return f"Nein, {entity.friendly_name} ist nicht {state_word}."

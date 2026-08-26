@@ -6,7 +6,13 @@ style). Covers the window/door vs motion/moisture branching and the
 from __future__ import annotations
 
 from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.semantic_state import SemanticState, derive_semantic_state, matches_semantic_state
+from ha_nlu.nlu.semantic_state import (
+    SemanticState,
+    derive_semantic_state,
+    evaluate_semantic_state,
+    matches_semantic_state,
+    supports_state_predicate,
+)
 
 
 def _entity(domain: str, state: str, device_class: str | None = None) -> EntitySnapshot:
@@ -69,3 +75,26 @@ def test_unknown_never_matches_even_unknown_request():
     entity = _entity("cover", "unavailable")
     assert matches_semantic_state(entity, SemanticState.UNKNOWN) is False
     assert matches_semantic_state(entity, SemanticState.OPEN) is False
+
+
+def test_running_vacuum_is_both_active_and_colloquially_on():
+    vacuum = _entity("vacuum", "cleaning")
+    assert evaluate_semantic_state(vacuum, SemanticState.ACTIVE) is True
+    assert evaluate_semantic_state(vacuum, SemanticState.ON) is True
+
+
+def test_paused_vacuum_is_not_running_but_on_off_is_unknown():
+    vacuum = _entity("vacuum", "paused")
+    assert evaluate_semantic_state(vacuum, SemanticState.ACTIVE) is False
+    assert evaluate_semantic_state(vacuum, SemanticState.INACTIVE) is True
+    assert evaluate_semantic_state(vacuum, SemanticState.ON) is None
+    assert evaluate_semantic_state(vacuum, SemanticState.OFF) is None
+
+
+def test_unavailable_state_is_never_turned_into_false_no():
+    assert evaluate_semantic_state(_entity("light", "unavailable"), SemanticState.ON) is None
+
+
+def test_domain_incompatible_predicate_is_not_supported():
+    assert supports_state_predicate("cover", SemanticState.ON) is False
+    assert supports_state_predicate("light", SemanticState.OPEN) is False

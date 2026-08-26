@@ -59,6 +59,10 @@ from .nlu.service_mapper import map_to_service_call
 from .nlu.semantic_compiler import SemanticCommandCompiler, SemanticQueryCompiler
 from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
 from .nlu.semantic_utterance import ClauseRole, SpeechAct, analyse_utterance
+from .nlu.verb_state_query import (
+    match_contextual_verb_state_query,
+    match_verb_state_query,
+)
 from .nlu.semantic_location import resolve_coordinated_locations
 from .nlu.validator import validate_command
 from .automation_action_parser import AutomationActionParser
@@ -519,6 +523,11 @@ class MatchResult:
     # sentence just parsed. Known, documented, not a behaviour regression
     # since nothing reads this field yet.
     resolved_intent: ResolvedSemanticIntent | None = None
+    # Read-only answers that do not originate from a SemanticCommand still
+    # need conversational focus for pronouns and elliptical follow-ups.
+    context_entities: tuple[EntitySnapshot, ...] = ()
+    context_predicate: str | None = None
+    explanation_text: str | None = None
 
 
 @dataclass(frozen=True)
@@ -773,6 +782,16 @@ class NluEngine:
         self, text: str, entities: list[EntitySnapshot], world_model: WorldModel | None = None
     ) -> MatchResult | CommandPlan | None:
         utterance = analyse_utterance(text)
+        if utterance.speech_act is SpeechAct.QUERY:
+            verb_answer = match_verb_state_query(text, entities)
+            if verb_answer is not None:
+                return MatchResult(
+                    plan=None,
+                    response_text=verb_answer.response_text,
+                    context_entities=verb_answer.entities,
+                    context_predicate=verb_answer.predicate,
+                    explanation_text=verb_answer.explanation_text,
+                )
         # Trigger/condition clauses belong to the automation composer and
         # must never degrade into an immediate direct command. Likewise, a
         # hypothetical/uncertain or explicitly negated command is not a safe
@@ -799,7 +818,7 @@ class NluEngine:
                 whole_result = SemanticQueryCompiler.compile(
                     normalized_whole, entities, world_model, whole_analysis
                 )
-                if whole_result is None:
+                if whole_result is None and utterance.speech_act is not SpeechAct.QUERY:
                     whole_result = SemanticCommandCompiler.compile(
                         normalized_whole, entities, world_model, whole_analysis
                     )
@@ -811,7 +830,14 @@ class NluEngine:
                         response_text=_clarification_question(whole_result),
                         clarification=whole_result,
                     )
-            return self._match_multi(segments, entities, world_model)
+            multi = self._match_multi(segments, entities, world_model)
+            if (
+                utterance.speech_act is SpeechAct.QUERY
+                and multi is not None
+                and any(command.plan is not None for command in multi.commands)
+            ):
+                return None
+            return multi
 
         text = normalize(text)
         semantic_analysis = analyse_semantics(text)
@@ -833,21 +859,30 @@ class NluEngine:
         # not fall through to a broader wildcard parser (for example,
         # "beide" must never degrade into a singular command).
         result = self._select_parser(text).parse(text, parse_context)
+        if (
+            utterance.speech_act is SpeechAct.QUERY
+            and isinstance(result, ParseResult)
+            and result.frame.intent not in QUERY_INTENTS
+        ):
+            result = None
         if isinstance(result, ClarificationRequest):
             # Legacy wildcard grammars may include politeness words in the
             # target or detect duplicate names before applying an explicitly
             # spoken area.  Let the constraint-based semantic compiler prove
             # a unique interpretation before asking an unnecessary question.
-            semantic_result = SemanticCommandCompiler.compile(
-                text, entities, world_model, semantic_analysis
-            )
-            if isinstance(semantic_result, ParseResult):
-                result = semantic_result
+            if utterance.speech_act is SpeechAct.QUERY:
+                result = None
+            else:
+                semantic_result = SemanticCommandCompiler.compile(
+                    text, entities, world_model, semantic_analysis
+                )
+                if isinstance(semantic_result, ParseResult):
+                    result = semantic_result
         if result is None:
             result = SemanticQueryCompiler.compile(
                 text, entities, world_model, semantic_analysis
             )
-            if result is None:
+            if result is None and utterance.speech_act is not SpeechAct.QUERY:
                 result = SemanticCommandCompiler.compile(
                     text, entities, world_model, semantic_analysis
                 )
@@ -908,9 +943,11 @@ class NluEngine:
                 ParseFailureReason.UNKNOWN_ENTITY,
                 "Ich konnte das angesprochene Gerät nicht eindeutig finden oder den Befehl nicht ausführen.",
             )
-        return None
-        if re.search(r"\b(wie|welche|welcher|welches|was|ist|sind)\b", text, re.IGNORECASE):
-            return "Ich habe die Frage erkannt, aber die gewünschte Eigenschaft oder das Ziel nicht gefunden."
+        if analyse_utterance(text).speech_act is SpeechAct.QUERY:
+            return UnderstandingFeedback(
+                ParseFailureReason.UNSUPPORTED_PROPERTY,
+                "Ich habe die Frage erkannt, aber die gewünschte Eigenschaft oder das Ziel nicht gefunden.",
+            )
         return None
 
     def _match_multi(
@@ -1116,9 +1153,26 @@ class NluEngine:
         resolution miss in the parser itself, both collapse to ``None``
         here, same as every other "never guess" miss in this engine.
         """
+        if context is None:
+            return None
+
+        contextual_answer = match_contextual_verb_state_query(
+            text,
+            entities,
+            context.last_entities,
+            context.last_query_predicate,
+        )
+        if contextual_answer is not None:
+            return MatchResult(
+                plan=None,
+                response_text=contextual_answer.response_text,
+                context_entities=contextual_answer.entities,
+                context_predicate=contextual_answer.predicate,
+                explanation_text=contextual_answer.explanation_text,
+            )
+
         if (
-            context is None
-            or context.last_command is None
+            context.last_command is None
             or context.last_command.intent not in _QUERY_FOLLOWUP_INTENTS
         ):
             return None
@@ -2487,6 +2541,7 @@ class NluEngine:
         frame = result.frame
         matched = result.resolved_entities
         command = build_semantic_command(result)
+
         validation_error = validate_command(command)
         capabilities = tuple(sorted({capability for entity in matched for capability in entity.capabilities}))
         candidates = tuple(entity.entity_id for entity in matched)
@@ -2534,6 +2589,15 @@ class NluEngine:
         frame = result.frame
         matched = result.resolved_entities
         command = build_semantic_command(result)
+
+        # Defense in depth for every caller of this builder: a syntactic
+        # question can only use registered read-only query intents. Never
+        # return a service plan with a success sentence for a question.
+        if (
+            analyse_utterance(frame.source_text).speech_act is SpeechAct.QUERY
+            and frame.intent not in QUERY_INTENTS
+        ):
+            return None
 
         # Gate on the Command Validator (v2 plan Phase 11) before building
         # anything. Today's parsers already self-police everything this

@@ -16,6 +16,10 @@ from ha_nlu.nlu.semantic_utterance import (
     [
         ("Mach das Licht an", SpeechAct.COMMAND, Modality.DIRECT, True),
         ("Kannst du das Licht einschalten?", SpeechAct.COMMAND, Modality.POLITE, True),
+        ("Kannst du die Temperatur auf 22 Grad erhöhen?", SpeechAct.COMMAND, Modality.POLITE, True),
+        ("Kannst du das Licht auf 30 Prozent dimmen?", SpeechAct.COMMAND, Modality.POLITE, True),
+        ("Spielt das Radio Atlas?", SpeechAct.QUERY, Modality.DIRECT, False),
+        ("Startet der Saugroboter Atlas?", SpeechAct.QUERY, Modality.DIRECT, False),
         ("Ich hätte gerne das Licht an", SpeechAct.COMMAND, Modality.WISH, True),
         ("Wie warm ist es?", SpeechAct.QUERY, Modality.DIRECT, False),
         ("Kann man die Tür aufschließen?", SpeechAct.QUERY, Modality.DIRECT, False),

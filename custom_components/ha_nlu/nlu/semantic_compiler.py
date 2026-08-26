@@ -38,7 +38,7 @@ from .semantic_location import (
     resolve_coordinated_locations,
     resolve_semantic_location,
 )
-from .semantic_state import QUERYABLE_STATE_DOMAINS
+from .semantic_state import QUERYABLE_STATE_DOMAINS, supports_state_predicate
 
 
 @dataclass(frozen=True)
@@ -556,6 +556,10 @@ class SemanticQueryCompiler:
         if domain not in QUERYABLE_STATE_DOMAINS:
             return None
         requested_state = states[0] if states else None
+        if requested_state is not None and not supports_state_predicate(
+            domain, requested_state, device_class
+        ):
+            return None
 
         coordinated_locations = resolve_coordinated_locations(text, entities)
         location = None if coordinated_locations else resolve_semantic_location(text, entities)

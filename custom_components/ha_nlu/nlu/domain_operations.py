@@ -16,7 +16,7 @@ DOMAIN_EXPRESSIONS: dict[str, tuple[str, ...]] = {
     "fan": (r"ventilator(?:en)?", r"lüfter"),
     "climate": (r"heizung(?:en)?", r"thermostat(?:e)?"),
     "script": (r"skript(?:e)?",),
-    "media_player": (r"medienplayer", r"media[ -]?player", r"lautsprecher", r"radio", r"fernseher"),
+    "media_player": (r"medienplayer", r"media[ -]?player", r"lautsprecher", r"radios?", r"fernseher"),
     "vacuum": (r"saugroboter", r"staubsauger(?:roboter)?", r"sauger"),
     "humidifier": (r"luftbefeuchter", r"befeuchter"),
     "water_heater": (r"warmwasser(?:bereiter)?", r"boiler", r"wasserheizer"),
@@ -41,7 +41,7 @@ DOMAIN_WORDS: dict[str, tuple[str, ...]] = {
     "fan": ("ventilator", "ventilatoren", "lüfter"),
     "climate": ("heizung", "heizungen", "thermostat", "thermostate"),
     "script": ("skript", "skripte"),
-    "media_player": ("medienplayer", "media player", "lautsprecher", "player", "radio", "fernseher"),
+    "media_player": ("medienplayer", "media player", "lautsprecher", "player", "radio", "radios", "fernseher"),
     "vacuum": ("saugroboter", "staubsauger", "staubsaugerroboter", "sauger"),
     "humidifier": ("luftbefeuchter", "befeuchter"),
     "water_heater": ("warmwasser", "warmwasserbereiter", "boiler", "wasserheizer"),
@@ -76,6 +76,10 @@ COMMAND_MARKER_EXPRESSIONS: tuple[str, ...] = (
     r"deaktivier(?:e|en|st|t)?", r"start(?:e|en|est|et)?", r"gestartet",
     r"spiel(?:e|en|st|t)?", r"weiterspiel(?:e|en|st|t)?", r"pausier(?:e|en|st|t)?",
     r"stopp(?:e|en|st|t)?", r"führ(?:e|en)?", r"ausführen",
+    r"erhöh(?:e|en|st|t)?", r"erhoeh(?:e|en|st|t)?",
+    r"senk(?:e|en|st|t)?", r"reduzier(?:e|en|st|t)?",
+    r"dimm(?:e|en|st|t)?", r"änder(?:e|n|st|t)?",
+    r"anheb(?:e|en|st|t)?",
 )
 
 

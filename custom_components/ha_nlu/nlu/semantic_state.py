@@ -52,8 +52,8 @@ _ACTIVE_STATES = {
     "lawn_mower": frozenset({"mowing", "returning"}),
 }
 _INACTIVE_STATES = {
-    "vacuum": frozenset({"docked", "idle", "paused", "off"}),
-    "lawn_mower": frozenset({"docked", "idle", "paused", "off"}),
+    "vacuum": frozenset({"docked", "idle", "off"}),
+    "lawn_mower": frozenset({"docked", "idle", "off"}),
 }
 _MEDIA_ON_STATES = frozenset({"on", "idle", "playing", "paused", "buffering", "standby"})
 
@@ -112,6 +112,88 @@ def matches_semantic_state(entity: EntitySnapshot, requested: SemanticState) -> 
     ``UNKNOWN`` - there is no valid sentence that asks for "state unknown"
     entities, and treating two UNKNOWNs as equal would silently surface
     unavailable entities in list/count queries."""
+    return evaluate_semantic_state(entity, requested) is True
+
+
+def supports_state_predicate(
+    domain: str,
+    requested: SemanticState,
+    device_class: str | None = None,
+) -> bool:
+    """Whether a spoken predicate has deterministic meaning for a domain."""
     if requested is SemanticState.UNKNOWN:
         return False
-    return derive_semantic_state(entity) is requested
+    if domain == "binary_sensor":
+        return requested in (
+            {SemanticState.OPEN, SemanticState.CLOSED}
+            if device_class in _BINARY_SENSOR_OPEN_CLOSE_DEVICE_CLASSES
+            else {SemanticState.ON, SemanticState.OFF}
+        )
+    if domain in {"cover", "valve"}:
+        return requested in {SemanticState.OPEN, SemanticState.CLOSED}
+    if domain in {"light", "switch", "input_boolean"}:
+        return requested in {SemanticState.ON, SemanticState.OFF}
+    if domain in {"fan", "climate", "humidifier", "media_player"}:
+        return requested in {
+            SemanticState.ON, SemanticState.OFF,
+            SemanticState.ACTIVE, SemanticState.INACTIVE,
+        }
+    if domain in {"vacuum", "lawn_mower"}:
+        return requested in {
+            SemanticState.ON, SemanticState.OFF,
+            SemanticState.ACTIVE, SemanticState.INACTIVE,
+        }
+    return False
+
+
+def evaluate_semantic_state(
+    entity: EntitySnapshot, requested: SemanticState
+) -> bool | None:
+    """Return true/false/unknown for one domain-compatible predicate.
+
+    ON/OFF and ACTIVE/INACTIVE are linked only for domains where natural
+    German uses both families for the same operational distinction. Paused
+    devices remain deliberately undecidable for ON/OFF while still answering
+    ``läuft`` with false. Unknown and unavailable states never become a
+    fabricated ``Nein``.
+    """
+    if not supports_state_predicate(entity.domain, requested, entity.device_class):
+        return None
+    actual = derive_semantic_state(entity)
+    if actual is requested:
+        return True
+
+    if entity.state == "paused":
+        if requested is SemanticState.ACTIVE:
+            return False
+        if requested is SemanticState.INACTIVE:
+            return True
+        return None
+    if actual is SemanticState.UNKNOWN:
+        return None
+
+    if entity.domain in {"vacuum", "lawn_mower"}:
+        equivalents = {
+            SemanticState.ON: SemanticState.ACTIVE,
+            SemanticState.OFF: SemanticState.INACTIVE,
+            SemanticState.ACTIVE: SemanticState.ON,
+            SemanticState.INACTIVE: SemanticState.OFF,
+        }
+        equivalent = equivalents.get(requested)
+        if equivalent is not None and actual in {requested, equivalent}:
+            return True
+
+    if entity.domain == "media_player" and requested in {
+        SemanticState.ACTIVE, SemanticState.INACTIVE,
+    }:
+        running = entity.state in {"playing", "buffering"}
+        known = entity.state in _MEDIA_ON_STATES or entity.state == "off"
+        return (running if requested is SemanticState.ACTIVE else not running) if known else None
+
+    if entity.domain in {"fan", "climate", "humidifier"}:
+        if requested is SemanticState.ACTIVE:
+            return actual is SemanticState.ON
+        if requested is SemanticState.INACTIVE:
+            return actual is SemanticState.OFF
+
+    return False
