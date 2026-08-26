@@ -369,22 +369,38 @@ QUERY_INTENTS: dict[str, QueryIntentSpec] = {
     # membership are still load-bearing for validate_command() and
     # conversation.py's QUERY_INTENT_NAMES.
     "HassStateQuery": QueryIntentSpec(
-        allowed_domains=frozenset({"binary_sensor", "cover", "light", "switch"}),
+        allowed_domains=frozenset({
+            "binary_sensor", "cover", "light", "switch", "fan", "climate",
+            "media_player", "vacuum", "humidifier", "input_boolean", "valve",
+            "lawn_mower",
+        }),
         response=lambda es, params: "Das habe ich nicht verstanden.",
         allows_empty=True,
     ),
     "HassCheckState": QueryIntentSpec(
-        allowed_domains=frozenset({"binary_sensor", "cover", "light", "switch"}),
+        allowed_domains=frozenset({
+            "binary_sensor", "cover", "light", "switch", "fan", "climate",
+            "media_player", "vacuum", "humidifier", "input_boolean", "valve",
+            "lawn_mower",
+        }),
         response=lambda es, params: "Das habe ich nicht verstanden.",
         allows_empty=False,
     ),
     "HassEntityStateQuery": QueryIntentSpec(
-        allowed_domains=frozenset({"binary_sensor", "cover", "light", "switch"}),
+        allowed_domains=frozenset({
+            "binary_sensor", "cover", "light", "switch", "fan", "climate",
+            "media_player", "vacuum", "humidifier", "input_boolean", "valve",
+            "lawn_mower",
+        }),
         response=lambda es, params: "Das habe ich nicht verstanden.",
         allows_empty=False,
     ),
     "HassExistsQuery": QueryIntentSpec(
-        allowed_domains=frozenset({"binary_sensor", "cover", "light", "switch"}),
+        allowed_domains=frozenset({
+            "binary_sensor", "cover", "light", "switch", "fan", "climate",
+            "media_player", "vacuum", "humidifier", "input_boolean", "valve",
+            "lawn_mower",
+        }),
         response=lambda es, params: "Das habe ich nicht verstanden.",
         allows_empty=True,
     ),

@@ -38,6 +38,7 @@ from .semantic_location import (
     resolve_coordinated_locations,
     resolve_semantic_location,
 )
+from .semantic_state import QUERYABLE_STATE_DOMAINS
 
 
 @dataclass(frozen=True)
@@ -537,7 +538,6 @@ class SemanticQueryCompiler:
             or analysis.values(SemanticKind.COMMAND_MARKER)
             or analysis.values(SemanticKind.PROPERTY)
             or analysis.values(SemanticKind.COMPARATOR)
-            or _SINGULAR_NAMED_QUERY_RE.search(text)
             or _DURATION_QUESTION_RE.search(text)
         ):
             return None
@@ -553,6 +553,8 @@ class SemanticQueryCompiler:
         if len(targets) != 1 or len(states) > 1:
             return None
         domain, device_class = targets[0]
+        if domain not in QUERYABLE_STATE_DOMAINS:
+            return None
         requested_state = states[0] if states else None
 
         coordinated_locations = resolve_coordinated_locations(text, entities)
@@ -602,7 +604,12 @@ class SemanticQueryCompiler:
 
         scopes = analysis.values(SemanticKind.QUERY_SCOPE)
         quantities = analysis.values(SemanticKind.QUANTIFIER)
-        if "none" in scopes:
+        singular_state_question = _SINGULAR_NAMED_QUERY_RE.search(text) is not None
+        if singular_state_question:
+            if requested_state is None or len(candidates) != 1:
+                return None
+            scope = QueryScope.SINGLE
+        elif "none" in scopes:
             if requested_state is None:
                 return None
             scope = QueryScope.NONE
@@ -621,7 +628,11 @@ class SemanticQueryCompiler:
         else:
             scope = QueryScope.LIST
 
-        intent = "HassExistsQuery" if scope is QueryScope.EXISTS else "HassStateQuery"
+        intent = (
+            "HassCheckState"
+            if scope is QueryScope.SINGLE
+            else "HassExistsQuery" if scope is QueryScope.EXISTS else "HassStateQuery"
+        )
         area_snapshot = (
             AreaSnapshot(area_id=area_id, name=location_name)
             if area_id is not None and location_name is not None and len(locations) == 1
@@ -635,6 +646,7 @@ class SemanticQueryCompiler:
                 device_class=device_class,
                 area=area_snapshot,
                 floor_id=floor_id,
+                entity_id=(candidates[0].entity_id if scope is QueryScope.SINGLE else None),
             ),
             filter=QueryFilter(state=requested_state),
         )

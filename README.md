@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.40.0**
+- Aktuelle Version: **4.41.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -289,7 +289,17 @@ Ist kein Fenster offen?
 Wie viele Fenster sind im Erdgeschoss geöffnet?
 Wo sind Fenster offen?
 Was ist im Badezimmer eingeschaltet?
+Ist das Radio in der Küche an?
+Läuft der Saugroboter?
+Was macht der Mähroboter?
 ```
+
+Zustandsfragen sind für jede Domäne nur dann freigeschaltet, wenn HomeIntent
+deren Home-Assistant-Zustände eindeutig semantisch abbilden kann. Dazu zählen
+neben Licht, Schaltern, Rollläden und Binärsensoren auch Ventilatoren,
+Heizungen, Media Player, Staubsauger, Luftbefeuchter, boolesche Helfer,
+Ventile und Mähroboter. Szenen und Tasten besitzen dagegen keinen
+dauerhaften an/aus-Zustand; HomeIntent erfindet dafür keine Antwort.
 
 ### Messwerte und Vergleiche
 
@@ -791,10 +801,10 @@ python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
 ```
 
-Geprüfter Stand von Version 4.40.0:
+Geprüfter Stand von Version 4.41.0:
 
 ```text
-2075 passed, 12 skipped
+2095 passed, 12 skipped
 84 % Gesamt-Coverage
 64 % Coverage für conversation.py
 ```
@@ -830,7 +840,7 @@ Dadurch können sie dem Parser keine Antworten „beibringen“.
 ![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
 
 Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.40.0. Benchmark,
+Entwicklungsstands und kein aktueller Nachweis für Version 4.41.0. Benchmark,
 Fehlerdiagnose und Messungen auf schwacher Hardware werden bewusst separat
 aktualisiert. Ein perfektes Ergebnis in einem bekannten Korpus bedeutet nicht,
 dass jede mögliche Formulierung verstanden wird.

@@ -205,6 +205,8 @@ _COMPARISON_QUERY_RE = re.compile(
 _STATE_QUERY_RE = re.compile(
     r"\bgibt es\b"
     r"|\bhaben wir\b.*\b(offen\w*|geöffnet\w*|geschlossen\w*|eingeschaltet\w*|ausgeschaltet\w*)\b"
+    r"|\b(?:läuft|laeuft)\b"
+    r"|\bwas\s+macht\b"
     r"|\bwelchen\b.*\b(zustand|status)\b"
     r"|\b(wie|zeige)\b.*\b(zustand|status)\b"
     r"|\b(wo|in welchen räumen|welche räume haben|was ist)\b.*"

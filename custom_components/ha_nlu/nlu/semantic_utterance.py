@@ -13,7 +13,13 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from .normalize import normalize
-from .domain_operations import COMMAND_MARKER_EXPRESSIONS, DOMAIN_EXPRESSIONS, regex_union
+from .domain_operations import (
+    ACTION_EXPRESSIONS,
+    COMMAND_MARKER_EXPRESSIONS,
+    DOMAIN_EXPRESSIONS,
+    INTENT_BY_DOMAIN_ACTION,
+    regex_union,
+)
 
 
 class SpeechAct(Enum):
@@ -125,11 +131,28 @@ _COMMAND_RE = re.compile(
     + r"|regel\w*|regle\w*|zeig\w*|sorge\w*|schick\w*|möchte|moechte)\b",
     re.I,
 )
-_ELLIPTICAL_COMMAND_RE = re.compile(
-    r"\b" + regex_union([
-        expression for expressions in DOMAIN_EXPRESSIONS.values() for expression in expressions
-    ]) + r"\b.*"
-    r"\b(?:an|aus|ein|hoch|runter|herunter|offen|geschlossen)\b",
+def _elliptical_command_expression() -> str:
+    """Build only executable domain/action pairs, once at import time.
+
+    A generic device noun next to a state word is not automatically a
+    command (``Ist das Radio an?``).  Pairing each domain with the actions
+    actually registered for it prevents unrelated vocabulary such as
+    ``Wert``/``Kamera`` from becoming executable discourse evidence.
+    """
+    pairs: list[str] = []
+    for domain, action in INTENT_BY_DOMAIN_ACTION:
+        domain_expression = regex_union(list(DOMAIN_EXPRESSIONS[domain]))
+        action_expression = regex_union(list(ACTION_EXPRESSIONS[action]))
+        pairs.append(
+            rf"(?:\b{domain_expression}\b.*\b{action_expression}\b|"
+            rf"\b{action_expression}\b.*\b{domain_expression}\b)"
+        )
+    return regex_union(pairs)
+
+
+_ELLIPTICAL_COMMAND_RE = re.compile(_elliptical_command_expression(), re.I)
+_COPULAR_STATE_QUESTION_RE = re.compile(
+    r"^\s*(?:ist|sind|welch\w*|was\s+(?:ist|macht)|wie\s+ist)\b",
     re.I,
 )
 _TRIGGER_CUE_RE = re.compile(r"\b(?P<cue>wenn|sobald|falls)\b", re.I)
@@ -185,8 +208,10 @@ def analyse_utterance(text: str) -> SemanticUtterance:
     # shape is evaluated afterwards.  "Kann man ...?" remains an
     # informational question and must never execute anything.
     elif (
-        _COMMAND_RE.search(normalized) or _ELLIPTICAL_COMMAND_RE.search(normalized)
-    ) and not _INFORMATIONAL_CAN_RE.search(normalized):
+        not _COPULAR_STATE_QUESTION_RE.search(normalized)
+        and (_COMMAND_RE.search(normalized) or _ELLIPTICAL_COMMAND_RE.search(normalized))
+        and not _INFORMATIONAL_CAN_RE.search(normalized)
+    ):
         speech_act = SpeechAct.COMMAND
     elif _QUERY_REQUEST_RE.search(normalized) or _QUESTION_RE.search(normalized):
         speech_act = SpeechAct.QUERY

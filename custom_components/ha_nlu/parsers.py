@@ -1746,6 +1746,8 @@ _STATE_NAME_TO_SEMANTIC: dict[str, SemanticState] = {
     "CLOSED": SemanticState.CLOSED,
     "ON": SemanticState.ON,
     "OFF": SemanticState.OFF,
+    "ACTIVE": SemanticState.ACTIVE,
+    "INACTIVE": SemanticState.INACTIVE,
 }
 
 # Shared, stateless (HomeIntent v4.2.1 plan, Phase 7): StateQueryParser now
@@ -2079,7 +2081,8 @@ class StateQueryParser:
 
     def _parse_check_state(self, text: str, slots: dict, context: ParseContext, spec) -> ParseResult | None:
         state_slot = slots.get("state")
-        if state_slot is None:
+        activity_question = re.match(r"\s*(?:läuft|laeuft)\b", text, re.IGNORECASE)
+        if state_slot is None and activity_question is None:
             return None
         target = self._resolve_single_state_target(slots, context)
         if target is None:
@@ -2088,7 +2091,11 @@ class StateQueryParser:
         if entity.domain not in spec.allowed_domains:
             return None
 
-        requested_state = _STATE_NAME_TO_SEMANTIC[str(state_slot.value)]
+        requested_state = (
+            SemanticState.ACTIVE
+            if state_slot is None
+            else _STATE_NAME_TO_SEMANTIC[str(state_slot.value)]
+        )
         area_snapshot = AreaSnapshot(area_id=area_id, name=area_name) if area_id is not None else None
         # device_class is inert here (QueryExecutor.SINGLE with a pre-resolved
         # entity_id never looks at it - only entity_id decides membership),

@@ -99,6 +99,12 @@ LEXEMES: tuple[Lexeme, ...] = (
         r"an", r"ein", r"eingeschaltet\w*", r"angeschaltet\w*",
     )),
     Lexeme(SemanticKind.STATE, SemanticState.OFF, (r"aus", r"ausgeschaltet\w*",)),
+    Lexeme(SemanticKind.STATE, SemanticState.ACTIVE, (
+        r"läuft", r"laeuft", r"laufend", r"aktiv", r"in\s+betrieb",
+    )),
+    Lexeme(SemanticKind.STATE, SemanticState.INACTIVE, (
+        r"inaktiv", r"steht", r"gestoppt", r"pausiert",
+    )),
     Lexeme(SemanticKind.QUANTIFIER, "all", (
         r"alle", r"sämtliche\w*", r"jede\w*", r"die\s+ganzen",
     )),
@@ -161,6 +167,7 @@ _FILLERS = frozenset(
         "jetzt vorhanden vorhandenen im in am auf beim nach von zur zum und oder soll sollen dort "
         "möchte will ich dass ob davon denn noch es sie sein sind ist stehen steht hat haben werde werden wird welche welcher welches was wie "
         "kannste könntest koenntest würdest wuerdest würd wuerd gern wär waer nett "
+        "nicht "
         "wiedergabe "
         "komplett ganz ganze ganzen ganzer ganzes vollständig halb halbe halber halben hälfte höhe prozent einmal zwar"
     ).split()

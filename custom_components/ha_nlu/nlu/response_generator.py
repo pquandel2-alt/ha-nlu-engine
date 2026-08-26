@@ -38,6 +38,8 @@ _SEMANTIC_STATE_SPOKEN_DE = {
     SemanticState.CLOSED: "geschlossen",
     SemanticState.ON: "eingeschaltet",
     SemanticState.OFF: "ausgeschaltet",
+    SemanticState.ACTIVE: "aktiv",
+    SemanticState.INACTIVE: "inaktiv",
 }
 
 _DEVICE_CLASS_PLURAL_DE = {
@@ -48,8 +50,18 @@ _DEVICE_CLASS_SINGULAR_DE = {
     "window": "Fenster", "door": "Tür", "garage_door": "Garagentor", "motion": "Bewegungsmelder",
 }
 
-_DOMAIN_PLURAL_DE = {"light": "Lichter", "switch": "Schalter", "fan": "Ventilatoren", "cover": "Rollläden"}
-_DOMAIN_SINGULAR_DE = {"light": "Licht", "switch": "Schalter", "fan": "Ventilator", "cover": "Rollladen"}
+_DOMAIN_PLURAL_DE = {
+    "light": "Lichter", "switch": "Schalter", "fan": "Ventilatoren",
+    "cover": "Rollläden", "climate": "Heizungen", "media_player": "Medienplayer",
+    "vacuum": "Saugroboter", "humidifier": "Luftbefeuchter",
+    "input_boolean": "Helfer", "valve": "Ventile", "lawn_mower": "Mähroboter",
+}
+_DOMAIN_SINGULAR_DE = {
+    "light": "Licht", "switch": "Schalter", "fan": "Ventilator",
+    "cover": "Rollladen", "climate": "Heizung", "media_player": "Medienplayer",
+    "vacuum": "Saugroboter", "humidifier": "Luftbefeuchter",
+    "input_boolean": "Helfer", "valve": "Ventil", "lawn_mower": "Mähroboter",
+}
 
 
 def _automation_label(automation) -> str:

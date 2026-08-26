@@ -135,6 +135,16 @@ _CLOSE_VALVE = OperationSpec("close_valve", (
     "{nom} {target} soll {particle} geschlossen sein",
     "Bitte {acc} {target} {particle} schließen",
 ))
+_ACTIVATE_SCENE = OperationSpec("turn_on", (
+    "Aktiviere {particle} {acc} {target}",
+    "Schalte {particle} {acc} {target} ein",
+    "Kannst du {particle} {acc} {target} aktivieren?",
+    "Wäre es möglich, {acc} {target} {particle} zu aktivieren?",
+    "Ich hätte gerne {acc} {target} {particle} aktiviert",
+    "Sorge bitte dafür, dass {nom} {target} {particle} aktiviert wird",
+    "{nom} {target} soll {particle} aktiviert werden",
+    "Bitte {acc} {target} {particle} aktivieren",
+))
 
 _DOMAINS = (
     DomainSpec("light", "Licht", "das", "das", frozenset({"TURN_ON", "TURN_OFF"}), {}, (_ON, _OFF)),
@@ -146,6 +156,8 @@ _DOMAINS = (
     DomainSpec("vacuum", "Saugroboter", "der", "den", frozenset(), {}, (_START, _STOP)),
     DomainSpec("humidifier", "Luftbefeuchter", "der", "den", frozenset({"TURN_ON", "TURN_OFF"}), {}, (_ON, _OFF)),
     DomainSpec("valve", "Ventil", "das", "das", frozenset({"OPEN", "CLOSE"}), {"supported_features": 3}, (_OPEN_VALVE, _CLOSE_VALVE)),
+    DomainSpec("input_boolean", "Helfer", "der", "den", frozenset({"TURN_ON", "TURN_OFF"}), {}, (_ON, _OFF)),
+    DomainSpec("scene", "Szene", "die", "die", frozenset(), {}, (_ACTIVATE_SCENE,)),
 )
 
 _NAMES = ("Atlas", "Birke", "Citrin", "Dahlie")

@@ -118,6 +118,8 @@ intents:
           - "ist [die|der|das] {area} {device_class} [denn] [noch] {state}"
           - "ist [die|der|das] {name} [in der|in dem|im|am|beim] {area} [denn] [noch] {state}"
           - "ist [die|der|das] {name} [denn] [noch] {state}"
+          - "ist [die|der|das] {name} [denn] [noch] nicht {state}"
+          - "(läuft|laeuft) [die|der|das] {name}"
 
   # Open state question without a requested comparison state. This is still
   # a strictly read-only SINGLE query; the response is derived from the
@@ -134,6 +136,7 @@ intents:
           - "wie ist der (zustand|status) (von|von der|von dem|vom) [die|der|das] {name}"
           - "was ist der (zustand|status) (von|von der|von dem|vom) [die|der|das] {name}"
           - "zeige [mir] den (zustand|status) (von|von der|von dem|vom) [die|der|das] {name}"
+          - "was macht [die|der|das] {name}"
   # WorldModelQuery wave: device-level query ("Welche Geräte sind im Büro?")
   # - no {device_class}/{state} slot, devices are cross-domain and answered
   # from the WorldModel's device list, not an entity/state filter (see

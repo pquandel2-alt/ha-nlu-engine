@@ -24,6 +24,8 @@ class SemanticState(Enum):
     CLOSED = auto()
     ON = auto()
     OFF = auto()
+    ACTIVE = auto()
+    INACTIVE = auto()
     UNKNOWN = auto()
 
 
@@ -39,9 +41,30 @@ _BINARY_SENSOR_OPEN_CLOSE_DEVICE_CLASSES = frozenset({"window", "door", "opening
 _COVER_STATE_TO_SEMANTIC = {"open": SemanticState.OPEN, "closed": SemanticState.CLOSED}
 
 # on/off domains where "on"/"off" is the semantic itself (not open/closed).
-_ON_OFF_DOMAINS = frozenset({"light", "switch", "fan"})
+_ON_OFF_DOMAINS = frozenset({
+    "light", "switch", "fan", "humidifier", "input_boolean",
+})
 
 _RAW_STATE_TO_ON_OFF = {"on": SemanticState.ON, "off": SemanticState.OFF}
+
+_ACTIVE_STATES = {
+    "vacuum": frozenset({"cleaning", "returning"}),
+    "lawn_mower": frozenset({"mowing", "returning"}),
+}
+_INACTIVE_STATES = {
+    "vacuum": frozenset({"docked", "idle", "paused", "off"}),
+    "lawn_mower": frozenset({"docked", "idle", "paused", "off"}),
+}
+_MEDIA_ON_STATES = frozenset({"on", "idle", "playing", "paused", "buffering", "standby"})
+
+# Domains for which HomeIntent has an explicit, deterministic mapping from
+# raw HA state to one of the semantic states above. Query callers use this
+# as the single boundary instead of inventing their own allow-lists.
+QUERYABLE_STATE_DOMAINS = frozenset({
+    "binary_sensor", "cover", "light", "switch", "fan", "climate",
+    "media_player", "vacuum", "humidifier", "input_boolean", "valve",
+    "lawn_mower",
+})
 
 
 def derive_semantic_state(entity: EntitySnapshot) -> SemanticState:
@@ -60,6 +83,27 @@ def derive_semantic_state(entity: EntitySnapshot) -> SemanticState:
         return _RAW_STATE_TO_ON_OFF.get(entity.state, SemanticState.UNKNOWN)
     if entity.domain in _ON_OFF_DOMAINS:
         return _RAW_STATE_TO_ON_OFF.get(entity.state, SemanticState.UNKNOWN)
+    if entity.domain == "climate":
+        return SemanticState.OFF if entity.state == "off" else (
+            SemanticState.UNKNOWN
+            if entity.state in {"unknown", "unavailable", ""}
+            else SemanticState.ON
+        )
+    if entity.domain == "media_player":
+        if entity.state == "off":
+            return SemanticState.OFF
+        return SemanticState.ON if entity.state in _MEDIA_ON_STATES else SemanticState.UNKNOWN
+    if entity.domain == "valve":
+        return {
+            "open": SemanticState.OPEN,
+            "opening": SemanticState.OPEN,
+            "closed": SemanticState.CLOSED,
+            "closing": SemanticState.CLOSED,
+        }.get(entity.state, SemanticState.UNKNOWN)
+    if entity.state in _ACTIVE_STATES.get(entity.domain, ()):
+        return SemanticState.ACTIVE
+    if entity.state in _INACTIVE_STATES.get(entity.domain, ()):
+        return SemanticState.INACTIVE
     return SemanticState.UNKNOWN
 
 

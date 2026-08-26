@@ -109,6 +109,16 @@ def test_device_class_slot_list_values_pinned():
         ("Rollos", "cover:None"), ("Rollo", "cover:None"),
         ("Bewegungsmelder", "binary_sensor:motion"), ("Bewegungssensoren", "binary_sensor:motion"),
         ("Bewegungssensor", "binary_sensor:motion"),
+        ("Ventilatoren", "fan:None"), ("Ventilator", "fan:None"), ("Lüfter", "fan:None"),
+        ("Heizungen", "climate:None"), ("Heizung", "climate:None"),
+        ("Thermostate", "climate:None"), ("Thermostat", "climate:None"),
+        ("Medienplayer", "media_player:None"), ("Radios", "media_player:None"),
+        ("Radio", "media_player:None"), ("Fernseher", "media_player:None"),
+        ("Lautsprecher", "media_player:None"),
+        ("Saugroboter", "vacuum:None"), ("Staubsauger", "vacuum:None"),
+        ("Luftbefeuchter", "humidifier:None"), ("Helfer", "input_boolean:None"),
+        ("Ventile", "valve:None"), ("Ventil", "valve:None"),
+        ("Mähroboter", "lawn_mower:None"), ("Maehroboter", "lawn_mower:None"),
     ]
 
 
@@ -121,6 +131,9 @@ def test_state_slot_list_values_pinned():
         ("unten", "CLOSED"),
         ("eingeschaltet", "ON"), ("angeschaltet", "ON"), ("an", "ON"),
         ("ausgeschaltet", "OFF"), ("aus", "OFF"),
+        ("aktiv", "ACTIVE"), ("in Betrieb", "ACTIVE"),
+        ("läuft", "ACTIVE"), ("laeuft", "ACTIVE"),
+        ("inaktiv", "INACTIVE"), ("gestoppt", "INACTIVE"),
     ]
 
 
@@ -132,6 +145,8 @@ def test_state_adj_slot_list_values_pinned():
         ("eingeschaltete", "ON"), ("eingeschaltetes", "ON"), ("eingeschalteter", "ON"), ("eingeschalteten", "ON"),
         ("angeschaltete", "ON"), ("angeschaltetes", "ON"), ("angeschalteter", "ON"), ("angeschalteten", "ON"),
         ("ausgeschaltete", "OFF"), ("ausgeschaltetes", "OFF"), ("ausgeschalteter", "OFF"), ("ausgeschalteten", "OFF"),
+        ("aktive", "ACTIVE"), ("aktives", "ACTIVE"), ("aktiver", "ACTIVE"), ("aktiven", "ACTIVE"),
+        ("inaktive", "INACTIVE"), ("inaktives", "INACTIVE"), ("inaktiver", "INACTIVE"), ("inaktiven", "INACTIVE"),
     ]
 
 

@@ -56,6 +56,15 @@ DOMAIN_WORDS: dict[str, tuple[str, ...]] = {
     "camera": ("kamera", "kameras"),
 }
 
+# Literal resolver words that are deliberately broader than the lexical
+# scanner expressions.  Keeping the small difference explicit turns future
+# drift into a test failure instead of silently growing two vocabularies.
+DOMAIN_WORD_ONLY_TERMS: dict[str, frozenset[str]] = {
+    "media_player": frozenset({"player"}),  # useful registry-name shorthand
+    "input_number": frozenset({"helfer"}),  # HA UI commonly calls input_number a helper
+    "lawn_mower": frozenset({"mäher", "maeher"}),  # natural short noun for name resolution
+}
+
 
 COMMAND_MARKER_EXPRESSIONS: tuple[str, ...] = (
     r"(?:an|aus|zu)mach(?:e|en|st|t)?", r"(?:ein|aus)schalt(?:e|en|st|t)?",
@@ -110,6 +119,7 @@ INTENT_BY_DOMAIN_ACTION: dict[tuple[str, str], str] = {
     ("cover", "close"): "HassCloseCover",
     ("script", "start"): "HassRunScript",
     ("scene", "start"): "HassActivateScene",
+    ("scene", "turn_on"): "HassActivateScene",
     ("media_player", "start"): "HassMediaPlay",
     ("media_player", "play"): "HassMediaPlay",
     ("media_player", "pause"): "HassMediaPause",
