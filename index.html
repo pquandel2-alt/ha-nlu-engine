@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HomeIntent — Sprachsteuerung für Home Assistant. Lokal. Deterministisch. Nachvollziehbar.</title>
+<meta name="description" content="HomeIntent ist ein deutscher Conversation Agent für Home Assistant Assist. Kein LLM, keine Cloud, keine GPU. Derselbe Satz führt immer zum selben geprüften Ergebnis.">
+<meta name="theme-color" content="#07080b">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="HomeIntent — Lokale Sprachsteuerung für Home Assistant">
+<meta property="og:description" content="Bedeutung erkennen, Ziel eindeutig auflösen, Fähigkeiten und Risiken prüfen — und erst danach Home Assistant verändern.">
+<meta property="og:url" content="https://pquandel2-alt.github.io/ha-nlu-engine/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="https://pquandel2-alt.github.io/ha-nlu-engine/">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:ital,wght@0,300..800;1,300..800&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2307080b'/><path d='M28 68V32h10v13h24V32h10v36H62V54H38v14z' fill='%235eead4'/></svg>">
+</head>
+<body>
+
+<div class="grain" aria-hidden="true"></div>
+<div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
+
+<!-- ═══════════════════════ NAV ═══════════════════════ -->
+<header class="nav" id="nav">
+  <div class="nav__inner">
+    <a class="brand" href="#top">
+      <svg class="brand__mark" viewBox="0 0 32 32" aria-hidden="true">
+        <rect x="1" y="1" width="30" height="30" rx="9" fill="none" stroke="url(#bg1)" stroke-width="1.4"/>
+        <path d="M9.5 22V10h3.2v4.4h6.6V10h3.2v12h-3.2v-4.7h-6.6V22z" fill="url(#bg1)"/>
+        <defs><linearGradient id="bg1" x1="0" y1="0" x2="32" y2="32">
+          <stop offset="0" stop-color="#5eead4"/><stop offset="1" stop-color="#a78bfa"/>
+        </linearGradient></defs>
+      </svg>
+      <span class="brand__text">HomeIntent</span>
+      <span class="brand__ver">4.49</span>
+    </a>
+
+    <nav class="nav__links" aria-label="Hauptnavigation">
+      <a href="#verstehen">Verstehen</a>
+      <a href="#demo">Live-Pipeline</a>
+      <a href="#koennen">Können</a>
+      <a href="#sicherheit">Sicherheit</a>
+      <a href="#architektur">Architektur</a>
+      <a href="#grenzen">Grenzen</a>
+    </nav>
+
+    <div class="nav__cta">
+      <a class="btn btn--ghost" href="https://github.com/pquandel2-alt/ha-nlu-engine" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8"/></svg>
+        GitHub
+      </a>
+      <a class="btn btn--primary" href="#installation">Installieren</a>
+    </div>
+
+    <button class="nav__burger" id="burger" aria-label="Menü" aria-expanded="false"><span></span><span></span></button>
+  </div>
+</header>
+
+<main id="top">
+
+<!-- ═══════════════════════ HERO ═══════════════════════ -->
+<section class="hero">
+  <div class="wrap hero__grid">
+
+    <div class="hero__copy">
+      <div class="pill reveal">
+        <span class="pill__dot"></span>
+        Version 4.49.0 · 2.235 Tests grün · MIT
+      </div>
+
+      <h1 class="reveal" style="--d:.05s">
+        Dein Zuhause versteht dich.<br>
+        <em>Ohne</em> dass jemand mithört.
+      </h1>
+
+      <p class="lead reveal" style="--d:.12s">
+        HomeIntent ist ein eigener Conversation Agent für Home&nbsp;Assistant Assist.
+        Er versteht deutsche Smart-Home-Sprache, löst Geräte gegen deine echte
+        Konfiguration auf und erzeugt daraus geprüfte Serviceaufrufe —
+        <strong>vollständig lokal, ohne LLM, ohne Cloud, ohne GPU.</strong>
+      </p>
+
+      <div class="hero__actions reveal" style="--d:.19s">
+        <a class="btn btn--primary btn--lg" href="#demo">
+          Pipeline live ansehen
+          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 10h11M11 6l4 4-4 4"/></svg>
+        </a>
+        <a class="btn btn--ghost btn--lg" href="#verstehen">Wie es funktioniert</a>
+      </div>
+
+      <ul class="hero__nots reveal" style="--d:.26s">
+        <li>keine Cloud-API</li>
+        <li>kein Large Language Model</li>
+        <li>keine GPU</li>
+        <li>kein Modell-Download</li>
+        <li>kein externer Server</li>
+      </ul>
+    </div>
+
+    <!-- Living conversation panel -->
+    <div class="hero__stage reveal" style="--d:.1s">
+      <div class="glass chat" id="chat">
+        <div class="chat__bar">
+          <span class="chat__dots"><i></i><i></i><i></i></span>
+          <span class="chat__title">Home Assistant · Assist</span>
+          <span class="chat__badge" id="chatBadge">lokal</span>
+        </div>
+        <div class="chat__body" id="chatBody"></div>
+        <div class="chat__foot">
+          <span class="chat__ms" id="chatMs">—</span>
+          <span>verarbeitet auf deinem Gerät</span>
+        </div>
+      </div>
+
+      <div class="hero__orb" aria-hidden="true"></div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="metrics reveal">
+      <div class="metric"><b data-count="30623">0</b><span>Zeilen Produktivcode</span></div>
+      <div class="metric"><b data-count="2235">0</b><span>automatisierte Tests</span></div>
+      <div class="metric"><b data-count="85" data-suffix=" %">0</b><span>Testabdeckung</span></div>
+      <div class="metric"><b data-count="27">0</b><span>Home-Assistant-Domänen</span></div>
+      <div class="metric"><b data-count="0">0</b><span>Laufzeit&shy;abhängigkeiten</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ VERSPRECHEN ═══════════════════════ -->
+<section class="sec" id="verstehen">
+  <div class="wrap">
+    <div class="sechead reveal">
+      <span class="kicker">Das Prinzip</span>
+      <h2>Ein Satz. Ein Ergebnis.<br><em>Jedes Mal.</em></h2>
+      <p class="sechead__sub">
+        Sprachassistenten, die auf einem Sprachmodell laufen, sind kreativ — und
+        genau das ist im eigenen Haus das Problem. HomeIntent ist bewusst das
+        Gegenteil: eine symbolische Sprachmaschine, deren Verhalten man prüfen,
+        wiederholen und erklären kann.
+      </p>
+    </div>
+
+    <blockquote class="creed reveal">
+      Bedeutung erkennen, Ziel eindeutig auflösen, Fähigkeiten und Risiken prüfen
+      — und <em>erst danach</em> Home&nbsp;Assistant verändern.
+    </blockquote>
+
+    <div class="pillars">
+      <article class="glass card reveal" style="--d:.05s">
+        <div class="card__icon" data-i="det"></div>
+        <h3>Deterministisch</h3>
+        <p>
+          Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
+          Dialogkontext zum gleichen Ergebnis. Kein Sampling, keine Temperatur,
+          keine Überraschung um drei Uhr nachts.
+        </p>
+        <div class="card__foot"><code>reproduzierbar</code></div>
+      </article>
+
+      <article class="glass card reveal" style="--d:.12s">
+        <div class="card__icon" data-i="lock"></div>
+        <h3>Vorsichtig</h3>
+        <p>
+          Bei echter Mehrdeutigkeit rät HomeIntent nicht. Es fragt nach — oder es
+          führt gar nichts aus. Die erste gefundene Entität wird niemals
+          stillschweigend verwendet.
+        </p>
+        <div class="card__foot"><code>nie raten</code></div>
+      </article>
+
+      <article class="glass card reveal" style="--d:.19s">
+        <div class="card__icon" data-i="eye"></div>
+        <h3>Nachvollziehbar</h3>
+        <p>
+          „Was hast du verstanden?“ liefert den aufgelösten Plan: Aktion, Orte,
+          Ziele, Ausnahmen. Aus bereits ermittelten Fakten — die Erklärung startet
+          selbst keine Aktion.
+        </p>
+        <div class="card__foot"><code>keine Blackbox</code></div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ LIVE PIPELINE ═══════════════════════ -->
+<section class="sec sec--alt" id="demo">
+  <div class="wrap">
+    <div class="sechead reveal">
+      <span class="kicker">Live-Pipeline</span>
+      <h2>Sieh zu, wie ein Satz <em>zu Bedeutung</em> wird.</h2>
+      <p class="sechead__sub">
+        Wähle eine Äußerung. HomeIntent zerlegt sie in Bedeutungsbausteine,
+        löst sie gegen ein Beispielhaus auf und zeigt, was am Ende herauskommt —
+        ein Plan, eine Antwort, eine Rückfrage oder bewusst nichts.
+      </p>
+    </div>
+
+    <div class="demo reveal">
+      <aside class="demo__picker" id="picker" role="tablist" aria-label="Beispieläußerungen"></aside>
+
+      <div class="demo__main glass">
+        <div class="demo__utter">
+          <span class="demo__who">Du</span>
+          <p id="demoText">—</p>
+          <button class="demo__replay" id="replay" title="Erneut abspielen" aria-label="Erneut abspielen">
+            <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M16 10a6 6 0 1 1-1.8-4.3"/><path d="M16 3v3.5h-3.5"/></svg>
+          </button>
+        </div>
+
+        <ol class="stages" id="stages"></ol>
+
+        <div class="verdict" id="verdict" data-kind="idle">
+          <div class="verdict__head">
+            <span class="verdict__tag" id="verdictTag">Ergebnis</span>
+            <span class="verdict__meta" id="verdictMeta"></span>
+          </div>
+          <div class="verdict__body" id="verdictBody">
+            <p class="muted">Wähle links eine Äußerung.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="footnote reveal">
+      Beispielhaus: 3 Lichter (Küche, Flur, Stehlampe im Wohnzimmer), 2 Rollläden,
+      1 Thermostat, 1 Türschloss, 2 Radios. Die gezeigten Ergebnisse entsprechen
+      dem dokumentierten Verhalten von Version 4.49.
+    </p>
+  </div>
+</section>
+
+<!-- ═══════════════════════ SPRACHHÜLLEN ═══════════════════════ -->
+<section class="sec" id="sprache">
+  <div class="wrap">
+    <div class="split">
+      <div class="split__copy reveal">
+        <span class="kicker">Keine Satzschablonen</span>
+        <h2>Sechs Sätze.<br><em>Eine</em> Bedeutung.</h2>
+        <p>
+          HomeIntent vergleicht nicht mit fertigen Vorlagen. Es analysiert
+          Sprechakt, Modalität, Negation und Klauselrollen — und erkennt deshalb
+          Befehl, Frage, Wunsch, Gedankenspiel und Korrektur auseinander.
+        </p>
+        <p>
+          Das ist ausführungsrelevant: Ein Satz mit „wenn“, ein hypothetisches
+          Gedankenspiel oder ein unsicherer Wunsch kann <strong>nicht versehentlich</strong>
+          als sofortiger Gerätebefehl ausgeführt werden.
+        </p>
+        <ul class="ticks">
+          <li>Wortstellung darf sich frei ändern</li>
+          <li>zusammengesetzte Zahlwörter („zweiundzwanzig Grad“)</li>
+          <li>Bruchteile („auf drei Viertel“, „zur Hälfte“)</li>
+          <li>relative Abstufungen mit festen, reproduzierbaren Schritten</li>
+        </ul>
+      </div>
+
+      <div class="split__vis reveal" style="--d:.1s">
+        <div class="glass morph" id="morph">
+          <div class="morph__list" id="morphList"></div>
+          <div class="morph__arrow" aria-hidden="true">
+            <svg viewBox="0 0 24 40" width="24" height="40" fill="none" stroke="currentColor" stroke-width="1.4">
+              <path d="M12 2v30M6 27l6 6 6-6"/>
+            </svg>
+          </div>
+          <div class="morph__out">
+            <span class="morph__label">identischer geprüfter Plan</span>
+            <code>light.turn_on → light.kueche</code>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wordorder reveal">
+      <h3 class="wordorder__h">Auch die Satzstellung ist frei</h3>
+      <div class="wordorder__grid">
+        <div class="wo">
+          <span class="wo__cap">Befehl</span>
+          <p>Fahre alle Rollläden im Erdgeschoss hoch.</p>
+          <p>Im Erdgeschoss bitte alle Rollläden hochfahren.</p>
+          <p>Nach oben fahren sollen im Erdgeschoss alle Rollläden.</p>
+        </div>
+        <div class="wo">
+          <span class="wo__cap">Frage</span>
+          <p>Sind im Erdgeschoss offene Fenster?</p>
+          <p>Offene Fenster, gibt es die im Erdgeschoss?</p>
+          <p>Welche Fenster im Erdgeschoss sind noch geöffnet?</p>
+        </div>
+        <div class="wo">
+          <span class="wo__cap">Vergleich</span>
+          <p>Welche Lichter im Wohnzimmer sind heller als 50 Prozent?</p>
+          <p>Im Wohnzimmer heller als 50 Prozent: Welche Lichter gibt es?</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ KÖNNEN / DOMÄNEN ═══════════════════════ -->
+<section class="sec sec--alt" id="koennen">
+  <div class="wrap">
+    <div class="sechead reveal">
+      <span class="kicker">Reichweite</span>
+      <h2>27 Domänen.<br>Immer <em>fähigkeitsgeprüft.</em></h2>
+      <p class="sechead__sub">
+        Die tatsächliche Aktion hängt immer von den Fähigkeiten ab, die das
+        jeweilige Home-Assistant-Gerät meldet. Eine Positionsaktion braucht
+        Positionsunterstützung, eine Farbe ein farbfähiges Licht, ein Modus muss
+        in den aktuell gemeldeten Optionen enthalten sein.
+      </p>
+    </div>
+
+    <div class="domains" id="domains"></div>
+
+    <div class="capsules reveal">
+      <div class="glass capsule">
+        <h4><span class="capsule__n">01</span> Zustände &amp; Messwerte</h4>
+        <p>Fragen sind strikt lesend und erzeugen niemals einen steuernden Serviceplan. Zustandsantworten unterscheiden <em>wahr</em>, <em>falsch</em> und <em>nicht sicher bestimmbar</em> — fehlende Daten werden nie zu einem erfundenen „Nein“.</p>
+        <div class="mini">
+          <code>Ist im Bad noch Licht an?</code>
+          <code>Welche Fenster sind offen?</code>
+          <code>Wie warm ist es im Wohnzimmer?</code>
+        </div>
+      </div>
+      <div class="glass capsule">
+        <h4><span class="capsule__n">02</span> Verlauf über den Recorder</h4>
+        <p>Natürliche Vergangenheitsfragen werden rein lesend aus den Recorder-Statistiken beantwortet — ohne dass ein Gerät angefasst wird.</p>
+        <div class="mini">
+          <code>Wie lange lief der Saugroboter gestern?</code>
+          <code>Wie oft spielte das Radio gestern?</code>
+        </div>
+      </div>
+      <div class="glass capsule">
+        <h4><span class="capsule__n">03</span> Kontext &amp; Rückfragen</h4>
+        <p>Kurze Anschlussäußerungen werden aus Gesprächskontext und Operation zusammengesetzt — nicht über eine Liste vollständiger Sätze.</p>
+        <div class="mini">
+          <code>Spielt das Radio Atlas?</code>
+          <code>Läuft es noch?</code>
+          <code>Und im Wohnzimmer?</code>
+        </div>
+      </div>
+      <div class="glass capsule">
+        <h4><span class="capsule__n">04</span> Kalender, Listen &amp; Timer</h4>
+        <p>Termine in einem Satz anlegen, fehlende Angaben im Dialog ergänzen, mehrere Listeneinträge gleichzeitig erfassen, Timer starten und abfragen.</p>
+        <div class="mini">
+          <code>Trag Zahnarzt am Dienstag um 9 Uhr ein.</code>
+          <code>Setz Milch, Brot und Kaffee auf die Einkaufsliste.</code>
+        </div>
+      </div>
+      <div class="glass capsule">
+        <h4><span class="capsule__n">05</span> Automationen per Sprache</h4>
+        <p>Zeit-, Zustands-, Sonnen-, Zahlen- und Kalenderauslöser, Wiederholungen, Zeiträume, Laufbegrenzungen, Bedingungen und Aktionsfolgen — mit Vorschau <em>vor</em> jeder Änderung.</p>
+        <div class="mini">
+          <code>Wenn es dunkel wird, mach die Stehlampe an.</code>
+          <code>Jeden Werktag um 7 Uhr die Rollläden hoch.</code>
+        </div>
+      </div>
+      <div class="glass capsule">
+        <h4><span class="capsule__n">06</span> Persönliche Aliase — neu in 4.49</h4>
+        <p>HomeIntent kann bestätigte Namen lernen. Die Regel wird erst nach einem ausdrücklichen <em>Ja</em> lokal gespeichert, ist in den Optionen sichtbar und jederzeit löschbar. Kein verstecktes Gedächtnis.</p>
+        <div class="mini">
+          <code>Mit Bürolicht meine ich Schreibtischlampe.</code>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ SICHERHEIT ═══════════════════════ -->
+<section class="sec" id="sicherheit">
+  <div class="wrap">
+    <div class="sechead reveal">
+      <span class="kicker">Sicherheit</span>
+      <h2>Die Bremse sitzt <em>vor</em> dem Gaspedal.</h2>
+      <p class="sechead__sub">
+        Sprachverständnis, Auflösung, Validierung, Richtlinie, Vorschau und
+        Ausführung sind getrennte, einzeln testbare Stufen. Parser führen niemals
+        selbst einen Home-Assistant-Dienst aus.
+      </p>
+    </div>
+
+    <div class="risk reveal">
+      <div class="risk__rail" aria-hidden="true"></div>
+      <div class="risk__steps">
+        <div class="risk__step" data-lv="low">
+          <span class="risk__lv">Niedrig</span>
+          <h4>Licht, Schalter, Szene</h4>
+          <p>Wird nach Prüfung direkt ausgeführt.</p>
+        </div>
+        <div class="risk__step" data-lv="med">
+          <span class="risk__lv">Mittel</span>
+          <h4>Rollladen, Sauger, Mäher, Notify</h4>
+          <p>Bewegliche oder nach außen wirkende Geräte.</p>
+        </div>
+        <div class="risk__step" data-lv="high">
+          <span class="risk__lv">Hoch</span>
+          <h4>Schloss, Ventil, Taster</h4>
+          <p>Erfordert eine ausdrückliche Bestätigung.</p>
+        </div>
+        <div class="risk__step" data-lv="crit">
+          <span class="risk__lv">Kritisch</span>
+          <h4>Alarmanlage, Entriegeln</h4>
+          <p>Bestätigung — kritische Aktionen nur für Administratoren.</p>
+        </div>
+      </div>
+      <p class="risk__note">
+        Mehr als fünf gleichzeitige Ziele heben die Risikostufe automatisch um
+        eine Stufe an.
+      </p>
+    </div>
+
+    <div class="grid4">
+      <div class="glass tile reveal">
+        <h4>Zentrale Ausführungsrichtlinie</h4>
+        <ul>
+          <li>Risikostufe ab der bestätigt wird</li>
+          <li>maximale Zahl gleichzeitiger Ziele</li>
+          <li>dürfen Nicht-Admins kritisch handeln?</li>
+          <li>dürfen Nicht-Admins Automationen anlegen?</li>
+          <li>welche Entitäten sind nur lesbar?</li>
+          <li>wer darf überhaupt steuern?</li>
+          <li>Gültigkeitsdauer des Dialogkontexts</li>
+        </ul>
+      </div>
+      <div class="glass tile reveal" style="--d:.06s">
+        <h4>Nur-Lesen-Entitäten</h4>
+        <p>Bleiben für Fragen und Recorder-Abfragen sichtbar. Direkte Befehle und
+        neu bestätigte HomeIntent-Automationen dürfen sie nicht steuern.</p>
+        <h4 class="mt">Benutzergebundene Bestätigung</h4>
+        <p>Stellt Home Assistant eine Benutzer-ID bereit, kann nur derselbe
+        Benutzer eine offene Bestätigung abschließen.</p>
+      </div>
+      <div class="glass tile reveal" style="--d:.12s">
+        <h4>Audit ohne Datensammlung</h4>
+        <p>Maximal 250 Einträge mit Zeitpunkt, Dienst, Entity-ID und gekürztem
+        Benutzer-Hash. <strong>Kein gesprochener Text, keine Service-Daten.</strong>
+        Nach einem Neustart beginnt das Protokoll neu.</p>
+        <h4 class="mt">Diagnose</h4>
+        <p>Enthält nur technische Kennzahlen und Richtlinien — keine Äußerungen,
+        keine Entity-IDs, keine Zustände.</p>
+      </div>
+      <div class="glass tile reveal" style="--d:.18s">
+        <h4>Was das Release-Gate prüft</h4>
+        <p>Jede Version muss einen kuratierten Mehrfachzug-Korpus bestehen.
+        Verpflichtende Dimensionen:</p>
+        <div class="chips">
+          <span>Dialog</span><span>Referenz</span><span>Negation</span>
+          <span>Gruppen</span><span>Zeit</span><span>Mehrdeutigkeit</span>
+          <span>Frage-/Befehlssicherheit</span>
+        </div>
+        <p class="mt small">Dazu generative Testmatrizen mit über 2.500 automatisch
+        erzeugten Fällen, die der Produktivcode nie importiert.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ VERGLEICH ═══════════════════════ -->
+<section class="sec sec--alt" id="vergleich">
+  <div class="wrap">
+    <div class="sechead reveal">
+      <span class="kicker">Einordnung</span>
+      <h2>Warum <em>nicht</em> einfach ein Sprachmodell?</h2>
+      <p class="sechead__sub">
+        Weil ein Chatbot und ein Aktor zwei verschiedene Dinge sind. Für ein Haus,
+        in dem Türen aufgehen und Heizungen laufen, ist Vorhersagbarkeit die
+        wertvollere Eigenschaft.
+      </p>
+    </div>
+
+    <div class="cmp glass reveal">
+      <table>
+        <thead>
+          <tr><th></th><th>LLM-Assistent</th><th class="is-us">HomeIntent</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Gleicher Satz, gleicher Zustand</td><td>kann variieren</td><td class="is-us">immer identisch</td></tr>
+          <tr><td>Verarbeitung</td><td>meist Cloud oder GPU</td><td class="is-us">lokal auf der HA-Instanz</td></tr>
+          <tr><td>Antwortzeit</td><td>hundert Millisekunden bis Sekunden</td><td class="is-us">Bruchteile einer Millisekunde</td></tr>
+          <tr><td>Bei Mehrdeutigkeit</td><td>wählt plausibel aus</td><td class="is-us">fragt nach oder tut nichts</td></tr>
+          <tr><td>Erfundene Fakten</td><td>strukturell möglich</td><td class="is-us">strukturell ausgeschlossen</td></tr>
+          <tr><td>Erklärbarkeit</td><td>statistisch, nachträglich</td><td class="is-us">der aufgelöste Plan selbst</td></tr>
+          <tr><td>Laufende Kosten</td><td>Token oder Hardware</td><td class="is-us">keine</td></tr>
+          <tr><td>Datenabfluss</td><td>je nach Anbieter</td><td class="is-us">keiner</td></tr>
+          <tr><td>Offene Weltfragen</td><td class="is-them">stark</td><td>bewusst nicht das Ziel</td></tr>
+          <tr><td>Neue Formulierung, nie gesehen</td><td class="is-them">oft verstanden</td><td>fragt lieber nach</td></tr>
+        </tbody>
+      </table>
+      <p class="cmp__foot">
+        Die letzten beiden Zeilen sind kein Versehen. HomeIntent ist kein
+        allgemeiner Chatbot und will keiner werden — es tauscht Reichweite gegen
+        Verlässlichkeit.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ ARCHITEKTUR ═══════════════════════ -->
+<section class="sec" id="architektur">
+  <div class="wrap">
+    <div class="sechead reveal">
+      <span class="kicker">Architektur</span>
+      <h2>Getrennt gebaut,<br>damit es <em>getrennt prüfbar</em> ist.</h2>
+      <p class="sechead__sub">
+        Die gesamte Sprachschicht kennt Home Assistant nicht. 46 Module im
+        Verzeichnis <code>nlu/</code> enthalten nicht einen einzigen
+        <code>homeassistant</code>-Import — sie lassen sich deshalb ohne laufende
+        HA-Instanz vollständig testen.
+      </p>
+    </div>
+
+    <div class="arch reveal">
+      <div class="arch__col">
+        <div class="arch__node arch__node--in">Home Assistant Assist</div>
+        <div class="arch__wire" aria-hidden="true"></div>
+        <div class="arch__node arch__node--router">Conversation Router</div>
+      </div>
+
+      <div class="arch__branch">
+        <div class="arch__lane">
+          <span class="arch__lane-h">Direktbefehl · Query · Dialog</span>
+          <ol>
+            <li>Normalisierung &amp; Äußerungsanalyse</li>
+            <li>Sprechakt, Modalität, Negation, Klauselrollen</li>
+            <li>Semantisches Lexikon</li>
+            <li>SemanticFrame — Aktion, Ziel, Ort, Menge, Wert</li>
+            <li>World Model + Constraint Resolver</li>
+            <li>Capability- und Command-Validator</li>
+            <li>Execution Policy</li>
+            <li class="is-end">ServiceCallPlan <em>oder</em> QueryResult</li>
+          </ol>
+        </div>
+
+        <div class="arch__lane">
+          <span class="arch__lane-h">Automation</span>
+          <ol>
+            <li>Trigger-, Condition- und Action-Semantik</li>
+            <li>AutomationModel</li>
+            <li>AutomationValidator</li>
+            <li>Vorschau + Benutzerbestätigung</li>
+            <li>HA Automation Generator</li>
+            <li>AutomationExecutor</li>
+            <li class="is-end">Journal · Reload · Metadatenabgleich</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <div class="quality reveal">
+      <div class="quality__item"><b>SHA-gepinnte</b><span>CI-Actions</span></div>
+      <div class="quality__item"><b>3.12 + 3.13</b><span>Python-Matrix</span></div>
+      <div class="quality__item"><b>Hassfest</b><span>+ HACS-Validierung</span></div>
+      <div class="quality__item"><b>Docker</b><span>Smoke-Test gegen echtes HA</span></div>
+      <div class="quality__item"><b>pyright</b><span>zweistufig, strict-Scope</span></div>
+      <div class="quality__item"><b>Eval-Korpus</b><span>eigenes Release-Gate</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ GRENZEN ═══════════════════════ -->
+<section class="sec sec--alt" id="grenzen">
+  <div class="wrap">
+    <div class="sechead reveal">
+      <span class="kicker">Ehrlichkeit</span>
+      <h2>Was HomeIntent <em>nicht</em> kann.</h2>
+      <p class="sechead__sub">
+        Ein System, das seine Grenzen verschweigt, ist an genau diesen Grenzen
+        gefährlich. Deshalb stehen sie hier — und nicht im Kleingedruckten.
+      </p>
+    </div>
+
+    <div class="limits">
+      <div class="limit reveal"><span>—</span><p>Die Sprachlogik ist derzeit <strong>deutsch</strong>. Englische UI-Texte existieren, die NLU-Grammatik und die dynamischen Antworten bleiben deutsch.</p></div>
+      <div class="limit reveal" style="--d:.04s"><span>—</span><p>HomeIntent ist <strong>kein allgemeiner Chatbot</strong>. Fragen jenseits des Hauses beantwortet es nicht.</p></div>
+      <div class="limit reveal" style="--d:.08s"><span>—</span><p>„Nebenan“ und „drüben“ werden <strong>nicht geraten</strong> — Home Assistant liefert standardmäßig kein Adjazenzmodell der Räume.</p></div>
+      <div class="limit reveal" style="--d:.12s"><span>—</span><p>Relative Einmal-Aufträge decken Sekunden, Minuten und Stunden bis <strong>maximal 59 Stunden</strong> ab, plus Kombinationen aus zwei Zeiteinheiten.</p></div>
+      <div class="limit reveal" style="--d:.16s"><span>—</span><p>Ein verpasster Zeitpunkt wird nach einem HA-Ausfall <strong>bewusst nicht nachträglich</strong> ausgeführt.</p></div>
+      <div class="limit reveal" style="--d:.2s"><span>—</span><p>Kalendarische Sprache deckt die dokumentierten Muster ab — sie ist <strong>kein universeller Parser</strong> für jede denkbare deutsche Datumsform.</p></div>
+      <div class="limit reveal" style="--d:.24s"><span>—</span><p>Eine Geräteaktion wird nur angeboten, wenn die nötige Fähigkeit im <strong>aktuellen</strong> HA-Zustand erkennbar ist.</p></div>
+      <div class="limit reveal" style="--d:.28s"><span>—</span><p>Integrationsspezifische Device-Trigger ohne vollständiges Subtypschema werden <strong>abgelehnt</strong> statt geraten.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ INSTALLATION ═══════════════════════ -->
+<section class="sec" id="installation">
+  <div class="wrap">
+    <div class="sechead reveal">
+      <span class="kicker">Loslegen</span>
+      <h2>In acht Schritten <em>eingerichtet.</em></h2>
+    </div>
+
+    <div class="install">
+      <div class="install__col reveal">
+        <h3>Installation über HACS</h3>
+        <ol class="steps">
+          <li><b>HACS → Integrationen</b> öffnen.</li>
+          <li>Oben rechts <b>Benutzerdefinierte Repositories</b> öffnen.</li>
+          <li>
+            Repository eintragen:
+            <div class="copy" data-copy="https://github.com/pquandel2-alt/ha-nlu-engine">
+              <code>https://github.com/pquandel2-alt/ha-nlu-engine</code>
+              <button aria-label="Kopieren">kopieren</button>
+            </div>
+          </li>
+          <li>Typ <b>Integration</b> wählen.</li>
+          <li>Nach <b>HA NLU Engine</b> suchen und installieren.</li>
+          <li>Home Assistant <b>neu starten</b>.</li>
+          <li><b>Einstellungen → Geräte &amp; Dienste → Integration hinzufügen</b>.</li>
+          <li><b>HA NLU Engine</b> hinzufügen.</li>
+        </ol>
+      </div>
+
+      <div class="install__col reveal" style="--d:.08s">
+        <h3>Assist verbinden</h3>
+        <ol class="steps steps--alt">
+          <li>Einstellungen der gewünschten <b>Assist-Pipeline</b> öffnen.</li>
+          <li><b>HA NLU Engine</b> als Conversation Agent wählen.</li>
+          <li>Die benötigten <b>Entitäten für Assist freigeben</b>.</li>
+          <li>Bei Bedarf die <b>Optionen</b> für feste Auswahl und Sicherheitsrichtlinien öffnen.</li>
+        </ol>
+
+        <div class="glass hint">
+          <h4>Für zuverlässige Ergebnisse</h4>
+          <ul class="ticks ticks--tight">
+            <li>eindeutige Friendly Names verwenden</li>
+            <li>Bereiche und Etagen korrekt zuordnen</li>
+            <li>sinnvolle Entity- und Bereichs-Aliase hinterlegen</li>
+            <li>Assist-Satelliten einem Bereich zuordnen</li>
+            <li>Geräteklassen korrekt setzen</li>
+            <li>nur benötigte Entitäten freigeben</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ CTA ═══════════════════════ -->
+<section class="cta">
+  <div class="wrap cta__inner reveal">
+    <h2>Ein Assistent, dem du<br>den Hausschlüssel <em>geben würdest.</em></h2>
+    <p>Lokal, deterministisch, quelloffen unter MIT. Version 4.49.0.</p>
+    <div class="cta__btns">
+      <a class="btn btn--primary btn--lg" href="https://github.com/pquandel2-alt/ha-nlu-engine" target="_blank" rel="noopener">Auf GitHub ansehen</a>
+      <a class="btn btn--ghost btn--lg" href="https://my.home-assistant.io/redirect/hacs_repository/?owner=pquandel2-alt&amp;repository=ha-nlu-engine&amp;category=integration" target="_blank" rel="noopener">In HACS öffnen</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap foot__inner">
+    <div class="foot__brand">
+      <span class="brand__text">HomeIntent</span>
+      <p>Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home&nbsp;Assistant Assist — ohne LLM zur Laufzeit.</p>
+    </div>
+    <div class="foot__cols">
+      <div><h5>Projekt</h5>
+        <a href="https://github.com/pquandel2-alt/ha-nlu-engine" target="_blank" rel="noopener">Repository</a>
+        <a href="https://github.com/pquandel2-alt/ha-nlu-engine/releases/latest" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/pquandel2-alt/ha-nlu-engine/blob/main/LICENSE" target="_blank" rel="noopener">MIT-Lizenz</a>
+      </div>
+      <div><h5>Dokumentation</h5>
+        <a href="https://github.com/pquandel2-alt/ha-nlu-engine/blob/main/docs/architecture-v6.md" target="_blank" rel="noopener">Architektur v6</a>
+        <a href="https://github.com/pquandel2-alt/ha-nlu-engine/blob/main/docs/language-understanding-v2.md" target="_blank" rel="noopener">Sprachverständnis v2</a>
+        <a href="https://github.com/pquandel2-alt/ha-nlu-engine/blob/main/docs/troubleshooting.md" target="_blank" rel="noopener">Fehlerdiagnose</a>
+      </div>
+      <div><h5>Seite</h5>
+        <a href="#demo">Live-Pipeline</a>
+        <a href="#sicherheit">Sicherheit</a>
+        <a href="#grenzen">Bekannte Grenzen</a>
+      </div>
+    </div>
+  </div>
+  <div class="wrap foot__bar">
+    <span>© 2026 HomeIntent · MIT</span>
+    <span>Kein Tracking. Keine Cookies. Keine externen Aufrufe außer Schriftarten.</span>
+  </div>
+</footer>
+
+<script src="assets/js/main.js"></script>
+</body>
+</html>
