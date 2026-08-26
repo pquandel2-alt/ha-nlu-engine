@@ -167,6 +167,16 @@ def test_unanswered_question_returns_structured_feedback(engine):
     assert "Frage erkannt" in feedback.speech
 
 
+def test_known_read_only_target_has_capability_feedback(engine):
+    feedback = engine.understanding_feedback(
+        "Schalte Fenster Batterie aus", ENTITIES
+    )
+
+    assert feedback is not None
+    assert feedback.reason is ParseFailureReason.UNSUPPORTED_CAPABILITY
+    assert feedback.details["entity_ids"] == ("sensor.upstairs_battery",)
+
+
 def test_query_correction_and_natural_floor_followup(engine):
     first = engine.match("Wie warm ist es im Wohnzimmer", ENTITIES)
     corrected = engine.match_query_followup("Nein, ich meinte Küche", ENTITIES, _context(first))

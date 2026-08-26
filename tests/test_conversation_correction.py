@@ -47,3 +47,24 @@ def test_unknown_correction_location_is_explained_without_action(engine, entitie
 
     assert result.plan is None
     assert "keinen Raum und keine Etage" in result.response_text
+
+
+def test_explicit_entity_correction_keeps_previous_action(engine):
+    entities = [
+        EntitySnapshot(
+            "light.kueche", "Küchenlicht", "light", "off",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+        EntitySnapshot(
+            "light.flur", "Flurlicht", "light", "off",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+    ]
+    first = engine.match("Mach Küchenlicht an", entities)
+
+    corrected = engine.match_correction_followup(
+        "Nein, nicht Küchenlicht sondern Flurlicht", entities, _context(first)
+    )
+
+    assert corrected.plan.entity_id == "light.flur"
+    assert corrected.plan.service == "turn_on"

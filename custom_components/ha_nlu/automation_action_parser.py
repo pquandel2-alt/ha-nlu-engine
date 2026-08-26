@@ -74,9 +74,9 @@ from .automation_condition_parser import AutomationConditionParser
 from .entities import EntitySnapshot
 from .nlu.entity_resolution import (
     ResolutionStatus,
-    all_mentioned_entities,
     resolve_entity_scored,
 )
+from .nlu.composition import build_compositional_plan, project_target
 from .nlu.action_model import ActionGroup, ActionModel, ActionType, ExecutionMode
 from .nlu.automation_model import TriggerTarget
 from .nlu.capabilities import Capability
@@ -257,21 +257,12 @@ class AutomationActionParser:
             or re.search(r"\b(?:außer|ausser|oder)\b", text, re.I)
         ):
             return None
-        targets = all_mentioned_entities(text, context.entities)
-        if len(targets) < 2:
+        plan = build_compositional_plan(turn, context.entities)
+        if plan is None:
             return None
         actions: list[ActionModel] = []
-        for selected in targets:
-            candidate = text
-            for entity in targets:
-                if entity.entity_id == selected.entity_id:
-                    continue
-                for name in sorted((entity.friendly_name, *entity.aliases), key=len, reverse=True):
-                    candidate = re.sub(
-                        rf"(?<!\w){re.escape(name)}(?!\w)", " ", candidate, flags=re.I
-                    )
-            candidate = re.sub(r"\b(?:und|sowie)\b", " ", candidate, flags=re.I)
-            candidate = _WHITESPACE_RE.sub(" ", candidate).strip(" ,")
+        for selected in plan.targets:
+            candidate = project_target(plan, selected)
             action = self._parse_leaf(candidate, context)
             if action is None:
                 return None

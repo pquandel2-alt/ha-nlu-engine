@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta
+from typing import Mapping, cast
 
 from .device_control import DeviceControlResult
 from .entities import EntitySnapshot, normalize_for_compare
@@ -79,6 +80,13 @@ def _target_for_capability_query(
     return resolve_query_targets(text, entities, frozenset(_CAPABILITY_LABELS))
 
 
+def _numeric_state(entity: EntitySnapshot) -> float | None:
+    try:
+        return float(str(entity.state).replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+
+
 def match_household_query(
     text: str, entities: list[EntitySnapshot], now: datetime
 ) -> DeviceControlResult | None:
@@ -121,6 +129,47 @@ def match_household_query(
         if len(people) > 1:
             return _read_only("Welche Person meinst du?")
 
+    if re.search(r"\b(?:gibt\s+es\s+)?(?:probleme|stoerungen|fehler)\s+(?:im|zu\s+hause|daheim)\b", key):
+        unavailable = [
+            entity.friendly_name for entity in entities
+            if normalize_for_compare(entity.state) in {"unknown", "unavailable"}
+        ]
+        weak_batteries = [
+            f"{entity.friendly_name} ({value:g} Prozent)"
+            for entity in entities
+            if entity.domain == "sensor" and entity.device_class == "battery"
+            and (value := _numeric_state(entity)) is not None and value < 20
+        ]
+        if not unavailable and not weak_batteries:
+            return _read_only("Ich sehe derzeit keine nicht verfügbaren Geräte oder schwachen Batterien.")
+        parts: list[str] = []
+        if unavailable:
+            parts.append("Nicht verfügbar: " + ", ".join(unavailable[:8]))
+        if weak_batteries:
+            parts.append("Schwache Batterien: " + ", ".join(weak_batteries[:8]))
+        return _read_only(". ".join(parts) + ".")
+
+    battery_limit = re.search(
+        r"\b(?:welche|zeige|gibt\s+es).*\bbatter(?:ie|ien)\b.*?"
+        r"(?:unter|kleiner\s+als|weniger\s+als)\s*(\d{1,3})\s*(?:prozent|%)",
+        key,
+    )
+    if battery_limit is not None:
+        limit = min(100, int(battery_limit.group(1)))
+        matches = [
+            (entity, value) for entity in entities
+            if entity.domain == "sensor" and entity.device_class == "battery"
+            and (value := _numeric_state(entity)) is not None and value < limit
+        ]
+        if not matches:
+            return _read_only(f"Keine bekannte Batterie liegt unter {limit} Prozent.")
+        return _read_only(
+            f"Unter {limit} Prozent: " + ", ".join(
+                f"{entity.friendly_name} mit {value:g} Prozent"
+                for entity, value in sorted(matches, key=lambda item: item[1])
+            ) + "."
+        )
+
     if re.search(r"\bwann\s+geht\s+die\s+sonne\s+(?:auf|unter)\b", key):
         sun = next((entity for entity in entities if entity.entity_id == "sun.sun"), None)
         if sun is None:
@@ -155,6 +204,38 @@ def match_household_query(
         if humidity is not None:
             details.append(f"{humidity} Prozent Luftfeuchtigkeit")
         return _read_only(f"{weather.friendly_name}: " + ", ".join(details) + ".")
+
+    if re.search(r"\b(?:wie\s+wird|wetter|vorhersage)\b.*\b(?:morgen|uebermorgen)\b", key):
+        weather_entities = [e for e in entities if e.domain == "weather"]
+        if len(weather_entities) != 1:
+            return _read_only("Welche Wetter-Entität meinst du?") if weather_entities else None
+        forecast = weather_entities[0].attributes.get("forecast")
+        if not isinstance(forecast, (list, tuple)) or not forecast:
+            return _read_only("Die Wetter-Entität stellt aktuell keine Vorhersage bereit.")
+        day_offset = 2 if "uebermorgen" in key else 1
+        target_date = now.date() + timedelta(days=day_offset)
+        forecast_values = cast(list[object] | tuple[object, ...], forecast)
+        rows = [
+            cast(Mapping[str, object], item)
+            for item in forecast_values if isinstance(item, dict)
+        ]
+        row = next((
+            item for item in rows
+            if str(item.get("datetime", "")).startswith(target_date.isoformat())
+        ), None)
+        if row is None:
+            return _read_only("Für diesen Tag ist keine Wettervorhersage verfügbar.")
+        condition = _WEATHER_DE.get(str(row.get("condition", "")), str(row.get("condition", "")))
+        temperatures: list[str] = []
+        if row.get("temperature") is not None:
+            temperatures.append(f"bis {row['temperature']} Grad")
+        if row.get("templow") is not None:
+            temperatures.append(f"mindestens {row['templow']} Grad")
+        label = "übermorgen" if day_offset == 2 else "morgen"
+        return _read_only(
+            f"{label.capitalize()} wird es {condition}"
+            + ((", " + ", ".join(temperatures)) if temperatures else "") + "."
+        )
 
     catalogue = re.search(r"\bwelche\s+(szenen|skripte)\s+(?:gibt\s+es|sind\s+verfuegbar)\b", key)
     if catalogue is not None:

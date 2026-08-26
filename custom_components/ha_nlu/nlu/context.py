@@ -34,6 +34,7 @@ from .primitives import SemanticProperty
 from .semantic_state import SemanticState
 
 if TYPE_CHECKING:
+    from ..alias_learning import AliasLearningDraft
     from ..automation_wizard import AutomationWizardState
     from ..calendar_event import CalendarEventDraft
     from ..calendar_management import (
@@ -63,6 +64,7 @@ __all__ = [
     "PendingSemanticCommand",
     "PendingProductivityCommand",
     "PendingAutomationWizard",
+    "PendingAliasLearning",
 ]
 
 
@@ -229,6 +231,13 @@ class PendingAutomationWizard:
 
     state: "AutomationWizardState"
 
+
+@dataclass(frozen=True)
+class PendingAliasLearning:
+    """One explicit local alias rule awaiting yes/no confirmation."""
+
+    draft: "AliasLearningDraft"
+
 # No TTL value is specified anywhere in the plan (only the test case name
 # "context expiration", brain node 9ced4390, section 26). 30s covers a
 # natural spoken follow-up ("Mach das Licht an." <pause> "Etwas heller.")
@@ -300,6 +309,7 @@ class ConversationContext:
     pending_semantic_command: PendingSemanticCommand | None = None
     pending_productivity_command: PendingProductivityCommand | None = None
     pending_automation_wizard: PendingAutomationWizard | None = None
+    pending_alias_learning: PendingAliasLearning | None = None
     pending_undo: "UndoPlan | None" = None
     # Read-only, non-command answers (for example "Spielt das Radio?") use
     # these fields to support "Läuft es noch?", "Und das andere?" and
@@ -356,6 +366,7 @@ class ConversationContextStore:
             or context.pending_semantic_command is not None
             or context.pending_productivity_command is not None
             or context.pending_automation_wizard is not None
+            or context.pending_alias_learning is not None
             else self._ttl_seconds
         )
         self._entries[conversation_id] = (self._clock(), ttl_seconds, context)

@@ -149,7 +149,7 @@ def parse_calendar_management(
     now: datetime,
 ) -> CalendarManagementRequest | None:
     """Parse bounded calendar management language without stealing device commands."""
-    if re.search(r"\b(?:auftrag|automation)\b", text, re.I):
+    if re.search(r"\b(?:auftrag|automation)\b|(?:bedingung|auslöser|ausloeser|trigger)", text, re.I):
         return None
     rename_match = _RENAME_RE.search(text)
     duration_match = _CHANGE_DURATION_RE.search(text)

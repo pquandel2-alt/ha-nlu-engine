@@ -59,7 +59,18 @@ def parse_automation_structure_edit(text: str) -> AutomationStructureEditRequest
             lowered,
         )
         if ordinal is None:
-            return None
+            semantic_kind = (
+                "time" if re.search(r"\bzeit(?:bedingung)?\b", lowered)
+                else "sun" if re.search(r"\bsonnen?(?:bedingung)?\b", lowered)
+                else "state" if re.search(r"\bzustands?(?:bedingung)?\b", lowered)
+                else None
+            )
+            return (
+                AutomationStructureEditRequest(
+                    section, AutomationEditOperation.REMOVE, payload=semantic_kind
+                )
+                if semantic_kind is not None else None
+            )
         indexes = {"erste": 0, "zweite": 1, "dritte": 2, "vierte": 3,
                    "fünfte": 4, "fuenfte": 4, "1": 0, "1.": 0,
                    "2": 1, "2.": 1, "3": 2, "3.": 2, "4": 3,

@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.48.0**
+- Aktuelle Version: **4.49.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -35,6 +35,32 @@ HomeIntent benötigt für die Sprachverarbeitung:
 Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
+
+## Was ist in Version 4.49 neu?
+
+Version 4.49 erweitert HomeIntent in allen verbliebenen Bereichen des lokalen
+Sprachverständnisses:
+
+- Ein neuer HA-freier `CompositionalPlan` beschreibt gemeinsame Prädikate,
+  ausdrücklich genannte Ziele und atomare Ausführung, bevor ein Serviceplan
+  entstehen darf.
+- Die deutsche Morphologie liefert zusätzlich konservative Wortstämme,
+  Kasushinweise, Tokenpositionen und trennbare Verbpartikeln.
+- Korrekturen können sowohl Orte als auch konkrete Geräte austauschen:
+  „Nein, nicht Küchenlicht, sondern Flurlicht“ behält die geprüfte Aktion bei.
+- Automationen lassen sich semantischer bearbeiten. „Entferne die
+  Zeitbedingung“ sucht genau eine passende Bedingung und zeigt vor jeder
+  Änderung eine Vorschau.
+- Fehlerantworten unterscheiden nun genauer zwischen einem unbekannten Ziel
+  und einem gefundenen Gerät ohne unterstützte Fähigkeit.
+- Wettervorhersagen aus vorhandenen HA-Attributen, Batteriegrenzen und eine
+  lokale Hausproblem-Zusammenfassung wurden ergänzt.
+- HomeIntent kann bestätigte persönliche Aliase lernen: „Mit Bürolicht meine
+  ich Schreibtischlampe“. Die Regel wird erst nach Ja lokal in der Integration
+  gespeichert, ist sichtbar und über die Optionen wieder löschbar.
+- Der mehrstufige Evaluationskorpus prüft jetzt auch gemeinsame Aktionen und
+  konkrete Korrekturen. Das Benchmark-Skript unterstützt JSON-Ausgabe,
+  frei wählbare Entity-Skalen und ein gerätespezifisches P95-Latenzbudget.
 
 ## Was ist in Version 4.48 neu?
 
@@ -987,10 +1013,10 @@ python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
 ```
 
-Geprüfter Stand von Version 4.48.0:
+Geprüfter Stand von Version 4.49.0:
 
 ```text
-2220 passed, 12 skipped
+2235 passed, 12 skipped
 84 % Gesamt-Coverage
 64 % Coverage für conversation.py
 ```
@@ -1026,10 +1052,19 @@ Dadurch können sie dem Parser keine Antworten „beibringen“.
 ![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
 
 Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.48.0. Benchmark,
-Fehlerdiagnose und Messungen auf schwacher Hardware werden bewusst separat
-aktualisiert. Ein perfektes Ergebnis in einem bekannten Korpus bedeutet nicht,
-dass jede mögliche Formulierung verstanden wird.
+Entwicklungsstands und kein aktueller Nachweis für Version 4.49.0. Für echte
+Zielhardware lässt sich seit 4.49 ein reproduzierbarer JSON-Bericht samt
+P95-Budget erzeugen:
+
+```bash
+python scripts/benchmark_v6_baseline.py \
+  --scales 100,500,1000 --iterations 50 --warmup 10 \
+  --json --max-p95-ms 100
+```
+
+Der Grenzwert muss passend zur jeweiligen Hardware gewählt werden. Ein
+perfektes Ergebnis in einem bekannten Korpus bedeutet weiterhin nicht, dass
+jede mögliche Formulierung verstanden wird.
 
 ## Mitwirken
 

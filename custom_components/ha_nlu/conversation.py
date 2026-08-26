@@ -31,6 +31,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .automation_executor import AutomationExecutor
+from .alias_learning import append_alias_rule, parse_alias_learning
 from .automation_action_edit import (
     action_edit_operation,
     homeintent_candidates,
@@ -74,6 +75,7 @@ from .conversation_location import (
 )
 from .const import (
     CONF_ALLOW_NON_ADMIN_AUTOMATIONS,
+    CONF_CUSTOM_ALIASES,
     DOMAIN,
     NOT_UNDERSTOOD_TEXT,
 )
@@ -123,6 +125,7 @@ from .nlu.context import (
     PendingAutomationManagement,
     PendingAutomationStructureEdit,
     PendingAutomationWizard,
+    PendingAliasLearning,
     PendingCalendarEvent,
     PendingServiceConfirmation,
     PendingSemanticCommand,
@@ -354,6 +357,35 @@ class NluConversationEntity(
                 )
             )
 
+        if pending is not None and pending.pending_alias_learning is not None:
+            reply = classify_confirmation_reply(user_input.text)
+            draft = pending.pending_alias_learning.draft
+            if reply is ConfirmationReply.NO:
+                self._context_store.clear(user_input.conversation_id)
+                response.async_set_speech("Abgebrochen. Der Alias wurde nicht gespeichert.")
+            elif reply is not ConfirmationReply.YES:
+                response.async_set_speech("Bitte antworte mit Ja oder Nein.")
+            else:
+                try:
+                    aliases = append_alias_rule(
+                        self.entry.options.get(CONF_CUSTOM_ALIASES), draft
+                    )
+                    self.hass.config_entries.async_update_entry(
+                        self.entry,
+                        options={**self.entry.options, CONF_CUSTOM_ALIASES: aliases},
+                    )
+                except ValueError as err:
+                    response.async_set_speech(str(err))
+                else:
+                    response.async_set_speech(
+                        f"Gespeichert. Mit „{draft.alias}“ meine ich künftig "
+                        f"{draft.entity_name}."
+                    )
+                self._context_store.clear(user_input.conversation_id)
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+
         if is_undo_request(user_input.text):
             return await self._async_handle_undo_request(
                 user_input, response, pending, entities
@@ -442,6 +474,26 @@ class NluConversationEntity(
         if pending is not None and pending.pending_automation_draft is not None:
             return await self._async_handle_pending_automation_draft(
                 user_input, response, pending, entities
+            )
+
+        alias_draft = parse_alias_learning(user_input.text, entities)
+        if alias_draft is not None:
+            self._context_store.set(
+                user_input.conversation_id,
+                ConversationContext(
+                    last_command=None,
+                    last_entities=(),
+                    last_area=None,
+                    pending_clarification=None,
+                    pending_alias_learning=PendingAliasLearning(alias_draft),
+                ),
+            )
+            response.async_set_speech(
+                f"Soll ich „{alias_draft.alias}“ lokal als Alias für "
+                f"{alias_draft.entity_name} speichern?"
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
             )
 
         if starts_automation_wizard(user_input.text):

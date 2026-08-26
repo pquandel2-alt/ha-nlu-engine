@@ -43,6 +43,7 @@ from .nlu.entity_resolution import (
     all_mentioned_entities,
     resolve_entity,
 )
+from .nlu.composition import build_compositional_plan, project_target
 from .nlu.command import SemanticCommand, build_semantic_command
 from .nlu.context import ConversationContext
 from .nlu.debug import DebugTrace, format_command
@@ -922,25 +923,12 @@ class NluEngine:
             or re.search(r"\b(?:und|sowie)\b", text, re.I) is None
         ):
             return None
-        targets = all_mentioned_entities(text, entities)
-        if len(targets) < 2:
+        plan = build_compositional_plan(turn, entities)
+        if plan is None:
             return None
         rendered: list[MatchResult] = []
-        for selected in targets:
-            candidate = text
-            for entity in targets:
-                if entity.entity_id == selected.entity_id:
-                    continue
-                names = sorted(
-                    (entity.friendly_name, *entity.aliases), key=len, reverse=True
-                )
-                for name in names:
-                    candidate = re.sub(
-                        rf"(?<!\w){re.escape(name)}(?!\w)", " ", candidate,
-                        flags=re.I,
-                    )
-            candidate = re.sub(r"\b(?:und|sowie)\b", " ", candidate, flags=re.I)
-            candidate = re.sub(r"\s+", " ", candidate).strip(" ,")
+        for selected in plan.targets:
+            candidate = project_target(plan, selected)
             result = self.match(candidate, entities, world_model)
             if not isinstance(result, MatchResult) or result.plan is None:
                 return None
@@ -992,9 +980,19 @@ class NluEngine:
             text,
             re.IGNORECASE,
         ):
+            mentioned = all_mentioned_entities(text, entities or [])
+            if mentioned:
+                names = ", ".join(entity.friendly_name for entity in mentioned)
+                return UnderstandingFeedback(
+                    ParseFailureReason.UNSUPPORTED_CAPABILITY,
+                    f"Ich habe {names} gefunden, aber die gewünschte Funktion "
+                    "ist für diese Geräte nicht eindeutig unterstützt.",
+                    {"entity_ids": tuple(entity.entity_id for entity in mentioned)},
+                )
             return UnderstandingFeedback(
                 ParseFailureReason.UNKNOWN_ENTITY,
-                "Ich konnte das angesprochene Gerät nicht eindeutig finden oder den Befehl nicht ausführen.",
+                "Ich habe die Aktion erkannt, aber kein eindeutig passendes, "
+                "für HomeIntent freigegebenes Gerät gefunden.",
             )
         if analyse_utterance(text).speech_act is SpeechAct.QUERY:
             return UnderstandingFeedback(

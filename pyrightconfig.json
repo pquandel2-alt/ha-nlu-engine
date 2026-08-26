@@ -11,6 +11,8 @@
     "custom_components/ha_nlu/capability_audit.py",
     "custom_components/ha_nlu/household_query.py",
     "custom_components/ha_nlu/nlu/automation_operations.py",
+    "custom_components/ha_nlu/alias_learning.py",
+    "custom_components/ha_nlu/nlu/composition.py",
     "custom_components/ha_nlu/nlu/entity_resolution.py",
     "custom_components/ha_nlu/nlu/german_morphology.py",
     "custom_components/ha_nlu/nlu/grounded_answer.py",

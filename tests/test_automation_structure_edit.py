@@ -79,7 +79,10 @@ def test_structure_edit_parser_keeps_section_operation_and_payload_separate():
     assert condition is not None and condition.operation is AutomationEditOperation.ADD
     assert condition.payload == "dass jemand zuhause ist"
     assert clear is not None and clear.operation is AutomationEditOperation.CLEAR
-    assert parse_automation_structure_edit("Entferne die Zeitbedingung") is None
+    semantic_remove = parse_automation_structure_edit("Entferne die Zeitbedingung")
+    assert semantic_remove is not None
+    assert semantic_remove.operation is AutomationEditOperation.REMOVE
+    assert semantic_remove.payload == "time"
 
 
 def test_trigger_edit_has_before_after_preview_and_confirmation(monkeypatch):
@@ -114,6 +117,25 @@ def test_clear_all_conditions_is_confirmed_but_specific_delete_is_refused(monkey
     _run(agent, "ja")
     args = agent._automation_executor.async_replace_automation_section.await_args.args
     assert args[1:3] == ("conditions", [])
+
+
+def test_condition_can_be_removed_by_semantic_kind(monkeypatch):
+    with_conditions = AutomationSummary(
+        **{
+            **AUTOMATION.__dict__,
+            "conditions": (
+                {"condition": "time", "after": "08:00:00"},
+                {"condition": "state", "entity_id": "binary_sensor.home", "state": "on"},
+            ),
+        }
+    )
+    agent = _agent(monkeypatch, (with_conditions,))
+
+    preview = _run(agent, "Entferne die Zeitbedingung")
+    assert "vorher 2, danach 1" in preview.response.speech
+    _run(agent, "ja")
+    args = agent._automation_executor.async_replace_automation_section.await_args.args
+    assert args[2] == [with_conditions.conditions[1]]
 
 
 def test_action_can_be_appended_without_replacing_existing_action(monkeypatch):

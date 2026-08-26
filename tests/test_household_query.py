@@ -14,7 +14,13 @@ ENTITIES = [
     EntitySnapshot("person.anna", "Anna", "person", "not_home"),
     EntitySnapshot(
         "weather.home", "Wetter Zuhause", "weather", "partlycloudy",
-        attributes={"temperature": 23.4, "humidity": 58},
+        attributes={
+            "temperature": 23.4,
+            "humidity": 58,
+            "forecast": [
+                {"datetime": "2026-08-27T12:00:00+00:00", "condition": "sunny", "temperature": 25, "templow": 14}
+            ],
+        },
     ),
     EntitySnapshot(
         "sun.sun", "Sonne", "sun", "above_horizon",
@@ -35,6 +41,8 @@ ENTITIES = [
         area_id="buero", area_name="Büro",
         attributes={"hvac_modes": ["heat", "auto"]},
     ),
+    EntitySnapshot("sensor.remote_battery", "Fernbedienung Batterie", "sensor", "12", device_class="battery"),
+    EntitySnapshot("sensor.phone_battery", "Handy Batterie", "sensor", "72", device_class="battery"),
 ]
 
 
@@ -46,6 +54,9 @@ ENTITIES = [
         ("Wer ist zuhause?", "Zuhause: Philipp"),
         ("Ist Anna zuhause?", "Anna ist laut Home Assistant nicht zuhause"),
         ("Wie ist das Wetter?", "teilweise bewölkt, 23.4 Grad"),
+        ("Wie wird das Wetter morgen?", "Morgen wird es sonnig, bis 25 Grad"),
+        ("Welche Batterien sind unter 20 Prozent?", "Fernbedienung Batterie mit 12 Prozent"),
+        ("Gibt es Probleme im Haus?", "Schwache Batterien: Fernbedienung Batterie"),
         ("Wann geht die Sonne unter?", "heute um 18:19 Uhr unter"),
         ("Wann geht die Sonne auf?", "morgen um 04:31 Uhr auf"),
         ("Welche Szenen gibt es?", "Verfügbare Szenen: Filmabend"),

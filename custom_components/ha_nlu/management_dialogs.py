@@ -103,16 +103,31 @@ async def async_prepare_automation_structure_edit(
         rendered: list[dict] = []
         spoken_edit = "alle Bedingungen entfernen"
     elif request.operation is AutomationEditOperation.REMOVE:
-        assert request.index is not None
-        if request.index >= len(existing):
+        remove_index = request.index
+        if remove_index is None and request.payload is not None:
+            matching = [
+                index for index, value in enumerate(existing)
+                if value.get("condition") == request.payload
+            ]
+            if len(matching) != 1:
+                response.async_set_speech(
+                    "Ich konnte nicht genau eine passende Bedingung bestimmen. "
+                    "Bitte nenne ihre Nummer."
+                )
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
+            remove_index = matching[0]
+        assert remove_index is not None
+        if remove_index >= len(existing):
             response.async_set_speech(
                 f"Diese Automation hat nur {len(existing)} Bedingungen."
             )
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
             )
-        rendered = [value for index, value in enumerate(existing) if index != request.index]
-        spoken_edit = f"Bedingung {request.index + 1} entfernen"
+        rendered = [value for index, value in enumerate(existing) if index != remove_index]
+        spoken_edit = f"Bedingung {remove_index + 1} entfernen"
     else:
         if not edit_text:
             store_automation_structure_edit(agent, user_input.conversation_id, pending)

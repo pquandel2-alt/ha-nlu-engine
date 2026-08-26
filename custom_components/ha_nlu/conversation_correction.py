@@ -8,6 +8,7 @@ from .areas import AreaResolveStatus, resolve_area_name
 from .entities import EntitySnapshot
 from .floors import FloorResolveStatus, resolve_floor_name
 from .nlu.context import ConversationContext
+from .nlu.entity_resolution import ResolutionStatus, resolve_entity_scored
 from .nlu.frame import AreaReference, SemanticFrame, TargetReference
 from .nlu.normalize import normalize
 from .nlu.parse_outcome import ParseFailureReason, UnderstandingFeedback
@@ -47,6 +48,35 @@ class ConversationCorrectionResolver:
         if match is None:
             return None
         location = match.group("location").strip()
+        domain = previous.entities[0].domain
+        named = resolve_entity_scored(
+            location, [entity for entity in entities if entity.domain == domain]
+        )
+        if named.status is ResolutionStatus.RESOLVED and named.entity is not None:
+            entity = named.entity
+            frame = SemanticFrame(
+                intent=previous.intent,
+                target=TargetReference(
+                    text=entity.friendly_name,
+                    entity_id=entity.entity_id,
+                    domain=entity.domain,
+                ),
+                area=(
+                    AreaReference(text=entity.area_name, area_id=entity.area_id)
+                    if entity.area_id is not None and entity.area_name is not None
+                    else None
+                ),
+                parameters=dict(previous.parameters),
+                source_text=text,
+            )
+            return ParseResult(frame=frame, resolved_entities=[entity])
+        if named.status is ResolutionStatus.AMBIGUOUS:
+            return ClarificationRequest(
+                pending_intent=previous.intent,
+                pending_target=domain,
+                candidates=named.candidates,
+                pending_parameters=previous.parameters,
+            )
         area = resolve_area_name(location, entities)
         floor_id: str | None = None
         area_id: str | None = None
@@ -67,7 +97,6 @@ class ConversationCorrectionResolver:
                 )
             floor_id = floor.floor_id
 
-        domain = previous.entities[0].domain
         candidates = [
             entity for entity in entities
             if entity.domain == domain

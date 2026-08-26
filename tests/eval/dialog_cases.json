@@ -289,5 +289,21 @@
       {"action": true, "entity_id": "light.kueche"}
     ],
     "expect": {"action": true, "service": "turn_on", "entity_id": "light.kueche"}
+  },
+  {
+    "id": "shared_predicate_named_targets",
+    "dimensions": ["command", "group", "safety"],
+    "turns": ["Schalte Küchenlicht und Flurlicht aus"],
+    "expect": {
+      "action": true,
+      "action_count": 2,
+      "entity_ids": ["light.kueche", "light.flur"]
+    }
+  },
+  {
+    "id": "explicit_entity_correction",
+    "dimensions": ["dialog", "correction", "reference", "command"],
+    "turns": ["Mach Küchenlicht an", "Nein, nicht Küchenlicht sondern Flurlicht"],
+    "expect": {"action": true, "service": "turn_on", "entity_id": "light.flur"}
   }
 ]

@@ -20,6 +20,12 @@ CASES = json.loads(
 
 EVAL_ENTITIES = ENTITIES + [
     EntitySnapshot(
+        "light.flur", "Flurlicht", "light", "off",
+        area_id="flur", area_name="Flur", floor_id="eg",
+        floor_name="Erdgeschoss", floor_level=0,
+        capabilities=frozenset({"TURN_ON", "TURN_OFF", "BRIGHTNESS"}),
+    ),
+    EntitySnapshot(
         "media_player.atlas", "Radio Atlas", "media_player", "playing",
         area_id="wohnzimmer", area_name="Wohnzimmer", floor_id="eg",
         floor_name="Erdgeschoss", floor_level=0,
@@ -92,12 +98,29 @@ def _assert_expectation(result, expected, *, utterance: str, case_id: str):
         assert result is None, label
         return
     assert result is not None, label
+    commands = tuple(getattr(result, "commands", ()))
+    plans = tuple(
+        command.plan for command in commands if getattr(command, "plan", None) is not None
+    )
     plan = getattr(result, "plan", None)
+    if plan is not None:
+        plans = (plan,)
     command = getattr(result, "command", None)
     if expected.get("action") is False:
-        assert plan is None, label
+        assert not plans, label
     if expected.get("action") is True:
-        assert plan is not None, label
+        assert plans, label
+    if "action_count" in expected:
+        assert len(plans) == expected["action_count"], label
+    if "entity_ids" in expected:
+        actual_ids = {
+            entity_id
+            for item in plans
+            for entity_id in (
+                item.entity_id if isinstance(item.entity_id, list) else [item.entity_id]
+            )
+        }
+        assert actual_ids == set(expected["entity_ids"]), label
     if "intent" in expected:
         assert command is not None and command.intent == expected["intent"], label
     if "response_contains" in expected:

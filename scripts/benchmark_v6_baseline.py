@@ -27,6 +27,8 @@ from __future__ import annotations
 import statistics
 import sys
 import time
+import argparse
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -280,13 +282,36 @@ def _print_stats(stats: Stats) -> None:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="HomeIntent latency benchmark")
+    parser.add_argument("--scales", default=",".join(map(str, SCALES)))
+    parser.add_argument("--iterations", type=int, default=ITERATIONS)
+    parser.add_argument("--warmup", type=int, default=WARMUP_ITERATIONS)
+    parser.add_argument("--json", action="store_true", dest="as_json")
+    parser.add_argument(
+        "--max-p95-ms", type=float, default=None,
+        help="Exit non-zero if any steady-state p95 exceeds this device-specific budget.",
+    )
+    args = parser.parse_args()
+    SCALES[:] = [int(value) for value in args.scales.split(",") if value]
+    ITERATIONS = max(1, args.iterations)
+    WARMUP_ITERATIONS = max(0, args.warmup)
     construction_stats, results = run_all()
-    print("Engine construction (one-time, hassil YAML compile):")
-    _print_stats(construction_stats)
-    print()
-    print("Per-utterance NluEngine.match() timings:")
-    for scale in SCALES:
-        print(f" -- scale={scale} --")
-        for stats in results:
-            if stats.scale == scale:
-                _print_stats(stats)
+    if args.as_json:
+        print(json.dumps({
+            "engine_construction": construction_stats.__dict__,
+            "utterances": [item.__dict__ for item in results],
+        }, ensure_ascii=False, indent=2))
+    else:
+        print("Engine construction (one-time, hassil YAML compile):")
+        _print_stats(construction_stats)
+        print()
+        print("Per-utterance NluEngine.match() timings:")
+        for scale in SCALES:
+            print(f" -- scale={scale} --")
+            for stats in results:
+                if stats.scale == scale:
+                    _print_stats(stats)
+    if args.max_p95_ms is not None and any(
+        item.p95_ms > args.max_p95_ms for item in results
+    ):
+        raise SystemExit(1)
