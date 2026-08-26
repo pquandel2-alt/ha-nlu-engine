@@ -58,6 +58,7 @@ from .nlu.response_generator import ResponseGenerator, _automation_label
 from .nlu.service_mapper import map_to_service_call
 from .nlu.semantic_compiler import SemanticCommandCompiler, SemanticQueryCompiler
 from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
+from .nlu.meaning import analyse_turn
 from .nlu.semantic_utterance import ClauseRole, SpeechAct, analyse_utterance
 from .nlu.verb_state_query import (
     match_contextual_verb_state_query,
@@ -781,7 +782,8 @@ class NluEngine:
     def match(
         self, text: str, entities: list[EntitySnapshot], world_model: WorldModel | None = None
     ) -> MatchResult | CommandPlan | None:
-        utterance = analyse_utterance(text)
+        turn = analyse_turn(text)
+        utterance = turn.utterance
         if utterance.speech_act is SpeechAct.QUERY:
             verb_answer = match_verb_state_query(text, entities)
             if verb_answer is not None:
@@ -839,8 +841,8 @@ class NluEngine:
                 return None
             return multi
 
-        text = normalize(text)
-        semantic_analysis = analyse_semantics(text)
+        text = turn.normalized_text
+        semantic_analysis = turn.semantic_analysis
         if (
             semantic_analysis.values(SemanticKind.COMMAND_MARKER)
             and _UNSAFE_DIRECT_COMMAND_MODIFIER_RE.search(text)
@@ -1110,7 +1112,9 @@ class NluEngine:
         if context is None:
             return None
 
-        normalized = normalize(text)
+        normalized = re.sub(
+            r"^(?:dann|danach|also)\s+", "", normalize(text), flags=re.IGNORECASE
+        )
         result = self._reference_parser.parse(normalized, entities, context.last_entities, context.last_area)
         if result is None or isinstance(result, AmbiguousReference):
             return None

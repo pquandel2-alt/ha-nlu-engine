@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.46.0**
+- Aktuelle Version: **4.47.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -35,6 +35,24 @@ HomeIntent benötigt für die Sprachverarbeitung:
 Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
+
+## Was ist in Version 4.47 neu?
+
+Version 4.47 beginnt die Vereinheitlichung des allgemeinen
+Sprachverständnisses. Ein neues HA-freies `SemanticTurn`-Modell bündelt
+Satzart, Modalität, Negation, Zeitperspektive, Teilsätze, Koordination,
+Referenzen, Quantoren und lexikalische Semantik bereits am zentralen
+Engine-Einstieg.
+
+Die lesende Entity-Auflösung verwendet nun einen kanonischen Resolver mit
+explizitem Ergebnisstatus und Auflösungsevidenz. Eine leichte deutsche
+Morphologiesicht markiert unter anderem Pronomen, Quantoren, Konnektoren,
+Negationen und Zahlen, ohne ein Modell oder eine externe Laufzeitabhängigkeit.
+
+Der kuratierte Multi-Turn-Evaluationskorpus wurde von 21 auf 43 Fälle
+erweitert. Erwartungen können pro Gesprächszug geprüft werden; Dialog,
+Referenz, Negation, Gruppen, Zeit, Mehrdeutigkeit sowie Frage-/Befehlssicherheit
+sind verpflichtende Dimensionen des Release-Gates.
 
 ## Was ist in Version 4.46 neu?
 
@@ -946,10 +964,10 @@ python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
 ```
 
-Geprüfter Stand von Version 4.46.0:
+Geprüfter Stand von Version 4.47.0:
 
 ```text
-2181 passed, 12 skipped
+2211 passed, 12 skipped
 84 % Gesamt-Coverage
 64 % Coverage für conversation.py
 ```
@@ -985,7 +1003,7 @@ Dadurch können sie dem Parser keine Antworten „beibringen“.
 ![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
 
 Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.46.0. Benchmark,
+Entwicklungsstands und kein aktueller Nachweis für Version 4.47.0. Benchmark,
 Fehlerdiagnose und Messungen auf schwacher Hardware werden bewusst separat
 aktualisiert. Ein perfektes Ergebnis in einem bekannten Korpus bedeutet nicht,
 dass jede mögliche Formulierung verstanden wird.

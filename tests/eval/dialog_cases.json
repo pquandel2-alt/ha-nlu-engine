@@ -145,5 +145,149 @@
     "id": "conditional_command_is_never_immediate",
     "turns": ["Mach das Küchenlicht an wenn es dunkel ist"],
     "expect": {"match": false, "action": false}
+  },
+  {
+    "id": "media_playing_question_read_only",
+    "dimensions": ["query", "safety"],
+    "turns": ["Spielt das Radio Atlas?"],
+    "expect": {"action": false, "speech_act": "QUERY", "response_contains": "Ja,"}
+  },
+  {
+    "id": "media_pause_question_truthful",
+    "dimensions": ["query"],
+    "turns": ["Pausiert das Radio Atlas?"],
+    "expect": {"action": false, "response_contains": "Nein,"}
+  },
+  {
+    "id": "vacuum_running_question_read_only",
+    "dimensions": ["query", "safety"],
+    "turns": ["Läuft der Saugroboter Atlas?"],
+    "expect": {"action": false, "response_contains": "Ja,"}
+  },
+  {
+    "id": "media_operation_question_never_executes",
+    "dimensions": ["query", "safety"],
+    "turns": ["Startet das Radio Atlas?"],
+    "expect": {"action": false, "speech_act": "QUERY", "response_contains": "nicht sicher"}
+  },
+  {
+    "id": "vacuum_operation_question_never_executes",
+    "dimensions": ["query", "safety"],
+    "turns": ["Stoppt der Saugroboter Atlas?"],
+    "expect": {"action": false, "speech_act": "QUERY", "response_contains": "nicht sicher"}
+  },
+  {
+    "id": "media_imperative_remains_command",
+    "dimensions": ["command"],
+    "turns": ["Spiele das Radio Atlas"],
+    "expect": {"action": true, "domain": "media_player", "service": "media_play", "entity_id": "media_player.atlas"}
+  },
+  {
+    "id": "vacuum_imperative_remains_command",
+    "dimensions": ["command"],
+    "turns": ["Starte den Saugroboter Atlas"],
+    "expect": {"action": true, "domain": "vacuum", "service": "start", "entity_id": "vacuum.atlas"}
+  },
+  {
+    "id": "verb_query_pronoun_followup",
+    "dimensions": ["dialog", "reference", "query", "safety"],
+    "turns": ["Spielt das Radio Atlas?", "Läuft es noch?"],
+    "turn_expect": [
+      {"action": false, "response_contains": "Ja,"},
+      {"action": false, "response_contains": "Ja,"}
+    ],
+    "expect": {"action": false, "response_contains": "Radio Atlas"}
+  },
+  {
+    "id": "verb_query_explicit_target_followup",
+    "dimensions": ["dialog", "reference", "query"],
+    "turns": ["Spielt das Radio Atlas?", "Und das Radio Birke?"],
+    "expect": {"action": false, "response_contains": "Nein,"}
+  },
+  {
+    "id": "verb_query_location_followup",
+    "dimensions": ["dialog", "reference", "query"],
+    "turns": ["Spielt das Radio Atlas?", "Und in der Küche?"],
+    "expect": {"action": false, "response_contains": "Radio Birke"}
+  },
+  {
+    "id": "verb_query_other_followup",
+    "dimensions": ["dialog", "reference", "query"],
+    "turns": ["Spielt das Radio Atlas?", "Und der andere?"],
+    "expect": {"action": false, "response_contains": "Radio Birke"}
+  },
+  {
+    "id": "verb_query_ambiguity_short_answer",
+    "dimensions": ["dialog", "ambiguity", "reference", "query"],
+    "turns": ["Spielt das Radio?", "Radio Birke"],
+    "turn_expect": [
+      {"action": false, "response_contains": "Radio Atlas oder Radio Birke"},
+      {"action": false, "response_contains": "Nein,"}
+    ],
+    "expect": {"action": false, "response_contains": "Radio Birke"}
+  },
+  {
+    "id": "verb_group_all_question",
+    "dimensions": ["group", "query", "safety"],
+    "turns": ["Spielen die Radios?"],
+    "expect": {"action": false, "response_contains": "Radio Birke"}
+  },
+  {
+    "id": "verb_group_which_question",
+    "dimensions": ["group", "query"],
+    "turns": ["Welche Radios spielen?"],
+    "expect": {"action": false, "response_contains": "Radio Atlas", "response_not_contains": "Radio Birke"}
+  },
+  {
+    "id": "negated_verb_question_uses_doch",
+    "dimensions": ["negation", "query"],
+    "turns": ["Spielt das Radio Atlas nicht?"],
+    "expect": {"action": false, "response_contains": "Doch,"}
+  },
+  {
+    "id": "past_state_never_uses_current_value",
+    "dimensions": ["time", "query", "safety"],
+    "turns": ["Spielte das Radio Atlas gestern?"],
+    "expect": {"match": false, "action": false}
+  },
+  {
+    "id": "window_state_question",
+    "dimensions": ["query"],
+    "turns": ["Ist das Badezimmerfenster offen?"],
+    "expect": {"action": false, "response_contains": "Ja,"}
+  },
+  {
+    "id": "cover_state_question",
+    "dimensions": ["query"],
+    "turns": ["Ist der Rollladen Büro geschlossen?"],
+    "expect": {"action": false, "response_contains": "Ja,"}
+  },
+  {
+    "id": "fan_running_question",
+    "dimensions": ["query"],
+    "turns": ["Läuft der Wohnzimmer Ventilator?"],
+    "expect": {"action": false, "response_contains": "Ja,"}
+  },
+  {
+    "id": "polite_brightness_command",
+    "dimensions": ["command"],
+    "turns": ["Kannst du das Küchenlicht auf 30 Prozent dimmen?"],
+    "expect": {"action": true, "domain": "light", "service": "turn_on", "entity_id": "light.kueche", "data": {"brightness_pct": 30}}
+  },
+  {
+    "id": "unknown_question_has_structured_safe_miss",
+    "dimensions": ["query", "safety", "ambiguity"],
+    "turns": ["Warum blinkt das unbekannte Gerät?"],
+    "expect": {"match": false, "action": false}
+  },
+  {
+    "id": "query_then_command_changes_intent_safely",
+    "dimensions": ["dialog", "query", "command", "reference"],
+    "turns": ["Ist das Küchenlicht an?", "Dann mach es an"],
+    "turn_expect": [
+      {"action": false},
+      {"action": true, "entity_id": "light.kueche"}
+    ],
+    "expect": {"action": true, "service": "turn_on", "entity_id": "light.kueche"}
   }
 ]

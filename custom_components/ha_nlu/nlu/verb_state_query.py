@@ -343,12 +343,19 @@ def match_contextual_verb_state_query(
     if _OTHER_RE.search(text):
         focused_ids = {entity.entity_id for entity in focus_entities}
         area_ids = {entity.area_id for entity in focus_entities if entity.area_id}
-        alternatives = tuple(
+        domain_alternatives = tuple(
             entity for entity in entities
             if entity.domain in domains
             and entity.entity_id not in focused_ids
-            and (not area_ids or entity.area_id in area_ids)
         )
+        area_alternatives = tuple(
+            entity for entity in domain_alternatives
+            if not area_ids or entity.area_id in area_ids
+        )
+        # Prefer the bounded current area, but if it contains no other
+        # candidate and exactly one domain-wide alternative exists, "der
+        # andere" is still deterministic and therefore safe.
+        alternatives = area_alternatives or domain_alternatives
         if alternatives:
             return _answer_targets(text, alternatives, predicate)
 

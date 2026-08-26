@@ -75,6 +75,16 @@ def test_match_reference_pronoun_turn_on(engine, entities):
     assert result.response_text == "Garagentor eingeschaltet."
 
 
+def test_match_reference_accepts_discourse_connector(engine, entities):
+    context = _context((SWITCH_A,))
+
+    result = engine.match_reference("Dann mach es an.", entities, context)
+
+    assert result is not None
+    assert result.plan is not None
+    assert result.plan.entity_id == "switch.garagentor"
+
+
 def test_match_reference_pronoun_turn_off(engine, entities):
     context = _context((SWITCH_A,))
     result = engine.match_reference("Mach es aus.", entities, context)
