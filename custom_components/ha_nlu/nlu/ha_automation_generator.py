@@ -117,6 +117,9 @@ def _resolve_target_entities(target: TriggerTarget, entities: list[EntitySnapsho
     inside it, same boundary every other ``nlu/`` module already respects)."""
     if target.entity_id is not None:
         return [e for e in entities if e.entity_id == target.entity_id]
+    if target.entity_ids:
+        requested = set(target.entity_ids)
+        return [e for e in entities if e.entity_id in requested]
     candidates = resolve_candidates(
         entities,
         Constraints(
@@ -450,7 +453,27 @@ def _generate_action_leaf(action: ActionModel, entities: list[EntitySnapshot]) -
     candidates = _resolve_target_entities(action.target, entities)
     if not candidates:
         return None, GenerationError.ENTITY_NOT_FOUND
+    if action.target.entity_ids and len(candidates) != len(action.target.entity_ids):
+        return None, GenerationError.ENTITY_NOT_FOUND
     domain = action.target.domain or candidates[0].domain
+
+    if action.type is ActionType.REGISTERED_SERVICE:
+        from .automation_operations import validate_registered_operation
+
+        if not validate_registered_operation(
+            action.service_domain,
+            action.service_name,
+            action.service_data,
+            frozenset(entity.domain for entity in candidates),
+        ):
+            return None, GenerationError.UNSUPPORTED_ACTION_TYPE
+        config: dict[str, Any] = {
+            "action": f"{action.service_domain}.{action.service_name}",
+            "target": {"entity_id": _entity_id_field(candidates)},
+        }
+        if action.service_data:
+            config["data"] = dict(action.service_data)
+        return config, None
 
     if action.type is ActionType.TURN_ON:
         service = "cover.open_cover" if domain == "cover" else "homeassistant.turn_on"

@@ -120,6 +120,10 @@ class TriggerTarget:
     area_id: str | None = None
     floor_id: str | None = None
     entity_id: str | None = None
+    # Exact, already-resolved multi-targets used when a validated direct
+    # service plan is lifted into a delayed or triggered action. This avoids
+    # widening an arbitrary concrete list to an entire room or house.
+    entity_ids: tuple[str, ...] = ()
     # V5 Wave 4 (V5.17, "Natural Language Quantifiers in Automations") -
     # reuses parsers.py's QuantifierParser vocabulary/values verbatim
     # (Regel 6): "all"/"both"/"count" (same 3 kinds, same "beide"==exactly-2/
@@ -367,6 +371,8 @@ def _render_target(target: TriggerTarget) -> str:
     ]
     if target.exclude_entity_ids:
         parts.append(f"exclude_entity_ids={','.join(target.exclude_entity_ids)}")
+    if target.entity_ids:
+        parts.append(f"entity_ids={','.join(target.entity_ids)}")
     return "{" + ", ".join(parts) + "}"
 
 

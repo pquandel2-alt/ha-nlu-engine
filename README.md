@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.41.0**
+- Aktuelle Version: **4.42.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -35,6 +35,45 @@ HomeIntent benötigt für die Sprachverarbeitung:
 Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
+
+## Was ist in Version 4.42 neu?
+
+Version 4.42 verwendet für direkte Befehle und Automationsaktionen dieselbe
+geprüfte Operationsschicht. Dadurch lassen sich nicht nur Licht- und
+Rollladenaktionen, sondern auch erweiterte Gerätefunktionen zuverlässig
+zeitversetzt oder durch einen Zustand auslösen, zum Beispiel:
+
+```text
+Pausiere in 30 Minuten den Medienplayer im Wohnzimmer.
+Schicke morgen um 8 Uhr den Saugroboter zur Ladestation.
+Wenn das Fenster geöffnet wird, pausiere den Saugroboter.
+Aktiviere am Samstag um 20 Uhr die Szene Filmabend.
+```
+
+Die Erweiterung ist keine Freigabe beliebiger Home-Assistant-Dienste. Ein
+geschlossenes Register legt fest, welche Kombination aus Domäne, Aktion und
+Daten zulässig ist. Der Validator und der YAML-Generator prüfen dieses
+Register unabhängig voneinander. Exakte Entity-IDs bleiben bis zur erzeugten
+Automation erhalten; technische Serviceparameter erscheinen in der Vorschau
+als verständliche deutsche Aktion.
+
+Besonders riskante Aktionen wie das Entriegeln eines Schlosses, Alarmaktionen,
+beliebige Gruppenaufrufe und Tastendrücke werden nicht automatisch in eine
+Automation übernommen. Ihre bestehenden Bestätigungs- und
+Sicherheitsgrenzen bleiben erhalten.
+
+## Was ist in Version 4.41 neu?
+
+Version 4.41 erweitert die lesende Seite des semantischen Compilers. Neben
+Licht, Schaltern, Rollläden und Thermostaten beantwortet HomeIntent nun auch
+Zustandsfragen zu Medienplayern, Saugrobotern, Ventilatoren,
+Luftbefeuchtern, Warmwasserbereitern, Ventilen, Mährobotern und Helfern.
+
+Die elliptische Befehlserkennung wird dabei aus tatsächlich registrierten
+Domänen-Aktions-Paaren aufgebaut. Zustandsfragen wie „Ist das Radio an?“ oder
+„Welche Ventilatoren sind aus?“ können deshalb nicht mehr durch ein
+gleichlautendes Befehlswort verdeckt werden. Abfragen erzeugen weiterhin nie
+einen schreibenden Serviceplan.
 
 ## Was ist in Version 4.40 neu?
 
@@ -801,10 +840,10 @@ python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
 ```
 
-Geprüfter Stand von Version 4.41.0:
+Geprüfter Stand von Version 4.42.0:
 
 ```text
-2095 passed, 12 skipped
+2110 passed, 12 skipped
 84 % Gesamt-Coverage
 64 % Coverage für conversation.py
 ```
@@ -840,7 +879,7 @@ Dadurch können sie dem Parser keine Antworten „beibringen“.
 ![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
 
 Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.41.0. Benchmark,
+Entwicklungsstands und kein aktueller Nachweis für Version 4.42.0. Benchmark,
 Fehlerdiagnose und Messungen auf schwacher Hardware werden bewusst separat
 aktualisiert. Ein perfektes Ergebnis in einem bekannten Korpus bedeutet nicht,
 dass jede mögliche Formulierung verstanden wird.

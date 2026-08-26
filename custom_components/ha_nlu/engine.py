@@ -77,6 +77,7 @@ from .nlu.automation_model import TriggerTarget
 from .nlu.action_model import ActionGroup, ActionModel, ActionType
 from .nlu.automation_sentence_split import split_trigger_action
 from .nlu.automation_validator import validate_automation
+from .nlu.automation_operations import validate_registered_operation
 from .nlu.condition_model import ConditionModel, ConditionNode, ConditionType
 from .parsers import (
     AreaQueryParser,
@@ -1366,6 +1367,18 @@ class NluEngine:
         action = self._action_from_direct_match(direct, context.entities)
         if action is not None:
             return (action,)
+        # The live conversation router also supports capability-driven
+        # device operations that have not yet migrated to MatchResult. Lift
+        # those only through the closed automation operation allow-list.
+        from .device_control import match_device_control
+
+        legacy = match_device_control(text, context.entities)
+        action = self._action_from_service_plan(
+            legacy.plan if legacy is not None else None,
+            context.entities,
+        )
+        if action is not None:
+            return (action,)
         return self._automation_action_parser.parse(text, context)
 
     def parse_automation_actions(
@@ -1819,10 +1832,9 @@ class NluEngine:
         decomposed = self._relative_time_command_parser.decompose(normalized)
         if decomposed is not None:
             command_text, offset_seconds = decomposed
-            direct = self.match(command_text, entities, world_model)
-            action = self._action_from_direct_match(direct, entities)
-            if action is not None:
-                parsed = ((action,), offset_seconds)
+            actions = self._parse_action_semantically(command_text, parse_context)
+            if actions is not None:
+                parsed = (actions, offset_seconds)
         if parsed is None:
             parsed = self._relative_time_command_parser.parse(normalized, parse_context)
         if parsed is None:
@@ -2073,11 +2085,60 @@ class NluEngine:
                     target=target,
                     value=float(temperature),
                 )
+        if validate_registered_operation(
+            plan.domain,
+            plan.service,
+            plan.data,
+            frozenset({domain}),
+        ):
+            return ActionModel(
+                type=ActionType.REGISTERED_SERVICE,
+                target=target,
+                service_domain=plan.domain,
+                service_name=plan.service,
+                service_data=dict(plan.data),
+            )
         if plan.service == "turn_on":
             return ActionModel(type=ActionType.TURN_ON, target=target)
         if plan.service == "turn_off":
             return ActionModel(type=ActionType.TURN_OFF, target=target)
         return None
+
+    @staticmethod
+    def _action_from_service_plan(
+        plan: ServiceCallPlan | None,
+        available_entities: list[EntitySnapshot],
+    ) -> ActionModel | None:
+        """Lift one legacy direct plan through the same closed allow-list."""
+        if plan is None:
+            return None
+        entity_ids = (
+            tuple(plan.entity_id)
+            if isinstance(plan.entity_id, list)
+            else (plan.entity_id,)
+        )
+        selected = [
+            entity for entity in available_entities if entity.entity_id in entity_ids
+        ]
+        if len(selected) != len(entity_ids):
+            return None
+        target_domains = frozenset(entity.domain for entity in selected)
+        if not validate_registered_operation(
+            plan.domain, plan.service, plan.data, target_domains
+        ):
+            return None
+        target = TriggerTarget(
+            domain=selected[0].domain,
+            entity_id=(entity_ids[0] if len(entity_ids) == 1 else None),
+            entity_ids=(entity_ids if len(entity_ids) > 1 else ()),
+        )
+        return ActionModel(
+            type=ActionType.REGISTERED_SERVICE,
+            target=target,
+            service_domain=plan.domain,
+            service_name=plan.service,
+            service_data=dict(plan.data),
+        )
 
     def match_calendar_event_automation(
         self,
@@ -2154,10 +2215,13 @@ class NluEngine:
             last_entities=tuple(context.last_entities) if context is not None else (),
             last_area=context.last_area if context is not None else None,
         )
-        parsed = self._scheduled_time_command_parser.parse(normalized, parse_context)
-        if parsed is None:
+        decomposed = self._scheduled_time_command_parser.decompose(normalized)
+        if decomposed is None:
             return None
-        actions, schedule = parsed
+        command_text, schedule = decomposed
+        actions = self._parse_action_semantically(command_text, parse_context)
+        if actions is None:
+            return None
         model = AutomationModel(
             triggers=(TriggerModel(type=TriggerType.CALENDAR_TIME),),
             actions=actions,

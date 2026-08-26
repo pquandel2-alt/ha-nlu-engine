@@ -83,9 +83,8 @@ class ScheduledTimeCommandParser:
     def __init__(self, action_parser: AutomationActionParser) -> None:
         self._action_parser = action_parser
 
-    def parse(
-        self, text: str, context: ParseContext
-    ) -> tuple[tuple[ActionModel | ActionGroup, ...], CalendarSchedule] | None:
+    def decompose(self, text: str) -> tuple[str, CalendarSchedule] | None:
+        """Return the action clause and schedule without choosing a parser."""
         match = _SCHEDULE_RE.search(text)
         if match is None:
             return None
@@ -157,6 +156,15 @@ class ScheduledTimeCommandParser:
 
         command_text = f"{text[:match.start()]} {text[match.end():]}"
         command_text = re.sub(r"\s+", " ", command_text).strip(" ,.")
+        return command_text, schedule
+
+    def parse(
+        self, text: str, context: ParseContext
+    ) -> tuple[tuple[ActionModel | ActionGroup, ...], CalendarSchedule] | None:
+        decomposed = self.decompose(text)
+        if decomposed is None:
+            return None
+        command_text, schedule = decomposed
         actions = self._action_parser.parse(command_text, context)
         if not actions:
             return None

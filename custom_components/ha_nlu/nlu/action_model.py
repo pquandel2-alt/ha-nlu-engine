@@ -20,8 +20,9 @@ for WAIT's condition - ``automation_action_parser.py`` delegates straight to
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
+from typing import Mapping
 
 from .automation_model import TriggerTarget
 from .condition_model import ConditionNode
@@ -42,6 +43,7 @@ class ActionType(Enum):
     DELAY = auto()
     WAIT = auto()
     CHOOSE = auto()
+    REGISTERED_SERVICE = auto()
 
 
 class ExecutionMode(Enum):
@@ -76,6 +78,9 @@ class ActionModel:
     if_condition: ConditionNode | None = None  # CHOOSE
     then_steps: tuple["ActionModel | ActionGroup", ...] = ()  # CHOOSE
     else_steps: tuple["ActionModel | ActionGroup", ...] = ()  # CHOOSE
+    service_domain: str | None = None  # REGISTERED_SERVICE, closed allow-list
+    service_name: str | None = None  # REGISTERED_SERVICE, closed allow-list
+    service_data: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -111,6 +116,8 @@ def _render_target(target: TriggerTarget) -> str:
     ]
     if target.exclude_entity_ids:
         parts.append(f"exclude_entity_ids={','.join(target.exclude_entity_ids)}")
+    if target.entity_ids:
+        parts.append(f"entity_ids={','.join(target.entity_ids)}")
     return "{" + ", ".join(parts) + "}"
 
 
@@ -130,6 +137,10 @@ def _render_action(action: ActionModel) -> str:
         parts.append(f"message={action.message!r}")
     if action.delay_seconds is not None:
         parts.append(f"delay_seconds={action.delay_seconds}")
+    if action.service_domain is not None and action.service_name is not None:
+        parts.append(f"service={action.service_domain}.{action.service_name}")
+        if action.service_data:
+            parts.append(f"service_data={dict(action.service_data)!r}")
     if action.wait_condition is not None:
         # Function-local import (mirrors automation_model.py's own
         # render_automation_tree() import of render_condition_tree) - avoids

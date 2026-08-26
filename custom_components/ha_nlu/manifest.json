@@ -10,5 +10,5 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/pquandel2-alt/ha-nlu-engine/issues",
   "requirements": [],
-  "version": "4.41.0"
+  "version": "4.42.0"
 }

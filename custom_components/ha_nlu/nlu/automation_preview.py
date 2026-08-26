@@ -34,12 +34,19 @@ _STATE_SPOKEN_DE = {
     SemanticState.CLOSED: "geschlossen",
     SemanticState.ON: "eingeschaltet",
     SemanticState.OFF: "ausgeschaltet",
+    SemanticState.ACTIVE: "aktiv",
+    SemanticState.INACTIVE: "inaktiv",
     SemanticState.UNKNOWN: "in unbekanntem Zustand",
 }
 
 _DOMAIN_NOUN_DE = {
     "light": "Licht", "switch": "Schalter", "fan": "Ventilator", "cover": "Rollladen",
     "climate": "Heizung", "binary_sensor": "Sensor", "sensor": "Sensor", "person": "Person",
+    "media_player": "Medienplayer", "vacuum": "Saugroboter", "humidifier": "Luftbefeuchter",
+    "water_heater": "Warmwasserbereiter", "input_boolean": "Helfer",
+    "number": "Regler", "input_number": "Zahlenhelfer", "select": "Auswahl",
+    "valve": "Ventil", "lawn_mower": "Mähroboter", "scene": "Szene",
+    "camera": "Kamera", "notify": "Benachrichtigungsziel",
 }
 _DEVICE_CLASS_NOUN_DE = {
     "window": "Fenster", "door": "Tür", "garage_door": "Garagentor", "opening": "Öffnung",
@@ -94,6 +101,12 @@ def _speak_target(
     if target.entity_id is not None:
         entity = entity_by_id.get(target.entity_id)
         name = entity.friendly_name if entity is not None else target.entity_id
+    elif target.entity_ids:
+        name = ", ".join(
+            entity_by_id[entity_id].friendly_name
+            if entity_id in entity_by_id else entity_id
+            for entity_id in target.entity_ids
+        )
     else:
         noun = _DEVICE_CLASS_NOUN_DE.get(target.device_class) if target.device_class else None
         if noun is None:
@@ -281,6 +294,10 @@ def _speak_action_leaf(
         return f"{target} auf {_format_number(action.value)} Grad stellen"
     if action.type is ActionType.SET_FAN_SPEED:
         return f"{target} auf {_format_number(action.value)} Prozent Stufe stellen"
+    if action.type is ActionType.REGISTERED_SERVICE:
+        from .automation_operations import describe_registered_operation
+
+        return f"bei {target} {describe_registered_operation(action.service_domain, action.service_name, action.service_data)}"
     if action.type is ActionType.NOTIFY:
         return f"eine Benachrichtigung senden: „{action.message}“"
     if action.type is ActionType.DELAY:

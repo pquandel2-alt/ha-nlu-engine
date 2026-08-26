@@ -41,6 +41,7 @@ from __future__ import annotations
 from enum import Enum, auto
 
 from .action_model import ActionGroup, ActionModel, ActionType
+from .automation_operations import validate_registered_operation
 from .automation_model import AutomationModel, TriggerModel, TriggerTarget, TriggerType
 from .condition_model import ConditionModel, ConditionNode, ConditionType, LogicalOperator
 
@@ -189,6 +190,7 @@ _ACTION_REQUIRED_FIELDS: dict[ActionType, tuple[str, ...]] = {
     ActionType.DELAY: ("delay_seconds",),
     ActionType.WAIT: ("wait_condition",),
     ActionType.CHOOSE: ("if_condition", "then_steps"),
+    ActionType.REGISTERED_SERVICE: ("target", "service_domain", "service_name"),
 }
 
 _PERCENT_ACTION_TYPES = frozenset({ActionType.SET_BRIGHTNESS, ActionType.SET_POSITION, ActionType.SET_FAN_SPEED})
@@ -201,8 +203,12 @@ def _validate_target(target: TriggerTarget | None) -> AutomationValidationError 
     this is defense-in-depth, same as the module docstring explains."""
     if target is None:
         return None  # caller's _*_REQUIRED_FIELDS check already covers "target required but missing"
-    if target.domain is None and target.entity_id is None:
+    if target.domain is None and target.entity_id is None and not target.entity_ids:
         return AutomationValidationError.ENTITY_NOT_FOUND
+    if target.entity_id is not None and target.entity_ids:
+        return AutomationValidationError.INVALID_PARAMETER
+    if len(set(target.entity_ids)) != len(target.entity_ids):
+        return AutomationValidationError.INVALID_PARAMETER
     if target.quantifier == "count" and (target.quantifier_count is None or target.quantifier_count < 1):
         return AutomationValidationError.INVALID_PARAMETER
     return None
@@ -312,6 +318,17 @@ def _validate_action_leaf(action: ActionModel) -> AutomationValidationError | No
     if action.type is ActionType.SET_COLOR_TEMPERATURE and action.color_temp_kelvin is not None:
         if action.color_temp_kelvin not in _COLOR_TEMP_KELVIN_VALUES:
             return AutomationValidationError.INVALID_PARAMETER
+    if action.type is ActionType.REGISTERED_SERVICE and not validate_registered_operation(
+        action.service_domain,
+        action.service_name,
+        action.service_data,
+        (
+            frozenset({action.target.domain})
+            if action.target is not None and action.target.domain is not None
+            else None
+        ),
+    ):
+        return AutomationValidationError.INVALID_PARAMETER
     if action.delay_seconds is not None and action.delay_seconds < 0:
         return AutomationValidationError.INVALID_PARAMETER
     if action.timeout_seconds is not None and action.timeout_seconds < 0:

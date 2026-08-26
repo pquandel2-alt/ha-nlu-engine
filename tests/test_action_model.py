@@ -36,6 +36,7 @@ def test_action_type_covers_all_documented_types():
         "DELAY",
         "WAIT",
         "CHOOSE",
+        "REGISTERED_SERVICE",
     }
 
 
