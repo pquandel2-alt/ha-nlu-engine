@@ -236,7 +236,9 @@ def test_a_stray_unmatched_reply_after_a_once_confirmation_is_not_swallowed(monk
     _run(entity, STATE_BASED_ONCE_SENTENCE)
     _run(entity, "Ja")
 
-    stray_result = _run(entity, "Wie ist das Wetter?")
+    # Use language outside every supported read-only household query. Since
+    # 4.44, "Wie ist das Wetter?" is intentionally a valid fresh request.
+    stray_result = _run(entity, "Erzähle mir einen Witz")
 
     assert stray_result.response.error_code == intent.IntentResponseErrorCode.NO_INTENT_MATCH
 

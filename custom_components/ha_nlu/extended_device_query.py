@@ -41,4 +41,10 @@ def match_extended_device_query(
         return None
     rendered = "; ".join(_state_text(entity) for entity in scope.entities[:8])
     suffix = "" if len(scope.entities) <= 8 else f"; und {len(scope.entities) - 8} weitere"
-    return DeviceControlResult(None, rendered + suffix + ".", entity=(scope.entities[0] if len(scope.entities) == 1 else None))
+    return DeviceControlResult(
+        None,
+        rendered + suffix + ".",
+        entity=(scope.entities[0] if len(scope.entities) == 1 else None),
+        entities=tuple(scope.entities),
+        is_query=True,
+    )

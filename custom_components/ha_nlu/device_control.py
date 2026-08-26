@@ -20,6 +20,7 @@ class DeviceControlResult:
     requires_confirmation: bool = False
     entity: EntitySnapshot | None = None
     entities: tuple[EntitySnapshot, ...] = ()
+    is_query: bool = False
 
     @property
     def resolved_entities(self) -> tuple[EntitySnapshot, ...]:

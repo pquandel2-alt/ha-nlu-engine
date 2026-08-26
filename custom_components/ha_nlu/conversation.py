@@ -98,6 +98,7 @@ from .history_query import (
     async_execute_history_query,
     parse_history_query,
 )
+from .household_query import match_household_query
 from .management_dialogs import (
     async_handle_automation_action_edit_turn,
     async_handle_automation_structure_edit_turn,
@@ -531,7 +532,11 @@ class NluConversationEntity(
                 user_input, response, management_request, entities
             )
 
-        device_control = match_extended_device_query(user_input.text, entities)
+        device_control = match_household_query(
+            user_input.text, entities, dt_util.now()
+        )
+        if device_control is None:
+            device_control = match_extended_device_query(user_input.text, entities)
         if device_control is None:
             device_control = match_device_control(user_input.text, entities)
         if device_control is None:
@@ -2285,6 +2290,8 @@ class NluConversationEntity(
         """Apply the common safety, execution and context policy once."""
         if device_control.plan is None:
             self._context_store.clear(user_input.conversation_id)
+            if device_control.is_query:
+                response.response_type = intent.IntentResponseType.QUERY_ANSWER
             response.async_set_speech(device_control.response_text)
         else:
             resolved_entities = list(device_control.resolved_entities)

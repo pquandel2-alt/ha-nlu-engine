@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.43.0**
+- Aktuelle Version: **4.44.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -35,6 +35,31 @@ HomeIntent benötigt für die Sprachverarbeitung:
 Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
+
+## Was ist in Version 4.44 neu?
+
+Version 4.44 ergänzt lokale Hauswissensfragen, die ausschließlich aus dem
+aktuellen Home-Assistant-Zustand beantwortet werden:
+
+```text
+Wie spät ist es?
+Welches Datum haben wir?
+Wer ist zuhause?
+Ist Philipp zuhause?
+Wie ist das Wetter?
+Wann geht die Sonne unter?
+Welche Szenen gibt es?
+Welche Quellen hat der Fernseher im Wohnzimmer?
+Welche Modi hat die Heizung im Büro?
+Was kann der Fernseher im Wohnzimmer?
+Was kannst du?
+```
+
+Wetterwerte, Anwesenheit, Sonnenzeiten, Optionen und Fähigkeiten werden nicht
+geraten, sondern aus den tatsächlich vorhandenen Entities und Attributen
+gelesen. Mehrere mögliche Ziele führen zu einer Rückfrage. Diese Antworten
+sind technisch als `QUERY_ANSWER` markiert und erzeugen weder einen
+`ServiceCallPlan` noch einen schreibenden Home-Assistant-Aufruf.
 
 ## Was ist in Version 4.43 neu?
 
@@ -868,10 +893,10 @@ python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
 ```
 
-Geprüfter Stand von Version 4.43.0:
+Geprüfter Stand von Version 4.44.0:
 
 ```text
-2115 passed, 12 skipped
+2132 passed, 12 skipped
 84 % Gesamt-Coverage
 64 % Coverage für conversation.py
 ```
@@ -907,7 +932,7 @@ Dadurch können sie dem Parser keine Antworten „beibringen“.
 ![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
 
 Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.43.0. Benchmark,
+Entwicklungsstands und kein aktueller Nachweis für Version 4.44.0. Benchmark,
 Fehlerdiagnose und Messungen auf schwacher Hardware werden bewusst separat
 aktualisiert. Ein perfektes Ergebnis in einem bekannten Korpus bedeutet nicht,
 dass jede mögliche Formulierung verstanden wird.

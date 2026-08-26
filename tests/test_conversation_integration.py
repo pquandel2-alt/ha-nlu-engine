@@ -134,6 +134,17 @@ def test_state_query_returns_query_answer_and_does_not_call_service(monkeypatch)
     assert "Flurlicht" in result.response.speech
 
 
+def test_household_presence_query_is_live_and_strictly_read_only(monkeypatch):
+    philipp = EntitySnapshot("person.philipp", "Philipp", "person", "home")
+    entity = _make_entity(monkeypatch, [philipp])
+
+    result = _run(entity, "Wer ist zuhause?")
+
+    entity.hass.services.async_call.assert_not_awaited()
+    assert result.response.response_type == intent.IntentResponseType.QUERY_ANSWER
+    assert "Zuhause: Philipp" in result.response.speech
+
+
 def test_cover_group_without_floor_assignment_returns_actionable_error(monkeypatch):
     cover = EntitySnapshot(
         "cover.buero", "Rollladen Büro", "cover", "closed",
