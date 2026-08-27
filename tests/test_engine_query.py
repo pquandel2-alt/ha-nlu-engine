@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ha_nlu.entities import EntitySnapshot
 
 DIMMED_LIGHT = EntitySnapshot(
@@ -47,6 +49,56 @@ def test_was_zeigt_der_sensor_an(engine, sensor_entities):
     result = engine.match("Was zeigt der Außentemperatur Sensor an?", sensor_entities)
     assert result is not None
     assert result.response_text == "18.4 Grad."
+
+
+@pytest.mark.parametrize(
+    "question",
+    (
+        "Welche Temperatur zeigt der Außentemperatur-Sensor?",
+        "Welche Temperatur zeigt der Außentemperatur Sensor?",
+        "Wie hoch ist die Außentemperatur?",
+    ),
+)
+def test_measurement_property_disambiguates_live_sensor_siblings(engine, question):
+    entities = [
+        EntitySnapshot(
+            "sensor.outdoor_linkquality",
+            "Außentemperatur Sensor Linkquality",
+            "sensor",
+            "76",
+            unit="lqi",
+        ),
+        EntitySnapshot(
+            "sensor.outdoor_battery",
+            "Außentemperatur Sensor Batterie",
+            "sensor",
+            "100",
+            unit="%",
+            device_class="battery",
+        ),
+        EntitySnapshot(
+            "sensor.outdoor_humidity",
+            "Außentemperatur Sensor Luftfeuchtigkeit",
+            "sensor",
+            "52.5",
+            unit="%",
+            device_class="humidity",
+        ),
+        EntitySnapshot(
+            "sensor.outdoor_temperature",
+            "Außentemperatur Sensor Temperatur",
+            "sensor",
+            "30.4",
+            unit="°C",
+            device_class="temperature",
+        ),
+    ]
+
+    result = engine.match(question, entities)
+
+    assert result is not None
+    assert result.response_text == "30.4 Grad."
+    assert result.command.entities[0].entity_id == "sensor.outdoor_temperature"
 
 
 def test_query_unknown_entity_returns_none(engine, sensor_entities):

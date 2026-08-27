@@ -463,6 +463,18 @@ def test_query_followup_area_supplement_wohnzimmer(engine):
     assert result.command.entities == ()
 
 
+def test_query_followup_area_does_not_require_conjunction(engine):
+    context = _context(engine, "Welche Fenster sind offen?", STATE_QUERY_ENTITIES)
+
+    result = engine.match_query_followup("Im Bad?", STATE_QUERY_ENTITIES, context)
+
+    assert result is not None
+    query_command = result.command.parameters["query_command"]
+    assert query_command.target.area.area_id == "bad"
+    assert query_command.filter.state.name == "OPEN"
+    assert result.command.entities == ()
+
+
 def test_query_followup_state_change_only(engine):
     # "Und welche sind geschlossen?" - state changes (OPEN -> CLOSED), no
     # device_class/area spoken at all - both carry over from the previous
@@ -476,6 +488,22 @@ def test_query_followup_state_change_only(engine):
     assert query_command.filter.state.name == "CLOSED"
     assert query_command.target.area is None
     assert result.command.entities == (FENSTER_BAD, WOHNZIMMER_FENSTER_ZU)
+
+
+def test_query_followup_state_change_does_not_require_conjunction(engine):
+    context = _context(
+        engine, "Welche Fenster sind im Keller offen?", DELTA_ENTITIES
+    )
+
+    result = engine.match_query_followup(
+        "Welche sind geschlossen?", DELTA_ENTITIES, context
+    )
+
+    assert result is not None
+    query_command = result.command.parameters["query_command"]
+    assert query_command.target.device_class == "window"
+    assert query_command.filter.state.name == "CLOSED"
+    assert query_command.target.area.area_id == "keller"
 
 
 def test_query_followup_target_change_only(engine):

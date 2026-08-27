@@ -1287,6 +1287,15 @@ class NluEngine:
             )
             if natural is not None:
                 normalized = f"Und {natural.group('location')}?"
+        if re.match(
+            r"^(?:welche\b|(?:in der|in dem|im|am|beim)\b|oben\b|unten\b)",
+            normalized,
+            re.IGNORECASE,
+        ):
+            # The follow-up grammar stores deltas, not discourse particles.
+            # "Und" is optional in natural dialogue; canonicalize both forms
+            # to the same grammar instead of duplicating every sentence.
+            normalized = f"Und {normalized}"
         previous_query_command = context.last_command.parameters.get("query_command")
         if (
             context.last_command.parameters.get("property")

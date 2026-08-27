@@ -281,6 +281,10 @@ def test_every_extended_domain_is_selectable_in_live_home_assistant():
     )
 
 
+def test_every_household_query_domain_is_selectable_in_live_home_assistant():
+    assert {"person", "weather", "sun"} <= set(SELECTABLE_DOMAINS)
+
+
 @pytest.mark.parametrize(
     ("sentence", "domain", "service", "data"),
     (

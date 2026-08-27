@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.57.0**
+- Aktuelle Version: **4.58.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -42,55 +42,27 @@ Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
 
-## Was ist in Version 4.57 neu?
+## Was ist in Version 4.58 neu?
 
-Version 4.57 schließt Sicherheits- und Verständnislücken im erweiterten
-Gerätepfad:
+Version 4.58 verbessert Messwertfragen und natürliche Anschlussfragen anhand
+realer Home-Assistant-Daten:
 
-- Fragen wie „Soll ich das Radio stumm schalten?“, „War das Radio stumm?“
-  oder „Muss ich den Saugroboter suchen?“ können keinen Serviceaufruf mehr
-  auslösen. Die Frage-/Befehlsgrenze wird vor dem Entfernen von Satzzeichen
-  geprüft und gilt gemeinsam für direkte Gerätebefehle und Anschlussbefehle.
-- Deliberativfragen mit „Soll ich …?“, „Muss ich …?“, „Darf ich …?“ und
-  „Wollen wir …?“ sowie eingebettete Fragen werden konservativ als Fragen
-  behandelt. Eindeutige Befehle wie „Schalte das Radio stumm“ bleiben
-  ausführbar.
-- Stummschaltung lässt sich mit natürlichen Varianten wie „wieder laut“,
-  „Ton wieder an“, „Stummschaltung aufheben“, „nicht mehr stumm“ und
-  „Unmute“ zuverlässig aufheben.
-- Ortsfragen ohne Zustandsfilter, beispielsweise „Wo sind die Lichter?“,
-  liefern bekannte Räume statt eines internen Fehlers.
-- Füllwörter wie „also“, „okay“, „gut“ oder „na gut“ sind jetzt am Anfang,
-  innerhalb und am Ende eines Befehls bedeutungsneutral. Ein abschließendes
-  Fragezeichen wird dabei bewusst nicht entfernt.
-- Das blockierende Pyright-Gate nennt nur noch Dateien, die es tatsächlich
-  analysiert. Ausgeschlossene Testdateien werden nicht länger fälschlich als
-  Strict-geprüft ausgewiesen.
-
-Die zuvor in 4.51 bis 4.56 eingeführten Fähigkeiten bleiben erhalten:
-
-- Geräte werden in direkten Befehlen, Automationsaktionen und Verlaufsfragen
-  über dieselbe bewertete Entity-Auflösung gefunden. Gleich gute Treffer
-  bleiben mehrdeutig und werden nicht geraten.
-- Füllwörter und typische Spracherkennungs-Hesitationen wie „also“, „okay“
-  oder „ähm“ verändern die erkannte Bedeutung eines ansonsten gleichen
-  Befehls nicht. Metamorphische Tests prüfen diese Invarianz über mehrere
-  Satzformen und Domänen.
-- Korrekturen funktionieren natürlicher: Neben „Ich meinte das Flurlicht“
-  versteht HomeIntent auch „Nein, das Flurlicht“ und „Stattdessen das
-  Flurlicht“. Bei einem vorherigen Alle-Befehl bleibt die Gruppensemantik
-  beim Wechsel von Raum oder Etage erhalten.
-- Recorder-Abfragen beantworten zusätzlich „War das Badezimmerfenster
-  gestern offen?“ und „Wann war es zuletzt offen?“. Die Abfragen sind rein
-  lesend und melden fehlende Verlaufsdaten ausdrücklich.
-- „Was würde die Automation für Küchenlicht jetzt tun?“ führt eine sichere
-  Trockenprobe aus: unterstützte Bedingungen werden gegen den aktuellen
-  Snapshot geprüft und Aktionen verständlich beschrieben. Es wird weder ein
-  Trigger ausgelöst noch ein Home-Assistant-Dienst ausgeführt.
-- Medienplayer lassen sich stumm und wieder hörbar schalten. Ein ausgewählter
-  Saugroboter kann über sein natives Suchsignal lokalisiert werden.
-- Weitere zentrale Laufzeitdateien sind Teil der blockierenden
-  Pyright-Strict-Prüfung.
+- Für Assist freigegebene `weather.*`-, `person.*`- und `sun.*`-Entitäten
+  erreichen jetzt das Laufzeitmodell. Wetter-, Anwesenheits- und Sonnenfragen
+  funktionieren dadurch auch mit der automatischen Assist-Auswahl.
+- Eine konkrete Außentemperaturfrage wird nicht mehr vom allgemeinen
+  Wetter-Handler abgefangen. Ein ausdrücklich genannter Temperatursensor hat
+  Vorrang vor Wetterzusammenfassungen.
+- Genannte Messgrößen wie Temperatur, Luftfeuchtigkeit, Batterie, Leistung
+  und Energie grenzen gleichnamige Sensor-Unterentitäten sicher ein. Das
+  vermeidet Verwechslungen bei Geräten mit mehreren Messkanälen.
+- Bindestrichvarianten wie „Außentemperatur-Sensor“ werden bei lesenden
+  Einzelzielabfragen genauso aufgelöst wie die Schreibweise mit Leerzeichen.
+- Elliptische Folgefragen benötigen kein künstliches „und“ mehr. Nach
+  „Sind im Erdgeschoss Fenster geöffnet?“ funktionieren sowohl „Welche sind
+  geschlossen?“ als auch kurze Ortswechsel wie „Im Badezimmer?“.
+- Bei mehreren allgemeinen Wetterquellen bleibt HomeIntent konservativ und
+  fragt nach der gewünschten Wetter-Entität, statt eine Quelle zu erraten.
 
 Ältere Änderungen stehen in den
 [GitHub-Releases](https://github.com/pquandel2-alt/ha-nlu-engine/releases).
@@ -803,10 +775,10 @@ python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
 ```
 
-Geprüfter Stand von Version 4.57.0:
+Geprüfter Stand von Version 4.58.0:
 
 ```text
-2320 passed, 12 skipped
+2329 passed, 12 skipped
 85 % Gesamt-Coverage
 65 % Coverage für conversation.py
 ```
@@ -842,7 +814,7 @@ Dadurch können sie dem Parser keine Antworten „beibringen“.
 ![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
 
 Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.57.0. Für echte
+Entwicklungsstands und kein aktueller Nachweis für Version 4.58.0. Für echte
 Zielhardware lässt sich seit 4.49 ein reproduzierbarer JSON-Bericht samt
 P95-Budget erzeugen:
 

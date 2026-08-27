@@ -80,6 +80,29 @@ SAUGROBOTER_ATLAS = EntitySnapshot(
     "vacuum.atlas", "Saugroboter Atlas", "vacuum", "cleaning"
 )
 
+LIVE_OUTDOOR_ENTITIES = [
+    EntitySnapshot(
+        "weather.baesweiler", "Baesweiler", "weather", "sunny",
+        attributes={"temperature": 29},
+    ),
+    EntitySnapshot(
+        "weather.openweathermap", "OpenWeatherMap", "weather", "sunny",
+        attributes={"temperature": 28},
+    ),
+    EntitySnapshot(
+        "sensor.outdoor_battery", "Außentemperatur Sensor Batterie", "sensor",
+        "100", unit="%", device_class="battery",
+    ),
+    EntitySnapshot(
+        "sensor.outdoor_humidity", "Außentemperatur Sensor Luftfeuchtigkeit",
+        "sensor", "52.5", unit="%", device_class="humidity",
+    ),
+    EntitySnapshot(
+        "sensor.outdoor_temperature", "Außentemperatur Sensor Temperatur",
+        "sensor", "30.4", unit="°C", device_class="temperature",
+    ),
+]
+
 
 def _make_entity(monkeypatch, entities: list[EntitySnapshot]) -> NluConversationEntity:
     entry = ConfigEntry()
@@ -94,6 +117,46 @@ def _make_entity(monkeypatch, entities: list[EntitySnapshot]) -> NluConversation
 def _run(entity: NluConversationEntity, text: str, conversation_id: str = "conv-1"):
     user_input = ConversationInput(text=text, conversation_id=conversation_id)
     return asyncio.run(entity._async_handle_message(user_input, chat_log=None))
+
+
+def test_live_outdoor_sensor_wins_over_multiple_weather_entities(monkeypatch):
+    entity = _make_entity(monkeypatch, LIVE_OUTDOOR_ENTITIES)
+
+    result = _run(entity, "Welche Temperatur zeigt der Außentemperatur-Sensor?")
+
+    assert result.response.speech == "30.4 Grad."
+    assert result.response.response_type == intent.IntentResponseType.QUERY_ANSWER
+    entity.hass.services.async_call.assert_not_awaited()
+
+
+def test_state_followup_without_und_keeps_floor_and_device_class(monkeypatch):
+    entities = [
+        EntitySnapshot(
+            "binary_sensor.gaeste_wc", "Gäste WC Fenster", "binary_sensor", "on",
+            area_id="gaeste_wc", area_name="Gäste WC", floor_id="eg",
+            floor_name="Erdgeschoss", floor_level=0, device_class="window",
+        ),
+        EntitySnapshot(
+            "binary_sensor.schlafzimmer", "Schlafzimmer Fenster",
+            "binary_sensor", "on", area_id="schlafzimmer",
+            area_name="Schlafzimmer", floor_id="eg", floor_name="Erdgeschoss",
+            floor_level=0, device_class="window",
+        ),
+        EntitySnapshot(
+            "binary_sensor.kueche", "Küchenfenster", "binary_sensor", "off",
+            area_id="kueche", area_name="Küche", floor_id="eg",
+            floor_name="Erdgeschoss", floor_level=0, device_class="window",
+        ),
+    ]
+    entity = _make_entity(monkeypatch, entities)
+
+    first = _run(entity, "Sind im Erdgeschoss Fenster geöffnet?", "window-turn")
+    followup = _run(entity, "Welche sind geschlossen?", "window-turn")
+
+    assert "Gäste WC Fenster" in first.response.speech
+    assert "Schlafzimmer Fenster" in first.response.speech
+    assert "Küchenfenster" in followup.response.speech
+    assert followup.response.response_type == intent.IntentResponseType.QUERY_ANSWER
 
 
 def test_turn_on_command_calls_service_and_responds_action_done(monkeypatch):

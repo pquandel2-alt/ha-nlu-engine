@@ -182,6 +182,16 @@ def match_household_query(
             return _read_only("Die nächste Sonnenzeit ist derzeit nicht verfügbar.")
         return _read_only(f"Die Sonne geht {rendered} {'auf' if rising else 'unter'}.")
 
+    # A specifically named outdoor measurement belongs to HassGetState,
+    # not to the broader weather summary below. Prefer the live temperature
+    # sensor when one is available; the engine then uses the stated property
+    # to distinguish it from battery/humidity/link-quality siblings.
+    if "aussentemperatur" in key and any(
+        entity.domain == "sensor" and entity.device_class == "temperature"
+        for entity in entities
+    ):
+        return None
+
     if re.search(
         r"\b(?:wie\s+ist\s+das\s+wetter|welches\s+wetter|aussen(?:temperatur)?|"
         r"wie\s+(?:warm|kalt)\s+ist\s+es\s+(?:draussen|aussen))\b",

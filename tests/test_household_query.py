@@ -85,3 +85,22 @@ def test_household_query_answers_from_snapshot_without_service_plan(question, ex
 )
 def test_household_query_does_not_claim_commands_or_unrelated_language(text):
     assert match_household_query(text, ENTITIES, NOW) is None
+
+
+def test_explicit_outdoor_sensor_question_is_not_claimed_as_general_weather():
+    entities = ENTITIES + [
+        EntitySnapshot(
+            "sensor.aussentemperatur_sensor_temperature",
+            "Außentemperatur Sensor Temperatur",
+            "sensor",
+            "30.4",
+            unit="°C",
+            device_class="temperature",
+        )
+    ]
+
+    result = match_household_query(
+        "Welche Temperatur zeigt der Außentemperatur-Sensor?", entities, NOW
+    )
+
+    assert result is None

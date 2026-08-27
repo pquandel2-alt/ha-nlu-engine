@@ -29,7 +29,8 @@ SELECTABLE_DOMAINS = (
     "climate", "media_player", "vacuum", "scene", "lock", "calendar",
     "humidifier", "water_heater", "select", "number", "input_number",
     "input_boolean", "button", "valve", "lawn_mower", "camera", "notify",
-    "todo", "timer", "alarm_control_panel", "group",
+    "todo", "timer", "alarm_control_panel", "group", "person", "weather",
+    "sun",
 )
 
 NOT_UNDERSTOOD_TEXT = "Das habe ich nicht verstanden."

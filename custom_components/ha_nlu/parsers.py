@@ -81,10 +81,35 @@ from .service_call import (
 # name, only as connective glue in a spoken sentence.
 _LOCATIVE_PREPOSITIONS = re.compile(r"\b(in der|in dem|im|am|beim)\b", re.IGNORECASE)
 
+_QUERY_DEVICE_CLASS_PATTERNS = (
+    ("temperature", re.compile(r"\b(?:(?:außen|aussen))?temperatur\b", re.I)),
+    ("humidity", re.compile(r"\bluftfeuchtigkeit\b", re.I)),
+    ("battery", re.compile(r"\bbatter(?:ie|iestand)\b", re.I)),
+    ("power", re.compile(r"\b(?:leistung|stromverbrauch)\b", re.I)),
+    ("energy", re.compile(r"\benergie(?:verbrauch)?\b", re.I)),
+)
+
 
 def _strip_locative_prepositions(name: str) -> str:
     without_prepositions = _LOCATIVE_PREPOSITIONS.sub(" ", name)
     return re.sub(r"\s+", " ", without_prepositions).strip()
+
+
+def _query_resolution_entities(
+    text: str, intent_name: str, entities: list[EntitySnapshot]
+) -> list[EntitySnapshot]:
+    """Use an explicitly requested measurement to narrow sensor siblings."""
+    if intent_name != "HassGetState":
+        return entities
+    for device_class, pattern in _QUERY_DEVICE_CLASS_PATTERNS:
+        if pattern.search(text):
+            matches = [
+                entity
+                for entity in entities
+                if entity.domain == "sensor" and entity.device_class == device_class
+            ]
+            return matches or entities
+    return entities
 
 
 # Closed-vocabulary TextSlotList definitions (domain/quantifier/count/level/
@@ -156,7 +181,15 @@ class SingleTargetParser:
             return None
 
         name = _strip_locative_prepositions(str(name_slot.value))
-        resolved = resolve_entity(name, context.entities)
+        resolution_name = (
+            re.sub(r"\s*-\s*", " ", name)
+            if result.intent.name in QUERY_INTENTS
+            else name
+        )
+        resolution_entities = _query_resolution_entities(
+            text, result.intent.name, context.entities
+        )
+        resolved = resolve_entity(resolution_name, resolution_entities)
         if resolved.status is ResolveStatus.AMBIGUOUS:
             # Only the 5 basic action intents (v2 plan Phase 25,
             # "Clarification") get a follow-up question - QUERY_INTENTS
