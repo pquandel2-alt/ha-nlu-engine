@@ -13,6 +13,7 @@ from .entities import EntitySnapshot, normalize_for_compare
 class PhoneticSuggestion:
     corrected_text: str
     entity: EntitySnapshot
+    corrected_term: str
 
 
 def _distance(left: str, right: str) -> int:
@@ -53,6 +54,6 @@ def phonetic_suggestions(
                     continue
                 corrected = text[:match.start()] + candidate + text[match.end():]
                 suggestions[(corrected.casefold(), entity.entity_id)] = PhoneticSuggestion(
-                    corrected, entity
+                    corrected, entity, candidate
                 )
     return tuple(suggestions.values())[:16]

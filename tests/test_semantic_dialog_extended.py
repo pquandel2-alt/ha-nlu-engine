@@ -26,3 +26,23 @@ def test_select_missing_option_lists_and_accepts_supported_option():
     done = continue_semantic_dialog("Intensiv", start.pending)
     assert done.result is not None
     assert done.result.plan.data == {"option": "Intensiv"}
+
+
+def test_percentage_without_temperature_cue_never_starts_climate_dialog():
+    """A percentage is not a temperature merely because parsing failed."""
+    climates = [
+        EntitySnapshot(
+            "climate.kitchen", "Heizung Küche", "climate", "heat",
+            capabilities=frozenset({"TEMPERATURE"}),
+        ),
+        EntitySnapshot(
+            "climate.bath", "Heizung Bad", "climate", "heat",
+            capabilities=frozenset({"TEMPERATURE"}),
+        ),
+    ]
+
+    outcome = start_semantic_dialog(
+        "Fahre die Rollläden im unbekannten Raum auf 30 Prozent", climates
+    )
+
+    assert outcome is None

@@ -80,7 +80,8 @@ _QUESTION_RE = re.compile(
 _LOCATION_CUE_RE = re.compile(r"\b(?:im|in\s+der|in\s+dem|am|beim)\s+", re.I)
 _LEVEL_CUE_RE = re.compile(r"(?<!nach\s)\b(?:oben|unten)\b", re.I)
 _PLURAL_RE = re.compile(
-    r"\b(?:lichter|lampen|leuchten|steckdosen|rollläden|rolläden|rollos|"
+    r"\b(?:lichter|lampen|leuchten|steckdosen|rollläden|rolläden|"
+    r"die\s+rol{1,3}aden|rollos|"
     r"jalousien|ventilatoren|heizungen|thermostate|skripte|lautsprecher|"
     r"staubsauger|ventile)\b",
     re.I,

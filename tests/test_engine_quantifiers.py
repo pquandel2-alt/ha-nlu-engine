@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ha_nlu.entities import EntitySnapshot
 
 from conftest import POLERAUM_COVERS
@@ -108,6 +110,53 @@ def test_area_scoped_plural_cover_is_implicit_all(engine):
     assert result is not None
     assert result.plan.service == "open_cover"
     assert sorted(result.plan.entity_id) == ["cover.links", "cover.rechts"]
+
+
+@pytest.mark.parametrize("noun", ["Rollläden", "Rollladen"])
+def test_compound_spoken_area_matches_spaced_registry_name(engine, noun):
+    """Natural German compounds remain grounded in the exact HA area."""
+    entities = [
+        EntitySnapshot(
+            "cover.left", "Rolllade Poleraum links", "cover", "open",
+            area_id="pole_raum", area_name="Pole Raum",
+            capabilities=frozenset({"POSITION"}),
+        ),
+        EntitySnapshot(
+            "cover.right", "Rolllade Poleraum rechts", "cover", "open",
+            area_id="pole_raum", area_name="Pole Raum",
+            capabilities=frozenset({"POSITION"}),
+        ),
+    ]
+
+    result = engine.match(
+        f"Fahre die {noun} im Poleraum auf 30 Prozent", entities
+    )
+
+    assert result is not None
+    assert result.plan.service == "set_cover_position"
+    assert result.plan.data == {"position": 30}
+    assert sorted(result.plan.entity_id) == ["cover.left", "cover.right"]
+
+
+def test_singular_article_does_not_turn_one_cover_into_area_group(engine):
+    entities = [
+        EntitySnapshot(
+            "cover.left", "Rolllade Poleraum links", "cover", "open",
+            area_id="pole_raum", area_name="Pole Raum",
+            capabilities=frozenset({"POSITION"}),
+        ),
+        EntitySnapshot(
+            "cover.right", "Rolllade Poleraum rechts", "cover", "open",
+            area_id="pole_raum", area_name="Pole Raum",
+            capabilities=frozenset({"POSITION"}),
+        ),
+    ]
+
+    result = engine.match(
+        "Fahre den Rollladen im Poleraum auf 30 Prozent", entities
+    )
+
+    assert result is None or result.plan is None
 
 
 def test_area_scoped_plural_lights_are_implicit_all(engine):

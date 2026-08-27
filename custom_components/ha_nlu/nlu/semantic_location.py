@@ -102,20 +102,39 @@ def resolve_semantic_location(
         for name in (entity.area_name, *entity.area_aliases, entity.floor_name)
         if name
     }
+    # HA registry names may contain orthographic word boundaries that spoken
+    # compounds naturally omit ("Pole Raum" -> "Poleraum").  Treat only the
+    # whitespace-free form of the *same registered location* as equivalent;
+    # this is deterministic normalization, not fuzzy guessing.
+    search_names = {
+        (spoken, canonical)
+        for canonical in names
+        for spoken in {
+            canonical,
+            re.sub(r"\s+", "", canonical),
+        }
+        if spoken
+    }
     mentioned = [
-        name for name in sorted(names, key=len, reverse=True)
-        if re.search(rf"\b{re.escape(name)}\b", text, re.I)
+        (match.group(0), canonical)
+        for spoken, canonical in sorted(
+            search_names, key=lambda item: len(item[0]), reverse=True
+        )
+        if (match := re.search(rf"\b{re.escape(spoken)}\b", text, re.I))
     ]
     if not mentioned:
         return None
-    longest = len(mentioned[0])
-    selected = [name for name in mentioned if len(name) == longest]
-    resolved = {resolve_location_name(name, entities) for name in selected}
+    longest = len(mentioned[0][0])
+    selected = [item for item in mentioned if len(item[0]) == longest]
+    resolved = {
+        resolve_location_name(canonical, entities)
+        for _, canonical in selected
+    }
     resolved.discard(None)
     if len(resolved) != 1:
         return None
     area_id, floor_id = resolved.pop()
-    return selected[0], area_id, floor_id
+    return selected[0][0], area_id, floor_id
 
 
 def resolve_coordinated_locations(

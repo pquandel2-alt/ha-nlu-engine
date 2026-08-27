@@ -142,7 +142,12 @@ def start_semantic_dialog(
         )
 
     number = _NUMBER_RE.search(text)
-    if number is not None and (number.group(2) or "temperatur" in text.casefold()):
+    number_unit = number.group(2).casefold() if number is not None and number.group(2) else None
+    temperature_value = number is not None and (
+        number_unit == "grad" or "temperatur" in text.casefold()
+    )
+    if temperature_value:
+        assert number is not None
         value = float(number.group(1).replace(",", "."))
         candidates = tuple(
             entity for entity in entities

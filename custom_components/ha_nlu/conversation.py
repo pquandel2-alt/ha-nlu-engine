@@ -173,7 +173,7 @@ from .productivity import (
     parse_productivity_request,
     select_productivity_candidate,
 )
-from .phonetic_correction import phonetic_suggestions
+from .phonetic_correction import PhoneticSuggestion, phonetic_suggestions
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -469,7 +469,7 @@ class NluConversationEntity(
 
         if pending is not None and pending.pending_semantic_command is not None:
             return await self._async_handle_pending_semantic_command(
-                user_input, response, pending.pending_semantic_command
+                user_input, response, pending.pending_semantic_command, entities
             )
 
         if pending is not None and pending.pending_automation_draft is not None:
@@ -780,6 +780,20 @@ class NluConversationEntity(
 
         if result is None:
             return await self._async_handle_no_match(user_input, response, entities)
+
+        if (
+            isinstance(result, MatchResult)
+            and result.plan is None
+            and result.command is None
+            and result.clarification is None
+            and analyse_utterance(user_input.text).speech_act is SpeechAct.COMMAND
+        ):
+            # Diagnostic feedback such as "unknown location" is still a
+            # structural no-match.  Give the bounded, confirm-before-action
+            # ASR correction a chance before returning that feedback.
+            return await self._async_handle_no_match(
+                user_input, response, entities
+            )
 
         if isinstance(result, CommandPlan):
             return await self._async_handle_command_plan(
@@ -1165,8 +1179,38 @@ class NluConversationEntity(
         user_input: conversation.ConversationInput,
         response: intent.IntentResponse,
         pending: PendingSemanticCommand,
+        entities: list[EntitySnapshot],
     ) -> conversation.ConversationResult:
         """Continue a deterministic slot-filling device dialog."""
+        # A complete new turn supersedes the open slot dialog.  Otherwise a
+        # command such as "Fahre die Rollläden ..." is interpreted as an
+        # attempted thermostat name merely because the preceding turn asked
+        # "Welche Heizung?".  Only a fully parsed fresh command/query (or a
+        # clearly command-shaped no-match that may enter bounded ASR
+        # correction) escapes; short answers such as "Küche" continue below.
+        fresh = self._engine.match(user_input.text, entities, self._world_model)
+        if isinstance(fresh, CommandPlan):
+            self._context_store.clear(user_input.conversation_id)
+            return await self._async_handle_command_plan(
+                user_input, response, fresh, entities
+            )
+        if isinstance(fresh, MatchResult) and (
+            fresh.command is not None or fresh.clarification is not None
+        ):
+            self._context_store.clear(user_input.conversation_id)
+            if fresh.clarification is not None:
+                return self._handle_clarification_result(
+                    user_input, response, fresh
+                )
+            return await self._async_handle_match_result(
+                user_input, response, fresh, entities
+            )
+        if analyse_utterance(user_input.text).speech_act is SpeechAct.COMMAND:
+            self._context_store.clear(user_input.conversation_id)
+            return await self._async_handle_no_match(
+                user_input, response, entities
+            )
+
         dialog = continue_semantic_dialog(user_input.text, pending)
         if dialog.result is not None:
             self._context_store.clear(user_input.conversation_id)
@@ -1529,7 +1573,7 @@ class NluConversationEntity(
     ) -> conversation.ConversationResult:
         """Try bounded correction/dialog fallbacks for an unmatched turn."""
         is_query = analyse_utterance(user_input.text).speech_act is SpeechAct.QUERY
-        corrected_plans: dict[tuple, tuple[object, str, EntitySnapshot]] = {}
+        corrected_plans: dict[tuple, tuple[object, str, PhoneticSuggestion]] = {}
         for suggestion in (
             () if is_query else phonetic_suggestions(user_input.text, entities)
         ):
@@ -1550,9 +1594,9 @@ class NluConversationEntity(
                 else (plan.entity_id,)
             )
             key = (plan.domain, plan.service, entity_ids, repr(sorted(plan.data.items())))
-            corrected_plans[key] = (plan, success, suggestion.entity)
+            corrected_plans[key] = (plan, success, suggestion)
         if len(corrected_plans) == 1:
-            plan, success, corrected_entity = next(iter(corrected_plans.values()))
+            plan, success, correction = next(iter(corrected_plans.values()))
             self._context_store.set(
                 user_input.conversation_id,
                 ConversationContext(
@@ -1573,7 +1617,7 @@ class NluConversationEntity(
                 ),
             )
             response.async_set_speech(
-                f"Meintest du „{corrected_entity.friendly_name}“? "
+                f"Meintest du „{correction.corrected_term}“? "
                 f"Soll ich {success.rstrip('.')}?"
             )
             return conversation.ConversationResult(

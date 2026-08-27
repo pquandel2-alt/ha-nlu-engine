@@ -381,6 +381,95 @@ def test_complete_group_command_supersedes_pending_cover_clarification(monkeypat
     )
 
 
+def test_live_cover_percentage_asr_correction_never_becomes_heating_dialog(
+    monkeypatch,
+):
+    entities = [
+        EntitySnapshot(
+            "cover.left", "Rolllade Poleraum links", "cover", "open",
+            area_id="pole_raum", area_name="Pole Raum",
+            capabilities=frozenset({"POSITION"}),
+        ),
+        EntitySnapshot(
+            "cover.right", "Rolllade Poleraum rechts", "cover", "open",
+            area_id="pole_raum", area_name="Pole Raum",
+            capabilities=frozenset({"POSITION"}),
+        ),
+        EntitySnapshot(
+            "climate.kitchen", "Heizung Küche", "climate", "heat",
+            capabilities=frozenset({"TEMPERATURE"}),
+        ),
+        EntitySnapshot(
+            "climate.bath", "Heizung Bad", "climate", "heat",
+            capabilities=frozenset({"TEMPERATURE"}),
+        ),
+    ]
+    entity = _make_entity(monkeypatch, entities)
+
+    typo = _run(
+        entity,
+        "Fahre die Rolletten im Polraum auf 30 Prozent.",
+        "cover-asr",
+    )
+    correction = _run(
+        entity,
+        "Fahre die Rollladen im Polraum auf 30 Prozent.",
+        "cover-asr",
+    )
+    confirmed = _run(entity, "Ja", "cover-asr")
+
+    assert "Heizung" not in typo.response.speech
+    assert "Meintest du" in correction.response.speech
+    assert "poleraum" in correction.response.speech.casefold()
+    assert confirmed.response.speech == "2 Rollläden auf 30 Prozent gefahren."
+    entity.hass.services.async_call.assert_awaited_once_with(
+        "cover",
+        "set_cover_position",
+        {"entity_id": ["cover.left", "cover.right"], "position": 30},
+        blocking=True,
+    )
+
+
+def test_complete_cover_command_supersedes_pending_temperature_dialog(monkeypatch):
+    entities = [
+        EntitySnapshot(
+            "cover.left", "Rolllade Poleraum links", "cover", "open",
+            area_id="pole_raum", area_name="Pole Raum",
+            capabilities=frozenset({"POSITION"}),
+        ),
+        EntitySnapshot(
+            "cover.right", "Rolllade Poleraum rechts", "cover", "open",
+            area_id="pole_raum", area_name="Pole Raum",
+            capabilities=frozenset({"POSITION"}),
+        ),
+        EntitySnapshot(
+            "climate.kitchen", "Heizung Küche", "climate", "heat",
+            capabilities=frozenset({"TEMPERATURE"}),
+        ),
+        EntitySnapshot(
+            "climate.bath", "Heizung Bad", "climate", "heat",
+            capabilities=frozenset({"TEMPERATURE"}),
+        ),
+    ]
+    entity = _make_entity(monkeypatch, entities)
+
+    pending = _run(entity, "Stelle auf 22 Grad", "dialog-switch")
+    replacement = _run(
+        entity,
+        "Fahre die Rollläden im Poleraum auf 30 Prozent",
+        "dialog-switch",
+    )
+
+    assert pending.response.speech == "Welche Heizung meinst du?"
+    assert replacement.response.speech == "2 Rollläden auf 30 Prozent gefahren."
+    entity.hass.services.async_call.assert_awaited_once_with(
+        "cover",
+        "set_cover_position",
+        {"entity_id": ["cover.left", "cover.right"], "position": 30},
+        blocking=True,
+    )
+
+
 def test_trigger_and_action_can_be_spoken_in_two_turns(monkeypatch):
     entity = _make_entity(monkeypatch, [KUECHE_FENSTER, KUECHE_LICHT])
 

@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.58.0**
+- Aktuelle Version: **4.59.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -42,27 +42,28 @@ Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
 
-## Was ist in Version 4.58 neu?
+## Was ist in Version 4.59 neu?
 
-Version 4.58 verbessert Messwertfragen und natürliche Anschlussfragen anhand
-realer Home-Assistant-Daten:
+Version 4.59 verbessert Prozentbefehle, Ortsnamen und den Wechsel zwischen
+Dialogen anhand eines realen Rollladenfalls:
 
-- Für Assist freigegebene `weather.*`-, `person.*`- und `sun.*`-Entitäten
-  erreichen jetzt das Laufzeitmodell. Wetter-, Anwesenheits- und Sonnenfragen
-  funktionieren dadurch auch mit der automatischen Assist-Auswahl.
-- Eine konkrete Außentemperaturfrage wird nicht mehr vom allgemeinen
-  Wetter-Handler abgefangen. Ein ausdrücklich genannter Temperatursensor hat
-  Vorrang vor Wetterzusammenfassungen.
-- Genannte Messgrößen wie Temperatur, Luftfeuchtigkeit, Batterie, Leistung
-  und Energie grenzen gleichnamige Sensor-Unterentitäten sicher ein. Das
-  vermeidet Verwechslungen bei Geräten mit mehreren Messkanälen.
-- Bindestrichvarianten wie „Außentemperatur-Sensor“ werden bei lesenden
-  Einzelzielabfragen genauso aufgelöst wie die Schreibweise mit Leerzeichen.
-- Elliptische Folgefragen benötigen kein künstliches „und“ mehr. Nach
-  „Sind im Erdgeschoss Fenster geöffnet?“ funktionieren sowohl „Welche sind
-  geschlossen?“ als auch kurze Ortswechsel wie „Im Badezimmer?“.
-- Bei mehreren allgemeinen Wetterquellen bleibt HomeIntent konservativ und
-  fragt nach der gewünschten Wetter-Entität, statt eine Quelle zu erraten.
+- Prozentwerte werden nicht mehr ohne ausdrücklichen Temperaturbezug als
+  Heizungswert interpretiert. Ein unvollständig verstandener Rollladenbefehl
+  führt daher nicht mehr zur falschen Frage „Welche Heizung meinst du?“.
+- Getrennt geschriebene Home-Assistant-Orte und natürliche deutsche
+  Zusammensetzungen werden gleich behandelt. Ein registrierter Bereich
+  „Pole Raum“ kann dadurch als „Poleraum“ angesprochen werden.
+- Die artikelführende Form „die Rollladen“ wird auch ohne Umlaut als Mehrzahl
+  verstanden; „den Rollladen“ bleibt dagegen ein einzelnes Ziel.
+- Ein vollständiger neuer Befehl darf einen offenen semantischen
+  Ergänzungsdialog ersetzen. Ein früherer Heizungsdialog bindet folgende
+  Licht-, Rollladen- oder andere Gerätebefehle nicht mehr fälschlich.
+- Bei einer kleinen ASR-Abweichung wie „Polraum“ nutzt HomeIntent die
+  vorhandene begrenzte Lautkorrektur und bittet vor der Ausführung um
+  Bestätigung. Die Korrektur nennt jetzt den tatsächlich korrigierten Begriff
+  statt eines zufällig beteiligten Gerätenamens.
+- Diagnoseantworten für unbekannte Orte durchlaufen vor der Ablehnung die
+  sichere, bestätigungspflichtige ASR-Korrektur.
 
 Ältere Änderungen stehen in den
 [GitHub-Releases](https://github.com/pquandel2-alt/ha-nlu-engine/releases).
@@ -775,10 +776,10 @@ python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
 ```
 
-Geprüfter Stand von Version 4.58.0:
+Geprüfter Stand von Version 4.59.0:
 
 ```text
-2329 passed, 12 skipped
+2335 passed, 12 skipped
 85 % Gesamt-Coverage
 65 % Coverage für conversation.py
 ```
@@ -814,7 +815,7 @@ Dadurch können sie dem Parser keine Antworten „beibringen“.
 ![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
 
 Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.58.0. Für echte
+Entwicklungsstands und kein aktueller Nachweis für Version 4.59.0. Für echte
 Zielhardware lässt sich seit 4.49 ein reproduzierbarer JSON-Bericht samt
 P95-Budget erzeugen:
 
