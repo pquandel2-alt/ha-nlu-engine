@@ -57,3 +57,28 @@ def test_fillers_and_hesitations_preserve_service_and_target(
         result = engine.match(sentence, ENTITIES)
         assert result is not None and result.plan is not None, sentence
         assert result.plan == expected.plan, sentence
+
+
+@pytest.mark.parametrize("filler", ("also", "okay", "ok", "gut", "nun", "na gut"))
+@pytest.mark.parametrize("position", ("leading", "middle", "trailing"))
+@pytest.mark.parametrize(
+    ("base", "middle"),
+    (
+        ("Schalte das Küchenlicht aus", "Schalte {filler} das Küchenlicht aus"),
+        ("Fahre den Rollladen Büro hoch", "Fahre {filler} den Rollladen Büro hoch"),
+    ),
+)
+def test_discourse_fillers_are_position_invariant(
+    engine, filler: str, position: str, base: str, middle: str
+) -> None:
+    variants = {
+        "leading": f"{filler}, {base}",
+        "middle": middle.format(filler=filler),
+        "trailing": f"{base}, {filler}",
+    }
+    expected = engine.match(base, ENTITIES)
+
+    result = engine.match(variants[position], ENTITIES)
+
+    assert expected is not None and expected.plan is not None
+    assert result is not None and result.plan == expected.plan

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from ha_nlu.device_control import match_device_control
 from ha_nlu.entities import EntitySnapshot
 
@@ -71,3 +73,27 @@ def test_media_mute_and_vacuum_locate_use_native_services():
         "volume_mute", {"is_volume_muted": False}
     )
     assert locate.plan.service == "locate"
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    (
+        "Hebe die Stummschaltung vom Küchenradio auf",
+        "Schalte die Stummschaltung vom Küchenradio aus",
+        "Mach den Ton beim Küchenradio wieder an",
+        "Küchenradio laut schalten",
+        "Mach das Küchenradio wieder laut",
+        "Unmute Küchenradio",
+        "Schalte das Küchenradio nicht mehr stumm",
+    ),
+)
+def test_media_unmute_phrasings_are_compositional(sentence):
+    player = EntitySnapshot(
+        "media_player.kitchen", "Küchenradio", "media_player", "playing"
+    )
+
+    result = match_device_control(sentence, [player])
+
+    assert result is not None and result.plan is not None
+    assert result.plan.service == "volume_mute"
+    assert result.plan.data == {"is_volume_muted": False}

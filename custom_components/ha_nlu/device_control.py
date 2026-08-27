@@ -13,7 +13,7 @@ from .nlu.entity_resolution import (
 )
 from .nlu.context import ConversationContext
 from .nlu.normalize import normalize
-from .nlu.semantic_utterance import SpeechAct, analyse_utterance
+from .nlu.semantic_utterance import Modality, Polarity, SpeechAct, analyse_utterance
 from .service_call import ServiceCallPlan
 from .risk import requires_confirmation
 
@@ -37,6 +37,42 @@ class DeviceControlResult:
 
 def _clean(text: str) -> str:
     return re.sub(r"[?.!]", "", normalize(text)).strip()
+
+
+_NEGATED_UNMUTE_RE = re.compile(r"\bnicht\s+mehr\s+stumm\b", re.I)
+_UNMUTE_RE = re.compile(
+    r"\b(?:unmute|nicht\s+mehr\s+stumm)\b|"
+    r"\bheb\w*\b.*\bstummschaltung\b.*\bauf\b|"
+    r"\bstummschaltung\b.*\b(?:aus|aufheb\w*)\b|"
+    r"\bton\b.*\bwieder\b.*\b(?:an|ein|anmach\w*|einschalt\w*)\b|"
+    r"\bwieder\s+laut\b|\blaut\s+schalt\w*\b",
+    re.I,
+)
+_UNSAFE_DEVICE_MODIFIER_RE = re.compile(
+    r"\b(?:nicht|kein\w*|ohne|vielleicht|normalerweise|gestern)\b", re.I
+)
+
+
+def _safe_device_text(
+    text: str, *, allow_contextual_ellipsis: bool = False
+) -> str | None:
+    """Return normalized command text only after one shared R3/R4 gate."""
+    discourse_text = _NEGATED_UNMUTE_RE.sub("hebe die stummschaltung auf", text)
+    utterance = analyse_utterance(discourse_text)
+    contextual_ellipsis = (
+        allow_contextual_ellipsis
+        and utterance.speech_act is SpeechAct.STATEMENT
+        and utterance.modality is Modality.DIRECT
+        and utterance.polarity is Polarity.POSITIVE
+        and not text.rstrip().endswith("?")
+    )
+    if not utterance.safe_to_execute_directly and not contextual_ellipsis:
+        return None
+    value = _clean(text)
+    safety_value = _NEGATED_UNMUTE_RE.sub("", value)
+    if _UNSAFE_DEVICE_MODIFIER_RE.search(safety_value):
+        return None
+    return value
 
 
 def _resolve_domain(
@@ -89,8 +125,6 @@ def _match_compositional(
     one supported operation and all required values are mandatory.
     """
     value = _clean(text)
-    if re.search(r"\b(?:nicht|kein\w*|ohne|vielleicht|normalerweise|gestern)\b", value, re.I):
-        return None
 
     climate = _mentioned_entity(value, entities, frozenset({"climate"}))
     temperature = re.search(
@@ -145,15 +179,11 @@ def _match_compositional(
 
     player = _mentioned_entity(value, entities, frozenset({"media_player"}))
     if player is not None:
-        mute = re.search(r"\b(?:stumm|stummschaltung|mute)\b", value, re.I)
-        if mute is not None:
-            unmute = re.search(
-                r"\b(?:nicht\s+mehr\s+stumm|stummschaltung\s+(?:aus|aufheben)|"
-                r"heb\w*\s+die\s+stummschaltung\b.*\bauf|"
-                r"ton\s+(?:an|ein)|laut\s+schalten|unmute)\b",
-                value,
-                re.I,
-            )
+        unmute = _UNMUTE_RE.search(value)
+        mute = unmute is not None or re.search(
+            r"\b(?:stumm|stummschaltung|mute)\b", value, re.I
+        ) is not None
+        if mute:
             muted = unmute is None
             return _result(
                 player,
@@ -327,12 +357,8 @@ def match_device_control_followup(
     if context is None or len(context.last_entities) != 1:
         return None
     entity = context.last_entities[0]
-    value = _clean(text)
-    utterance = analyse_utterance(value)
-    if utterance.speech_act in {SpeechAct.AUTOMATION, SpeechAct.QUERY} or (
-        utterance.speech_act is SpeechAct.COMMAND
-        and not utterance.safe_to_execute_directly
-    ):
+    value = _safe_device_text(text, allow_contextual_ellipsis=True)
+    if value is None:
         return None
     words = re.findall(r"\b\w+\b", value, re.UNICODE)
     has_reference = re.search(
@@ -395,14 +421,8 @@ def match_device_control(
     text: str, entities: list[EntitySnapshot]
 ) -> DeviceControlResult | None:
     """Match extended device commands; return None for unrelated language."""
-    value = _clean(text)
-    utterance = analyse_utterance(value)
-    if utterance.speech_act in {SpeechAct.AUTOMATION, SpeechAct.QUERY} or (
-        utterance.speech_act is SpeechAct.COMMAND
-        and not utterance.safe_to_execute_directly
-    ):
-        return None
-    if re.search(r"\b(?:nicht|kein\w*|ohne|vielleicht|normalerweise|gestern)\b", value, re.I):
+    value = _safe_device_text(text)
+    if value is None:
         return None
 
     climate = _mentioned_entity(value, entities, frozenset({"climate"}))

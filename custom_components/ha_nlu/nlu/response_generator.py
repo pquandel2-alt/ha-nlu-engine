@@ -257,8 +257,15 @@ class ResponseGenerator:
 
     def _respond_locations(self, result: QueryResult) -> str:
         noun = self._noun(result)
-        state_word = _SEMANTIC_STATE_SPOKEN_DE[result.command.filter.state]
         areas = sorted({entity.area_name for entity in result.entities if entity.area_name})
+        requested = result.command.filter.state
+        if requested is None:
+            if not areas:
+                return f"Ich kenne für {noun} keinen Raum."
+            if len(areas) == 1:
+                return f"{noun} befinden sich im Raum {areas[0]}."
+            return f"{noun} befinden sich in {_join_names(areas)}."
+        state_word = _SEMANTIC_STATE_SPOKEN_DE[requested]
         if not areas:
             return f"In keinem bekannten Raum sind {noun} {state_word}."
         if len(areas) == 1:

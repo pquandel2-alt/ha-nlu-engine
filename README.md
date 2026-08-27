@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.56.0**
+- Aktuelle Version: **4.57.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -42,10 +42,32 @@ Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
 
-## Was ist in Version 4.56 neu?
+## Was ist in Version 4.57 neu?
 
-Die Releases 4.51 bis 4.56 stärken die gemeinsame Sprachbasis und ergänzen
-neue, vollständig lokale Fähigkeiten:
+Version 4.57 schließt Sicherheits- und Verständnislücken im erweiterten
+Gerätepfad:
+
+- Fragen wie „Soll ich das Radio stumm schalten?“, „War das Radio stumm?“
+  oder „Muss ich den Saugroboter suchen?“ können keinen Serviceaufruf mehr
+  auslösen. Die Frage-/Befehlsgrenze wird vor dem Entfernen von Satzzeichen
+  geprüft und gilt gemeinsam für direkte Gerätebefehle und Anschlussbefehle.
+- Deliberativfragen mit „Soll ich …?“, „Muss ich …?“, „Darf ich …?“ und
+  „Wollen wir …?“ sowie eingebettete Fragen werden konservativ als Fragen
+  behandelt. Eindeutige Befehle wie „Schalte das Radio stumm“ bleiben
+  ausführbar.
+- Stummschaltung lässt sich mit natürlichen Varianten wie „wieder laut“,
+  „Ton wieder an“, „Stummschaltung aufheben“, „nicht mehr stumm“ und
+  „Unmute“ zuverlässig aufheben.
+- Ortsfragen ohne Zustandsfilter, beispielsweise „Wo sind die Lichter?“,
+  liefern bekannte Räume statt eines internen Fehlers.
+- Füllwörter wie „also“, „okay“, „gut“ oder „na gut“ sind jetzt am Anfang,
+  innerhalb und am Ende eines Befehls bedeutungsneutral. Ein abschließendes
+  Fragezeichen wird dabei bewusst nicht entfernt.
+- Das blockierende Pyright-Gate nennt nur noch Dateien, die es tatsächlich
+  analysiert. Ausgeschlossene Testdateien werden nicht länger fälschlich als
+  Strict-geprüft ausgewiesen.
+
+Die zuvor in 4.51 bis 4.56 eingeführten Fähigkeiten bleiben erhalten:
 
 - Geräte werden in direkten Befehlen, Automationsaktionen und Verlaufsfragen
   über dieselbe bewertete Entity-Auflösung gefunden. Gleich gute Treffer
@@ -70,298 +92,8 @@ neue, vollständig lokale Fähigkeiten:
 - Weitere zentrale Laufzeitdateien sind Teil der blockierenden
   Pyright-Strict-Prüfung.
 
-## Was ist in Version 4.50 neu?
-
-Version 4.50 schließt eine wichtige Sicherheits- und Verständnislücke bei
-Ausnahmen und vereinfacht gleichzeitig die semantische Architektur:
-
-- Ausschlüsse funktionieren sowohl nach als auch vor einer trennbaren
-  Verbpartikel: „Schalte alle Lichter aus außer dem Küchenlicht“ und
-  „Schalte alle Lichter außer dem Küchenlicht aus“ sind gleichbedeutend.
-- Neben `außer` werden auch die ASR-Schreibweise `ausser` und „mit Ausnahme
-  von“ sicher verarbeitet. Eine nicht auflösbare Ausnahme kann niemals zu
-  einem unbeschränkten Befehl für alle Geräte herabgestuft werden.
-- Dieselbe Ausschlusslogik gilt für direkte Befehle und beim Erstellen von
-  Automationen.
-- Direkte Befehle und Automationsaktionen verwenden jetzt dasselbe zentrale
-  Kompositions-Gate. Dadurch funktionieren additive Formulierungen mit
-  „außerdem“ in beiden Pfaden konsistent.
-- Vergangenheitsformen wie „Spielte das Radio?“ werden nicht mehr anhand des
-  aktuellen Home-Assistant-Zustands beantwortet.
-- Reine Zwischenrepräsentationen ohne Produktionsleser wurden entfernt. Die
-  tatsächlich genutzte Entity-Auflösung bleibt als schlankerer gemeinsamer
-  Pfad erhalten.
-- Eine neue Wortstellungs-Matrix prüft Ausschlüsse domänenübergreifend und
-  ist Teil des blockierenden Pyright-Strict-Scope.
-
-## Was ist in Version 4.49 neu?
-
-Version 4.49 erweitert HomeIntent in allen verbliebenen Bereichen des lokalen
-Sprachverständnisses:
-
-- Ein neuer HA-freier `CompositionalPlan` beschreibt gemeinsame Prädikate,
-  ausdrücklich genannte Ziele und atomare Ausführung, bevor ein Serviceplan
-  entstehen darf.
-- Die deutsche Morphologie liefert zusätzlich konservative Wortstämme,
-  Kasushinweise, Tokenpositionen und trennbare Verbpartikeln.
-- Korrekturen können sowohl Orte als auch konkrete Geräte austauschen:
-  „Nein, nicht Küchenlicht, sondern Flurlicht“ behält die geprüfte Aktion bei.
-- Automationen lassen sich semantischer bearbeiten. „Entferne die
-  Zeitbedingung“ sucht genau eine passende Bedingung und zeigt vor jeder
-  Änderung eine Vorschau.
-- Fehlerantworten unterscheiden nun genauer zwischen einem unbekannten Ziel
-  und einem gefundenen Gerät ohne unterstützte Fähigkeit.
-- Wettervorhersagen aus vorhandenen HA-Attributen, Batteriegrenzen und eine
-  lokale Hausproblem-Zusammenfassung wurden ergänzt.
-- HomeIntent kann bestätigte persönliche Aliase lernen: „Mit Bürolicht meine
-  ich Schreibtischlampe“. Die Regel wird erst nach Ja lokal in der Integration
-  gespeichert, ist sichtbar und über die Optionen wieder löschbar.
-- Der mehrstufige Evaluationskorpus prüft jetzt auch gemeinsame Aktionen und
-  konkrete Korrekturen. Das Benchmark-Skript unterstützt JSON-Ausgabe,
-  frei wählbare Entity-Skalen und ein gerätespezifisches P95-Latenzbudget.
-
-## Was ist in Version 4.48 neu?
-
-Version 4.48 führt die in 4.47 begonnene semantische Vereinheitlichung bis in
-Geräteauflösung, Dialog, Zeitfragen, Automationen und Antworten fort:
-
-- Ein kanonischer Entity-Resolver ist jetzt die gemeinsame Fassade für direkte
-  Befehle, Abfragen, Bedingungen, Trigger und Automationsaktionen.
-- Ein gemeinsames Prädikat kann mehrere ausdrücklich benannte Geräte atomar
-  steuern, zum Beispiel „Schalte Küchenlicht und Flurlicht aus“. Sobald ein
-  Ziel nicht sicher ausführbar ist, wird nichts davon ausgeführt.
-- Der Dialog speichert den letzten verstandenen Zug als zusammenhängenden
-  semantischen Snapshot. Referenzen, Anschlussfragen und Erklärungen greifen
-  damit auf dieselbe Bedeutung zurück.
-- Natürliche Verlaufsfragen wie „Wie lange lief der Saugroboter gestern?“ oder
-  „Wie oft spielte das Radio gestern?“ werden rein lesend über den Recorder
-  beantwortet.
-- Automationen unterstützen ebenfalls eine gemeinsame Aktion für mehrere
-  benannte Geräte. Nicht schaltbare Domänen wie Sensoren werden dabei strikt
-  abgelehnt.
-- Zustandsantworten unterscheiden ausdrücklich zwischen wahr, falsch und nicht
-  sicher bestimmbar. Fehlende Daten können dadurch nicht zu einem erfundenen
-  „Nein“ werden.
-
-## Was ist in Version 4.47 neu?
-
-Version 4.47 beginnt die Vereinheitlichung des allgemeinen
-Sprachverständnisses. Ein neues HA-freies `SemanticTurn`-Modell bündelt
-Satzart, Modalität, Negation, Zeitperspektive, Teilsätze, Koordination,
-Referenzen, Quantoren und lexikalische Semantik bereits am zentralen
-Engine-Einstieg.
-
-Die lesende Entity-Auflösung verwendet nun einen kanonischen Resolver mit
-explizitem Ergebnisstatus und Auflösungsevidenz. Eine leichte deutsche
-Morphologiesicht markiert unter anderem Pronomen, Quantoren, Konnektoren,
-Negationen und Zahlen, ohne ein Modell oder eine externe Laufzeitabhängigkeit.
-
-Der kuratierte Multi-Turn-Evaluationskorpus wurde von 21 auf 43 Fälle
-erweitert. Erwartungen können pro Gesprächszug geprüft werden; Dialog,
-Referenz, Negation, Gruppen, Zeit, Mehrdeutigkeit sowie Frage-/Befehlssicherheit
-sind verpflichtende Dimensionen des Release-Gates.
-
-## Was ist in Version 4.46 neu?
-
-Version 4.46 schließt eine sicherheitsrelevante Grenze zwischen Fragen und
-Befehlen. Verbfragen wie „Spielt das Radio?“, „Pausiert das Radio?“ oder
-„Läuft der Saugroboter?“ bleiben jetzt in allen Ausführungspfaden strikt
-lesend. Zustände werden mit `Ja`, `Nein` oder einer ehrlichen unbekannten
-Antwort ausgewertet, statt einen nicht ableitbaren Zustand zu verneinen.
-
-Der Dialogkontext versteht außerdem natürliche Anschlussfragen:
-
-```text
-Spielt das Radio Atlas?
-Läuft es noch?
-Und das Radio Birke?
-Und im Wohnzimmer?
-Und der andere?
-Woher weißt du das?
-```
-
-Gruppenfragen, negierte Fragen und konkrete Mehrdeutigkeits-Rückfragen sind
-ebenfalls abgedeckt. Eine neue Sicherheitsmatrix prüft 1.536 Kombinationen
-aus zwölf Domänen, acht Frageformen, Zuständen, Namen und Füllpartikeln. Die
-Wahrheitsprüfung fachlich sinnvoller Fragen bleibt davon getrennt.
-
-## Was ist in Version 4.45 neu?
-
-Version 4.45 macht den Einrichtungszustand direkt über Assist prüfbar:
-
-```text
-Ist HomeIntent bereit?
-Welche Geräte kannst du steuern?
-Welche Geräte kannst du nicht steuern?
-Welche Geräte haben keinen Bereich?
-Warum kannst du die Garagensirene nicht steuern?
-```
-
-Der Audit wertet ausschließlich die für diesen Conversation-Turn
-freigegebenen Entity-Snapshots aus. Er nennt Anzahlen, fehlende
-Bereichszuordnungen und noch nicht unterstützte Domänen, ohne Zustände oder
-Entity-IDs aus einem anderen Sichtbarkeitsbereich offenzulegen. Auch dieser
-Pfad ist strikt lesend.
-
-Die Zielauflösung für Fähigkeits- und Optionsfragen liegt nun in einem
-gemeinsamen HA-freien Modul. Ein zusätzlicher Driftschutz prüft, dass jede für
-Automationen freigegebene Operation eine Vorschau und bekannte Datenfelder
-besitzt und keine Hochrisiko-Domäne versehentlich in das Register gelangt.
-Vier weitere Module gehören jetzt zum blockierenden Pyright-Strict-Scope.
-
-## Was ist in Version 4.44 neu?
-
-Version 4.44 ergänzt lokale Hauswissensfragen, die ausschließlich aus dem
-aktuellen Home-Assistant-Zustand beantwortet werden:
-
-```text
-Wie spät ist es?
-Welches Datum haben wir?
-Wer ist zuhause?
-Ist Philipp zuhause?
-Wie ist das Wetter?
-Wann geht die Sonne unter?
-Welche Szenen gibt es?
-Welche Quellen hat der Fernseher im Wohnzimmer?
-Welche Modi hat die Heizung im Büro?
-Was kann der Fernseher im Wohnzimmer?
-Was kannst du?
-```
-
-Wetterwerte, Anwesenheit, Sonnenzeiten, Optionen und Fähigkeiten werden nicht
-geraten, sondern aus den tatsächlich vorhandenen Entities und Attributen
-gelesen. Mehrere mögliche Ziele führen zu einer Rückfrage. Diese Antworten
-sind technisch als `QUERY_ANSWER` markiert und erzeugen weder einen
-`ServiceCallPlan` noch einen schreibenden Home-Assistant-Aufruf.
-
-## Was ist in Version 4.43 neu?
-
-Version 4.43 erweitert den Gesprächskontext auf alle bereits sicher
-unterstützten Geräteoperationen. Nach einem eindeutig aufgelösten Ziel sind
-dadurch kurze, natürliche Ergänzungen möglich, ohne das Gerät zu wiederholen:
-
-```text
-Du: Stelle die Heizung im Büro auf 21 Grad.
-Du: Und jetzt auf Automatik.
-
-Du: Wähle beim Heizprofil Komfort.
-Du: Und jetzt Eco.
-
-Du: Stelle den Luftbefeuchter im Bad ein.
-Du: Und auf 45 Prozent Luftfeuchtigkeit.
-```
-
-Die Folgeäußerung wird nicht als eigener Sonderfall implementiert. HomeIntent
-setzt den bereits exakt aufgelösten Kontext mit der neuen Operation zusammen
-und lässt das Ergebnis erneut durch denselben Geräte-, Werte-, Capability-
-und Sicherheitsparser laufen. Nennt der Nutzer ein anderes bekanntes Gerät,
-wird der alte Kontext nicht verwendet.
-
-Mehrzielaktionen behalten nun außerdem alle kontrollierten Entities im
-Dialog- und Undo-Kontext. Auch koordinierte Folgeklauseln wie „Mach das Licht
-im Wohnzimmer an und im Schlafzimmer auch“ können die vorherige Aktion
-übernehmen; vor der Ausführung muss weiterhin der gesamte Plan gültig sein.
-
-## Was ist in Version 4.42 neu?
-
-Version 4.42 verwendet für direkte Befehle und Automationsaktionen dieselbe
-geprüfte Operationsschicht. Dadurch lassen sich nicht nur Licht- und
-Rollladenaktionen, sondern auch erweiterte Gerätefunktionen zuverlässig
-zeitversetzt oder durch einen Zustand auslösen, zum Beispiel:
-
-```text
-Pausiere in 30 Minuten den Medienplayer im Wohnzimmer.
-Schicke morgen um 8 Uhr den Saugroboter zur Ladestation.
-Wenn das Fenster geöffnet wird, pausiere den Saugroboter.
-Aktiviere am Samstag um 20 Uhr die Szene Filmabend.
-```
-
-Die Erweiterung ist keine Freigabe beliebiger Home-Assistant-Dienste. Ein
-geschlossenes Register legt fest, welche Kombination aus Domäne, Aktion und
-Daten zulässig ist. Der Validator und der YAML-Generator prüfen dieses
-Register unabhängig voneinander. Exakte Entity-IDs bleiben bis zur erzeugten
-Automation erhalten; technische Serviceparameter erscheinen in der Vorschau
-als verständliche deutsche Aktion.
-
-Besonders riskante Aktionen wie das Entriegeln eines Schlosses, Alarmaktionen,
-beliebige Gruppenaufrufe und Tastendrücke werden nicht automatisch in eine
-Automation übernommen. Ihre bestehenden Bestätigungs- und
-Sicherheitsgrenzen bleiben erhalten.
-
-## Was ist in Version 4.41 neu?
-
-Version 4.41 erweitert die lesende Seite des semantischen Compilers. Neben
-Licht, Schaltern, Rollläden und Thermostaten beantwortet HomeIntent nun auch
-Zustandsfragen zu Medienplayern, Saugrobotern, Ventilatoren,
-Luftbefeuchtern, Warmwasserbereitern, Ventilen, Mährobotern und Helfern.
-
-Die elliptische Befehlserkennung wird dabei aus tatsächlich registrierten
-Domänen-Aktions-Paaren aufgebaut. Zustandsfragen wie „Ist das Radio an?“ oder
-„Welche Ventilatoren sind aus?“ können deshalb nicht mehr durch ein
-gleichlautendes Befehlswort verdeckt werden. Abfragen erzeugen weiterhin nie
-einen schreibenden Serviceplan.
-
-## Was ist in Version 4.40 neu?
-
-Version 4.40 erweitert den lokalen semantischen Compiler über die bisherigen
-Kerndomänen hinaus. Licht, Schalter, Ventilator, Rollladen, Heizung,
-Medienplayer, Saugroboter, Luftbefeuchter und Ventile werden in einer
-gemeinsamen, kompositionalen Sprachschicht geprüft.
-
-Dabei wurden keine Listen vollständiger Sätze hinzugefügt. Ein HA-freies
-Operationsregister beschreibt stattdessen unabhängig voneinander:
-
-- Gerätebegriffe und ihre deutschen Formen,
-- Aktionen wie Ein-/Ausschalten, Öffnen/Schließen, Starten, Pausieren und
-  Stoppen,
-- die zulässigen Kombinationen aus Domäne und Aktion sowie
-- das daraus entstehende interne Intent.
-
-Dadurch gelten neue sprachliche Hüllen, Füllpartikel und Wortstellungen für
-alle registrierten Domänen zugleich. Beispielsweise führen diese Aussagen
-zum gleichen geprüften Medienbefehl:
-
-```text
-Starte die Wiedergabe auf dem Medienplayer Atlas.
-Der Medienplayer Atlas soll die Wiedergabe starten.
-Ich hätte gerne auf dem Medienplayer Atlas die Wiedergabe gestartet.
-Bitte auf dem Medienplayer Atlas weiterspielen.
-```
-
-Ventile bleiben trotz der allgemeineren Sprachschicht besonders geschützt:
-Die gemeldete Gerätefähigkeit wird geprüft, und die bestehende
-Sicherheitsrichtlinie verlangt weiterhin eine Bestätigung. Alte
-domänenspezifische Parser bleiben vorerst als Kompatibilitätspfad erhalten;
-der neue Compiler ist jedoch zusätzlich unabhängig davon getestet.
-
-Das Vokabular für Lexikon, Sprechakt-Erkennung, Entity-Gruppen und
-Dialogergänzung stammt nun aus einer gemeinsamen Quelle. Das verhindert,
-dass eine neue Gerätebezeichnung nur in einem Teil der Sprachpipeline
-bekannt ist.
-
-## Was ist in Version 4.37 neu?
-
-Version 4.37 bündelt die bisher größte Erweiterung des Projekts:
-
-- freiere Kombination von Aktion, Gerät, Raum, Etage, Menge und Wert,
-- mehrere mit „und“ verbundene Orte,
-- mehrere Ausschlüsse mit „außer“ oder „mit Ausnahme von“,
-- semantische Rückfragen bei fehlendem Ziel, Wert oder genauer Auswahl,
-- Erklärung des zuletzt verstandenen Befehls,
-- erweiterte zeitliche und wiederkehrende Automationen,
-- geführter Dialog zum Erstellen von Automationen,
-- Erinnerungen und Benachrichtigungsziele,
-- umfangreichere Automationsverwaltung einschließlich Rücknahme,
-- Kalender-, Timer- und Aufgabenlistenverwaltung,
-- Recorder-Verlaufsabfragen,
-- Raumbezug des verwendeten Assist-Geräts für „hier“ und „in diesem Raum“,
-- sicheres Rückgängigmachen der letzten reversiblen Geräteaktion,
-- eigene, streng eindeutige Sprach-Aliase,
-- Benutzerfreigaben und nur administrativ steuerbare Ziele,
-- weitere Gerätefähigkeiten,
-- zentrale, konfigurierbare Sicherheitsrichtlinien,
-- getrennte Nur-Lesen-Freigaben und
-- benutzergebundene Bestätigungen.
+Ältere Änderungen stehen in den
+[GitHub-Releases](https://github.com/pquandel2-alt/ha-nlu-engine/releases).
 
 ## Wie HomeIntent Sprache versteht
 
@@ -404,7 +136,7 @@ stillschweigend ignoriert.
 
 ### Natürliche Formulierungen ohne Satzschablonen
 
-Seit Version 4.39.0 analysiert HomeIntent zusätzlich die Art einer Äußerung:
+HomeIntent analysiert zusätzlich die Art einer Äußerung:
 Befehl, Abfrage, Automation, Bestätigung, Korrektur oder Aussage. Außerdem
 werden höfliche Wünsche, hypothetische beziehungsweise unsichere Aussagen,
 Negation und die Rollen einzelner Klauseln unterschieden. Diese Information
@@ -1071,10 +803,10 @@ python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
 ```
 
-Geprüfter Stand von Version 4.56.0:
+Geprüfter Stand von Version 4.57.0:
 
 ```text
-2264 passed, 12 skipped
+2320 passed, 12 skipped
 85 % Gesamt-Coverage
 65 % Coverage für conversation.py
 ```
@@ -1110,7 +842,7 @@ Dadurch können sie dem Parser keine Antworten „beibringen“.
 ![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
 
 Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.50.0. Für echte
+Entwicklungsstands und kein aktueller Nachweis für Version 4.57.0. Für echte
 Zielhardware lässt sich seit 4.49 ein reproduzierbarer JSON-Bericht samt
 P95-Budget erzeugen:
 

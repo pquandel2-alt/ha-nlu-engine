@@ -17,10 +17,7 @@
     "custom_components/ha_nlu/nlu/entity_resolution.py",
     "custom_components/ha_nlu/nlu/grounded_answer.py",
     "custom_components/ha_nlu/nlu/meaning.py",
-    "custom_components/ha_nlu/nlu/verb_state_query.py",
-    "tests/test_exclusion_word_order.py",
-    "tests/test_automation_simulation.py",
-    "tests/test_semantic_metamorphic_invariance.py"
+    "custom_components/ha_nlu/nlu/verb_state_query.py"
   ],
   "reportMissingImports": false
 }

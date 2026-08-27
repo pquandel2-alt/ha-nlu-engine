@@ -77,8 +77,13 @@ class SemanticUtterance:
 
 
 _QUESTION_RE = re.compile(
-    r"^\s*(?:wer|was|wie|wo|wann|warum|wieso|welch\w*|ist|sind|hat|haben|"
+    r"^\s*(?:wer|was|wie|wo|wann|warum|wieso|welch\w*|ist|sind|war|waren|hat|haben|"
     r"gibt|kann|kannst|könnte|koennte)\b",
+    re.I,
+)
+_DELIBERATIVE_QUESTION_RE = re.compile(
+    r"^\s*(?:(?:soll|muss|darf)\s+ich\b|wollen\s+wir\b|"
+    r"ich\s+frage\s+mich\s*,?\s*ob\b)",
     re.I,
 )
 _QUERY_REQUEST_RE = re.compile(
@@ -128,7 +133,11 @@ _NEGATION_RE = re.compile(
 )
 _COMMAND_RE = re.compile(
     r"\b(?:" + regex_union(list(COMMAND_MARKER_EXPRESSIONS))
-    + r"|regel\w*|regle\w*|zeig\w*|sorge\w*|schick\w*|möchte|moechte)\b",
+    + r"|regel\w*|regle\w*|zeig\w*|sorge\w*|schick\w*|"
+    r"find\w*|such\w*|ort\w*|lokalisier\w*|piep\w*|heb\w*|unmute|"
+    r"wähl\w*|waehl\w*|auswähl\w*|auswaehl\w*|send\w*|"
+    r"drück\w*|drueck\w*|"
+    r"möchte|moechte)\b",
     re.I,
 )
 def _elliptical_command_expression() -> str:
@@ -152,7 +161,7 @@ def _elliptical_command_expression() -> str:
 
 _ELLIPTICAL_COMMAND_RE = re.compile(_elliptical_command_expression(), re.I)
 _COPULAR_STATE_QUESTION_RE = re.compile(
-    r"^\s*(?:ist|sind|welch\w*|was\s+(?:ist|macht)|wie\s+ist)\b",
+    r"^\s*(?:ist|sind|war|waren|welch\w*|was\s+(?:ist|macht)|wie\s+ist)\b",
     re.I,
 )
 _DEVICE_NOUN_EXPRESSION = regex_union([
@@ -237,6 +246,8 @@ def analyse_utterance(text: str) -> SemanticUtterance:
     elif _AUTOMATION_RE.search(normalized):
         speech_act = SpeechAct.AUTOMATION
     elif _is_verb_first_device_question(normalized):
+        speech_act = SpeechAct.QUERY
+    elif _DELIBERATIVE_QUESTION_RE.search(normalized):
         speech_act = SpeechAct.QUERY
     # A polite question that contains an executable operation is still a
     # command ("Kannst du das Licht einschalten?").  The generic question
