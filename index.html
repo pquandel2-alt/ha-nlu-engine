@@ -37,7 +37,7 @@
         </linearGradient></defs>
       </svg>
       <span class="brand__text">HomeIntent</span>
-      <span class="brand__ver">4.49</span>
+      <span class="brand__ver">4.57</span>
     </a>
 
     <nav class="nav__links" aria-label="Hauptnavigation">
@@ -70,7 +70,7 @@
     <div class="hero__copy">
       <div class="pill reveal">
         <span class="pill__dot"></span>
-        Version 4.49.0 · 2.235 Tests grün · MIT
+        Version 4.57.0 · 2.320 Tests grün · MIT
       </div>
 
       <h1 class="reveal" style="--d:.05s">
@@ -230,7 +230,7 @@
     <p class="footnote reveal">
       Beispielhaus: 3 Lichter (Küche, Flur, Stehlampe im Wohnzimmer), 2 Rollläden,
       1 Thermostat, 1 Türschloss, 2 Radios. Die gezeigten Ergebnisse entsprechen
-      dem dokumentierten Verhalten von Version 4.49.
+      dem dokumentierten Verhalten von Version 4.57.
     </p>
   </div>
 </section>
@@ -306,7 +306,7 @@
   <div class="wrap">
     <div class="sechead reveal">
       <span class="kicker">Reichweite</span>
-      <h2>27 Domänen.<br>Immer <em>fähigkeitsgeprüft.</em></h2>
+      <h2>24 Domänen.<br>Immer <em>fähigkeitsgeprüft.</em></h2>
       <p class="sechead__sub">
         Die tatsächliche Aktion hängt immer von den Fähigkeiten ab, die das
         jeweilige Home-Assistant-Gerät meldet. Eine Positionsaktion braucht
@@ -320,11 +320,11 @@
     <div class="capsules reveal">
       <div class="glass capsule">
         <h4><span class="capsule__n">01</span> Zustände &amp; Messwerte</h4>
-        <p>Fragen sind strikt lesend und erzeugen niemals einen steuernden Serviceplan. Zustandsantworten unterscheiden <em>wahr</em>, <em>falsch</em> und <em>nicht sicher bestimmbar</em> — fehlende Daten werden nie zu einem erfundenen „Nein“.</p>
+        <p>Fragen sind strikt lesend und erzeugen niemals einen steuernden Serviceplan — auch die heiklen Formen nicht: <em>„Soll ich …?“</em>, <em>„Wollen wir …?“</em>, <em>„War das …?“</em>. Zustandsantworten unterscheiden <em>wahr</em>, <em>falsch</em> und <em>nicht sicher bestimmbar</em> — fehlende Daten werden nie zu einem erfundenen „Nein“.</p>
         <div class="mini">
           <code>Ist im Bad noch Licht an?</code>
           <code>Welche Fenster sind offen?</code>
-          <code>Wie warm ist es im Wohnzimmer?</code>
+          <code>Soll ich das Radio stumm schalten?</code>
         </div>
       </div>
       <div class="glass capsule">
@@ -361,7 +361,7 @@
         </div>
       </div>
       <div class="glass capsule">
-        <h4><span class="capsule__n">06</span> Persönliche Aliase — neu in 4.49</h4>
+        <h4><span class="capsule__n">06</span> Persönliche Aliase</h4>
         <p>HomeIntent kann bestätigte Namen lernen. Die Regel wird erst nach einem ausdrücklichen <em>Ja</em> lokal gespeichert, ist in den Optionen sichtbar und jederzeit löschbar. Kein verstecktes Gedächtnis.</p>
         <div class="mini">
           <code>Mit Bürolicht meine ich Schreibtischlampe.</code>
@@ -380,7 +380,9 @@
       <p class="sechead__sub">
         Sprachverständnis, Auflösung, Validierung, Richtlinie, Vorschau und
         Ausführung sind getrennte, einzeln testbare Stufen. Parser führen niemals
-        selbst einen Home-Assistant-Dienst aus.
+        selbst einen Home-Assistant-Dienst aus. Seit 4.57 passiert <em>jede</em>
+        Geräteroute dieselbe Frage-/Befehls-Sperre — eine Frage kann auf keinem
+        Weg mehr in einer Aktion enden.
       </p>
     </div>
 
@@ -453,8 +455,9 @@
           <span>Gruppen</span><span>Zeit</span><span>Mehrdeutigkeit</span>
           <span>Frage-/Befehlssicherheit</span>
         </div>
-        <p class="mt small">Dazu generative Testmatrizen mit über 2.500 automatisch
-        erzeugten Fällen, die der Produktivcode nie importiert.</p>
+        <p class="mt small">Dazu generative Testmatrizen mit über 5.200 automatisch
+        erzeugten Äußerungen — rund 7.900 Einzelprüfungen, weil ein Teil davon über
+        beide Routen läuft. Der Produktivcode importiert sie nie.</p>
       </div>
     </div>
   </div>
@@ -645,7 +648,7 @@
 <section class="cta">
   <div class="wrap cta__inner reveal">
     <h2>Ein Assistent, dem du<br>den Hausschlüssel <em>geben würdest.</em></h2>
-    <p>Lokal, deterministisch, quelloffen unter MIT. Version 4.49.0.</p>
+    <p>Lokal, deterministisch, quelloffen unter MIT. Version 4.57.0.</p>
     <div class="cta__btns">
       <a class="btn btn--primary btn--lg" href="https://github.com/pquandel2-alt/ha-nlu-engine" target="_blank" rel="noopener">Auf GitHub ansehen</a>
       <a class="btn btn--ghost btn--lg" href="https://my.home-assistant.io/redirect/hacs_repository/?owner=pquandel2-alt&amp;repository=ha-nlu-engine&amp;category=integration" target="_blank" rel="noopener">In HACS öffnen</a>
