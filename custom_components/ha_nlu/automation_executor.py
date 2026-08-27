@@ -1008,9 +1008,10 @@ class AutomationExecutor:
                 if automation.get("id") not in expired_ids
             ]
             present_ids = {
-                automation.get("id")
+                automation_id
                 for automation in original_automations
-                if automation.get("id") in expired_ids
+                if isinstance((automation_id := automation.get("id")), str)
+                and automation_id in expired_ids
             }
             if present_ids:
                 transaction = await self._async_begin_transaction(

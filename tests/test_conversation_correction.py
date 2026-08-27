@@ -68,3 +68,57 @@ def test_explicit_entity_correction_keeps_previous_action(engine):
 
     assert corrected.plan.entity_id == "light.flur"
     assert corrected.plan.service == "turn_on"
+
+
+def test_short_negative_correction_retargets_without_repeating_action(engine):
+    entities = [
+        EntitySnapshot(
+            "light.kueche", "Küchenlicht", "light", "off",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+        EntitySnapshot(
+            "light.flur", "Flurlicht", "light", "off",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+    ]
+    first = engine.match("Mach Küchenlicht an", entities)
+
+    corrected = engine.match_correction_followup(
+        "Nein, das Flurlicht", entities, _context(first)
+    )
+
+    assert corrected.plan.entity_id == "light.flur"
+    assert corrected.plan.service == "turn_on"
+
+
+def test_group_correction_preserves_all_quantifier_for_new_floor(engine):
+    entities = [
+        EntitySnapshot(
+            "light.eg_1", "Küchenlicht", "light", "off",
+            floor_id="eg", floor_name="Erdgeschoss",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+        EntitySnapshot(
+            "light.eg_2", "Flurlicht", "light", "off",
+            floor_id="eg", floor_name="Erdgeschoss",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+        EntitySnapshot(
+            "light.dg_1", "Schlafzimmerlicht", "light", "off",
+            floor_id="dg", floor_name="Dachgeschoss",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+        EntitySnapshot(
+            "light.dg_2", "Badlicht oben", "light", "off",
+            floor_id="dg", floor_name="Dachgeschoss",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+    ]
+    first = engine.match("Schalte alle Lichter im Erdgeschoss an", entities)
+
+    corrected = engine.match_correction_followup(
+        "Nein, ich meinte Dachgeschoss", entities, _context(first)
+    )
+
+    assert corrected.plan.entity_id == ["light.dg_1", "light.dg_2"]
+    assert corrected.plan.service == "turn_on"

@@ -19,8 +19,14 @@ _CORRECTION_RE = re.compile(
     r"^(?:nein[,.]?\s*)?(?:"
     r"nicht\s+.+?\s+sondern\s+|"
     r"(?:ich\s+)?meinte\s+|"
+    r"statt(?:dessen)?\s+|"
     r"nur\s+(?:(?:in\s+der|in\s+dem|im|am)\s+)?"
     r")(?P<location>.+?)\s*[?.!]*$",
+    re.IGNORECASE,
+)
+
+_SHORT_NEGATIVE_CORRECTION_RE = re.compile(
+    r"^nein[,.]?\s+(?P<location>(?!doch\b|nicht\b).+?)\s*[?.!]*$",
     re.IGNORECASE,
 )
 
@@ -44,7 +50,10 @@ class ConversationCorrectionResolver:
         if not previous.entities:
             return None
 
-        match = _CORRECTION_RE.match(normalize(text))
+        normalized = normalize(text)
+        match = _CORRECTION_RE.match(normalized)
+        if match is None:
+            match = _SHORT_NEGATIVE_CORRECTION_RE.match(normalized)
         if match is None:
             return None
         location = match.group("location").strip()
@@ -108,13 +117,35 @@ class ConversationCorrectionResolver:
                 ParseFailureReason.UNKNOWN_ENTITY,
                 f"Dort ist kein passendes Gerät der Art {domain} für Assist freigegeben.",
             )
-        if len(candidates) > 1:
+        preserve_group = (
+            previous.source_frame.quantifier is not None
+            and previous.source_frame.quantifier.kind == "all"
+        )
+        if len(candidates) > 1 and not preserve_group:
             return ClarificationRequest(
                 pending_intent=previous.intent,
                 pending_target=domain,
                 candidates=tuple(candidates),
                 pending_parameters=previous.parameters,
             )
+
+        if preserve_group:
+            parameters = dict(previous.parameters)
+            parameters["location_kind"] = "area" if area_id is not None else "floor"
+            parameters["location_id"] = area_id if area_id is not None else floor_id
+            frame = SemanticFrame(
+                intent=previous.intent,
+                target=TargetReference(text=domain, domain=domain),
+                area=(
+                    AreaReference(text=area_name, area_id=area_id)
+                    if area_id is not None and area_name is not None
+                    else None
+                ),
+                quantifier=previous.source_frame.quantifier,
+                parameters=parameters,
+                source_text=text,
+            )
+            return ParseResult(frame=frame, resolved_entities=candidates)
 
         entity = candidates[0]
         frame = SemanticFrame(

@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum, auto
 
-from .entities import EntitySnapshot, generate_aliases, normalize_for_compare
+from .entities import EntitySnapshot, normalize_for_compare
+from .nlu.entity_resolution import ResolutionStatus, resolve_mentioned_target
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,6 +25,8 @@ class HistoryMetric(Enum):
 class StateHistoryMetric(Enum):
     COUNT = auto()
     DURATION = auto()
+    OCCURRED = auto()
+    LAST = auto()
 
 
 @dataclass(frozen=True)
@@ -96,24 +99,15 @@ def _history_state_target(
 
 
 def _mentioned_entity(text: str, entities: list[EntitySnapshot]) -> EntitySnapshot | None:
-    value = normalize_for_compare(text)
-    matches: list[tuple[int, EntitySnapshot]] = []
-    for entity in entities:
-        names = (entity.friendly_name, *entity.aliases, *(a.text for a in generate_aliases(entity)))
-        score = max(
-            (len(normalized) for name in names if (normalized := normalize_for_compare(name)) and normalized in value),
-            default=0,
-        )
-        if score:
-            matches.append((score, entity))
-    if not matches:
-        return None
-    top = max(score for score, _ in matches)
-    selected = [entity for score, entity in matches if score == top]
-    return selected[0] if len(selected) == 1 else None
+    domains = frozenset(entity.domain for entity in entities)
+    result = resolve_mentioned_target(text, entities, domains)
+    return result.entity if result.status is ResolutionStatus.RESOLVED else None
 
 
 def _time_range(value: str, now: datetime) -> tuple[datetime, datetime, str, str] | None:
+    if re.search(r"\bvorgestern\b", value):
+        end = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+        return end - timedelta(days=1), end, "hour", "vorgestern"
     if re.search(r"\bgestern\b", value):
         end = now.replace(hour=0, minute=0, second=0, microsecond=0)
         return end - timedelta(days=1), end, "hour", "gestern"
@@ -127,6 +121,10 @@ def _time_range(value: str, now: datetime) -> tuple[datetime, datetime, str, str
         return this_week - timedelta(days=7), this_week, "day", "letzte Woche"
     if re.search(r"\b(?:dieser|diesen|aktuellen?)\s+monat\b", value):
         return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0), now, "day", "diesen Monat"
+    if re.search(r"\b(?:letzte[snm]?|vergangene[snm]?)\s+24\s+stunden\b", value):
+        return now - timedelta(hours=24), now, "hour", "in den letzten 24 Stunden"
+    if re.search(r"\b(?:zuletzt|letzte[snm]?\s+sieben\s+tage)\b", value):
+        return now - timedelta(days=7), now, "hour", "in den letzten sieben Tagen"
     return None
 
 
@@ -149,7 +147,12 @@ def parse_history_query(
             if "woche" in value and re.search(r"\b(?:diese|aktuelle)\w*\b", value)
             else None
         )
-        if entity is not None and periods is not None and all(periods):
+        if (
+            entity is not None
+            and periods is not None
+            and periods[0] is not None
+            and periods[1] is not None
+        ):
             metric = (
                 HistoryMetric.CHANGE
                 if re.search(r"\b(?:verbraucht|verbrauch|erzeugt|produziert)\w*\b", value)
@@ -162,6 +165,10 @@ def parse_history_query(
         if re.search(r"\b(?:wie oft|anzahl)\b", value)
         else StateHistoryMetric.DURATION
         if re.search(r"\b(?:wie lange|dauer)\b", value)
+        else StateHistoryMetric.LAST
+        if re.search(r"\b(?:wann\b.*\bzuletzt|zuletzt\b.*\bwann|wann\s+wurde)\b", value)
+        else StateHistoryMetric.OCCURRED
+        if re.search(r"^(?:war|waren|hat|haben)\b", value)
         else None
     )
     if state_metric is not None and time_range is not None:
@@ -368,6 +375,33 @@ def render_state_history_result(
         return (
             f"{query.entity.friendly_name} war {query.period_label} "
             f"{count}-mal {query.target_label}."
+        )
+
+    if query.metric is StateHistoryMetric.OCCURRED:
+        occurred = any(_state_value(row) in query.target_states for row in rows)
+        return (
+            f"Ja, {query.entity.friendly_name} war {query.period_label} {query.target_label}."
+            if occurred
+            else f"Nein, {query.entity.friendly_name} war {query.period_label} nicht {query.target_label}."
+        )
+
+    if query.metric is StateHistoryMetric.LAST:
+        matching_times = [
+            changed
+            for row in rows
+            if _state_value(row) in query.target_states
+            and (changed := _state_time(row)) is not None
+        ]
+        if not matching_times:
+            return (
+                f"{query.entity.friendly_name} war {query.period_label} "
+                f"nicht {query.target_label}."
+            )
+        last = max(matching_times)
+        return (
+            f"{query.entity.friendly_name} war zuletzt am "
+            f"{last.astimezone(query.end.tzinfo).strftime('%d.%m. um %H:%M Uhr')} "
+            f"{query.target_label}."
         )
 
     total_seconds = 0.0

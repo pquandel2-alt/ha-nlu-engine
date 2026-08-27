@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -63,6 +63,22 @@ def test_binary_state_history_count_and_duration_are_composed():
     assert duration is not None and duration.metric is StateHistoryMetric.DURATION
 
 
+def test_binary_state_history_occurrence_and_last_time_are_composed():
+    window = EntitySnapshot(
+        "binary_sensor.window", "Badezimmer Fenster", "binary_sensor", "off"
+    )
+    occurred = parse_history_query(
+        "War das Badezimmer Fenster gestern offen?", [window], NOW
+    )
+    last = parse_history_query(
+        "Wann war das Badezimmer Fenster zuletzt offen?", [window], NOW
+    )
+
+    assert occurred is not None and occurred.metric is StateHistoryMetric.OCCURRED
+    assert last is not None and last.metric is StateHistoryMetric.LAST
+    assert last.period_label == "in den letzten sieben Tagen"
+
+
 @pytest.mark.parametrize(
     ("text", "entity", "states", "label"),
     (
@@ -121,6 +137,29 @@ def test_state_history_result_counts_transitions_and_sums_duration():
         ]
     }
     assert "2-mal offen" in render_state_history_result(query, rows)
+
+
+def test_state_history_result_answers_occurrence_and_last_time():
+    window = EntitySnapshot(
+        "binary_sensor.window", "Badezimmer Fenster", "binary_sensor", "off"
+    )
+    occurred = parse_history_query(
+        "War das Badezimmer Fenster gestern offen?", [window], NOW
+    )
+    last = parse_history_query(
+        "Wann war das Badezimmer Fenster zuletzt offen?", [window], NOW
+    )
+    assert occurred is not None and last is not None
+    rows = {
+        window.entity_id: [
+            {"state": "off", "last_changed": NOW - timedelta(hours=5)},
+            {"state": "on", "last_changed": NOW - timedelta(hours=3)},
+            {"state": "off", "last_changed": NOW - timedelta(hours=2)},
+        ]
+    }
+
+    assert "Ja," in render_state_history_result(occurred, rows)
+    assert "09:00 Uhr" in render_state_history_result(last, rows)
 
 
 def test_history_result_is_aggregated_defensively():

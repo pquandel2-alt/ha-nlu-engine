@@ -74,7 +74,7 @@ from .automation_condition_parser import AutomationConditionParser
 from .entities import EntitySnapshot
 from .nlu.entity_resolution import (
     ResolutionStatus,
-    resolve_entity_scored,
+    resolve_named_target,
 )
 from .nlu.composition import build_compositional_plan, project_target
 from .nlu.action_model import ActionGroup, ActionModel, ActionType, ExecutionMode
@@ -344,7 +344,7 @@ class AutomationActionParser:
         name = _strip_locative_prepositions(str(name_slot.value))
         if name.strip().lower() in _PRONOUN_WORDS:
             return AutomationActionParser._build_pronoun_target(context)
-        resolved = resolve_entity_scored(name, context.entities, index=context.index)
+        resolved = resolve_named_target(name, context.entities)
         if resolved.status is not ResolutionStatus.RESOLVED or resolved.entity is None:
             return None  # not found or ambiguous - never guess (Regel 4)
         entity = resolved.entity
@@ -423,7 +423,7 @@ class AutomationActionParser:
         name_slot = slots.get("name")
         if name_slot is not None:
             exclude_name = _strip_locative_prepositions(str(name_slot.value))
-            resolved = resolve_entity_scored(exclude_name, context.entities, index=context.index)
+            resolved = resolve_named_target(exclude_name, context.entities)
             if resolved.status is not ResolutionStatus.RESOLVED or resolved.entity is None:
                 return None  # exclusion target doesn't resolve unambiguously - never guess
             if resolved.entity not in matches:

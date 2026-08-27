@@ -1060,15 +1060,25 @@ class NluEngine:
             ):
                 return None
             results.append(result)
+        actionable_commands = tuple(
+            result.command
+            for result in results
+            if result.plan is not None and result.command is not None
+        )
+        query_commands = tuple(
+            result.command
+            for result in results
+            if result.plan is None and result.command is not None
+        )
         action_ids = {
             entity.entity_id
-            for result in results if result.plan is not None
-            for entity in result.command.entities
+            for command in actionable_commands
+            for entity in command.entities
         }
         query_ids = {
             entity.entity_id
-            for result in results if result.plan is None
-            for entity in result.command.entities
+            for command in query_commands
+            for entity in command.entities
         }
         if action_ids & query_ids:
             return None
@@ -1433,7 +1443,7 @@ class NluEngine:
                 ),
             )
 
-        automation = match.matched[0]
+        automation = next(iter(match.matched))
         return AutomationDeletionMatchResult(
             automation=automation,
             response_text=f'Soll die Automation "{_automation_label(automation)}" gelöscht werden?',
@@ -1502,7 +1512,7 @@ class NluEngine:
                 ),
             )
 
-        automation = match.matched[0]
+        automation = next(iter(match.matched))
         return AutomationToggleMatchResult(
             automation=automation,
             enable=match.enable,

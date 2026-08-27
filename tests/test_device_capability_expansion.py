@@ -48,3 +48,26 @@ def test_humidifier_and_water_heater_modes_come_from_attributes():
     operation = match_device_control("Stelle Warmwasserboiler auf performance Betrieb", [heater])
     assert mode.plan.data == {"mode": "sleep"}
     assert operation.plan.data == {"operation_mode": "performance"}
+
+
+def test_media_mute_and_vacuum_locate_use_native_services():
+    player = EntitySnapshot(
+        "media_player.kitchen", "Küchenradio", "media_player", "playing"
+    )
+    vacuum = EntitySnapshot(
+        "vacuum.helper", "Saugroboter Helfer", "vacuum", "docked"
+    )
+
+    mute = match_device_control("Schalte das Küchenradio stumm", [player])
+    unmute = match_device_control(
+        "Hebe die Stummschaltung vom Küchenradio auf", [player]
+    )
+    locate = match_device_control("Lass den Saugroboter Helfer piepen", [vacuum])
+
+    assert (mute.plan.service, mute.plan.data) == (
+        "volume_mute", {"is_volume_muted": True}
+    )
+    assert (unmute.plan.service, unmute.plan.data) == (
+        "volume_mute", {"is_volume_muted": False}
+    )
+    assert locate.plan.service == "locate"

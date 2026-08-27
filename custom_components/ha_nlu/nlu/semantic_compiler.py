@@ -37,7 +37,27 @@ from .semantic_location import (
     resolve_coordinated_locations,
     resolve_semantic_location,
 )
-from .semantic_state import QUERYABLE_STATE_DOMAINS, supports_state_predicate
+from .semantic_state import (
+    QUERYABLE_STATE_DOMAINS,
+    SemanticState,
+    supports_state_predicate,
+)
+
+
+def _device_class_targets(
+    analysis: SemanticAnalysis,
+) -> list[tuple[str, str | None]]:
+    """Narrow lexicon object values to typed domain/device-class pairs."""
+    targets: list[tuple[str, str | None]] = []
+    for value in analysis.values(SemanticKind.DEVICE_CLASS):
+        if not isinstance(value, tuple) or len(value) != 2:
+            continue
+        domain, device_class = value
+        if isinstance(domain, str) and (
+            device_class is None or isinstance(device_class, str)
+        ):
+            targets.append((domain, device_class))
+    return targets
 
 
 @dataclass(frozen=True)
@@ -573,14 +593,18 @@ class SemanticQueryCompiler:
         ):
             return None
 
-        targets = list(analysis.values(SemanticKind.DEVICE_CLASS))
+        targets = _device_class_targets(analysis)
         targets.extend(
             (domain, None)
             for domain in analysis.values(SemanticKind.DOMAIN)
             if isinstance(domain, str)
         )
         targets = list(dict.fromkeys(targets))
-        states = list(analysis.values(SemanticKind.STATE))
+        states = [
+            value
+            for value in analysis.values(SemanticKind.STATE)
+            if isinstance(value, SemanticState)
+        ]
         if len(targets) != 1 or len(states) > 1:
             return None
         domain, device_class = targets[0]

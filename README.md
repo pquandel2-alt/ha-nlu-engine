@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.50.0**
+- Aktuelle Version: **4.56.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -41,6 +41,34 @@ HomeIntent benötigt für die Sprachverarbeitung:
 Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
+
+## Was ist in Version 4.56 neu?
+
+Die Releases 4.51 bis 4.56 stärken die gemeinsame Sprachbasis und ergänzen
+neue, vollständig lokale Fähigkeiten:
+
+- Geräte werden in direkten Befehlen, Automationsaktionen und Verlaufsfragen
+  über dieselbe bewertete Entity-Auflösung gefunden. Gleich gute Treffer
+  bleiben mehrdeutig und werden nicht geraten.
+- Füllwörter und typische Spracherkennungs-Hesitationen wie „also“, „okay“
+  oder „ähm“ verändern die erkannte Bedeutung eines ansonsten gleichen
+  Befehls nicht. Metamorphische Tests prüfen diese Invarianz über mehrere
+  Satzformen und Domänen.
+- Korrekturen funktionieren natürlicher: Neben „Ich meinte das Flurlicht“
+  versteht HomeIntent auch „Nein, das Flurlicht“ und „Stattdessen das
+  Flurlicht“. Bei einem vorherigen Alle-Befehl bleibt die Gruppensemantik
+  beim Wechsel von Raum oder Etage erhalten.
+- Recorder-Abfragen beantworten zusätzlich „War das Badezimmerfenster
+  gestern offen?“ und „Wann war es zuletzt offen?“. Die Abfragen sind rein
+  lesend und melden fehlende Verlaufsdaten ausdrücklich.
+- „Was würde die Automation für Küchenlicht jetzt tun?“ führt eine sichere
+  Trockenprobe aus: unterstützte Bedingungen werden gegen den aktuellen
+  Snapshot geprüft und Aktionen verständlich beschrieben. Es wird weder ein
+  Trigger ausgelöst noch ein Home-Assistant-Dienst ausgeführt.
+- Medienplayer lassen sich stumm und wieder hörbar schalten. Ein ausgewählter
+  Saugroboter kann über sein natives Suchsignal lokalisiert werden.
+- Weitere zentrale Laufzeitdateien sind Teil der blockierenden
+  Pyright-Strict-Prüfung.
 
 ## Was ist in Version 4.50 neu?
 
@@ -1043,12 +1071,12 @@ python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
 ```
 
-Geprüfter Stand von Version 4.50.0:
+Geprüfter Stand von Version 4.56.0:
 
 ```text
-2253 passed, 12 skipped
-84 % Gesamt-Coverage
-64 % Coverage für conversation.py
+2264 passed, 12 skipped
+85 % Gesamt-Coverage
+65 % Coverage für conversation.py
 ```
 
 Zusätzlich wurden ausgeführt:

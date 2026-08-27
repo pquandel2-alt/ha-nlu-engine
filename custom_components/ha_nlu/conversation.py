@@ -45,6 +45,7 @@ from .automation_management import (
     parse_automation_management,
     select_automation_management,
 )
+from .automation_simulation import render_automation_simulation
 from .automation_structure_edit import (
     AutomationEditOperation,
     AutomationStructureEditRequest,
@@ -2713,6 +2714,7 @@ class NluConversationEntity(
             AutomationManagementKind.CONTROLS_ENTITY,
             AutomationManagementKind.DETAIL,
             AutomationManagementKind.DIAGNOSE,
+            AutomationManagementKind.SIMULATE,
         }:
             if not selection.automations:
                 response.async_set_speech("Ich finde keine passende HomeIntent-Automation.")
@@ -2745,6 +2747,12 @@ class NluConversationEntity(
                         + "Ohne gespeicherte Home-Assistant-Ablaufverfolgung kann ich die "
                         "genaue Ursache nicht beweisen; häufig sind Auslöser nicht eingetreten "
                         "oder eine Bedingung war zu diesem Zeitpunkt falsch."
+                    )
+                elif request.kind is AutomationManagementKind.SIMULATE:
+                    item = selection.automations[0]
+                    response.async_set_speech(
+                        f"Simulation für {_automation_label(item)}: "
+                        + render_automation_simulation(item, entities)
                     )
                 elif request.kind is AutomationManagementKind.DETAIL:
                     item = selection.automations[0]

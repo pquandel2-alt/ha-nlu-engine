@@ -49,6 +49,10 @@ _DEGREE_SYMBOL_RE = re.compile(r"(\d)\s*°")
 # other words are prefixes of each other's tokens. "bitte" excluded, see
 # module docstring.
 _FILLER_RE = re.compile(r"\b(mal|ma|doch|kurz)\b", re.IGNORECASE)
+_HESITATION_RE = re.compile(r"(?<!\w)(?:äh+m*|eh+m+)(?!\w)[,;:]?", re.I)
+_LEADING_DISCOURSE_FILLER_RE = re.compile(
+    r"^\s*(?:(?:also|okay|ok|gut|nun|na\s+gut)\s*[,;:]?\s+)+", re.I
+)
 _NON_DEGREE_FILLER_RE = re.compile(
     r"\b(?:ein\s+bisschen|etwas)\b"
     r"(?!\s+(?:heller|dunkler|wärmer|kälter|lauter|leiser|schneller|langsamer)\b)",
@@ -201,6 +205,8 @@ _WHITESPACE_RE = re.compile(r"\s+")
 
 
 def normalize(text: str) -> str:
+    text = _LEADING_DISCOURSE_FILLER_RE.sub("", text)
+    text = _HESITATION_RE.sub(" ", text)
     text = _PERCENT_SYMBOL_RE.sub(r"\1 Prozent", text)
     text = _DEGREE_SYMBOL_RE.sub(r"\1 Grad", text)
     text = _POLITE_MODAL_RE.sub("kannst du", text)

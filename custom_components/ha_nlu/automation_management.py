@@ -28,6 +28,7 @@ class AutomationManagementKind(Enum):
     DUPLICATE = auto()
     PAUSE_UNTIL = auto()
     DIAGNOSE = auto()
+    SIMULATE = auto()
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,16 @@ _RUN_COUNTS = {
 def parse_automation_management(text: str) -> AutomationManagementRequest | None:
     """Recognize the bounded management vocabulary without fuzzy matching."""
     normalized = re.sub(r"[?.!]", "", text).strip()
+    simulation = re.search(
+        r"\b(?:simulier\w*|was\s+würde)\s+(?:die\s+)?automation"
+        r"(?:\s+(?:von|für|fuer|zu))?\s+(?P<name>.+?)(?:\s+jetzt\s+tun)?$",
+        normalized, re.IGNORECASE,
+    )
+    if simulation is not None:
+        return AutomationManagementRequest(
+            AutomationManagementKind.SIMULATE,
+            entity_name=simulation.group("name").strip(),
+        )
     duplicate = re.search(
         r"\b(?:duplizier\w*|kopier\w*)\s+(?:die\s+)?automation(?:\s+(?:von|für|fuer|zu)\s+)?(?P<name>.+)$",
         normalized, re.IGNORECASE,
@@ -283,6 +294,7 @@ def select_automation_management(
             AutomationManagementKind.DETAIL, AutomationManagementKind.DUPLICATE,
             AutomationManagementKind.PAUSE_UNTIL,
             AutomationManagementKind.DIAGNOSE,
+            AutomationManagementKind.SIMULATE,
         }
         else tuple(automation for automation in homeintent if not automation.once)
         if request.kind is AutomationManagementKind.SET_MAX_RUNS

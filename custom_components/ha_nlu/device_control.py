@@ -6,7 +6,11 @@ import re
 from dataclasses import dataclass
 
 from .entities import EntitySnapshot, normalize_for_compare
-from .nlu.entity_resolution import ResolveStatus, resolve_entity
+from .nlu.entity_resolution import (
+    ResolutionStatus,
+    resolve_mentioned_target,
+    resolve_named_target,
+)
 from .nlu.context import ConversationContext
 from .nlu.normalize import normalize
 from .nlu.semantic_utterance import SpeechAct, analyse_utterance
@@ -38,12 +42,10 @@ def _clean(text: str) -> str:
 def _resolve_domain(
     name: str, entities: list[EntitySnapshot], domain: str
 ) -> EntitySnapshot | None:
-    result = resolve_entity(
-        name.strip(), [entity for entity in entities if entity.domain == domain]
-    )
-    if result.status is not ResolveStatus.OK or result.entity is None:
+    result = resolve_named_target(name, entities, frozenset({domain}))
+    if result.status is not ResolutionStatus.RESOLVED or result.entity is None:
         return None
-    return result.entity if result.entity.domain == domain else None
+    return result.entity
 
 
 def _result(
@@ -69,28 +71,12 @@ def _mentioned_entity(
     domains: frozenset[str],
 ) -> EntitySnapshot | None:
     """Resolve one explicitly mentioned registry name independent of order."""
-    normalized = normalize_for_compare(text)
-    ranked: list[tuple[int, EntitySnapshot]] = []
-    for entity in entities:
-        if entity.domain not in domains:
-            continue
-        names = (entity.friendly_name, *entity.aliases)
-        best = max(
-            (
-                len(candidate_norm)
-                for name in names
-                if (candidate_norm := normalize_for_compare(name))
-                and re.search(rf"(?<!\w){re.escape(candidate_norm)}(?!\w)", normalized)
-            ),
-            default=0,
-        )
-        if best:
-            ranked.append((best, entity))
-    if not ranked:
-        return None
-    top = max(score for score, _ in ranked)
-    matches = [entity for score, entity in ranked if score == top]
-    return matches[0] if len(matches) == 1 else None
+    result = resolve_mentioned_target(text, entities, domains)
+    return (
+        result.entity
+        if result.status is ResolutionStatus.RESOLVED
+        else None
+    )
 
 
 def _match_compositional(
@@ -159,6 +145,22 @@ def _match_compositional(
 
     player = _mentioned_entity(value, entities, frozenset({"media_player"}))
     if player is not None:
+        mute = re.search(r"\b(?:stumm|stummschaltung|mute)\b", value, re.I)
+        if mute is not None:
+            unmute = re.search(
+                r"\b(?:nicht\s+mehr\s+stumm|stummschaltung\s+(?:aus|aufheben)|"
+                r"heb\w*\s+die\s+stummschaltung\b.*\bauf|"
+                r"ton\s+(?:an|ein)|laut\s+schalten|unmute)\b",
+                value,
+                re.I,
+            )
+            muted = unmute is None
+            return _result(
+                player,
+                "volume_mute",
+                f"{player.friendly_name} {'stummgeschaltet' if muted else 'wieder hörbar geschaltet'}.",
+                {"is_volume_muted": muted},
+            )
         volume = re.search(r"\b(100|[1-9]?\d)\s*(?:prozent|%)\b", value, re.I)
         if (
             volume is not None
@@ -248,6 +250,14 @@ def _match_compositional(
 
     vacuum = _mentioned_entity(value, entities, frozenset({"vacuum"}))
     if vacuum is not None:
+        if re.search(
+            r"\b(?:finde|such\w*|ort\w*|lokalisier\w*|piep\w*)\b", value, re.I
+        ):
+            return _result(
+                vacuum,
+                "locate",
+                f"{vacuum.friendly_name} gibt ein Suchsignal aus.",
+            )
         normalized_value = normalize_for_compare(value)
         speeds = [
             str(option) for option in vacuum.attributes.get("fan_speed_list", ()) or ()
