@@ -7,9 +7,15 @@
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
 - Lizenz: **MIT**
+- Website: **[pquandel2-alt.github.io/ha-nlu-engine](https://pquandel2-alt.github.io/ha-nlu-engine/)**
 
 [![HomeIntent in HACS öffnen](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=pquandel2-alt&repository=ha-nlu-engine&category=integration)
 [![GitHub Release](https://img.shields.io/github/v/release/pquandel2-alt/ha-nlu-engine)](https://github.com/pquandel2-alt/ha-nlu-engine/releases/latest)
+[![Website](https://img.shields.io/badge/Website-Live--Demo-5eead4?logo=github&logoColor=white)](https://pquandel2-alt.github.io/ha-nlu-engine/)
+
+> **[➜ HomeIntent im Browser ansehen](https://pquandel2-alt.github.io/ha-nlu-engine/)** — eine
+> interaktive Übersicht, die Schritt für Schritt zeigt, wie aus einem gesprochenen
+> Satz ein geprüfter Serviceaufruf wird. Ohne Installation.
 
 ## Was ist HomeIntent?
 
