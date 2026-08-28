@@ -97,7 +97,9 @@ def test_complete_sentence_previews_immediately_and_can_be_cancelled(monkeypatch
 def test_multiple_calendars_trigger_a_specific_question(monkeypatch):
     entity = _make_entity(monkeypatch, (PRIVATE, FAMILY))
     result = _run(entity, "Trag morgen um 10 Uhr für eine Stunde Zahnarzt ein")
-    assert "In welchen Kalender" in result.response.speech
+    assert "mehrere passende Kalender" in result.response.speech
+    assert "1. Privat" in result.response.speech
+    assert "2. Familie" in result.response.speech
     preview = _run(entity, "Familie").response.speech
     assert "Kalender „Familie“" in preview
 

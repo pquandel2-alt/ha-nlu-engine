@@ -24,14 +24,14 @@ from ..entities import (
 )
 from ..world_model import WorldModel
 from .constraint_resolver import Constraints, resolve_candidates
-from .entity_resolution import ResolveStatus, resolve_entity
+from .entity_resolution import ResolveStatus, rank_semantic_targets, resolve_entity
 from .frame import AreaReference, Quantifier, SemanticFrame, TargetReference
 from .parser import ClarificationRequest, ParseResult
 from .primitives import SemanticAction, SemanticProperty, SemanticQuantity
 from .query_command import QueryCommand, QueryFilter, QueryScope, QueryTarget
 from .query_executor import QueryExecutor
 from .semantic_lexicon import SemanticAnalysis, SemanticKind, analyse_semantics
-from .domain_operations import DOMAIN_WORDS, INTENT_BY_DOMAIN_ACTION
+from .domain_operations import INTENT_BY_DOMAIN_ACTION
 from .semantic_location import (
     has_explicit_location_cue,
     resolve_coordinated_locations,
@@ -148,13 +148,6 @@ _SEMANTIC_WORDS = {
     "spiele", "spielen", "spiel", "weiter", "weiterspielen", "pausiere",
     "pausieren", "pausiert", "halte", "halten", "stoppe", "stoppen", "gestoppt",
 }
-# Concrete surface forms are used for entity-name scoring. Regex lexemes
-# remain the authoritative recognition source; this table merely marks
-# generic nouns as non-distinctive.
-_DOMAIN_CANONICAL = {
-    word: domain for domain, words in DOMAIN_WORDS.items() for word in words
-}
-
 _QUERY_MARKER_RE = re.compile(
     r"\b(?:ist|sind|welch\w*|wie\s+viele|wo|gibt\s+es|haben\s+wir|irgendein\w*|keine?\w*)\b",
     re.I,
@@ -349,43 +342,22 @@ def _entity_candidates(
     *,
     area_id: str | None = None,
     floor_id: str | None = None,
+    world_model: WorldModel | None = None,
 ) -> list[EntitySnapshot]:
-    utterance = _tokens(text) - _SEMANTIC_WORDS
-    scored: list[tuple[int, EntitySnapshot]] = []
-    scoped_entities = resolve_candidates(
+    ignored = frozenset(_SEMANTIC_WORDS | _STOP_WORDS)
+    ranked = rank_semantic_targets(
+        text,
         entities,
-        Constraints(area_id=area_id, floor_id=floor_id),
+        domains=domains,
+        area_id=area_id,
+        floor_id=floor_id,
+        ignored_tokens=ignored,
+        index=world_model.entity_index if world_model is not None else None,
     )
-    for entity in scoped_entities:
-        if domains and entity.domain not in domains:
-            continue
-        best = 0
-        names = (
-            ((entity.friendly_name, "friendly_name"),)
-            + tuple((alias, "configured") for alias in entity.aliases)
-            + tuple((alias.text, alias.source) for alias in generate_aliases(entity))
-        )
-        for name, source in names:
-            name_tokens = _tokens(name)
-            distinctive = {token for token in name_tokens if _DOMAIN_CANONICAL.get(token) is None}
-            # Generic one-word names ("Rollladen") remain valid, but only
-            # when they are unique; ambiguity is handled below.
-            # Humanized entity IDs ("Buero Steckdose") must not match from
-            # the location word alone. Friendly/configured names may omit a
-            # generic domain noun and therefore keep distinctive matching.
-            required = (
-                name_tokens
-                if source in {"entity_name", "entity_id"}
-                else distinctive or name_tokens
-            )
-            if required and required <= utterance:
-                best = max(best, len(required) * 10 + len(name_tokens))
-        if best:
-            scored.append((best, entity))
-    if not scored:
+    if not ranked:
         return []
-    top = max(score for score, _ in scored)
-    return [entity for score, entity in scored if score == top]
+    top = ranked[0].score
+    return [item.entity for item in ranked if item.score == top]
 
 
 class SemanticCommandCompiler:
@@ -436,6 +408,7 @@ class SemanticCommandCompiler:
             domains,
             area_id=location[1] if location else None,
             floor_id=location[2] if location else None,
+            world_model=world_model,
         )
         if not domains and preliminary:
             domains = frozenset(entity.domain for entity in preliminary)
@@ -496,6 +469,7 @@ class SemanticCommandCompiler:
                 facts.domains,
                 area_id=facts.area_id,
                 floor_id=facts.floor_id,
+                world_model=world_model,
             )
             if len(candidates) > 1:
                 return ClarificationRequest(intent, domain, tuple(candidates), {"percent": percent} if percent is not None else {})

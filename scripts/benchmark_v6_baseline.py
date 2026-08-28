@@ -183,6 +183,7 @@ BENCHMARK_UTTERANCES: list[tuple[str, str]] = [
 SCALES: list[int] = [100, 500, 1000, 5000]
 ITERATIONS = 50
 WARMUP_ITERATIONS = 10
+PIPELINE = "match"
 
 
 @dataclass(frozen=True)
@@ -241,13 +242,17 @@ def benchmark_engine_construction(repeats: int = 5) -> Stats:
 
 def benchmark_utterance(engine: NluEngine, label: str, text: str, entities: list[EntitySnapshot], scale: int) -> Stats:
     world_model = build_world_model(entities, [])
+    if PIPELINE == "understand":
+        run = lambda: engine.understand(text, entities, world_model)
+    else:
+        run = lambda: engine.match(text, entities, world_model)
     # Warmup: first call(s) into a fresh entity list pay for any incidental
     # cold-path cost (e.g. first regex compile cache fill) - excluded from
     # the measured sample so steady-state per-call cost is what's reported.
     for _ in range(WARMUP_ITERATIONS):
-        engine.match(text, entities, world_model)
+        run()
 
-    durations = _time_call(lambda: engine.match(text, entities, world_model), ITERATIONS)
+    durations = _time_call(run, ITERATIONS)
     durations.sort()
     return Stats(
         label=label,
@@ -288,6 +293,10 @@ if __name__ == "__main__":
     parser.add_argument("--warmup", type=int, default=WARMUP_ITERATIONS)
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument(
+        "--pipeline", choices=("match", "understand"), default="match",
+        help="Benchmark the legacy matcher or the V7 understanding boundary.",
+    )
+    parser.add_argument(
         "--max-p95-ms", type=float, default=None,
         help="Exit non-zero if any steady-state p95 exceeds this device-specific budget.",
     )
@@ -295,6 +304,7 @@ if __name__ == "__main__":
     SCALES[:] = [int(value) for value in args.scales.split(",") if value]
     ITERATIONS = max(1, args.iterations)
     WARMUP_ITERATIONS = max(0, args.warmup)
+    PIPELINE = args.pipeline
     construction_stats, results = run_all()
     if args.as_json:
         print(json.dumps({
@@ -305,7 +315,7 @@ if __name__ == "__main__":
         print("Engine construction (one-time, hassil YAML compile):")
         _print_stats(construction_stats)
         print()
-        print("Per-utterance NluEngine.match() timings:")
+        print(f"Per-utterance NluEngine.{PIPELINE}() timings:")
         for scale in SCALES:
             print(f" -- scale={scale} --")
             for stats in results:

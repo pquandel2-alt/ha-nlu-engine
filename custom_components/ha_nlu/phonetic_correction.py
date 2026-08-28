@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from difflib import SequenceMatcher
 
 from .entities import EntitySnapshot, normalize_for_compare
+from .name_similarity import bounded_name_similarity
 
 
 @dataclass(frozen=True)
@@ -14,20 +14,6 @@ class PhoneticSuggestion:
     corrected_text: str
     entity: EntitySnapshot
     corrected_term: str
-
-
-def _distance(left: str, right: str) -> int:
-    previous = list(range(len(right) + 1))
-    for row, char_left in enumerate(left, 1):
-        current = [row]
-        for column, char_right in enumerate(right, 1):
-            current.append(min(
-                current[-1] + 1,
-                previous[column] + 1,
-                previous[column - 1] + (char_left != char_right),
-            ))
-        previous = current
-    return previous[-1]
 
 
 def phonetic_suggestions(
@@ -47,10 +33,8 @@ def phonetic_suggestions(
             for candidate in candidate_words:
                 if spoken == candidate:
                     continue
-                distance = _distance(spoken, candidate)
-                ratio = SequenceMatcher(None, spoken, candidate).ratio()
-                limit = 1 if max(len(spoken), len(candidate)) <= 6 else 2
-                if distance > limit or ratio < 0.72:
+                similarity = bounded_name_similarity(spoken, candidate)
+                if not similarity.accepted:
                     continue
                 corrected = text[:match.start()] + candidate + text[match.end():]
                 suggestions[(corrected.casefold(), entity.entity_id)] = PhoneticSuggestion(

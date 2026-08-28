@@ -116,7 +116,9 @@ def test_ambiguous_list_is_selected_in_followup(monkeypatch):
     agent = _entity(monkeypatch, [SHOPPING, WORK])
     question = _run(agent, "Füge Milch und Brot zur Liste hinzu", "list-select")
     answer = _run(agent, "die Einkaufsliste", "list-select")
-    assert "Welche Liste" in question.response.speech
+    assert "mehrere passende Listen" in question.response.speech
+    assert "1. Einkaufsliste" in question.response.speech
+    assert "2. Arbeitsliste" in question.response.speech
     assert "2 Einträge" in answer.response.speech
     assert agent.hass.services.async_call.await_count == 2
 

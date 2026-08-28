@@ -304,7 +304,10 @@ def test_contextual_setpoint_clarifies_multiple_actuators_and_keeps_value(engine
         "Küche Heizung", ambiguous.clarification, entities
     )
 
-    assert ambiguous.response_text == "Welche Heizung meinst du?"
+    assert ambiguous.response_text == (
+        "Ich habe mehrere passende Heizungen gefunden: "
+        "1. Erdgeschoss Heizung; 2. Küche Heizung. Welche meinst du?"
+    )
     assert resolved.plan.entity_id == "climate.kueche"
     assert resolved.plan.data == {"temperature": 22}
 

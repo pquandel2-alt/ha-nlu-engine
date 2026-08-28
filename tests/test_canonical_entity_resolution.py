@@ -3,6 +3,7 @@ from __future__ import annotations
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.entity_resolution import (
     ResolutionStatus,
+    rank_semantic_targets,
     resolve_mentioned_target,
     resolve_named_target,
     resolve_query_targets,
@@ -44,3 +45,34 @@ def test_named_and_embedded_target_resolution_share_domain_constraints():
     assert named.status is ResolutionStatus.RESOLVED
     assert embedded.status is ResolutionStatus.RESOLVED
     assert named.entity == embedded.entity == ENTITIES[0]
+
+
+def test_semantic_ranking_prefers_complete_registry_name_over_longer_suffix_name():
+    entities = [
+        EntitySnapshot("light.island", "Kücheninsel", "light", "off"),
+        EntitySnapshot(
+            "switch.island", "Kücheninsel Steckdose", "switch", "off"
+        ),
+    ]
+
+    ranked = rank_semantic_targets(
+        "Mach Kücheninsel an",
+        entities,
+        ignored_tokens=frozenset({"mach", "an"}),
+    )
+
+    assert ranked[0].entity.entity_id == "light.island"
+    assert ranked[0].source == "friendly_name"
+    assert ranked[0].score > ranked[1].score
+
+
+def test_semantic_ranking_keeps_equal_names_tied_for_clarification():
+    entities = [
+        EntitySnapshot("light.one", "Leselicht", "light", "off"),
+        EntitySnapshot("light.two", "Leselicht", "light", "off"),
+    ]
+
+    ranked = rank_semantic_targets("Leselicht an", entities)
+
+    assert len(ranked) == 2
+    assert ranked[0].score == ranked[1].score

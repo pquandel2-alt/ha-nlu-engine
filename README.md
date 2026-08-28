@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.59.0**
+- Aktuelle Version: **4.60.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -150,6 +150,29 @@ Die konkrete Aktion läuft anschließend durch denselben semantischen Compiler
 und dieselben Entity-/Capability-Prüfungen wie ein direkter Befehl. Eine
 reine Informationsfrage wie „Was passiert, wenn …?“ bleibt dagegen immer
 lesend.
+
+### Ähnliche Namen und natürliche Auswahl
+
+Exakte Namen, konfigurierte und abgeleitete Aliase, Wortteile sowie eng
+begrenzte Schreib-/ASR-Ähnlichkeit werden über einen gemeinsamen
+Kandidatenvertrag bewertet. Mehrere gleichwertige oder ähnlich gute Ziele
+werden nummeriert und mit Bereich, Etage, Alias oder nötigenfalls Entity-ID
+unterscheidbar gemacht:
+
+```text
+Du: Mach das Bürolicht an.
+Assist: Ich habe mehrere passende Lichter gefunden:
+        1. Bürolicht im Bereich Büro 1;
+        2. Bürolicht im Bereich Büro 2. Welches meinst du?
+Du: Das zweite.
+```
+
+Auswahlen funktionieren per vollständigem Namen, Alias, Bereich, Etage,
+Merkmal oder Nummer. Eine ungültige Antwort verwirft die Rückfrage nicht.
+Vor der späteren Ausführung werden Entity und Capability erneut aus dem
+aktuellen Home-Assistant-Zustand geladen. Ein einzelner nur unscharfer
+Treffer benötigt weiterhin eine ausdrückliche Bestätigung; mehrere
+unscharfe Treffer werden niemals geraten.
 
 ### Mengen, Orte und Ausschlüsse
 
@@ -739,7 +762,10 @@ Für zuverlässige Ergebnisse:
 Home Assistant Assist
         │
         ▼
-Conversation Router
+Loss-aware Language Frontend
+        │
+        ▼
+Semantic Interpreter + UnderstandingOutcome
         │
         ├── semantischer Direktbefehl / Query / Dialog
         │     → SemanticFrame
@@ -764,6 +790,8 @@ testbar.
 
 Weitere Dokumentation:
 
+- [`docs/architecture-v7.md`](docs/architecture-v7.md)
+- [`docs/natural-language-roadmap-v7.md`](docs/natural-language-roadmap-v7.md)
 - [`docs/architecture-v6.md`](docs/architecture-v6.md)
 - [`docs/language-understanding-v2.md`](docs/language-understanding-v2.md)
 - [`docs/quality-checklist.md`](docs/quality-checklist.md)
@@ -776,10 +804,10 @@ python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
 ```
 
-Geprüfter Stand von Version 4.59.0:
+Geprüfter V7-Release-Stand von Version 4.60.0:
 
 ```text
-2335 passed, 12 skipped
+2374 passed, 12 skipped
 85 % Gesamt-Coverage
 65 % Coverage für conversation.py
 ```
@@ -815,7 +843,7 @@ Dadurch können sie dem Parser keine Antworten „beibringen“.
 ![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
 
 Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.59.0. Für echte
+Entwicklungsstands und kein aktueller Nachweis für Version 4.60.0. Für echte
 Zielhardware lässt sich seit 4.49 ein reproduzierbarer JSON-Bericht samt
 P95-Budget erzeugen:
 

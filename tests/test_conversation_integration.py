@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -371,7 +372,12 @@ def test_complete_group_command_supersedes_pending_cover_clarification(monkeypat
         conversation_id="cover-replacement",
     )
 
-    assert ambiguous.response.speech == "Welche Rollläden meinst du?"
+    assert ambiguous.response.speech == (
+        "Ich habe mehrere passende Rollläden gefunden: "
+        "1. Rollladen Esszimmer im Bereich Esszimmer (cover.links); "
+        "2. Rollladen Esszimmer im Bereich Esszimmer (cover.rechts). "
+        "Welchen meinst du?"
+    )
     assert replacement.response.speech == "2 Rollläden geöffnet."
     entity.hass.services.async_call.assert_awaited_once_with(
         "cover",
@@ -379,6 +385,141 @@ def test_complete_group_command_supersedes_pending_cover_clarification(monkeypat
         {"entity_id": ["cover.links", "cover.rechts"]},
         blocking=True,
     )
+
+
+def test_live_ambiguity_lists_candidates_and_executes_selected_ordinal(monkeypatch):
+    lights = [
+        EntitySnapshot(
+            "light.a", "Bürolicht", "light", "off",
+            area_id="buero_1", area_name="Büro 1",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+        EntitySnapshot(
+            "light.b", "Bürolicht", "light", "off",
+            area_id="buero_2", area_name="Büro 2",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+    ]
+    entity = _make_entity(monkeypatch, lights)
+
+    question = _run(entity, "Mach das Bürolicht an", "listed-selection")
+    entity.hass.services.async_call.assert_not_awaited()
+    answer = _run(entity, "das zweite", "listed-selection")
+
+    assert "1. Bürolicht im Bereich Büro 1" in question.response.speech
+    assert "2. Bürolicht im Bereich Büro 2" in question.response.speech
+    assert "Bürolicht eingeschaltet" in answer.response.speech
+    entity.hass.services.async_call.assert_awaited_once_with(
+        "homeassistant", "turn_on", {"entity_id": "light.b"}, blocking=True,
+    )
+
+
+def test_invalid_clarification_reply_keeps_dialog_until_valid_selection(monkeypatch):
+    lights = [
+        EntitySnapshot(
+            "light.a", "Leselicht", "light", "off",
+            area_id="links", area_name="Links",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+        EntitySnapshot(
+            "light.b", "Leselicht", "light", "off",
+            area_id="rechts", area_name="Rechts",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+    ]
+    entity = _make_entity(monkeypatch, lights)
+
+    _run(entity, "Mach das Leselicht an", "retry-selection")
+    retry = _run(entity, "das unbekannte", "retry-selection")
+    entity.hass.services.async_call.assert_not_awaited()
+    answer = _run(entity, "Nummer 2", "retry-selection")
+
+    assert "keinem der angebotenen Geräte" in retry.response.speech
+    assert "Leselicht eingeschaltet" in answer.response.speech
+    entity.hass.services.async_call.assert_awaited_once()
+
+
+def test_live_multiple_fuzzy_names_ask_before_selected_execution(monkeypatch):
+    lights = [
+        EntitySnapshot(
+            "light.a", "Küchenlicht", "light", "off",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+        EntitySnapshot(
+            "light.b", "Kuchenlicht", "light", "off",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+    ]
+    entity = _make_entity(monkeypatch, lights)
+
+    question = _run(entity, "Mach Kuechenlict an", "fuzzy-selection")
+    entity.hass.services.async_call.assert_not_awaited()
+    _run(entity, "Nummer 1", "fuzzy-selection")
+
+    assert "mehrere passende Lichter" in question.response.speech
+    entity.hass.services.async_call.assert_awaited_once_with(
+        "homeassistant", "turn_on", {"entity_id": "light.a"}, blocking=True,
+    )
+
+
+def test_selected_entity_disappearing_between_turns_is_never_executed(monkeypatch):
+    lights = [
+        EntitySnapshot(
+            "light.a", "Leselicht", "light", "off",
+            area_id="a", area_name="Bereich A",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+        EntitySnapshot(
+            "light.b", "Leselicht", "light", "off",
+            area_id="b", area_name="Bereich B",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+    ]
+    entity = _make_entity(monkeypatch, lights)
+
+    _run(entity, "Mach das Leselicht an", "stale-selection")
+    lights.pop()
+    result = _run(entity, "Nummer 2", "stale-selection")
+
+    assert "nicht mehr verfügbar" in result.response.speech
+    entity.hass.services.async_call.assert_not_awaited()
+
+
+def test_clarification_can_be_cancelled_without_execution(monkeypatch):
+    lights = [
+        EntitySnapshot("light.a", "Leselicht", "light", "off"),
+        EntitySnapshot("light.b", "Leselicht", "light", "off"),
+    ]
+    entity = _make_entity(monkeypatch, lights)
+
+    _run(entity, "Mach das Leselicht an", "cancel-selection")
+    result = _run(entity, "keins davon", "cancel-selection")
+
+    assert result.response.speech == "Abgebrochen. Ich führe nichts aus."
+    entity.hass.services.async_call.assert_not_awaited()
+
+
+def test_selected_entity_losing_capability_is_revalidated(monkeypatch):
+    valves = [
+        EntitySnapshot(
+            "valve.a", "Gartenventil", "valve", "closed",
+            area_id="a", area_name="Bereich A",
+            capabilities=frozenset({"OPEN", "CLOSE"}),
+        ),
+        EntitySnapshot(
+            "valve.b", "Gartenventil", "valve", "closed",
+            area_id="b", area_name="Bereich B",
+            capabilities=frozenset({"OPEN", "CLOSE"}),
+        ),
+    ]
+    entity = _make_entity(monkeypatch, valves)
+
+    _run(entity, "Öffne das Gartenventil", "capability-selection")
+    valves[1] = replace(valves[1], capabilities=frozenset())
+    result = _run(entity, "Nummer 2", "capability-selection")
+
+    assert "nicht mehr verfügbar" in result.response.speech
+    entity.hass.services.async_call.assert_not_awaited()
 
 
 def test_live_cover_percentage_asr_correction_never_becomes_heating_dialog(
@@ -482,6 +623,16 @@ def test_trigger_and_action_can_be_spoken_in_two_turns(monkeypatch):
     assert "Licht im Bereich Küche" in preview.response.speech
     context = entity._context_store.get("conv-1")
     assert context.pending_automation_confirmation is not None
+
+
+def test_misspelled_negation_is_blocked_before_every_live_router(monkeypatch):
+    entity = _make_entity(monkeypatch, [KUECHE_LICHT])
+
+    result = _run(entity, "Mach das Küchenlicht nciht an")
+
+    entity.hass.services.async_call.assert_not_awaited()
+    assert result.response.error_code is intent.IntentResponseErrorCode.NO_INTENT_MATCH
+    assert "führe nichts aus" in result.response.speech
 
 
 @pytest.mark.parametrize(

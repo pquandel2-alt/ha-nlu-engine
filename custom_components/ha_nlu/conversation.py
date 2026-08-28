@@ -117,6 +117,7 @@ from .nlu.automation_model import AutomationModel, TriggerTarget, resolve_pendin
 from .nlu.automation_validator import validate_automation
 from .nlu.automation_preview import render_automation_preview
 from .nlu.context import (
+    active_pending_dialog,
     ConversationContext,
     DialogTurnMemory,
     PendingAutomationConfirmation,
@@ -131,14 +132,21 @@ from .nlu.context import (
     PendingServiceConfirmation,
     PendingSemanticCommand,
     PendingProductivityCommand,
+    PendingDialogKind,
 )
 from .nlu.dialog_focus import DialogFocus, derive_dialog_focus
+from .nlu.entity_clarification import (
+    CandidateReplyKind,
+    render_candidate_question,
+    resolve_candidate_reply,
+)
 from .nlu.explanation import explain_command, is_explanation_request
 from .nlu.ha_automation_generator import (
     GenerationError,
     generate_ha_automation_config,
     resolve_automation_action_entity_ids,
 )
+from .nlu.language_frontend import analyse_language
 from .nlu.response_generator import _automation_label
 from .nlu.semantic_utterance import SpeechAct, analyse_utterance
 from .service_call import QUERY_INTENTS, ServiceCallPlan
@@ -344,6 +352,7 @@ class NluConversationEntity(
         )
         if localized_text != user_input.text:
             user_input = replace(user_input, text=localized_text)
+        language_document = analyse_language(user_input.text, entities)
         if conversation_area is not None and (
             pending is None or pending.last_area is None
         ):
@@ -358,7 +367,14 @@ class NluConversationEntity(
                 )
             )
 
-        if pending is not None and pending.pending_alias_learning is not None:
+        active_dialog = active_pending_dialog(pending)
+
+        if (
+            active_dialog is not None
+            and active_dialog.kind is PendingDialogKind.ALIAS_LEARNING
+            and pending is not None
+            and pending.pending_alias_learning is not None
+        ):
             reply = classify_confirmation_reply(user_input.text)
             draft = pending.pending_alias_learning.draft
             if reply is ConfirmationReply.NO:
@@ -399,31 +415,56 @@ class NluConversationEntity(
 
         all_calendars = tuple(entity for entity in entities if entity.domain == "calendar")
         calendars = writable_calendars(entities)
-        if pending is not None and pending.pending_automation_wizard is not None:
+        if (
+            active_dialog is not None
+            and active_dialog.kind is PendingDialogKind.AUTOMATION_WIZARD
+            and pending is not None
+            and pending.pending_automation_wizard is not None
+        ):
             return await self._async_handle_automation_wizard(
                 user_input,
                 response,
                 pending.pending_automation_wizard.state,
                 entities,
             )
-        if pending is not None and pending.pending_productivity_command is not None:
+        if (
+            active_dialog is not None
+            and active_dialog.kind is PendingDialogKind.PRODUCTIVITY
+            and pending is not None
+            and pending.pending_productivity_command is not None
+        ):
             return await self._async_handle_pending_productivity(
                 user_input,
                 response,
                 pending.pending_productivity_command,
                 entities,
             )
-        if pending is not None and pending.pending_calendar_event is not None:
+        if (
+            active_dialog is not None
+            and active_dialog.kind is PendingDialogKind.CALENDAR_EVENT
+            and pending is not None
+            and pending.pending_calendar_event is not None
+        ):
             return await self._async_handle_calendar_event_turn(
                 user_input, response, pending.pending_calendar_event, calendars
             )
 
-        if pending is not None and pending.pending_calendar_mutation is not None:
+        if (
+            active_dialog is not None
+            and active_dialog.kind is PendingDialogKind.CALENDAR_MUTATION
+            and pending is not None
+            and pending.pending_calendar_mutation is not None
+        ):
             return await async_handle_calendar_mutation_confirmation(
                 self, user_input, response, pending.pending_calendar_mutation
             )
 
-        if pending is not None and pending.pending_automation_confirmation is not None:
+        if (
+            active_dialog is not None
+            and active_dialog.kind is PendingDialogKind.AUTOMATION_CONFIRMATION
+            and pending is not None
+            and pending.pending_automation_confirmation is not None
+        ):
             return await self._async_handle_pending_automation_confirmation_turn(
                 user_input,
                 response,
@@ -431,7 +472,12 @@ class NluConversationEntity(
                 entities,
             )
 
-        if pending is not None and pending.pending_automation_action_edit is not None:
+        if (
+            active_dialog is not None
+            and active_dialog.kind is PendingDialogKind.AUTOMATION_ACTION_EDIT
+            and pending is not None
+            and pending.pending_automation_action_edit is not None
+        ):
             return await async_handle_automation_action_edit_turn(
                 self,
                 user_input,
@@ -440,7 +486,12 @@ class NluConversationEntity(
                 entities,
             )
 
-        if pending is not None and pending.pending_automation_structure_edit is not None:
+        if (
+            active_dialog is not None
+            and active_dialog.kind is PendingDialogKind.AUTOMATION_STRUCTURE_EDIT
+            and pending is not None
+            and pending.pending_automation_structure_edit is not None
+        ):
             return await async_handle_automation_structure_edit_turn(
                 self,
                 user_input,
@@ -449,17 +500,32 @@ class NluConversationEntity(
                 entities,
             )
 
-        if pending is not None and pending.pending_automation_management is not None:
+        if (
+            active_dialog is not None
+            and active_dialog.kind is PendingDialogKind.AUTOMATION_MANAGEMENT
+            and pending is not None
+            and pending.pending_automation_management is not None
+        ):
             return await self._async_handle_automation_management_confirmation(
                 user_input, response, pending.pending_automation_management
             )
 
-        if pending is not None and pending.pending_automation_deletion is not None:
+        if (
+            active_dialog is not None
+            and active_dialog.kind is PendingDialogKind.AUTOMATION_DELETION
+            and pending is not None
+            and pending.pending_automation_deletion is not None
+        ):
             return await self._async_handle_automation_deletion_confirmation_reply(
                 user_input, response, pending.pending_automation_deletion
             )
 
-        if pending is not None and pending.pending_service_confirmation is not None:
+        if (
+            active_dialog is not None
+            and active_dialog.kind is PendingDialogKind.SERVICE_CONFIRMATION
+            and pending is not None
+            and pending.pending_service_confirmation is not None
+        ):
             return await self._async_handle_service_confirmation_reply(
                 user_input,
                 response,
@@ -467,14 +533,42 @@ class NluConversationEntity(
                 entities,
             )
 
-        if pending is not None and pending.pending_semantic_command is not None:
+        if (
+            active_dialog is not None
+            and active_dialog.kind is PendingDialogKind.SEMANTIC_COMMAND
+            and pending is not None
+            and pending.pending_semantic_command is not None
+        ):
             return await self._async_handle_pending_semantic_command(
                 user_input, response, pending.pending_semantic_command, entities
             )
 
-        if pending is not None and pending.pending_automation_draft is not None:
+        if (
+            active_dialog is not None
+            and active_dialog.kind is PendingDialogKind.AUTOMATION_DRAFT
+            and pending is not None
+            and pending.pending_automation_draft is not None
+        ):
             return await self._async_handle_pending_automation_draft(
                 user_input, response, pending, entities
+            )
+
+        # One language/safety gate now protects every fresh domain router,
+        # including historical calendar/device/productivity matchers.  This
+        # is especially important for a misspelled negation: legacy wildcard
+        # grammars must not absorb it into an entity name and execute anyway.
+        if (
+            language_document.utterance.speech_act is SpeechAct.COMMAND
+            and not language_document.utterance.safe_to_execute_directly
+        ):
+            response.async_set_error(
+                intent.IntentResponseErrorCode.NO_INTENT_MATCH,
+                "Ich habe den Satz als unsicheren oder verneinten Befehl "
+                "erkannt und führe nichts aus.",
+            )
+            return conversation.ConversationResult(
+                response=response,
+                conversation_id=user_input.conversation_id,
             )
 
         alias_draft = parse_alias_learning(user_input.text, entities)
@@ -613,14 +707,79 @@ class NluConversationEntity(
             # "Welche Rollläden meinst du?".  Elliptical answers such as
             # "die linke" do not match a complete command and therefore
             # continue through the established clarification resolver.
-            result = self._engine.match(
-                user_input.text, entities, self._world_model
-            )
+            result = self._engine.understand(
+                user_input.text, entities, self._world_model, language_document
+            ).payload
             if result is None:
-                result = self._engine.resolve_clarification(
-                    user_input.text, pending.pending_clarification, entities
+                clarification = pending.pending_clarification
+                selection = resolve_candidate_reply(
+                    user_input.text, clarification.candidates, entities
                 )
-                self._context_store.clear(user_input.conversation_id)
+                if selection.kind is CandidateReplyKind.CANCELLED:
+                    self._context_store.clear(user_input.conversation_id)
+                    response.async_set_speech("Abgebrochen. Ich führe nichts aus.")
+                    return conversation.ConversationResult(
+                        response=response,
+                        conversation_id=user_input.conversation_id,
+                    )
+
+                current_by_id = {entity.entity_id: entity for entity in entities}
+                refreshed_candidates = tuple(
+                    current_by_id[candidate.entity_id]
+                    for candidate in clarification.candidates
+                    if candidate.entity_id in current_by_id
+                )
+                refreshed = replace(
+                    clarification,
+                    candidates=refreshed_candidates,
+                    candidate_matches=(),
+                )
+                if selection.kind is CandidateReplyKind.SELECTED:
+                    selected = selection.entity
+                    current = (
+                        current_by_id.get(selected.entity_id)
+                        if selected is not None
+                        else None
+                    )
+                    if current is not None:
+                        result = self._engine.resolve_clarification(
+                            current.entity_id, refreshed, entities
+                        )
+                    else:
+                        result = None
+                    if result is not None:
+                        self._context_store.clear(user_input.conversation_id)
+                    else:
+                        self._context_store.clear(user_input.conversation_id)
+                        response.async_set_speech(
+                            "Das ausgewählte Gerät ist nicht mehr verfügbar. "
+                            "Ich führe nichts aus."
+                        )
+                        return conversation.ConversationResult(
+                            response=response,
+                            conversation_id=user_input.conversation_id,
+                        )
+                else:
+                    if not refreshed_candidates:
+                        self._context_store.clear(user_input.conversation_id)
+                        response.async_set_speech(
+                            "Keines der zuvor gefundenen Geräte ist noch verfügbar. "
+                            "Ich führe nichts aus."
+                        )
+                    else:
+                        self._context_store.set(
+                            user_input.conversation_id,
+                            replace(pending, pending_clarification=refreshed),
+                        )
+                        response.async_set_speech(
+                            "Das konnte ich keinem der angebotenen Geräte "
+                            "eindeutig zuordnen. "
+                            + render_candidate_question(refreshed_candidates)
+                        )
+                    return conversation.ConversationResult(
+                        response=response,
+                        conversation_id=user_input.conversation_id,
+                    )
         else:
             result = self._engine.match_correction_followup(
                 user_input.text, entities, pending
@@ -695,9 +854,13 @@ class NluConversationEntity(
                     user_input.text, entities, dt_util.now(), self._world_model, pending
                 )
             if result is None:
-                result = self._engine.match_automation(
-                    user_input.text, entities, self._world_model, pending
-                )
+                result = self._engine.understand_automation(
+                    user_input.text,
+                    entities,
+                    self._world_model,
+                    pending,
+                    language_document,
+                ).payload
             if result is None:
                 result = self._engine.match_calendar_event_automation(
                     user_input.text, entities, self._world_model, pending
@@ -776,7 +939,9 @@ class NluConversationEntity(
                     user_input.text, entities, self._world_model, pending
                 )
             if result is None:
-                result = self._engine.match(user_input.text, entities, self._world_model)
+                result = self._engine.understand(
+                    user_input.text, entities, self._world_model, language_document
+                ).payload
 
         if result is None:
             return await self._async_handle_no_match(user_input, response, entities)
@@ -1188,7 +1353,9 @@ class NluConversationEntity(
         # "Welche Heizung?".  Only a fully parsed fresh command/query (or a
         # clearly command-shaped no-match that may enter bounded ASR
         # correction) escapes; short answers such as "Küche" continue below.
-        fresh = self._engine.match(user_input.text, entities, self._world_model)
+        fresh = self._engine.understand(
+            user_input.text, entities, self._world_model
+        ).payload
         if isinstance(fresh, CommandPlan):
             self._context_store.clear(user_input.conversation_id)
             return await self._async_handle_command_plan(
@@ -1573,13 +1740,15 @@ class NluConversationEntity(
     ) -> conversation.ConversationResult:
         """Try bounded correction/dialog fallbacks for an unmatched turn."""
         is_query = analyse_utterance(user_input.text).speech_act is SpeechAct.QUERY
-        corrected_plans: dict[tuple, tuple[object, str, PhoneticSuggestion]] = {}
+        corrected_plans: dict[
+            tuple, tuple[ServiceCallPlan, str, PhoneticSuggestion]
+        ] = {}
         for suggestion in (
             () if is_query else phonetic_suggestions(user_input.text, entities)
         ):
-            corrected = self._engine.match(
+            corrected = self._engine.understand(
                 suggestion.corrected_text, entities, self._world_model
-            )
+            ).payload
             plan = getattr(corrected, "plan", None)
             success = getattr(corrected, "response_text", None)
             if plan is None:
@@ -1979,11 +2148,29 @@ class NluConversationEntity(
                 user_input, response, pending.request, entities
             )
 
+        candidate_reply = resolve_candidate_reply(
+            user_input.text, pending.request.candidates, entities
+        )
+        if candidate_reply.kind is CandidateReplyKind.CANCELLED:
+            self._context_store.clear(user_input.conversation_id)
+            response.async_set_speech("Abgebrochen. Ich führe nichts aus.")
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
         selected = select_productivity_candidate(pending.request, user_input.text)
         if selected is None:
-            labels = ", ".join(item.friendly_name for item in pending.request.candidates)
-            question = "Welche Liste" if isinstance(pending.request, TodoRequest) else "Welchen Timer"
-            response.async_set_speech(f"{question} meinst du? {labels}.")
+            response.async_set_speech(
+                render_candidate_question(pending.request.candidates)
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+        if not any(entity.entity_id == selected.entity_id for entity in entities):
+            self._context_store.clear(user_input.conversation_id)
+            response.async_set_speech(
+                "Das ausgewählte Ziel ist nicht mehr verfügbar. "
+                "Ich führe nichts aus."
+            )
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
             )
@@ -2001,9 +2188,9 @@ class NluConversationEntity(
         if request.entity_id is None:
             if request.candidates:
                 self._store_productivity(user_input.conversation_id, request)
-                labels = ", ".join(item.friendly_name for item in request.candidates)
-                question = "Welche Liste" if isinstance(request, TodoRequest) else "Welchen Timer"
-                response.async_set_speech(f"{question} meinst du? {labels}.")
+                response.async_set_speech(
+                    render_candidate_question(request.candidates)
+                )
             else:
                 noun = "keine für HomeIntent freigegebene Liste" if isinstance(request, TodoRequest) else "keinen für HomeIntent freigegebenen Timer"
                 response.async_set_speech(f"Ich finde {noun}.")

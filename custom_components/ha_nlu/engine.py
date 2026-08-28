@@ -43,6 +43,7 @@ from .nlu.entity_resolution import (
     all_mentioned_entities,
     resolve_entity,
 )
+from .nlu.entity_clarification import render_candidate_question
 from .nlu.composition import build_compositional_plan, project_target
 from .nlu.command import SemanticCommand, build_semantic_command
 from .nlu.context import ConversationContext
@@ -50,6 +51,7 @@ from .nlu.debug import DebugTrace, format_command
 from .nlu.degree_semantics import extract_degree
 from .nlu.frame import AreaReference, SemanticFrame, TargetReference
 from .nlu.normalize import normalize
+from .nlu.language_frontend import LanguageDocument, analyse_language
 from .nlu.parser import (
     AmbiguousReference,
     ClarificationRequest,
@@ -68,8 +70,10 @@ from .nlu.semantic_compiler import (
     has_exclusion_clause,
 )
 from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
+from .nlu.semantic_interpreter import SemanticInterpreter
 from .nlu.meaning import SemanticTurn, analyse_turn
 from .nlu.semantic_utterance import ClauseRole, SpeechAct, analyse_utterance
+from .nlu.understanding import UnderstandingKind, UnderstandingOutcome
 from .nlu.verb_state_query import (
     match_contextual_verb_state_query,
     match_verb_state_query,
@@ -478,29 +482,8 @@ _UNSAFE_DIRECT_COMMAND_MODIFIER_RE = re.compile(
     re.I,
 )
 
-# Per-domain question word for the clarification round-trip (v2 plan Phase
-# 25). Same kind of small, explicit German-grammar lookup as
-# service_call.py's ``_DOMAIN_PLURAL_DE`` - only covers the domains
-# SingleTargetParser's basic INTENTS can actually produce ambiguity for.
-# Unknown/mixed-domain candidate sets fall back to a grammatically safe,
-# gender-neutral phrasing rather than guessing an article.
-_DOMAIN_QUESTION_WORD_DE = {
-    "light": "Welches Licht",
-    "switch": "Welchen Schalter",
-    "cover": "Welche Rollläden",
-    "fan": "Welchen Ventilator",
-    "climate": "Welche Heizung",
-    "sensor": "Welchen Sensor",
-}
-
-
 def _clarification_question(clarification: ClarificationRequest) -> str:
-    domains = {candidate.domain for candidate in clarification.candidates}
-    if len(domains) == 1:
-        question_word = _DOMAIN_QUESTION_WORD_DE.get(next(iter(domains)))
-        if question_word is not None:
-            return f"{question_word} meinst du?"
-    return "Das war nicht eindeutig. Welches meinst du?"
+    return render_candidate_question(clarification.candidates)
 
 
 @dataclass(frozen=True)
@@ -790,7 +773,10 @@ class NluEngine:
         return self._single_parser
 
     def match(
-        self, text: str, entities: list[EntitySnapshot], world_model: WorldModel | None = None
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
     ) -> MatchResult | CommandPlan | None:
         turn = analyse_turn(text)
         utterance = turn.utterance
@@ -932,6 +918,177 @@ class NluEngine:
                 plan=None, response_text=_clarification_question(result), clarification=result,
             )
         return self._build_match_result(result, entities)
+
+    def understand(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
+        document: LanguageDocument | None = None,
+    ) -> UnderstandingOutcome[MatchResult | CommandPlan]:
+        """Return a canonical, reason-carrying result for one direct turn.
+
+        During the V7 migration ``match()`` remains the authoritative legacy
+        payload producer.  This method is the new stable boundary: it runs the
+        loss-aware frontend once, preserves structured failure information,
+        and removes the need for callers to infer meaning from ``None`` or a
+        plan-less result.  Later V7 phases replace the payload producer behind
+        this API without changing its callers.
+        """
+        document = document or analyse_language(text, entities)
+        result = self.match(text, entities, world_model)
+        interpreted = SemanticInterpreter.interpret(
+            document,
+            entities,
+            world_model,
+            compile_result=result is None,
+            resolve_registry=result is None,
+        )
+        # The loss-aware frontend recognizes bounded safety-critical spelling
+        # variants (especially a mistyped negation) that legacy grammars may
+        # otherwise absorb into a wildcard entity name.  The canonical V7
+        # boundary is authoritative for non-executability.
+        if (
+            document.utterance.speech_act is SpeechAct.COMMAND
+            and not document.utterance.safe_to_execute_directly
+        ):
+            result = None
+        if result is None and isinstance(interpreted.parse_result, ParseResult):
+            result = self._build_match_result(interpreted.parse_result, entities)
+        elif result is None and isinstance(
+            interpreted.parse_result, ClarificationRequest
+        ):
+            result = MatchResult(
+                plan=None,
+                response_text=_clarification_question(interpreted.parse_result),
+                clarification=interpreted.parse_result,
+            )
+        route = type(result).__name__ if result is not None else "no_match"
+        corrections = (
+            (interpreted.selected_variant.source,)
+            if interpreted.selected_variant is not None
+            and interpreted.selected_variant.source != "original"
+            else ()
+        )
+
+        if isinstance(result, CommandPlan):
+            has_action = any(command.plan is not None for command in result.commands)
+            return UnderstandingOutcome(
+                kind=(UnderstandingKind.COMMAND if has_action else UnderstandingKind.QUERY),
+                source_text=text,
+                normalized_text=document.utterance.normalized_text,
+                speech_act=document.utterance.speech_act,
+                payload=result,
+                candidates=interpreted.candidates,
+                unexplained_tokens=document.semantics.unexplained_tokens,
+                corrections=corrections,
+                route=route,
+            )
+
+        if isinstance(result, MatchResult):
+            if result.clarification is not None:
+                return UnderstandingOutcome(
+                    kind=(
+                        UnderstandingKind.AMBIGUOUS
+                        if len(result.clarification.candidates) > 1
+                        else UnderstandingKind.CLARIFICATION
+                    ),
+                    source_text=text,
+                    normalized_text=document.utterance.normalized_text,
+                    speech_act=document.utterance.speech_act,
+                    payload=result,
+                    candidates=interpreted.candidates,
+                    reason=ParseFailureReason.AMBIGUOUS_TARGET,
+                    speech=result.response_text,
+                    unexplained_tokens=document.semantics.unexplained_tokens,
+                    corrections=corrections,
+                    route=route,
+                )
+            return UnderstandingOutcome(
+                kind=(
+                    UnderstandingKind.COMMAND
+                    if result.plan is not None
+                    else UnderstandingKind.QUERY
+                ),
+                source_text=text,
+                normalized_text=document.utterance.normalized_text,
+                speech_act=document.utterance.speech_act,
+                payload=result,
+                candidates=interpreted.candidates,
+                speech=result.response_text,
+                unexplained_tokens=document.semantics.unexplained_tokens,
+                corrections=corrections,
+                route=(result.frame.intent if result.frame is not None else route),
+            )
+
+        feedback = self.understanding_feedback(text, entities)
+        unsafe = (
+            document.utterance.speech_act is SpeechAct.COMMAND
+            and not document.utterance.safe_to_execute_directly
+        )
+        return UnderstandingOutcome(
+            kind=(UnderstandingKind.UNSAFE if unsafe else UnderstandingKind.UNSUPPORTED),
+            source_text=text,
+            normalized_text=document.utterance.normalized_text,
+            speech_act=document.utterance.speech_act,
+            reason=(
+                ParseFailureReason.UNSAFE_INFERENCE
+                if unsafe
+                else feedback.reason if feedback is not None
+                else ParseFailureReason.NO_GRAMMAR
+            ),
+            speech=feedback.speech if feedback is not None else None,
+            candidates=interpreted.candidates,
+            unexplained_tokens=document.semantics.unexplained_tokens,
+            corrections=corrections,
+            route=route,
+        )
+
+    def understand_automation(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
+        context: ConversationContext | None = None,
+        document: LanguageDocument | None = None,
+    ) -> UnderstandingOutcome[AutomationMatchResult]:
+        """Canonical V7 boundary for a trigger/condition/action turn."""
+        document = document or analyse_language(text, entities)
+        result = self.match_automation(text, entities, world_model, context)
+        interpreted = SemanticInterpreter.interpret(
+            document,
+            entities,
+            world_model,
+            compile_result=False,
+            resolve_registry=result is None,
+        )
+        if result is not None:
+            return UnderstandingOutcome(
+                kind=UnderstandingKind.AUTOMATION,
+                source_text=text,
+                normalized_text=document.utterance.normalized_text,
+                speech_act=document.utterance.speech_act,
+                payload=result,
+                candidates=interpreted.candidates,
+                unexplained_tokens=document.semantics.unexplained_tokens,
+                route="automation",
+            )
+        return UnderstandingOutcome(
+            kind=(
+                UnderstandingKind.UNSAFE
+                if document.utterance.speech_act is SpeechAct.AUTOMATION
+                and not document.utterance.safe_to_execute_directly
+                and document.utterance.polarity.name == "NEGATIVE"
+                else UnderstandingKind.UNSUPPORTED
+            ),
+            source_text=text,
+            normalized_text=document.utterance.normalized_text,
+            speech_act=document.utterance.speech_act,
+            reason=ParseFailureReason.INCOMPLETE_REQUEST,
+            candidates=interpreted.candidates,
+            unexplained_tokens=document.semantics.unexplained_tokens,
+            route="automation_no_match",
+        )
 
     def _match_coordinated_named_targets(
         self,

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol, runtime_checkable
 
 from ..areas import AreaSnapshot
-from ..entities import EntityIndex, EntitySnapshot, build_entity_index
+from ..entities import EntityCandidate, EntityIndex, EntitySnapshot, build_entity_index
 from ..world_model import WorldModel
 from .frame import SemanticFrame
 
@@ -86,6 +86,7 @@ class ClarificationRequest:
     # the requested 22-degree setpoint). Empty for all older clarification
     # paths, so existing callers remain unchanged.
     pending_parameters: Mapping[str, Any] = field(default_factory=dict)
+    candidate_matches: tuple[EntityCandidate, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -1,24 +1,17 @@
-"""Conversation state (v2 plan Phase 24, "Conversation State"). Foundation for
-the dialog-capability phases that build on top of it: Phase 25 ("Clarification")
-wires ``ClarificationRequest`` into a real "Welches Licht meinst du?" round-trip,
-Phase 26 ("Context") wires ``last_command``/``last_entities``/``last_area`` into
-follow-up merging ("Mach das Wohnzimmerlicht an." -> "Etwas heller."), Phase 27
-("Pronomen/Referenzen") resolves "es"/"die andere"/etc. against the same context.
+"""Home-Assistant-free conversation state and pending-dialog state machine.
 
-This module only defines the state shape and its per-conversation storage -
-deliberately not wired into ``conversation.py``/``engine.py`` yet, same
-build-ahead-of-consumer pattern as ``SemanticCommand``/``EntityIndex`` in their
-own phases (see docs/architecture-v2-phase22.md).
-
-Kept free of Home Assistant/hassil imports, same boundary as the rest of
-``nlu/``: ``EntitySnapshot``/``AreaSnapshot``/``SemanticCommand`` are already
-hass-free by this point, and storage below only needs a monotonic clock.
+The state supports clarification, follow-up merging and reference resolution.
+``active_pending_dialog()`` turns the historical optional ``pending_*`` fields
+into one explicit, deterministic active node and reports conflicting stored
+nodes for diagnostics.  ``conversation.py`` consumes that node before routing
+a fresh utterance.
 """
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from enum import Enum, auto
 from typing import TYPE_CHECKING, Callable
 
 from ..areas import AreaSnapshot
@@ -65,7 +58,36 @@ __all__ = [
     "PendingProductivityCommand",
     "PendingAutomationWizard",
     "PendingAliasLearning",
+    "PendingDialogKind",
+    "ActivePendingDialog",
+    "active_pending_dialog",
 ]
+
+
+class PendingDialogKind(Enum):
+    ALIAS_LEARNING = auto()
+    AUTOMATION_WIZARD = auto()
+    PRODUCTIVITY = auto()
+    CALENDAR_EVENT = auto()
+    CALENDAR_MUTATION = auto()
+    AUTOMATION_CONFIRMATION = auto()
+    AUTOMATION_ACTION_EDIT = auto()
+    AUTOMATION_STRUCTURE_EDIT = auto()
+    AUTOMATION_MANAGEMENT = auto()
+    AUTOMATION_DELETION = auto()
+    SERVICE_CONFIRMATION = auto()
+    SEMANTIC_COMMAND = auto()
+    AUTOMATION_DRAFT = auto()
+    CLARIFICATION = auto()
+
+
+@dataclass(frozen=True)
+class ActivePendingDialog:
+    """The single explicit state-machine node active for a conversation."""
+
+    kind: PendingDialogKind
+    payload: object
+    conflicting_kinds: tuple[PendingDialogKind, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -317,6 +339,51 @@ class ConversationContext:
     last_query_predicate: str | None = None
     last_explanation: str | None = None
     memory: DialogTurnMemory | None = None
+
+
+_PENDING_DIALOG_FIELDS: tuple[tuple[PendingDialogKind, str], ...] = (
+    (PendingDialogKind.ALIAS_LEARNING, "pending_alias_learning"),
+    (PendingDialogKind.AUTOMATION_WIZARD, "pending_automation_wizard"),
+    (PendingDialogKind.PRODUCTIVITY, "pending_productivity_command"),
+    (PendingDialogKind.CALENDAR_EVENT, "pending_calendar_event"),
+    (PendingDialogKind.CALENDAR_MUTATION, "pending_calendar_mutation"),
+    (PendingDialogKind.AUTOMATION_CONFIRMATION, "pending_automation_confirmation"),
+    (PendingDialogKind.AUTOMATION_ACTION_EDIT, "pending_automation_action_edit"),
+    (PendingDialogKind.AUTOMATION_STRUCTURE_EDIT, "pending_automation_structure_edit"),
+    (PendingDialogKind.AUTOMATION_MANAGEMENT, "pending_automation_management"),
+    (PendingDialogKind.AUTOMATION_DELETION, "pending_automation_deletion"),
+    (PendingDialogKind.SERVICE_CONFIRMATION, "pending_service_confirmation"),
+    (PendingDialogKind.SEMANTIC_COMMAND, "pending_semantic_command"),
+    (PendingDialogKind.AUTOMATION_DRAFT, "pending_automation_draft"),
+    (PendingDialogKind.CLARIFICATION, "pending_clarification"),
+)
+
+
+def active_pending_dialog(
+    context: ConversationContext | None,
+) -> ActivePendingDialog | None:
+    """Return the deterministic active state without inspecting user text.
+
+    Context constructors should normally set one pending field.  Historical
+    states can contain more; those are surfaced in ``conflicting_kinds`` and
+    resolved by the documented state priority instead of accidental chains
+    of ``if`` statements spread through the conversation router.
+    """
+    if context is None:
+        return None
+    found = tuple(
+        (kind, payload)
+        for kind, field_name in _PENDING_DIALOG_FIELDS
+        if (payload := getattr(context, field_name)) is not None
+    )
+    if not found:
+        return None
+    kind, payload = found[0]
+    return ActivePendingDialog(
+        kind=kind,
+        payload=payload,
+        conflicting_kinds=tuple(other_kind for other_kind, _ in found[1:]),
+    )
 
 
 class ConversationContextStore:

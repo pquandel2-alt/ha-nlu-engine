@@ -39,7 +39,11 @@ def test_match_surfaces_clarification_instead_of_none(engine):
     assert result is not None
     assert result.plan is None
     assert result.clarification is not None
-    assert result.response_text == "Welches Licht meinst du?"
+    assert result.response_text == (
+        "Ich habe mehrere passende Lichter gefunden: "
+        "1. Bürolicht im Bereich Büro 1; 2. Bürolicht im Bereich Büro 2. "
+        "Welches meinst du?"
+    )
 
 
 def test_resolve_clarification_by_name_within_candidates(engine):

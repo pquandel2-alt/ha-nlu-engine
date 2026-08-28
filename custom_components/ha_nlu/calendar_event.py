@@ -12,6 +12,11 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
 
 from .entities import EntitySnapshot, normalize_for_compare
+from .nlu.entity_clarification import (
+    CandidateReplyKind,
+    render_candidate_question,
+    resolve_candidate_reply,
+)
 
 
 _WEEKDAYS = {
@@ -532,9 +537,17 @@ def update_calendar_event_draft(
     """Merge one reply or correction into an existing event draft."""
     pieces = _parse_pieces(text, now, allow_bare=True)
     matches = select_calendar(text, calendars)
+    if not matches and draft.calendar_entity_id is None and len(calendars) > 1:
+        selection = resolve_candidate_reply(text, calendars, list(calendars))
+        if (
+            selection.kind is CandidateReplyKind.SELECTED
+            and selection.entity is not None
+        ):
+            matches = (selection.entity,)
     if len(matches) > 1:
-        names = ", ".join(item.friendly_name for item in matches)
-        return CalendarDraftUpdate(draft, False, f"Mehrere Kalender passen: {names}. Welchen meinst du?")
+        return CalendarDraftUpdate(
+            draft, False, render_candidate_question(matches)
+        )
 
     changes: dict[str, object] = {}
     if pieces.event_date is not None:
@@ -584,8 +597,7 @@ def calendar_event_question(
     ):
         if not calendars:
             return "Ich finde keinen für HomeIntent freigegebenen, beschreibbaren Kalender."
-        names = ", ".join(calendar.friendly_name for calendar in calendars)
-        return f"In welchen Kalender soll ich den Termin eintragen? Verfügbar sind: {names}."
+        return render_candidate_question(calendars)
     return None
 
 

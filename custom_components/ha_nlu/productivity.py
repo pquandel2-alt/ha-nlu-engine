@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from enum import Enum, auto
 
 from .entities import EntitySnapshot, normalize_for_compare
+from .nlu.entity_clarification import CandidateReplyKind, resolve_candidate_reply
 
 
 class TodoOperation(Enum):
@@ -376,16 +377,17 @@ def parse_productivity_request(
 def select_productivity_candidate(
     request: ProductivityRequest, reply: str
 ) -> ProductivityRequest | None:
-    selected = _mentioned_entities(reply, request.candidates)
-    if len(selected) != 1:
-        ordinal = re.search(r"\b(?:die|der|das)?\s*(erste|zweite|dritte|1\.?|2\.?|3\.?)\b", reply, re.IGNORECASE)
-        indexes = {"erste": 0, "1": 0, "1.": 0, "zweite": 1, "2": 1, "2.": 1, "dritte": 2, "3": 2, "3.": 2}
-        if ordinal:
-            index = indexes[ordinal.group(1).casefold()]
-            selected = request.candidates[index:index + 1]
-    if len(selected) != 1:
+    selection = resolve_candidate_reply(
+        reply, request.candidates, list(request.candidates)
+    )
+    if (
+        selection.kind is not CandidateReplyKind.SELECTED
+        or selection.entity is None
+    ):
         return None
-    return replace(request, entity_id=selected[0].entity_id, candidates=())
+    return replace(
+        request, entity_id=selection.entity.entity_id, candidates=()
+    )
 
 
 def format_duration(seconds: int) -> str:

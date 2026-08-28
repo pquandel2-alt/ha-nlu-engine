@@ -191,17 +191,23 @@ class SingleTargetParser:
         )
         resolved = resolve_entity(resolution_name, resolution_entities)
         if resolved.status is ResolveStatus.AMBIGUOUS:
-            # Only the 5 basic action intents (v2 plan Phase 25,
-            # "Clarification") get a follow-up question - QUERY_INTENTS
-            # (sensor reads) keep today's NOT_FOUND-equivalent behaviour,
-            # since finishing a query needs no further parameters and an
-            # ambiguous sensor name is rare enough that the extra round-trip
-            # isn't worth the added branch; INTENTS.get() also doubles as
-            # the "is this even a known intent" guard the non-ambiguous path
-            # below performs via ``spec``.
-            if INTENTS.get(result.intent.name) is not None:
+            # Commands and singular queries share the same clarification
+            # contract. Queries stay read-only after selection; dropping an
+            # ambiguous query into a generic no-match would make resolution
+            # behavior depend on the downstream domain.
+            if (
+                INTENTS.get(result.intent.name) is not None
+                or QUERY_INTENTS.get(result.intent.name) is not None
+            ):
                 return ClarificationRequest(
-                    pending_intent=result.intent.name, pending_target=name, candidates=resolved.candidates,
+                    pending_intent=result.intent.name,
+                    pending_target=name,
+                    candidates=resolved.candidates,
+                    candidate_matches=(
+                        resolved.candidate_set.ranked
+                        if resolved.candidate_set is not None
+                        else ()
+                    ),
                 )
             return None
         if resolved.status is not ResolveStatus.OK or resolved.entity is None:

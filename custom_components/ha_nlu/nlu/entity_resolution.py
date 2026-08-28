@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from typing import Iterable
 
 from ..entities import (
     EntitySnapshot,
+    EntityIndex,
     ResolutionResult,
     ResolutionStatus,
     ResolveResult,
@@ -14,6 +17,7 @@ from ..entities import (
     resolve_entities_by_domain,
     resolve_entity,
     resolve_entity_scored,
+    generate_aliases,
 )
 from ..entity_scope import resolve_entity_scope
 from .domain_operations import DOMAIN_WORDS
@@ -22,8 +26,97 @@ __all__ = (
     "ResolutionResult", "ResolutionStatus", "ResolveResult", "ResolveStatus",
     "all_mentioned_entities", "mentioned_entities", "resolve_entities_by_domain", "resolve_entity",
     "resolve_entity_scored", "resolve_mentioned_target", "resolve_named_target",
-    "resolve_query_targets",
+    "resolve_query_targets", "rank_semantic_targets", "RankedTarget",
 )
+
+
+@dataclass(frozen=True)
+class RankedTarget:
+    """One explainable candidate from the shared semantic name resolver."""
+
+    entity: EntitySnapshot
+    score: int
+    source: str
+    matched_name: str
+
+
+_WORD_RE = re.compile(r"[\wäöüß]+", re.I)
+
+
+def _word_set(text: str, ignored: frozenset[str]) -> set[str]:
+    return {
+        token
+        for raw in _WORD_RE.findall(text)
+        if (token := normalize_for_compare(raw)) not in ignored
+    }
+
+
+def rank_semantic_targets(
+    text: str,
+    entities: Iterable[EntitySnapshot],
+    *,
+    domains: frozenset[str] = frozenset(),
+    area_id: str | None = None,
+    floor_id: str | None = None,
+    ignored_tokens: frozenset[str] = frozenset(),
+    index: EntityIndex | None = None,
+) -> tuple[RankedTarget, ...]:
+    """Rank embedded registry names once for every semantic consumer.
+
+    Complete friendly/configured names outrank token-subset matches. Generic
+    domain words may be omitted from a registry name only after the caller
+    supplies the shared ignored-token set. Equal top scores remain equal so
+    the caller can produce an ambiguity rather than selecting by iteration
+    order.
+    """
+    normalized_text = normalize_for_compare(text)
+    utterance = _word_set(text, ignored_tokens)
+    if index is not None and len(domains) == 1:
+        pool: Iterable[EntitySnapshot] = index.by_domain.get(next(iter(domains)), ())
+    else:
+        pool = entities
+    ranked: list[RankedTarget] = []
+    for entity in pool:
+        if domains and entity.domain not in domains:
+            continue
+        if area_id is not None and entity.area_id != area_id:
+            continue
+        if floor_id is not None and entity.floor_id != floor_id:
+            continue
+        best: RankedTarget | None = None
+        names = (
+            ((entity.friendly_name, "friendly_name"),)
+            + tuple((alias, "configured") for alias in entity.aliases)
+            + tuple((alias.text, alias.source) for alias in generate_aliases(entity))
+        )
+        for name, source in names:
+            normalized_name = normalize_for_compare(name)
+            score = 0
+            if normalized_name and re.search(
+                rf"(?<!\w){re.escape(normalized_name)}(?!\w)", normalized_text
+            ):
+                source_bonus = 30 if source in {"friendly_name", "configured"} else 0
+                score = 1000 + source_bonus + len(normalized_name)
+            else:
+                name_tokens = _word_set(name, frozenset())
+                generic = {
+                    normalize_for_compare(word)
+                    for words in DOMAIN_WORDS.values()
+                    for word in words
+                }
+                distinctive = name_tokens - generic
+                required = (
+                    name_tokens
+                    if source in {"entity_name", "entity_id"}
+                    else distinctive or name_tokens
+                )
+                if required and required <= utterance:
+                    score = len(required) * 10 + len(name_tokens)
+            if score and (best is None or score > best.score):
+                best = RankedTarget(entity, score, source, name)
+        if best is not None:
+            ranked.append(best)
+    return tuple(sorted(ranked, key=lambda item: (-item.score, item.entity.entity_id)))
 
 
 def _rank_mentions(

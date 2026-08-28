@@ -17,7 +17,13 @@
     "custom_components/ha_nlu/nlu/entity_resolution.py",
     "custom_components/ha_nlu/nlu/grounded_answer.py",
     "custom_components/ha_nlu/nlu/meaning.py",
-    "custom_components/ha_nlu/nlu/verb_state_query.py"
+    "custom_components/ha_nlu/nlu/verb_state_query.py",
+    "custom_components/ha_nlu/nlu/understanding.py",
+    "custom_components/ha_nlu/nlu/language_frontend.py",
+    "custom_components/ha_nlu/nlu/semantic_catalog.py",
+    "custom_components/ha_nlu/nlu/semantic_interpreter.py",
+    "custom_components/ha_nlu/name_similarity.py",
+    "custom_components/ha_nlu/nlu/entity_clarification.py"
   ],
   "reportMissingImports": false
 }

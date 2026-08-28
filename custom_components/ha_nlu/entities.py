@@ -16,6 +16,8 @@ from datetime import datetime
 from enum import Enum, auto
 from typing import Any, Mapping
 
+from .name_similarity import bounded_name_similarity
+
 
 @dataclass(frozen=True)
 class EntitySnapshot:
@@ -58,13 +60,6 @@ class ResolveStatus(Enum):
     OK = auto()
     AMBIGUOUS = auto()
     NOT_FOUND = auto()
-
-
-@dataclass(frozen=True)
-class ResolveResult:
-    status: ResolveStatus
-    entity: EntitySnapshot | None = None
-    candidates: tuple[EntitySnapshot, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -147,7 +142,50 @@ def generate_aliases(entity: EntitySnapshot) -> tuple[EntityAlias, ...]:
 class ResolutionStatus(Enum):
     RESOLVED = auto()
     AMBIGUOUS = auto()
+    CONFIRMATION_REQUIRED = auto()
     NOT_FOUND = auto()
+
+
+class EntityMatchSource(Enum):
+    FRIENDLY_NAME = auto()
+    CONFIGURED_ALIAS = auto()
+    GENERATED_ALIAS = auto()
+    ENTITY_ID = auto()
+    CONTAINS = auto()
+    FUZZY = auto()
+
+
+@dataclass(frozen=True)
+class EntityCandidate:
+    """One explainable, stable registry-name candidate."""
+
+    entity: EntitySnapshot
+    score: float
+    source: EntityMatchSource
+    matched_name: str
+    distance: int = 0
+
+
+@dataclass(frozen=True)
+class EntityCandidateSet:
+    """Ranked candidates and the safety margin used for one resolution."""
+
+    query: str
+    ranked: tuple[EntityCandidate, ...]
+    margin: float | None = None
+    correction_required: bool = False
+
+    @property
+    def entities(self) -> tuple[EntitySnapshot, ...]:
+        return tuple(candidate.entity for candidate in self.ranked)
+
+
+@dataclass(frozen=True)
+class ResolveResult:
+    status: ResolveStatus
+    entity: EntitySnapshot | None = None
+    candidates: tuple[EntitySnapshot, ...] = ()
+    candidate_set: EntityCandidateSet | None = None
 
 
 @dataclass(frozen=True)
@@ -156,6 +194,10 @@ class ResolutionResult:
     entity: EntitySnapshot | None = None
     candidates: tuple[EntitySnapshot, ...] = ()
     score: float | None = None
+    # Diagnostic explanation does not alter resolution equality. Indexed
+    # and full-scan calls may observe a different runner-up margin while
+    # producing the same authoritative result.
+    candidate_set: EntityCandidateSet | None = field(default=None, compare=False)
 
 
 # Scoring weights (v2 plan Phase 6, "Beispielwerte, experimentell, durch
@@ -190,9 +232,15 @@ def normalize_for_compare(text: str) -> str:
     return " ".join(folded.split())
 
 
-def _score_name_pair(spoken: str, spoken_norm: str, candidate_text: str, source: str) -> float | None:
-    """Best tier score for one (spoken text, candidate name) pair, or None
-    if they don't match under any tier at all."""
+def _score_name_pair(
+    spoken: str,
+    spoken_norm: str,
+    candidate_text: str,
+    source: str,
+    *,
+    allow_fuzzy: bool,
+) -> tuple[float, EntityMatchSource, int] | None:
+    """Best score, provenance and distance for one name pair."""
     if not candidate_text or not spoken_norm:
         return None
     candidate_norm = normalize_for_compare(candidate_text)
@@ -202,29 +250,72 @@ def _score_name_pair(spoken: str, spoken_norm: str, candidate_text: str, source:
     if source == "entity_id":
         # Raw entity_ids are lowercase by HA convention - no natural-language
         # "contains" fragment matching for them, just a dedicated tier.
-        return _SCORE_ENTITY_ID_MATCH if candidate_norm == spoken_norm else None
+        return (
+            (_SCORE_ENTITY_ID_MATCH, EntityMatchSource.ENTITY_ID, 0)
+            if candidate_norm == spoken_norm
+            else None
+        )
 
     if candidate_text == spoken:
-        return _SCORE_EXACT_FRIENDLY_NAME if source == "friendly_name" else _SCORE_EXACT_ALIAS
+        return (
+            _SCORE_EXACT_FRIENDLY_NAME
+            if source == "friendly_name"
+            else _SCORE_EXACT_ALIAS,
+            EntityMatchSource.FRIENDLY_NAME
+            if source == "friendly_name"
+            else EntityMatchSource.CONFIGURED_ALIAS
+            if source == "configured"
+            else EntityMatchSource.GENERATED_ALIAS,
+            0,
+        )
     if candidate_norm == spoken_norm:
-        return _SCORE_NORMALIZED_EXACT
-    if spoken_norm in candidate_norm:
-        return _SCORE_CONTAINS
-    if candidate_norm in spoken_norm:
-        return _SCORE_REVERSE_CONTAINS
+        return (
+            _SCORE_NORMALIZED_EXACT,
+            EntityMatchSource.FRIENDLY_NAME
+            if source == "friendly_name"
+            else EntityMatchSource.CONFIGURED_ALIAS
+            if source == "configured"
+            else EntityMatchSource.GENERATED_ALIAS,
+            0,
+        )
+    if len(spoken_norm) >= 3 and spoken_norm in candidate_norm:
+        return _SCORE_CONTAINS, EntityMatchSource.CONTAINS, 0
+    if len(candidate_norm) >= 3 and candidate_norm in spoken_norm:
+        return _SCORE_REVERSE_CONTAINS, EntityMatchSource.CONTAINS, 0
+    if not allow_fuzzy:
+        return None
+    similarity = bounded_name_similarity(spoken_norm, candidate_norm)
+    if similarity.accepted:
+        # Fuzzy evidence never outranks a literal contains match.  A sole
+        # fuzzy candidate requires confirmation; several near-equal fuzzy
+        # candidates become an ordinary clarification.
+        score = 30.0 + similarity.ratio * 10.0 - similarity.distance * 2.0
+        return score, EntityMatchSource.FUZZY, similarity.distance
     return None
 
 
-def _best_name_score(spoken: str, spoken_norm: str, entity: EntitySnapshot) -> float | None:
+def _best_name_candidate(
+    spoken: str,
+    spoken_norm: str,
+    entity: EntitySnapshot,
+    *,
+    allow_fuzzy: bool,
+) -> EntityCandidate | None:
     """Highest tier score across friendly_name and all generated aliases -
     Schritt 1+2 of the plan (Candidate Generation + Scoring) for one entity."""
-    best: float | None = None
+    best: EntityCandidate | None = None
     for text, source in [(entity.friendly_name, "friendly_name"), *(
         (a.text, a.source) for a in generate_aliases(entity)
     )]:
-        score = _score_name_pair(spoken, spoken_norm, text, source)
-        if score is not None and (best is None or score > best):
-            best = score
+        match = _score_name_pair(
+            spoken, spoken_norm, text, source, allow_fuzzy=allow_fuzzy
+        )
+        if match is None:
+            continue
+        score, match_source, distance = match
+        candidate = EntityCandidate(entity, score, match_source, text, distance)
+        if best is None or candidate.score > best.score:
+            best = candidate
     return best
 
 
@@ -277,33 +368,74 @@ def resolve_entity_scored(
             candidates = list(index.by_domain.get(domain, ()))
             if area_id is not None:
                 candidates = [e for e in candidates if e.area_id == area_id]
-        else:
+        elif area_id is not None:
             candidates = list(index.by_area.get(area_id, ()))
 
-    ranked: list[tuple[EntitySnapshot, float]] = []
-    for entity in candidates:
-        name_score = _best_name_score(spoken, spoken_norm, entity)
-        if name_score is None:
-            continue
-        total = name_score
-        if area_id is not None and entity.area_id == area_id:
-            total += _SCORE_MATCHING_AREA
-        if domain is not None and entity.domain == domain:
-            total += _SCORE_MATCHING_DOMAIN
-        if device_class is not None and entity.device_class == device_class:
-            total += _SCORE_MATCHING_DEVICE_CLASS
-        ranked.append((entity, total))
+    ranked: list[EntityCandidate] = []
+    for allow_fuzzy in (False, True):
+        for entity in candidates:
+            candidate = _best_name_candidate(
+                spoken, spoken_norm, entity, allow_fuzzy=allow_fuzzy
+            )
+            if candidate is None:
+                continue
+            total = candidate.score
+            if area_id is not None and entity.area_id == area_id:
+                total += _SCORE_MATCHING_AREA
+            if domain is not None and entity.domain == domain:
+                total += _SCORE_MATCHING_DOMAIN
+            if device_class is not None and entity.device_class == device_class:
+                total += _SCORE_MATCHING_DEVICE_CLASS
+            ranked.append(EntityCandidate(
+                candidate.entity,
+                total,
+                candidate.source,
+                candidate.matched_name,
+                candidate.distance,
+            ))
+        if ranked:
+            break
 
     if not ranked:
         return ResolutionResult(status=ResolutionStatus.NOT_FOUND)
 
-    ranked.sort(key=lambda pair: pair[1], reverse=True)
-    top_score = ranked[0][1]
-    tied = [entity for entity, score in ranked if top_score - score <= _AMBIGUITY_MARGIN]
+    ranked.sort(key=lambda item: (-item.score, item.entity.entity_id))
+    top_score = ranked[0].score
+    top = [
+        candidate
+        for candidate in ranked
+        if top_score - candidate.score <= _AMBIGUITY_MARGIN
+    ]
+    margin = top_score - ranked[len(top)].score if len(ranked) > len(top) else None
+    candidate_set = EntityCandidateSet(
+        query=spoken,
+        ranked=tuple(top),
+        margin=margin,
+        correction_required=all(
+            candidate.source is EntityMatchSource.FUZZY for candidate in top
+        ),
+    )
 
-    if len(tied) > 1:
-        return ResolutionResult(status=ResolutionStatus.AMBIGUOUS, candidates=tuple(tied))
-    return ResolutionResult(status=ResolutionStatus.RESOLVED, entity=tied[0], score=top_score)
+    if len(top) > 1:
+        return ResolutionResult(
+            status=ResolutionStatus.AMBIGUOUS,
+            candidates=candidate_set.entities,
+            score=top_score,
+            candidate_set=candidate_set,
+        )
+    if top[0].source is EntityMatchSource.FUZZY:
+        return ResolutionResult(
+            status=ResolutionStatus.CONFIRMATION_REQUIRED,
+            candidates=candidate_set.entities,
+            score=top_score,
+            candidate_set=candidate_set,
+        )
+    return ResolutionResult(
+        status=ResolutionStatus.RESOLVED,
+        entity=top[0].entity,
+        score=top_score,
+        candidate_set=candidate_set,
+    )
 
 
 def resolve_entity(name: str, entities: list[EntitySnapshot]) -> ResolveResult:
@@ -317,10 +449,22 @@ def resolve_entity(name: str, entities: list[EntitySnapshot]) -> ResolveResult:
     """
     result = resolve_entity_scored(name, entities)
     if result.status is ResolutionStatus.RESOLVED:
-        return ResolveResult(status=ResolveStatus.OK, entity=result.entity)
+        return ResolveResult(
+            status=ResolveStatus.OK,
+            entity=result.entity,
+            candidate_set=result.candidate_set,
+        )
     if result.status is ResolutionStatus.AMBIGUOUS:
-        return ResolveResult(status=ResolveStatus.AMBIGUOUS, candidates=result.candidates)
-    return ResolveResult(status=ResolveStatus.NOT_FOUND)
+        return ResolveResult(
+            status=ResolveStatus.AMBIGUOUS,
+            candidates=result.candidates,
+            candidate_set=result.candidate_set,
+        )
+    return ResolveResult(
+        status=ResolveStatus.NOT_FOUND,
+        candidates=result.candidates,
+        candidate_set=result.candidate_set,
+    )
 
 
 def resolve_entities_by_domain(

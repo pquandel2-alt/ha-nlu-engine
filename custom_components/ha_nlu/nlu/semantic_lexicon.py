@@ -20,8 +20,29 @@ from functools import lru_cache
 from typing import Iterable
 
 from ..entities import normalize_for_compare
-from .semantic_state import SemanticState
-from .domain_operations import ACTION_EXPRESSIONS, COMMAND_MARKER_EXPRESSIONS, DOMAIN_EXPRESSIONS
+from .semantic_catalog import (
+    ACTION_EXPRESSIONS,
+    AUTOMATION_CUE_ENTRIES,
+    COMMAND_MARKER_EXPRESSIONS,
+    COMPARATOR_ENTRIES,
+    DEVICE_CLASS_ENTRIES,
+    DOMAIN_EXPRESSIONS,
+    MEASUREMENT_PROPERTY_SPECS,
+    PROPERTY_ENTRIES,
+    QUANTIFIER_ENTRIES,
+    QUERY_SCOPE_ENTRIES,
+    STATE_ENTRIES,
+)
+
+__all__ = [
+    "LEXEMES",
+    "Lexeme",
+    "MEASUREMENT_PROPERTY_SPECS",
+    "SemanticAnalysis",
+    "SemanticKind",
+    "SemanticSpan",
+    "analyse_semantics",
+]
 
 
 class SemanticKind(Enum):
@@ -79,84 +100,21 @@ LEXEMES: tuple[Lexeme, ...] = (
       for action, expressions in ACTION_EXPRESSIONS.items()),
     *(Lexeme(SemanticKind.DOMAIN, domain, expressions)
       for domain, expressions in DOMAIN_EXPRESSIONS.items()),
-    Lexeme(SemanticKind.DEVICE_CLASS, ("binary_sensor", "window"), (
-        r"fenster(?:kontakte?)?",
-    )),
-    Lexeme(SemanticKind.DEVICE_CLASS, ("binary_sensor", "door"), (r"tür(?:en)?",)),
-    Lexeme(SemanticKind.DEVICE_CLASS, ("binary_sensor", "garage_door"), (
-        r"garagentor(?:e)?",
-    )),
-    Lexeme(SemanticKind.DEVICE_CLASS, ("binary_sensor", "motion"), (
-        r"bewegungsmelder", r"bewegungssensor(?:en)?",
-    )),
-    Lexeme(SemanticKind.STATE, SemanticState.OPEN, (
-        r"offen\w*", r"geöffnet\w*", r"hochgefahren\w*", r"oben",
-    )),
-    Lexeme(SemanticKind.STATE, SemanticState.CLOSED, (
-        r"geschlossen\w*", r"runtergefahren\w*", r"heruntergefahren\w*", r"unten", r"zu",
-    )),
-    Lexeme(SemanticKind.STATE, SemanticState.ON, (
-        r"an", r"ein", r"eingeschaltet\w*", r"angeschaltet\w*",
-    )),
-    Lexeme(SemanticKind.STATE, SemanticState.OFF, (r"aus", r"ausgeschaltet\w*",)),
-    Lexeme(SemanticKind.STATE, SemanticState.ACTIVE, (
-        r"läuft", r"laeuft", r"laufend", r"aktiv", r"in\s+betrieb",
-    )),
-    Lexeme(SemanticKind.STATE, SemanticState.INACTIVE, (
-        r"inaktiv", r"steht", r"gestoppt", r"pausiert",
-    )),
-    Lexeme(SemanticKind.QUANTIFIER, "all", (
-        r"alle", r"sämtliche\w*", r"jede\w*", r"die\s+ganzen",
-    )),
-    Lexeme(SemanticKind.QUANTIFIER, "both", (r"beide\w*",)),
-    Lexeme(SemanticKind.QUERY_SCOPE, "count", (r"wie\s+viele",)),
-    Lexeme(SemanticKind.QUERY_SCOPE, "locations", (
-        r"wo", r"in\s+welchen\s+räumen", r"welche\s+räume",
-    )),
-    Lexeme(SemanticKind.QUERY_SCOPE, "exists", (
-        r"gibt\s+es", r"haben\s+wir", r"irgendein\w*", r"irgendwelche",
-    )),
-    Lexeme(SemanticKind.QUERY_SCOPE, "none", (r"kein\w*",)),
-    Lexeme(SemanticKind.AUTOMATION_CUE, "predicate", (
-        r"wenn", r"sobald", r"falls", r"sofern", r"nur\s+wenn",
-    )),
-    Lexeme(SemanticKind.PROPERTY, "temperature", (
-        r"temperatur", r"wärme", r"warm", r"kalt", r"grad",
-    )),
-    Lexeme(SemanticKind.PROPERTY, "humidity", (
-        r"luftfeuchtigkeit", r"feuchtigkeit", r"feucht",
-    )),
-    Lexeme(SemanticKind.PROPERTY, "battery", (
-        r"batteriestand", r"batterie", r"batterien",
-    )),
-    Lexeme(SemanticKind.PROPERTY, "power", (r"leistung",)),
-    Lexeme(SemanticKind.PROPERTY, "energy", (
-        r"stromverbrauch", r"energieverbrauch",
-    )),
-    Lexeme(SemanticKind.PROPERTY, "brightness", (r"helligkeit", r"hell",)),
-    Lexeme(SemanticKind.COMPARATOR, "lt", (
-        r"unter", r"weniger\s+als", r"dunkler\s+als",
-    )),
-    Lexeme(SemanticKind.COMPARATOR, "gt", (
-        r"über", r"mehr\s+als", r"heller\s+als",
-    )),
-    Lexeme(SemanticKind.COMPARATOR, "lte", (r"höchstens", r"nicht\s+höher\s+als")),
-    Lexeme(SemanticKind.COMPARATOR, "gte", (r"mindestens",)),
-    Lexeme(SemanticKind.QUERY_SCOPE, "average", (r"durchschnitt\w*",)),
-    Lexeme(SemanticKind.QUERY_SCOPE, "measurement", (
-        r"wie\s+viel", r"aktuell\w*", r"momentan", r"gerade",
-    )),
+    *(Lexeme(SemanticKind.DEVICE_CLASS, item.value, item.expressions)
+      for item in DEVICE_CLASS_ENTRIES),
+    *(Lexeme(SemanticKind.STATE, item.value, item.expressions)
+      for item in STATE_ENTRIES),
+    *(Lexeme(SemanticKind.QUANTIFIER, item.value, item.expressions)
+      for item in QUANTIFIER_ENTRIES),
+    *(Lexeme(SemanticKind.QUERY_SCOPE, item.value, item.expressions)
+      for item in QUERY_SCOPE_ENTRIES),
+    *(Lexeme(SemanticKind.AUTOMATION_CUE, item.value, item.expressions)
+      for item in AUTOMATION_CUE_ENTRIES),
+    *(Lexeme(SemanticKind.PROPERTY, item.value, item.expressions)
+      for item in PROPERTY_ENTRIES),
+    *(Lexeme(SemanticKind.COMPARATOR, item.value, item.expressions)
+      for item in COMPARATOR_ENTRIES),
 )
-
-
-MEASUREMENT_PROPERTY_SPECS = {
-    "temperature": ("sensor", "temperature", "Temperatur", "temperatur"),
-    "humidity": ("sensor", "humidity", "Luftfeuchtigkeit", "luftfeuchtigkeit"),
-    "battery": ("sensor", "battery", "Batteriestand", "batterie"),
-    "power": ("sensor", "power", "Leistung", "leistung"),
-    "energy": ("sensor", "energy", "Energieverbrauch", "energieverbrauch"),
-    "brightness": ("light", None, "Helligkeit", "helligkeit"),
-}
 
 
 _WORD_RE = re.compile(r"[\wäöüß]+", re.I)

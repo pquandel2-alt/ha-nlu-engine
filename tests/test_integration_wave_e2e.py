@@ -208,7 +208,9 @@ def test_case_7_ambiguous_target_returns_clarification_not_a_guess(monkeypatch):
 
     entity.hass.services.async_call.assert_not_awaited()
     assert result.response.error_code is None
-    assert "Welches Licht meinst du" in result.response.speech
+    assert "mehrere passende Lichter" in result.response.speech
+    assert "1. Bürolicht im Bereich Büro 1" in result.response.speech
+    assert "2. Bürolicht im Bereich Büro 2" in result.response.speech
 
 
 # --- Case 8: unresolvable reference -> NOT_FOUND (no prior context) ------

@@ -9,12 +9,14 @@ from __future__ import annotations
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.calendar_event import CalendarEventDraft
 from ha_nlu.nlu.context import (
+    active_pending_dialog,
     ClarificationRequest,
     ConversationContext,
     ConversationContextStore,
     PendingAutomationConfirmation,
     PendingAutomationDraft,
     PendingCalendarEvent,
+    PendingDialogKind,
 )
 from ha_nlu.nlu.automation_model import AutomationModel, TriggerModel, TriggerType
 
@@ -190,3 +192,36 @@ def test_conversation_context_accepts_v6_fields_directly():
     assert context.last_value == 42.0
     assert context.last_state is SemanticState.OPEN
     assert context.pending_reference == "die andere"
+
+
+def test_pending_dialog_state_is_explicit_and_text_independent():
+    context = ConversationContext(
+        last_command=None,
+        last_entities=(),
+        last_area=None,
+        pending_clarification=_clarification(),
+    )
+
+    active = active_pending_dialog(context)
+
+    assert active is not None
+    assert active.kind is PendingDialogKind.CLARIFICATION
+    assert active.payload == context.pending_clarification
+
+
+def test_historical_multiple_pending_fields_surface_conflict_with_stable_priority():
+    context = ConversationContext(
+        last_command=None,
+        last_entities=(),
+        last_area=None,
+        pending_clarification=_clarification(),
+        pending_automation_confirmation=PendingAutomationConfirmation(
+            model=AutomationModel()
+        ),
+    )
+
+    active = active_pending_dialog(context)
+
+    assert active is not None
+    assert active.kind is PendingDialogKind.AUTOMATION_CONFIRMATION
+    assert active.conflicting_kinds == (PendingDialogKind.CLARIFICATION,)
