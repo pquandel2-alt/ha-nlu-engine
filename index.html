@@ -37,7 +37,7 @@
         </linearGradient></defs>
       </svg>
       <span class="brand__text">HomeIntent</span>
-      <span class="brand__ver">4.57</span>
+      <span class="brand__ver">4.62</span>
     </a>
 
     <nav class="nav__links" aria-label="Hauptnavigation">
@@ -45,6 +45,7 @@
       <a href="#demo">Live-Pipeline</a>
       <a href="#koennen">Können</a>
       <a href="#sicherheit">Sicherheit</a>
+      <a href="#v7">V7</a>
       <a href="#architektur">Architektur</a>
       <a href="#grenzen">Grenzen</a>
     </nav>
@@ -70,7 +71,7 @@
     <div class="hero__copy">
       <div class="pill reveal">
         <span class="pill__dot"></span>
-        Version 4.57.0 · 2.320 Tests grün · MIT
+        Version 4.62.0 · 2.443 Tests grün · MIT
       </div>
 
       <h1 class="reveal" style="--d:.05s">
@@ -123,10 +124,10 @@
 
   <div class="wrap">
     <div class="metrics reveal">
-      <div class="metric"><b data-count="30623">0</b><span>Zeilen Produktivcode</span></div>
-      <div class="metric"><b data-count="2235">0</b><span>automatisierte Tests</span></div>
+      <div class="metric"><b data-count="34516">0</b><span>Zeilen Produktivcode</span></div>
+      <div class="metric"><b data-count="2443">0</b><span>automatisierte Tests</span></div>
       <div class="metric"><b data-count="85" data-suffix=" %">0</b><span>Testabdeckung</span></div>
-      <div class="metric"><b data-count="27">0</b><span>Home-Assistant-Domänen</span></div>
+      <div class="metric"><b data-count="31">0</b><span>Home-Assistant-Domänen</span></div>
       <div class="metric"><b data-count="0">0</b><span>Laufzeit&shy;abhängigkeiten</span></div>
     </div>
   </div>
@@ -230,7 +231,7 @@
     <p class="footnote reveal">
       Beispielhaus: 3 Lichter (Küche, Flur, Stehlampe im Wohnzimmer), 2 Rollläden,
       1 Thermostat, 1 Türschloss, 2 Radios. Die gezeigten Ergebnisse entsprechen
-      dem dokumentierten Verhalten von Version 4.57.
+      dem dokumentierten Verhalten von Version 4.62.0.
     </p>
   </div>
 </section>
@@ -306,7 +307,7 @@
   <div class="wrap">
     <div class="sechead reveal">
       <span class="kicker">Reichweite</span>
-      <h2>24 Domänen.<br>Immer <em>fähigkeitsgeprüft.</em></h2>
+      <h2>31 Domänen.<br>Immer <em>fähigkeitsgeprüft.</em></h2>
       <p class="sechead__sub">
         Die tatsächliche Aktion hängt immer von den Fähigkeiten ab, die das
         jeweilige Home-Assistant-Gerät meldet. Eine Positionsaktion braucht
@@ -361,7 +362,22 @@
         </div>
       </div>
       <div class="glass capsule">
-        <h4><span class="capsule__n">06</span> Persönliche Aliase</h4>
+        <h4><span class="capsule__n">06</span> Haushalt, Wetter &amp; Anwesenheit</h4>
+        <p>Seit 4.58 beantwortet HomeIntent auch die Fragen, die kein einzelnes
+        Gerät betreffen — aus Wetter-, <code>person</code>- und
+        <code>sun</code>-Entitäten sowie dem Gesamtzustand. Alles strikt lesend.
+        Eine Vorhersage kommt aus dem <code>forecast</code>-Attribut; fehlt es,
+        sagt HomeIntent das, statt zu raten.</p>
+        <div class="mini">
+          <code>Wie ist das Wetter?</code>
+          <code>Wie wird das Wetter morgen?</code>
+          <code>Wer ist zuhause?</code>
+          <code>Wann geht die Sonne unter?</code>
+          <code>Gibt es Probleme im Haus?</code>
+        </div>
+      </div>
+      <div class="glass capsule">
+        <h4><span class="capsule__n">07</span> Persönliche Aliase</h4>
         <p>HomeIntent kann bestätigte Namen lernen. Die Regel wird erst nach einem ausdrücklichen <em>Ja</em> lokal gespeichert, ist in den Optionen sichtbar und jederzeit löschbar. Kein verstecktes Gedächtnis.</p>
         <div class="mini">
           <code>Mit Bürolicht meine ich Schreibtischlampe.</code>
@@ -382,7 +398,9 @@
         Ausführung sind getrennte, einzeln testbare Stufen. Parser führen niemals
         selbst einen Home-Assistant-Dienst aus. Seit 4.57 passiert <em>jede</em>
         Geräteroute dieselbe Frage-/Befehls-Sperre — eine Frage kann auf keinem
-        Weg mehr in einer Aktion enden.
+        Weg mehr in einer Aktion enden. Seit 4.62 entscheidet zusätzlich
+        <code>UnderstandingOutcome.authority</code> nachvollziehbar, welcher
+        Pfad einen Turn überhaupt beantworten durfte.
       </p>
     </div>
 
@@ -406,13 +424,16 @@
         </div>
         <div class="risk__step" data-lv="crit">
           <span class="risk__lv">Kritisch</span>
-          <h4>Alarmanlage, Entriegeln</h4>
+          <h4>Alarmanlage, Entriegeln, Garagentor</h4>
           <p>Bestätigung — kritische Aktionen nur für Administratoren.</p>
         </div>
       </div>
       <p class="risk__note">
-        Mehr als fünf gleichzeitige Ziele heben die Risikostufe automatisch um
-        eine Stufe an.
+        Die Stufe entsteht aus der konkreten Kombination, nicht aus der Domäne
+        allein: <code>lock</code> ist hoch, <code>lock + unlock</code> kritisch;
+        ein <code>cover</code> mit Geräteklasse <em>garage</em> wird beim Öffnen
+        und Schließen kritisch. Mehr als fünf gleichzeitige Ziele heben jede
+        Stufe zusätzlich um eine an.
       </p>
     </div>
 
@@ -455,16 +476,93 @@
           <span>Gruppen</span><span>Zeit</span><span>Mehrdeutigkeit</span>
           <span>Frage-/Befehlssicherheit</span>
         </div>
-        <p class="mt small">Dazu generative Testmatrizen mit über 5.200 automatisch
-        erzeugten Äußerungen — rund 7.900 Einzelprüfungen, weil ein Teil davon über
-        beide Routen läuft. Der Produktivcode importiert sie nie.</p>
+        <p class="mt small">Dazu generative Testmatrizen: 1.024 Lichtparaphrasen
+        und 2.688 domänenübergreifende Formulierungen, jede einmal direkt gegen
+        den semantischen Compiler und einmal über die echte Live-Routingreihenfolge
+        — 5.376 Routingprüfungen. Der Produktivcode importiert sie nie.</p>
       </div>
     </div>
   </div>
 </section>
 
+<!-- ═══════════════════════ V7-AUTORITÄT ═══════════════════════ -->
+<section class="sec sec--alt" id="v7">
+  <div class="wrap">
+    <div class="sechead reveal">
+      <span class="kicker">Neu in 4.60 – 4.62</span>
+      <h2>Der semantische Compiler<br>ist jetzt <em>die Autorität.</em></h2>
+      <p class="sechead__sub">
+        Bisher lag die Bedeutung im Compiler, die Entscheidung aber oft noch bei
+        gewachsenen Spezialparsern. Seit 4.60 ist die Reihenfolge umgedreht — für
+        einen ausdrücklich vermessenen Ausschnitt entscheidet V7 zuerst, und die
+        Entscheidung selbst ist beobachtbar.
+      </p>
+    </div>
+
+    <div class="grid4">
+      <div class="glass tile reveal">
+        <h4>Ein Ergebnis, sieben Zustände</h4>
+        <p>Jeder Turn endet in genau einem <code>UnderstandingOutcome</code>:</p>
+        <div class="chips">
+          <span>QUERY</span><span>COMMAND</span><span>AUTOMATION</span>
+          <span>CLARIFICATION</span><span>AMBIGUOUS</span><span>UNSUPPORTED</span>
+          <span>UNSAFE</span>
+        </div>
+        <p class="mt small">Nur <code>COMMAND</code> und eine bestätigte
+        <code>AUTOMATION</code> dürfen überhaupt Richtung Executor laufen.</p>
+      </div>
+
+      <div class="glass tile reveal" style="--d:.06s">
+        <h4>Autorität braucht Abstand</h4>
+        <p>Ein autoritativer V7-Treffer setzt einen <strong>vollständigen</strong>
+        Kandidaten voraus. Konkurrieren zwei vollständige Lesarten, müssen
+        mindestens <strong>zehn Scorepunkte</strong> zwischen ihnen liegen.</p>
+        <p class="mt">Echte Ziel-Mehrdeutigkeit bleibt davon unberührt: Sie ist
+        und bleibt eine nicht ausführbare Klärung.</p>
+      </div>
+
+      <div class="glass tile reveal" style="--d:.12s">
+        <h4>Shadow-Gate vor jedem Release</h4>
+        <p>Alter und neuer Pfad laufen rein lesend gegeneinander. Der
+        versionierte Bericht zu 4.62.0 umfasst <strong>3.772 Turns</strong>:</p>
+        <div class="plan">
+          <div class="plan__row"><span>semantisch identisch</span><b>3.752</b></div>
+          <div class="plan__row"><span>Divergenz</span><b>0</b></div>
+          <div class="plan__row"><span>nur Legacy / nur V7</span><b>0</b></div>
+          <div class="plan__row"><span>beidseitig sicher gescheitert</span><b>20</b></div>
+        </div>
+        <p class="mt small">Die 20 sind kontextabhängige Folgeturns, bewusst nicht
+        ausführbare Hypothesen sowie unbekannte Ziele und Werte.</p>
+      </div>
+
+      <div class="glass tile reveal" style="--d:.18s">
+        <h4>Leakage: dreimal null</h4>
+        <p>Im selben Lauf wird gemessen, ob eine Bedeutung je in den falschen
+        Pfad rutscht:</p>
+        <div class="plan">
+          <div class="plan__row"><span>Query&nbsp;→&nbsp;Action</span><b>0</b></div>
+          <div class="plan__row"><span>Unsafe&nbsp;→&nbsp;Action</span><b>0</b></div>
+          <div class="plan__row"><span>Ambiguous&nbsp;→&nbsp;Action</span><b>0</b></div>
+        </div>
+        <p class="mt small">Der Shadow-Pfad erzeugt nur unveränderliche Pläne und
+        besitzt keinen HA-Executor — er <em>kann</em> nichts auslösen.</p>
+      </div>
+    </div>
+
+    <p class="footnote reveal">
+      Reproduzierbar über <code>scripts/v7_shadow_report.py --check
+      docs/perf/v7-shadow-baseline-4.62.0.json</code>. Der aktive autoritative
+      Schnitt umfasst Ein/Aus für Licht, Schalter, Ventilator, Heizung,
+      Luftbefeuchter und Input-Boolean, Öffnen/Schließen für Cover und Ventile,
+      Media Play/Pause, Saugroboter Start/Stopp, Szenenaktivierung, Cover- und
+      Licht-Prozentwerte, Heizungs-Solltemperatur sowie typisierte Zustands-,
+      Verb- und Messwertabfragen.
+    </p>
+  </div>
+</section>
+
 <!-- ═══════════════════════ VERGLEICH ═══════════════════════ -->
-<section class="sec sec--alt" id="vergleich">
+<section class="sec" id="vergleich">
   <div class="wrap">
     <div class="sechead reveal">
       <span class="kicker">Einordnung</span>
@@ -504,13 +602,13 @@
 </section>
 
 <!-- ═══════════════════════ ARCHITEKTUR ═══════════════════════ -->
-<section class="sec" id="architektur">
+<section class="sec sec--alt" id="architektur">
   <div class="wrap">
     <div class="sechead reveal">
       <span class="kicker">Architektur</span>
       <h2>Getrennt gebaut,<br>damit es <em>getrennt prüfbar</em> ist.</h2>
       <p class="sechead__sub">
-        Die gesamte Sprachschicht kennt Home Assistant nicht. 46 Module im
+        Die gesamte Sprachschicht kennt Home Assistant nicht. 51 Module im
         Verzeichnis <code>nlu/</code> enthalten nicht einen einzigen
         <code>homeassistant</code>-Import — sie lassen sich deshalb ohne laufende
         HA-Instanz vollständig testen.
@@ -566,7 +664,7 @@
 </section>
 
 <!-- ═══════════════════════ GRENZEN ═══════════════════════ -->
-<section class="sec sec--alt" id="grenzen">
+<section class="sec" id="grenzen">
   <div class="wrap">
     <div class="sechead reveal">
       <span class="kicker">Ehrlichkeit</span>
@@ -586,12 +684,14 @@
       <div class="limit reveal" style="--d:.2s"><span>—</span><p>Kalendarische Sprache deckt die dokumentierten Muster ab — sie ist <strong>kein universeller Parser</strong> für jede denkbare deutsche Datumsform.</p></div>
       <div class="limit reveal" style="--d:.24s"><span>—</span><p>Eine Geräteaktion wird nur angeboten, wenn die nötige Fähigkeit im <strong>aktuellen</strong> HA-Zustand erkennbar ist.</p></div>
       <div class="limit reveal" style="--d:.28s"><span>—</span><p>Integrationsspezifische Device-Trigger ohne vollständiges Subtypschema werden <strong>abgelehnt</strong> statt geraten.</p></div>
+      <div class="limit reveal" style="--d:.32s"><span>—</span><p>Die V7-Autorität gilt für einen <strong>ausdrücklich vermessenen Ausschnitt</strong>. Kalender, Produktivität und einzelne Managementfunktionen laufen weiterhin über fachspezifische Parser — hinter derselben Sicherheitsgrenze, aber noch nicht im Compiler.</p></div>
+      <div class="limit reveal" style="--d:.36s"><span>—</span><p>Die Benchmark-Grafik im Repository ist eine <strong>Momentaufnahme eines älteren Stands</strong> und kein Leistungsnachweis für 4.62.0. Reale Zahlen muss man auf der eigenen Hardware messen.</p></div>
     </div>
   </div>
 </section>
 
 <!-- ═══════════════════════ INSTALLATION ═══════════════════════ -->
-<section class="sec" id="installation">
+<section class="sec sec--alt" id="installation">
   <div class="wrap">
     <div class="sechead reveal">
       <span class="kicker">Loslegen</span>
@@ -648,7 +748,7 @@
 <section class="cta">
   <div class="wrap cta__inner reveal">
     <h2>Ein Assistent, dem du<br>den Hausschlüssel <em>geben würdest.</em></h2>
-    <p>Lokal, deterministisch, quelloffen unter MIT. Version 4.57.0.</p>
+    <p>Lokal, deterministisch, quelloffen unter MIT. Version 4.62.0.</p>
     <div class="cta__btns">
       <a class="btn btn--primary btn--lg" href="https://github.com/pquandel2-alt/ha-nlu-engine" target="_blank" rel="noopener">Auf GitHub ansehen</a>
       <a class="btn btn--ghost btn--lg" href="https://my.home-assistant.io/redirect/hacs_repository/?owner=pquandel2-alt&amp;repository=ha-nlu-engine&amp;category=integration" target="_blank" rel="noopener">In HACS öffnen</a>
@@ -671,13 +771,15 @@
         <a href="https://github.com/pquandel2-alt/ha-nlu-engine/blob/main/LICENSE" target="_blank" rel="noopener">MIT-Lizenz</a>
       </div>
       <div><h5>Dokumentation</h5>
-        <a href="https://github.com/pquandel2-alt/ha-nlu-engine/blob/main/docs/architecture-v6.md" target="_blank" rel="noopener">Architektur v6</a>
-        <a href="https://github.com/pquandel2-alt/ha-nlu-engine/blob/main/docs/language-understanding-v2.md" target="_blank" rel="noopener">Sprachverständnis v2</a>
+        <a href="https://github.com/pquandel2-alt/ha-nlu-engine/blob/main/docs/architecture-v7.md" target="_blank" rel="noopener">Architektur v7</a>
+        <a href="https://github.com/pquandel2-alt/ha-nlu-engine/blob/main/docs/natural-language-roadmap-v7.md" target="_blank" rel="noopener">Sprach-Roadmap v7</a>
+        <a href="https://github.com/pquandel2-alt/ha-nlu-engine/blob/main/docs/quality-checklist.md" target="_blank" rel="noopener">Qualitäts-Checkliste</a>
         <a href="https://github.com/pquandel2-alt/ha-nlu-engine/blob/main/docs/troubleshooting.md" target="_blank" rel="noopener">Fehlerdiagnose</a>
       </div>
       <div><h5>Seite</h5>
         <a href="#demo">Live-Pipeline</a>
         <a href="#sicherheit">Sicherheit</a>
+        <a href="#v7">V7-Autorität</a>
         <a href="#grenzen">Bekannte Grenzen</a>
       </div>
     </div>

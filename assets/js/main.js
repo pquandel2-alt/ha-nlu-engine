@@ -88,7 +88,13 @@ const SCENES = [
     ha: 'Soll ich die Haustür wirklich entriegeln?', ms: '0,07 ms' },
   { me: 'Was hast du verstanden?',
     sys: 'Erklärung aus aufgelösten Fakten · keine Aktion',
-    ha: 'Aktion: entriegeln; Ziel: Haustür; Risiko: kritisch; Status: wartet auf Bestätigung.', ms: '0,02 ms' }
+    ha: 'Aktion: entriegeln; Ziel: Haustür; Risiko: kritisch; Status: wartet auf Bestätigung.', ms: '0,02 ms' },
+  { me: 'Wie wird das Wetter morgen?',
+    sys: 'Haushaltsabfrage · forecast-Attribut · rein lesend',
+    ha: 'Morgen wird es bewölkt, bis 19 Grad, mindestens 11 Grad.', ms: '0,04 ms' },
+  { me: 'Wer ist zuhause?',
+    sys: 'person-Domäne · kein Serviceplan erzeugt',
+    ha: 'Zuhause: Philipp.', ms: '0,03 ms' }
 ];
 
 const chatBody = $('#chatBody'), chatMs = $('#chatMs'), chatBadge = $('#chatBadge');
@@ -268,6 +274,24 @@ const EXAMPLES = [
     say: 'Ich würde anlegen: Bei Sonnenuntergang die Stehlampe einschalten. Soll ich das speichern?',
     plan: [['Auslöser', 'sun · sunset'], ['Aktion', 'light.turn_on'], ['Ziel', 'light.wohnzimmer_stehlampe'], ['Kategorie', 'Homeintent'], ['Status', 'Entwurf, unbestätigt']],
     why: '<b>Erzeugte Automationen sind gewöhnliche HA-Automationen</b> in der Kategorie „Homeintent“ — sichtbar, editierbar und löschbar in der normalen Oberfläche. Ein CI-Job validiert das erzeugte Schema gegen ein echtes Home Assistant im Docker-Container.'
+  },
+  {
+    tag: 'V7-Autorität — neu in 4.62',
+    text: 'Mach das Küchenlicht auf 30 Prozent.',
+    stages: [
+      S('Loss-aware Frontend', 'Ein <code>LanguageDocument</code> hält Originaltokens, Quellspannen und Normalisierungsvarianten mit Kosten und Herkunft fest — der Rohtext wird nie überschrieben.'),
+      S('SemanticInterpreter', 'Erzeugt vollständige <code>MeaningCandidates</code> und meldet offen, was fehlt: Konflikte, leere Slots, ungeklärte Tokens.'),
+      S('Katalogabgleich', 'Das Paar <code>light</code> + Prozentwert steht in <code>semantic_catalog.py</code> auf der vermessenen Capability-Liste → V7 ist hier <b>autoritativ</b>.'),
+      S('Score-Margin', 'Nur ein <b>vollständiger</b> Kandidat zählt. Zwei konkurrierende vollständige Lesarten bräuchten mindestens <code>10</code> Scorepunkte Abstand — hier gibt es nur eine.'),
+      S('UnderstandingOutcome', 'Ergebnis <code>COMMAND</code> · <code>authority = V7</code>. Der Live-Router lässt den Treffer vor dem historischen Device-Router passieren.'),
+      S('Revalidierung', 'Die stabile Entity-ID wird gegen den <b>aktuellen</b> Registry-Snapshot und die aktuelle Capability erneut geprüft — nicht gegen den Stand von vorhin.'),
+      S('Shadow-Gate', 'Derselbe Turn läuft im Release-Vergleich rein lesend gegen den Legacy-Pfad. Bei 3.772 Turns: 0 Divergenzen.')
+    ],
+    kind: 'plan', tagText: 'ServiceCallPlan', meta: 'V7 autoritativ',
+    say: 'Okay, das Küchenlicht steht auf 30 Prozent.',
+    plan: [['Dienst', 'light.turn_on'], ['Ziel', 'light.kueche'], ['brightness_pct', '30'],
+           ['authority', 'V7'], ['Risiko', 'niedrig']],
+    why: '<b>Warum das eine eigene Stufe ist:</b> Bedeutung lag schon länger im Compiler — die <em>Entscheidung</em> traf aber oft noch ein gewachsener Spezialparser. Seit 4.60 ist die Reihenfolge umgedreht, und <code>authority</code> macht für jeden Turn nachprüfbar, welcher Pfad geantwortet hat. Nicht migrierte Fachcapabilities bleiben kontrollierter Fallback hinter derselben Sicherheitsgrenze.'
   }
 ];
 
@@ -400,7 +424,8 @@ const DOMAINS = [
   ['calendar', 'Termine lesen, anlegen und – je nach Integration – ändern oder löschen'],
   ['todo', 'Listen lesen und Einträge verwalten'],
   ['timer', 'starten, ändern, pausieren, fortsetzen, beenden und abfragen'],
-  ['sun · weather', 'Sonnenauf- und -untergang, aktuelles Wetter und Vorhersage']
+  ['sun · weather', 'Sonnenauf- und -untergang, aktuelles Wetter und Vorhersage'],
+  ['person', 'Anwesenheit abfragen — einzeln oder für den ganzen Haushalt']
 ];
 const domainsEl = $('#domains');
 if (domainsEl) {
