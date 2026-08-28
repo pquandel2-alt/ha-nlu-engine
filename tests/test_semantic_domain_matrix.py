@@ -16,6 +16,7 @@ import pytest
 
 from ha_nlu.device_control import match_device_control
 from ha_nlu.entities import EntitySnapshot
+from ha_nlu.nlu.understanding import UnderstandingAuthority
 
 
 @dataclass(frozen=True)
@@ -211,6 +212,41 @@ def test_semantic_compiler_domain_matrix(engine, spec: DomainSpec):
 @pytest.mark.parametrize("spec", _DOMAINS, ids=lambda spec: spec.domain)
 def test_live_domain_compositionality_matrix(engine, spec: DomainSpec):
     _assert_domain_matrix(engine, spec, live_route=True)
+
+
+@pytest.mark.parametrize("spec", _DOMAINS, ids=lambda spec: spec.domain)
+def test_v7_authority_domain_compositionality_matrix(engine, spec: DomainSpec):
+    entities = [
+        EntitySnapshot(
+            f"{spec.domain}.matrix_{index}", f"{spec.noun} {name}", spec.domain, "off",
+            capabilities=spec.capabilities, attributes=spec.attributes,
+        )
+        for index, name in enumerate(_NAMES)
+    ]
+    failures: list[str] = []
+    total = 0
+    for name, particle, operation in product(_NAMES, _PARTICLES, spec.operations):
+        target = f"{spec.noun} {name}"
+        for shell in operation.shells:
+            total += 1
+            sentence = shell.format(
+                particle=particle, nom=spec.nominative, acc=spec.accusative, target=target,
+            ).replace("  ", " ")
+            outcome = engine.understand(sentence, entities)
+            plan = getattr(outcome.payload, "plan", None)
+            expected_id = f"{spec.domain}.matrix_{_NAMES.index(name)}"
+            if outcome.authority is not UnderstandingAuthority.V7_MIGRATED:
+                failures.append(f"AUTHORITY {outcome.authority.name}: {sentence}")
+            elif plan is None:
+                failures.append(f"NO_PLAN: {sentence}")
+            elif plan.service != operation.service:
+                failures.append(f"SERVICE {plan.service!r}: {sentence}")
+            elif plan.entity_id != expected_id:
+                failures.append(f"ENTITY {plan.entity_id!r}: {sentence}")
+    assert not failures, (
+        f"{spec.domain}: {total - len(failures)}/{total} V7-autoritativ, "
+        f"{len(failures)} fehlgeschlagen\n" + "\n".join(failures[:3])
+    )
 
 
 def test_valve_capability_is_a_hard_execution_gate(engine):

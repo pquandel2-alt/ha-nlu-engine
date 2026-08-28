@@ -850,8 +850,12 @@ class NluEngine:
             )
             if is_single_coordinated_meaning:
                 whole_analysis = analyse_semantics(normalized_whole)
-                whole_result = SemanticQueryCompiler.compile(
-                    normalized_whole, entities, world_model, whole_analysis
+                whole_result = (
+                    SemanticQueryCompiler.compile(
+                        normalized_whole, entities, world_model, whole_analysis
+                    )
+                    if utterance.speech_act is SpeechAct.QUERY
+                    else None
                 )
                 if whole_result is None and utterance.speech_act is not SpeechAct.QUERY:
                     whole_result = SemanticCommandCompiler.compile(
@@ -914,8 +918,12 @@ class NluEngine:
                 if isinstance(semantic_result, ParseResult):
                     result = semantic_result
         if result is None:
-            result = SemanticQueryCompiler.compile(
-                text, entities, world_model, semantic_analysis
+            result = (
+                SemanticQueryCompiler.compile(
+                    text, entities, world_model, semantic_analysis
+                )
+                if utterance.speech_act is SpeechAct.QUERY
+                else None
             )
             if result is None and utterance.speech_act is not SpeechAct.QUERY:
                 result = SemanticCommandCompiler.compile(
@@ -1041,13 +1049,39 @@ class NluEngine:
         )
         return compare_outcomes(legacy_outcome, v7_outcome)  # type: ignore[arg-type]
 
-    @staticmethod
     def _interpreted_match_result(
+        self,
         interpreted: InterpreterResult,
         entities: list[EntitySnapshot],
-    ) -> MatchResult | None:
+    ) -> MatchResult | CommandPlan | None:
         """Turn the interpreter parse into the same validated payload shape."""
+        if interpreted.compositional_plan is not None:
+            rendered: list[MatchResult] = []
+            for selected in interpreted.compositional_plan.targets:
+                candidate_text = project_target(
+                    interpreted.compositional_plan, selected
+                )
+                parsed = SemanticCommandCompiler.compile(
+                    candidate_text,
+                    entities,
+                    analysis=analyse_semantics(candidate_text),
+                )
+                if not isinstance(parsed, ParseResult):
+                    return None
+                result = self._build_match_result(parsed, entities)
+                if result is None or result.plan is None:
+                    return None
+                rendered.append(result)
+            return CommandPlan(tuple(rendered))
         if isinstance(interpreted.parse_result, ParseResult):
+            if interpreted.parse_result.response_text is not None:
+                return MatchResult(
+                    plan=None,
+                    response_text=interpreted.parse_result.response_text,
+                    context_entities=tuple(interpreted.parse_result.resolved_entities),
+                    context_predicate=interpreted.parse_result.context_predicate,
+                    explanation_text=interpreted.parse_result.explanation_text,
+                )
             return NluEngine._build_match_result(interpreted.parse_result, entities)
         if isinstance(interpreted.parse_result, ClarificationRequest):
             return MatchResult(
@@ -1062,6 +1096,21 @@ class NluEngine:
         result: MatchResult | CommandPlan | None,
     ) -> tuple[str, str] | None:
         """Return the deterministic domain/intent authority key."""
+        if isinstance(result, CommandPlan):
+            intents = {
+                command.frame.intent
+                for command in result.commands
+                if command.frame is not None
+            }
+            domains = {
+                entity.domain
+                for command in result.commands
+                if command.command is not None
+                for entity in command.command.entities
+            }
+            if len(intents) == 1 and len(domains) == 1:
+                return next(iter(domains)), next(iter(intents))
+            return None
         if not isinstance(result, MatchResult):
             return None
         if result.clarification is not None:
@@ -1070,6 +1119,9 @@ class NluEngine:
                 return next(iter(domains)), result.clarification.pending_intent
             return None
         if result.frame is None:
+            domains = {entity.domain for entity in result.context_entities}
+            if result.context_predicate is not None and len(domains) == 1:
+                return next(iter(domains)), "HassVerbStateQuery"
             return None
         domains = {entity.domain for entity in result.command.entities} if (
             result.command is not None

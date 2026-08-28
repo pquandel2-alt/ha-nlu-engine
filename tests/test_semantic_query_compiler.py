@@ -8,6 +8,7 @@ import pytest
 
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.semantic_compiler import SemanticQueryCompiler
+from ha_nlu.nlu.understanding import UnderstandingAuthority
 
 
 WINDOWS = [
@@ -52,6 +53,11 @@ def test_state_query_components_have_free_order(engine, sentence):
         "binary_sensor.wohnzimmer"
     ]
     assert "Wohnzimmerfenster" in result.response_text or result.response_text.startswith("Ja")
+
+    outcome = engine.understand(sentence, WINDOWS)
+    assert outcome.authority is UnderstandingAuthority.V7_MIGRATED
+    assert outcome.payload is not None
+    assert outcome.payload.plan is None
 
 
 @pytest.mark.parametrize(

@@ -83,3 +83,39 @@ def test_wizard_can_be_cancelled_without_service_call(monkeypatch):
     assert "verworfen" in result.response.speech
     assert agent._context_store.get("cancel") is None
     agent.hass.services.async_call.assert_not_awaited()
+
+
+def test_wizard_retries_every_unclear_stage_without_losing_state(monkeypatch):
+    agent = _agent(monkeypatch)
+    cid = "wizard-retries"
+
+    _run(agent, "Erstelle eine neue Automation", cid)
+    bad_trigger = _run(agent, "irgendwann vielleicht", cid)
+    good_trigger = _run(agent, "Wenn das Küchenfenster geöffnet wird", cid)
+    bad_decision = _run(agent, "weiß nicht", cid)
+    _run(agent, "ja", cid)
+    bad_condition = _run(agent, "nur unter guten Umständen", cid)
+    _run(agent, "nur wenn jemand zuhause ist", cid)
+    bad_action = _run(agent, "irgendetwas tun", cid)
+    _run(agent, "Schalte das Küchenlicht ein", cid)
+    bad_lifetime = _run(agent, "eine Weile", cid)
+    preview = _run(agent, "dauerhaft", cid)
+
+    assert "Auslöser" in bad_trigger.response.speech
+    assert "Bedingung" in good_trigger.response.speech
+    assert bad_decision.response.speech == "Bitte antworte mit Ja oder Nein."
+    assert "Bedingung" in bad_condition.response.speech
+    assert "Aktion" in bad_action.response.speech
+    assert "Bitte sage dauerhaft" in bad_lifetime.response.speech
+    assert "Automation erkannt" in preview.response.speech
+
+
+def test_wizard_no_condition_path_reaches_action(monkeypatch):
+    agent = _agent(monkeypatch)
+    cid = "wizard-no-condition"
+
+    _run(agent, "Erstelle eine neue Automation", cid)
+    _run(agent, "Wenn das Küchenfenster geöffnet wird", cid)
+    action_question = _run(agent, "nein", cid)
+
+    assert action_question.response.speech == "Was soll dann passieren?"

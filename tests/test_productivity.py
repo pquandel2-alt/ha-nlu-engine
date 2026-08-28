@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "custom_components"))
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -17,6 +19,7 @@ import ha_nlu.conversation as ha_conversation  # noqa: E402
 from ha_nlu.conversation import NluConversationEntity  # noqa: E402
 from ha_nlu.entities import EntitySnapshot  # noqa: E402
 from ha_nlu.productivity import (  # noqa: E402
+    TodoRequest,
     TimerOperation,
     TodoOperation,
     parse_productivity_request,
@@ -161,3 +164,126 @@ def test_timer_service_and_status(monkeypatch):
     status = _run(agent, "Wie lange läuft der Küchentimer noch?", "timer-status")
     assert "00:04:15" in status.response.speech
     agent.hass.services.async_call.assert_not_awaited()
+
+
+def test_clear_completed_requires_confirmation_and_executes_after_yes(monkeypatch):
+    agent = _entity(monkeypatch, [SHOPPING])
+    agent.hass.services.async_call = AsyncMock(side_effect=[
+        {SHOPPING.entity_id: {"items": [
+            {"uid": "done-1", "summary": "Brot", "status": "completed"},
+        ]}},
+        None,
+    ])
+
+    question = _run(
+        agent, "Alle erledigten Einträge aus der Einkaufsliste löschen", "clear"
+    )
+    unclear = _run(agent, "vielleicht", "clear")
+    result = _run(agent, "ja", "clear")
+
+    assert "wirklich" in question.response.speech
+    assert unclear.response.speech == "Bitte antworte mit Ja oder Nein."
+    assert result.response.speech == "1 erledigte Einträge wurden gelöscht."
+    assert agent.hass.services.async_call.await_count == 2
+
+
+def test_clear_completed_can_be_declined_without_write(monkeypatch):
+    agent = _entity(monkeypatch, [SHOPPING])
+
+    _run(agent, "Alle erledigten Einträge aus der Einkaufsliste löschen", "decline")
+    result = _run(agent, "nein", "decline")
+
+    assert "nicht verändert" in result.response.speech
+    agent.hass.services.async_call.assert_not_awaited()
+
+
+def test_todo_complete_and_remove_resolve_stable_uids(monkeypatch):
+    agent = _entity(monkeypatch, [SHOPPING])
+    items = {SHOPPING.entity_id: {"items": [
+        {"uid": "milk-1", "summary": "[Hoch] Milch", "status": "needs_action"},
+        {"uid": "bread-1", "summary": "Brot", "status": "needs_action"},
+    ]}}
+    agent.hass.services.async_call = AsyncMock(side_effect=[items, None, items, None])
+
+    completed = asyncio.run(agent._async_execute_todo(TodoRequest(
+        TodoOperation.COMPLETE, items=("Milch",), entity_id=SHOPPING.entity_id
+    )))
+    removed = asyncio.run(agent._async_execute_todo(TodoRequest(
+        TodoOperation.REMOVE, items=("Brot",), entity_id=SHOPPING.entity_id
+    )))
+
+    assert completed == "1 Eintrag wurde als erledigt markiert."
+    assert removed == "1 Eintrag wurde aus der Liste entfernt."
+    assert agent.hass.services.async_call.await_args_list[1].args[2] == {
+        "item": "milk-1", "status": "completed"
+    }
+    assert agent.hass.services.async_call.await_args_list[3].args[2] == {
+        "item": "bread-1"
+    }
+
+
+@pytest.mark.parametrize(
+    ("items", "spoken", "message"),
+    (
+        ([], "Milch", "nicht gefunden"),
+        ([
+            {"uid": "a", "summary": "Milch", "status": "needs_action"},
+            {"uid": "b", "summary": "Milch", "status": "needs_action"},
+        ], "Milch", "mehrfach vorhanden"),
+        ([{"summary": "Milch", "status": "needs_action"}], "Milch", "stabile Eintrags-ID"),
+    ),
+)
+def test_todo_mutation_refuses_unknown_duplicate_or_unstable_items(
+    monkeypatch, items, spoken, message
+):
+    agent = _entity(monkeypatch, [SHOPPING])
+    agent.hass.services.async_call = AsyncMock(return_value={
+        SHOPPING.entity_id: {"items": items}
+    })
+
+    with pytest.raises(ValueError, match=message):
+        asyncio.run(agent._async_execute_todo(TodoRequest(
+            TodoOperation.REMOVE, items=(spoken,), entity_id=SHOPPING.entity_id
+        )))
+
+
+def test_todo_move_preserves_metadata_then_removes_source(monkeypatch):
+    agent = _entity(monkeypatch, [SHOPPING, WORK])
+    source = {SHOPPING.entity_id: {"items": [{
+        "uid": "report-1", "summary": "Bericht", "status": "needs_action",
+        "due_date": "2026-09-01", "description": "Prüfen",
+    }]}}
+    agent.hass.services.async_call = AsyncMock(side_effect=[source, None, None])
+
+    speech = asyncio.run(agent._async_execute_todo(TodoRequest(
+        TodoOperation.MOVE,
+        items=("Bericht",),
+        entity_id=SHOPPING.entity_id,
+        destination_entity_id=WORK.entity_id,
+    )))
+
+    assert speech == "1 Eintrag wurde verschoben."
+    added = agent.hass.services.async_call.await_args_list[1]
+    assert added.args[2] == {
+        "item": "Bericht", "due_date": "2026-09-01", "description": "Prüfen"
+    }
+    assert agent.hass.services.async_call.await_args_list[2].args[1] == "remove_item"
+
+
+def test_todo_move_requires_destination_before_any_service(monkeypatch):
+    agent = _entity(monkeypatch, [SHOPPING])
+
+    with pytest.raises(ValueError, match="Zielliste"):
+        asyncio.run(agent._async_execute_todo(TodoRequest(
+            TodoOperation.MOVE, items=("Milch",), entity_id=SHOPPING.entity_id
+        )))
+    agent.hass.services.async_call.assert_not_awaited()
+
+
+def test_productivity_service_failure_is_cleanly_reported(monkeypatch):
+    agent = _entity(monkeypatch, [SHOPPING])
+    agent.hass.services.async_call = AsyncMock(side_effect=RuntimeError("todo down"))
+
+    result = _run(agent, "Füge Milch zur Einkaufsliste hinzu")
+
+    assert "todo down" in result.response.speech

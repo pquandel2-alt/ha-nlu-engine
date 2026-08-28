@@ -58,6 +58,18 @@ def test_unknown_reply_retries_and_cancel_is_explicit():
     ).kind is CandidateReplyKind.CANCELLED
 
 
+def test_single_candidate_supports_explicit_confirmation_and_rejection():
+    single = CANDIDATES[:1]
+
+    assert render_candidate_question(single) == "Meintest du Bürolicht?"
+    selected = resolve_candidate_reply("ja", single, list(single))
+    rejected = resolve_candidate_reply("nein", single, list(single))
+
+    assert selected.kind is CandidateReplyKind.SELECTED
+    assert selected.entity == single[0]
+    assert rejected.kind is CandidateReplyKind.CANCELLED
+
+
 def test_multiple_fuzzy_names_are_ambiguous_but_single_fuzzy_needs_confirmation():
     similar = [
         EntitySnapshot("light.a", "Küchenlicht", "light", "off"),

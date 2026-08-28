@@ -51,8 +51,11 @@ Conversation-Integration erstellt pro frischem Turn genau ein
 Direkte Turns werden in `understand()` semantisch zuerst interpretiert. Eine
 explizite Capability-Liste in `semantic_catalog.py` entscheidet, für welche
 bereits vermessenen Paare aus HA-Domäne und Intent V7 autoritativ ist. Der
-erste aktive Schnitt umfasst `light/HassTurnOn` und
-`light/HassTurnOff`. Für alle anderen Capabilities bleibt der bisherige Pfad
+aktive Schnitt umfasst Ein/Aus für Licht, Schalter, Ventilator, Heizung,
+Luftbefeuchter und Input-Boolean, Öffnen/Schließen für Cover und Ventile,
+Media Play/Pause, Saugroboter Start/Stopp, Szenenaktivierung, Cover-/Licht-
+Prozentwerte, Heizungs-Solltemperatur sowie typisierte Zustands-, Verb- und
+Messwertabfragen. Nicht migrierte Fachcapabilities bleiben kontrollierter
 Kompatibilitätsfallback. `UnderstandingOutcome.authority` macht diese
 Entscheidung beobachtbar; der Live-Router lässt einen autoritativen V7-Treffer
 vor dem historischen Device-Router passieren. Ausführbare V7-Autorität setzt
@@ -72,7 +75,8 @@ unabhängig davon eine nicht ausführbare Klärung.
 - Ein gleichwertiger Target-Gleichstand erzeugt eine Klärung, keinen
   First-Match.
 - Klärungen nennen bis zu fünf unterscheidbare Kandidaten und akzeptieren
-  Name, Alias, Bereich, Etage, Merkmal oder Ordinalzahl.
+  Name, Alias, Bereich, Etage, Merkmal oder Ordinalzahl. Ein einzelner nur
+  ungefähr passender Name verlangt ein explizites Ja; Nein bricht ab.
 - Eine unklare Folgeantwort hält den Dialog offen. Abbruch, Timeout oder ein
   vollständiger neuer Befehl beenden ihn definiert.
 - Die ausgewählte stabile Entity-ID wird vor Ausführung gegen den aktuellen
@@ -105,9 +109,10 @@ Der read-only Shadow-Vergleich ist über
 `NluEngine.compare_understanding_pipelines()` reproduzierbar. Das Skript
 `scripts/v7_shadow_report.py` führt ihn über Dialogkorpus, 1.024
 Lichtparaphrasen und 2.688 domänenübergreifende Direktbefehle aus. Der
-versionierte Ausgangsbericht enthält 3.772 Turns: 3.625 semantisch identisch,
-125 nur Legacy, keinen nur-V7-Treffer, einen in der Antwortform divergenten
-Query-Turn und 21 beidseitige sichere Fehlschläge. Der Shadow-Pfad erzeugt
+versionierte Bericht enthält 3.772 Turns: 3.752 semantisch identisch, keinen
+nur-Legacy- oder nur-V7-Treffer, keine Divergenz und 20 beidseitige sichere
+Fehlschläge. Diese Fehlschläge sind kontextabhängige Folgeturns oder bewusst
+nicht ausführbare Hypothesen, unbekannte/ungültige Ziele und Werte. Der Shadow-Pfad erzeugt
 nur unveränderliche Pläne und Antworten und besitzt keinen HA-Executor.
 Im selben Lauf sind Query-to-Action-, Unsafe-Action- und
 Ambiguous-to-Action-Leakage jeweils null.
@@ -135,9 +140,9 @@ Pyright-Strict-Scope bleiben zusätzlich verpflichtend. CI prüft auf Python
 Messung auf echter Pi-Hardware stehen in
 [`perf/v7-understanding.md`](perf/v7-understanding.md).
 
-`conversation.py` liegt nach dem Audit weiterhin bei 67 % Coverage und damit
-unter dem vorgeschlagenen 80-%-Ziel. Für den tatsächlich umgehängten
-Lichtpfad existiert ein End-to-End-Test, der fehlschlägt, sobald der alte
-Device-Router wieder erreicht wird. Die globale Zahl wird nicht durch Tests
-unberührter Kalender-/Managementzweige künstlich angehoben; sie bleibt als
-capabilityweise abzuarbeitende Orchestrator-Testschuld offen.
+`conversation.py` erreicht 80 % Coverage. Der Ausbau konzentriert sich auf
+offene Dialogzustände und risikoreiche Übergänge: Entity-Auswahl,
+Bestätigung/Abbruch, Wizard-Retries, Todo-Mutationen, Mehrfachbefehle mit
+Undo, Automationsauswahl sowie Laufzeitfehler. Ein End-to-End-Test schlägt
+weiterhin fehl, sobald ein migrierter V7-Pfad wieder den alten Device-Router
+erreicht.

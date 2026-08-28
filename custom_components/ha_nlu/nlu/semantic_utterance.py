@@ -16,8 +16,10 @@ from .normalize import normalize
 from .semantic_catalog import (
     ACTION_EXPRESSIONS,
     COMMAND_MARKER_EXPRESSIONS,
+    COMPARATOR_ENTRIES,
     DOMAIN_EXPRESSIONS,
     INTENT_BY_DOMAIN_ACTION,
+    PROPERTY_ENTRIES,
     regex_union,
 )
 
@@ -90,6 +92,7 @@ _QUERY_REQUEST_RE = re.compile(
     r"^\s*(?:sag|sage|zeig|zeige|nenn|nenne)\s+(?:mir\s+)?(?:bitte\s+)?",
     re.I,
 )
+_INDIRECT_QUERY_RE = re.compile(r"^\s*ob\b", re.I)
 _AUTOMATION_RE = re.compile(
     r"\b(?:wenn|sobald|falls|sofern|jedes\s+mal\s+wenn|immer\s+wenn)\b",
     re.I,
@@ -160,6 +163,22 @@ def _elliptical_command_expression() -> str:
 
 
 _ELLIPTICAL_COMMAND_RE = re.compile(_elliptical_command_expression(), re.I)
+_PROPERTY_CUE_RE = re.compile(
+    r"\b" + regex_union([
+        expression
+        for entry in PROPERTY_ENTRIES
+        for expression in entry.expressions
+    ]) + r"\b",
+    re.I,
+)
+_COMPARATOR_CUE_RE = re.compile(
+    r"\b" + regex_union([
+        expression
+        for entry in COMPARATOR_ENTRIES
+        for expression in entry.expressions
+    ]) + r"\b",
+    re.I,
+)
 _COPULAR_STATE_QUESTION_RE = re.compile(
     r"^\s*(?:ist|sind|war|waren|welch\w*|was\s+(?:ist|macht)|wie\s+ist)\b",
     re.I,
@@ -169,6 +188,11 @@ _DEVICE_NOUN_EXPRESSION = regex_union([
     for expressions in DOMAIN_EXPRESSIONS.values()
     for expression in expressions
 ])
+_DOMAIN_CUE_RE = re.compile(r"\b" + _DEVICE_NOUN_EXPRESSION + r"\b", re.I)
+_NUMERIC_ASSIGNMENT_RE = re.compile(
+    r"\bauf\s+-?\d{1,3}\s*(?:prozent|%|grad|°\s*c|°c)\b",
+    re.I,
+)
 _VERB_FIRST_DEVICE_RE = re.compile(
     rf"^\s*(?P<verb>[a-zäöüß]+(?:t|en))\b(?P<body>.*\b{_DEVICE_NOUN_EXPRESSION}\b.*)[?.!]*$",
     re.I,
@@ -183,6 +207,17 @@ _SUBJECT_START_RE = re.compile(
 )
 _TRIGGER_CUE_RE = re.compile(r"\b(?P<cue>wenn|sobald|falls)\b", re.I)
 _CONDITION_CUE_RE = re.compile(r"\b(?P<cue>nur\s+wenn|sofern)\b", re.I)
+_CONTEXTUAL_FOLLOWUP_RE = re.compile(
+    r"^\s*(?:und|dann|danach|nein[,.]?|stattdessen)\b|"
+    r"\b(?:der|die|das)\s+andere\w*\b|"
+    r"^\s*(?:er|sie|es|das|dort|davon)\b",
+    re.I,
+)
+
+
+def is_contextual_followup(text: str) -> bool:
+    """Whether a turn explicitly asks to inherit prior dialog meaning."""
+    return _CONTEXTUAL_FOLLOWUP_RE.search(normalize(text)) is not None
 
 
 def _modality(text: str) -> Modality:
@@ -249,17 +284,43 @@ def analyse_utterance(text: str) -> SemanticUtterance:
         speech_act = SpeechAct.QUERY
     elif _DELIBERATIVE_QUESTION_RE.search(normalized):
         speech_act = SpeechAct.QUERY
+    elif _INDIRECT_QUERY_RE.search(normalized):
+        speech_act = SpeechAct.QUERY
+    elif _QUERY_REQUEST_RE.search(text) and re.search(r"^\s*\w+\s+mir\b", text, re.I):
+        # ``Zeige mir den Zustand ...`` asks for information.  The otherwise
+        # identical transitive form ``Zeige die Kamera auf dem TV`` is a
+        # device-to-device command and continues into the command branch.
+        speech_act = SpeechAct.QUERY
     # A polite question that contains an executable operation is still a
     # command ("Kannst du das Licht einschalten?").  The generic question
     # shape is evaluated afterwards.  "Kann man ...?" remains an
     # informational question and must never execute anything.
     elif (
         not _COPULAR_STATE_QUESTION_RE.search(normalized)
-        and (_COMMAND_RE.search(normalized) or _ELLIPTICAL_COMMAND_RE.search(normalized))
+        and (
+            _COMMAND_RE.search(normalized)
+            or _ELLIPTICAL_COMMAND_RE.search(normalized)
+            or (
+                _POLITE_RE.search(normalized)
+                and _DOMAIN_CUE_RE.search(normalized)
+                and _NUMERIC_ASSIGNMENT_RE.search(normalized)
+            )
+        )
         and not _INFORMATIONAL_CAN_RE.search(normalized)
     ):
         speech_act = SpeechAct.COMMAND
-    elif _QUERY_REQUEST_RE.search(normalized) or _QUESTION_RE.search(normalized):
+    # Chat-style measurement questions commonly place the interrogative at
+    # the end (``Im Erdgeschoss Temperatur wie viel?``).  A recognised
+    # property plus question punctuation is structural query evidence; the
+    # command branch above still wins whenever an executable operation is
+    # present.
+    elif _PROPERTY_CUE_RE.search(normalized) and (
+        normalized.rstrip().endswith("?") or _COMPARATOR_CUE_RE.search(normalized)
+    ):
+        speech_act = SpeechAct.QUERY
+    elif _QUERY_REQUEST_RE.search(normalized):
+        speech_act = SpeechAct.QUERY
+    elif normalized.rstrip().endswith("?") or _QUESTION_RE.search(normalized):
         speech_act = SpeechAct.QUERY
     else:
         speech_act = SpeechAct.STATEMENT

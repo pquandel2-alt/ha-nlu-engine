@@ -17,7 +17,7 @@ from .domain_operations import (
     INTENT_BY_DOMAIN_ACTION,
     regex_union,
 )
-from .semantic_state import SemanticState
+from .semantic_state import QUERYABLE_STATE_DOMAINS, SemanticState
 
 
 @dataclass(frozen=True)
@@ -117,6 +117,14 @@ MEASUREMENT_PROPERTY_SPECS = {
     "brightness": ("light", None, "Helligkeit", "helligkeit"),
 }
 
+# Typed numeric command properties.  This is the sole registry connecting a
+# domain/property pair with the executable intent it may produce.
+VALUE_INTENT_BY_DOMAIN_PROPERTY = {
+    ("cover", "position"): "HassSetPercentage",
+    ("light", "brightness"): "HassSetPercentage",
+    ("climate", "temperature"): "HassClimateSetTemperature",
+}
+
 # Literal canonical surfaces used only for bounded spelling candidates. Regex
 # expressions above remain the semantic source; this set intentionally lists
 # their ordinary dictionary forms, not sentence shapes.
@@ -146,14 +154,56 @@ SEMANTIC_RESOLUTION_WORDS = frozenset({
     "stoppen", "gestoppt",
 })
 
-# This is deliberately small and capability-specific.  An entry becomes
-# authoritative only after the versioned shadow report proves equivalence
-# for its complete compositional matrix.
-V7_AUTHORITATIVE_DIRECT_CAPABILITIES = frozenset({
+# Entries become authoritative only after the versioned shadow report proves
+# equivalence for their complete compositional matrix.  Keeping every pair
+# explicit makes the migration boundary reviewable and prevents a newly
+# registered operation from becoming authoritative by accident.
+V7_AUTHORITATIVE_COMMAND_CAPABILITIES = frozenset({
     ("light", "HassTurnOn"),
     ("light", "HassTurnOff"),
+    ("switch", "HassTurnOn"),
+    ("switch", "HassTurnOff"),
+    ("fan", "HassTurnOn"),
+    ("fan", "HassTurnOff"),
+    ("cover", "HassOpenCover"),
+    ("cover", "HassCloseCover"),
+    ("climate", "HassTurnOn"),
+    ("climate", "HassTurnOff"),
+    ("media_player", "HassMediaPlay"),
+    ("media_player", "HassMediaPause"),
+    ("vacuum", "HassVacuumStart"),
+    ("vacuum", "HassVacuumStop"),
+    ("humidifier", "HassTurnOn"),
+    ("humidifier", "HassTurnOff"),
+    ("valve", "HassOpenValve"),
+    ("valve", "HassCloseValve"),
+    ("input_boolean", "HassTurnOn"),
+    ("input_boolean", "HassTurnOff"),
+    ("scene", "HassActivateScene"),
+    ("cover", "HassSetPercentage"),
+    ("light", "HassSetPercentage"),
+    ("climate", "HassClimateSetTemperature"),
+})
+_V7_AUTHORITATIVE_STATE_QUERY_INTENTS = frozenset({
+    "HassCheckState",
+    "HassStateQuery",
+    "HassExistsQuery",
+})
+V7_AUTHORITATIVE_QUERY_CAPABILITIES = frozenset({
+    *((domain, intent) for domain in QUERYABLE_STATE_DOMAINS
+      for intent in _V7_AUTHORITATIVE_STATE_QUERY_INTENTS),
+    *((domain, "HassVerbStateQuery") for domain in QUERYABLE_STATE_DOMAINS),
+    ("sensor", "HassGetState"),
+    ("sensor", "HassLocationPropertyQuery"),
+    ("light", "HassGetState"),
+    ("light", "HassLocationPropertyQuery"),
+})
+V7_AUTHORITATIVE_DIRECT_CAPABILITIES = frozenset({
+    *V7_AUTHORITATIVE_COMMAND_CAPABILITIES,
+    *V7_AUTHORITATIVE_QUERY_CAPABILITIES,
 })
 V7_AUTHORITY_MIN_MARGIN = 10.0
+V7_ENTITY_AMBIGUITY_MARGIN = 5
 
 
 def catalogue_expression_groups() -> dict[str, tuple[CatalogueEntry, ...]]:
@@ -187,7 +237,11 @@ __all__ = [
     "SEMANTIC_RESOLUTION_WORDS",
     "STATE_ENTRIES",
     "V7_AUTHORITATIVE_DIRECT_CAPABILITIES",
+    "V7_AUTHORITATIVE_COMMAND_CAPABILITIES",
+    "V7_AUTHORITATIVE_QUERY_CAPABILITIES",
     "V7_AUTHORITY_MIN_MARGIN",
+    "V7_ENTITY_AMBIGUITY_MARGIN",
+    "VALUE_INTENT_BY_DOMAIN_PROPERTY",
     "catalogue_expression_groups",
     "regex_union",
 ]

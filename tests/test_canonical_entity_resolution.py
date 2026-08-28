@@ -3,6 +3,7 @@ from __future__ import annotations
 from ha_nlu.entities import EntitySnapshot, build_entity_index
 from ha_nlu.nlu.entity_resolution import (
     ResolutionStatus,
+    mentioned_entities,
     rank_semantic_targets,
     resolve_mentioned_target,
     resolve_named_target,
@@ -45,6 +46,14 @@ def test_named_and_embedded_target_resolution_share_domain_constraints():
     assert named.status is ResolutionStatus.RESOLVED
     assert embedded.status is ResolutionStatus.RESOLVED
     assert named.entity == embedded.entity == ENTITIES[0]
+
+
+def test_registry_mentions_keep_word_boundaries_without_per_name_regexes():
+    light = EntitySnapshot("light.flur", "Flur Licht", "light", "off")
+
+    assert mentioned_entities("Ist Flur Licht?", [light]) == (light,)
+    assert mentioned_entities("Ist (Flur Licht) an?", [light]) == (light,)
+    assert mentioned_entities("Ist Vorflur Lichtung an?", [light]) == ()
 
 
 def test_semantic_ranking_prefers_complete_registry_name_over_longer_suffix_name():

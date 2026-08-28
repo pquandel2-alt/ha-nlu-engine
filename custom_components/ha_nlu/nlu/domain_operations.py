@@ -75,7 +75,7 @@ COMMAND_MARKER_EXPRESSIONS: tuple[str, ...] = (
     r"dreh(?:e|en)?", r"lass(?:e|en)?", r"aktivier(?:e|en|st|t)?",
     r"deaktivier(?:e|en|st|t)?", r"start(?:e|en|est|et)?", r"gestartet",
     r"spiel(?:e|en|st|t)?", r"weiterspiel(?:e|en|st|t)?", r"pausier(?:e|en|st|t)?",
-    r"stopp(?:e|en|st|t)?", r"führ(?:e|en)?", r"ausführen",
+    r"halt(?:e|en|st|t)?", r"stopp(?:e|en|st|t)?", r"führ(?:e|en)?", r"ausführen",
     r"erhöh(?:e|en|st|t)?", r"erhoeh(?:e|en|st|t)?",
     r"senk(?:e|en|st|t)?", r"reduzier(?:e|en|st|t)?",
     r"dimm(?:e|en|st|t)?", r"änder(?:e|n|st|t)?",

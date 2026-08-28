@@ -105,9 +105,14 @@ def test_query_unknown_entity_returns_none(engine, sensor_entities):
     assert engine.match("wie hoch ist die Kellertemperatur", sensor_entities) is None
 
 
-def test_query_wrong_domain_returns_none(engine, entities):
-    # Query intents are scoped to sensor - a cover must not answer a query.
-    assert engine.match("wie ist der Rollladen Büro", entities) is None
+def test_named_cover_state_query_uses_typed_state_mapping(engine, entities):
+    # V7 state queries are no longer sensor-only: cover state has an explicit
+    # open/closed mapping and can therefore be answered without guessing.
+    result = engine.match("wie ist der Rollladen Büro", entities)
+
+    assert result is not None
+    assert result.plan is None
+    assert result.response_text == "Rollladen Büro ist geschlossen."
 
 
 def test_query_case_does_not_matter(engine, sensor_entities):

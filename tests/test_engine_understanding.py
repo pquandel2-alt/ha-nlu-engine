@@ -27,12 +27,20 @@ def test_light_power_is_v7_authoritative_after_shadow_gate(engine, entities):
     assert outcome.payload.plan.entity_id == "light.flur_licht"
 
 
-def test_unmigrated_capability_retains_legacy_authority(engine, entities):
+def test_cover_capability_is_v7_authoritative_after_shadow_gate(engine, entities):
     outcome = engine.understand("Fahre Rollladen Büro hoch", entities)
 
-    assert outcome.authority is UnderstandingAuthority.LEGACY
+    assert outcome.authority is UnderstandingAuthority.V7_MIGRATED
     assert outcome.payload is not None
     assert outcome.payload.plan.service == "open_cover"
+
+
+def test_percentage_capability_is_v7_authoritative_after_shadow_gate(engine, entities):
+    outcome = engine.understand("Fahre Rollladen Büro auf 40 Prozent", entities)
+
+    assert outcome.authority is UnderstandingAuthority.V7_MIGRATED
+    assert outcome.payload is not None
+    assert outcome.payload.plan.service == "set_cover_position"
 
 
 def test_real_shadow_comparison_is_read_only_and_semantically_equal(engine, entities):
@@ -43,6 +51,63 @@ def test_real_shadow_comparison_is_read_only_and_semantically_equal(engine, enti
     assert comparison.equivalent
     assert comparison.authoritative.payload is not None
     assert comparison.candidate.payload is not None
+
+
+def test_shared_predicate_shadow_comparison_is_semantically_equal(engine):
+    entities = [
+        EntitySnapshot("light.kueche", "Küchenlicht", "light", "on"),
+        EntitySnapshot("light.flur", "Flurlicht", "light", "on"),
+    ]
+    comparison = engine.compare_understanding_pipelines(
+        "Schalte Küchenlicht und Flurlicht aus", entities
+    )
+
+    assert comparison.equivalent
+    assert comparison.candidate.payload is not None
+
+
+def test_named_state_query_is_v7_authoritative(engine):
+    entities = [EntitySnapshot("light.kueche", "Küchenlicht", "light", "off")]
+
+    outcome = engine.understand("Ist das Küchenlicht an?", entities)
+
+    assert outcome.authority is UnderstandingAuthority.V7_MIGRATED
+    assert outcome.kind is UnderstandingKind.QUERY
+    assert outcome.payload is not None
+    assert outcome.payload.plan is None
+
+
+def test_verb_state_query_is_v7_authoritative(engine):
+    entities = [
+        EntitySnapshot("media_player.atlas", "Radio Atlas", "media_player", "playing")
+    ]
+
+    outcome = engine.understand("Spielt das Radio Atlas?", entities)
+
+    assert outcome.authority is UnderstandingAuthority.V7_MIGRATED
+    assert outcome.kind is UnderstandingKind.QUERY
+    assert outcome.speech is not None and outcome.speech.startswith("Ja,")
+
+
+def test_measurement_query_is_v7_authoritative(engine):
+    entities = [
+        EntitySnapshot(
+            "sensor.wohnzimmer_temp",
+            "Wohnzimmer Temperatur",
+            "sensor",
+            "21.5",
+            area_id="wohnzimmer",
+            area_name="Wohnzimmer",
+            device_class="temperature",
+            unit="°C",
+        )
+    ]
+
+    outcome = engine.understand("Wie warm ist es im Wohnzimmer?", entities)
+
+    assert outcome.authority is UnderstandingAuthority.V7_MIGRATED
+    assert outcome.kind is UnderstandingKind.QUERY
+    assert outcome.speech == "21.5 Grad."
 
 
 def test_understand_returns_explicit_unsupported_reason(engine, entities):
@@ -112,3 +177,39 @@ def test_understand_surfaces_ambiguous_candidates_explicitly(engine):
     assert outcome.payload is not None
     assert outcome.payload.clarification is not None
     assert len(outcome.payload.clarification.candidates) == 2
+
+
+def test_partial_shared_name_lists_similarly_named_candidates(engine):
+    entities = [
+        EntitySnapshot("light.links", "Deckenlicht links", "light", "off"),
+        EntitySnapshot("light.rechts", "Deckenlicht rechts", "light", "off"),
+    ]
+
+    outcome = engine.understand("Mach das Deckenlicht an", entities)
+
+    assert outcome.kind is UnderstandingKind.AMBIGUOUS
+    assert not outcome.actionable
+    assert outcome.payload is not None
+    assert outcome.payload.clarification is not None
+    assert {entity.entity_id for entity in outcome.payload.clarification.candidates} == {
+        "light.links",
+        "light.rechts",
+    }
+    assert "Deckenlicht links" in outcome.speech
+    assert "Deckenlicht rechts" in outcome.speech
+
+
+def test_single_fuzzy_name_requires_confirmation_instead_of_execution(engine):
+    entities = [
+        EntitySnapshot("light.links", "Deckenlicht links", "light", "off"),
+    ]
+
+    outcome = engine.understand("Mach Deckenlicth links an", entities)
+
+    assert outcome.kind is UnderstandingKind.CLARIFICATION
+    assert not outcome.actionable
+    assert outcome.payload is not None
+    assert outcome.payload.clarification is not None
+    assert [entity.entity_id for entity in outcome.payload.clarification.candidates] == [
+        "light.links"
+    ]

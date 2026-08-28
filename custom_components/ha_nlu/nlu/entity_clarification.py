@@ -26,8 +26,13 @@ _DOMAIN_LABELS = {
     "calendar": ("Kalender", "Welchen meinst du?"),
 }
 _CANCEL_RE = re.compile(
-    r"^\s*(?:abbrechen|abbruch|(?:keins|keine|keiner)(?:\s+davon)?|"
+    r"^\s*(?:nein|abbrechen|abbruch|(?:keins|keine|keiner)(?:\s+davon)?|"
     r"nichts|vergiss es|lass es)\s*[.!?]*$",
+    re.I,
+)
+_CONFIRM_RE = re.compile(
+    r"^\s*(?:ja|jawohl|genau|richtig|das ist es|den meine ich|die meine ich|"
+    r"das meine ich)\s*[.!?]*$",
     re.I,
 )
 _ORDINAL_WORDS = {
@@ -102,6 +107,8 @@ def render_candidate_question(candidates: tuple[EntitySnapshot, ...]) -> str:
     if not candidates:
         return "Das war nicht eindeutig. Welches Gerät meinst du?"
     labels = candidate_labels(candidates)
+    if len(labels) == 1:
+        return f"Meintest du {labels[0]}?"
     shown = labels[:5]
     domains = {candidate.domain for candidate in candidates}
     noun, followup = (
@@ -140,6 +147,8 @@ def resolve_candidate_reply(
     """Resolve only inside the offered set; fuzzy-only replies never execute."""
     if _CANCEL_RE.fullmatch(reply_text):
         return CandidateReply(CandidateReplyKind.CANCELLED)
+    if len(candidates) == 1 and _CONFIRM_RE.fullmatch(reply_text):
+        return CandidateReply(CandidateReplyKind.SELECTED, candidates[0])
 
     index = _ordinal_index(reply_text)
     if index is not None:

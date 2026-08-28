@@ -258,7 +258,9 @@ def test_device_control_service_failure_is_logged(monkeypatch, tmp_path, caplog)
     result = _run(entity, "Starte Wiedergabe auf Wohnzimmer TV")
 
     assert "player unavailable" in result.response.speech
-    assert "Device-control service call media_player.media_play" in caplog.text
+    # Media playback is in the V7 authority cohort and now uses the shared
+    # validated service-call executor rather than the legacy device router.
+    assert "Service call media_player.media_play" in caplog.text
 
 
 def test_garage_movement_can_be_cancelled(monkeypatch, tmp_path):

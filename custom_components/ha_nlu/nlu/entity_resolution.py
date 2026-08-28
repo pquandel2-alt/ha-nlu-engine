@@ -183,6 +183,42 @@ def rank_semantic_targets(
                 best = RankedTarget(entity, score, source, name)
         if best is not None:
             ranked.append(best)
+    if not ranked:
+        generic = {
+            normalize_for_compare(word)
+            for words in DOMAIN_WORDS.values()
+            for word in words
+        }
+        residual = " ".join(
+            token
+            for raw in _WORD_RE.findall(text)
+            if (token := normalize_for_compare(raw)) not in ignored_tokens
+            and token not in generic
+        )
+        if residual:
+            scoped_pool = [
+                entity
+                for entity in pool
+                if (not domains or entity.domain in domains)
+                and (area_id is None or entity.area_id == area_id)
+                and (floor_id is None or entity.floor_id == floor_id)
+            ]
+            resolved = resolve_entity_scored(
+                residual,
+                scoped_pool,
+                area_id=area_id,
+                domain=(next(iter(domains)) if len(domains) == 1 else None),
+            )
+            if resolved.candidate_set is not None:
+                ranked.extend(
+                    RankedTarget(
+                        candidate.entity,
+                        int(candidate.score),
+                        candidate.source.name.casefold(),
+                        candidate.matched_name,
+                    )
+                    for candidate in resolved.candidate_set.ranked
+                )
     return tuple(sorted(ranked, key=lambda item: (-item.score, item.entity.entity_id)))
 
 
@@ -191,6 +227,29 @@ def _rank_mentions(
 ) -> list[tuple[int, EntitySnapshot]]:
     """Rank explicit registry-name and alias mentions once for all consumers."""
     normalized = normalize_for_compare(text)
+
+    def contains_bounded(key: str) -> bool:
+        """Substring lookup with regex-equivalent word boundaries.
+
+        Compiling one escaped regex for every entity made read-only queries
+        hundreds of milliseconds slower on 5,000-entity registries.  A
+        literal scan preserves the same boundary rule without per-name regex
+        construction.
+        """
+        start = normalized.find(key)
+        while start >= 0:
+            end = start + len(key)
+            left_ok = start == 0 or not (
+                normalized[start - 1].isalnum() or normalized[start - 1] == "_"
+            )
+            right_ok = end == len(normalized) or not (
+                normalized[end].isalnum() or normalized[end] == "_"
+            )
+            if left_ok and right_ok:
+                return True
+            start = normalized.find(key, start + 1)
+        return False
+
     found: list[tuple[int, EntitySnapshot]] = []
     for entity in entities:
         score = max(
@@ -198,7 +257,7 @@ def _rank_mentions(
                 len(key)
                 for name in (entity.friendly_name, *entity.aliases)
                 if (key := normalize_for_compare(name))
-                and re.search(rf"(?<!\w){re.escape(key)}(?!\w)", normalized)
+                and contains_bounded(key)
             ),
             default=0,
         )

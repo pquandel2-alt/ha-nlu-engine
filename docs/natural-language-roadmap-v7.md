@@ -68,11 +68,11 @@ liefern“, sondern diese Reihenfolge:
 
 Der aktuelle Stand ist funktional und sicherheitsbewusst:
 
-- 2.383 Tests bestehen, 12 sind übersprungen;
+- 2.443 Tests bestehen, 12 sind übersprungen;
 - die zuletzt gemessene Gesamt-Coverage liegt bei 85 %; die zentralen
-  Sprachmodule liegen überwiegend deutlich höher, `conversation.py` als
-  Orchestrator jedoch weiterhin nur bei 67 %;
-- 149 Python-Testdateien sind vorhanden;
+  Sprachmodule liegen überwiegend deutlich höher, `conversation.py` erreicht
+  nach dem risikobasierten Dialogtestausbau 80 %;
+- 147 Python-Testdateien sind vorhanden;
 - `SemanticUtterance`, `SemanticAnalysis`, `SemanticFrame`, `WorldModel`,
   Constraint Resolver, Capability-Prüfung und strukturierte Dialogzustände
   existieren bereits;
@@ -93,11 +93,12 @@ Generalisierung:
 
 Die wesentlichen Architekturbremsen sind:
 
-1. **Semantik ist erst capabilityweise Autorität.** Seit dem Audit vom
+1. **Semantik ist capabilityweise Autorität.** Seit dem Audit vom
    28. August laufen direkte Turns in `NluEngine.understand()` semantisch
-   zuerst. Für Licht Ein/Aus ist V7 nach einem vollständigen Shadow-Gate
-   autoritativ; alle übrigen Capabilities behalten Legacy als
-   Kompatibilitätsfallback. `_select_parser()` bleibt dort weiterhin eine
+   zuerst. Die explizite autoritative Matrix umfasst die vermessenen Core-
+   Commands, Prozent-/Temperaturwerte sowie Zustands-, Verb- und
+   Messwertqueries. Nur nicht migrierte Fachcapabilities behalten Legacy als
+   Kompatibilitätsfallback. `_select_parser()` bleibt für diese Restmenge eine
    offene Architekturbremse.
 2. **Routing ist reihenfolgeabhängig.** `conversation.py::_async_handle_message()`
    probiert viele Dialog-, Kalender-, Produktivitäts-, Geräte-, Automations-
@@ -126,22 +127,23 @@ Die wesentlichen Architekturbremsen sind:
 
 `scripts/v7_shadow_report.py` vergleicht Legacy und vollständig kompiliertes
 V7 ohne Serviceausführung. Der versionierte Bericht
-`docs/perf/v7-shadow-baseline-4.61.0.json` umfasst 3.772 Turns:
+`docs/perf/v7-shadow-baseline-4.62.0.json` umfasst 3.772 Turns:
 
-- 3.625 semantisch identische Ergebnisse,
-- 125 Treffer nur im Legacy-Pfad,
+- 3.752 semantisch identische Ergebnisse,
+- 0 Treffer nur im Legacy-Pfad,
 - 0 Treffer nur im V7-Pfad,
-- 1 Divergenz bei einer read-only Ventilatorfrage; Ziel und Wahrheit stimmen,
-  die gesprochene Form unterscheidet sich,
-- 21 beidseitige sichere Fehlschläge.
+- 0 Divergenzen,
+- 20 beidseitige sichere Fehlschläge (kontextabhängige Folgeturns oder
+  bewusst nicht ausführbare/ungültige Einzelturns).
 
 Query-to-Action-, Unsafe-Action- und Ambiguous-to-Action-Leakage sind in
 diesem Lauf jeweils null.
 
-Damit war die im externen Prüfplan vorgeschlagene Umschaltung der Kategorie
-„nur V7“ nicht anwendbar. Als erster Schnitt wurde stattdessen die vollständig
-identische Licht-Ein/Aus-Matrix gewählt. Medien-, Kontext- und Messwertpfade
-werden wegen der belegten Legacy-only-Fälle ausdrücklich noch nicht entfernt.
+Die zuvor belegten Legacy-only-Fälle und die Antwortdivergenz wurden durch
+domain-aware Konfliktauflösung, typisierte Verb-/Messwertqueries und
+kompositionale Mehrzielbefehle geschlossen. Entfernt werden historische
+Fachparser trotzdem erst capabilityweise; ein sauberer Shadow-Bericht ist
+die notwendige, nicht die allein hinreichende Löschfreigabe.
 
 ## 3. Zielarchitektur
 

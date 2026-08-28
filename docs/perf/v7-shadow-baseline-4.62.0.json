@@ -1,9 +1,9 @@
 {
   "categories": {
-    "both_failed": 21,
-    "divergent": 1,
-    "identical": 3625,
-    "legacy_only": 125,
+    "both_failed": 20,
+    "divergent": 0,
+    "identical": 3752,
+    "legacy_only": 0,
     "v7_only": 0
   },
   "datasets": {
@@ -26,25 +26,22 @@
       "identical": 256
     },
     "domain_media_player": {
-      "identical": 208,
-      "legacy_only": 48
+      "identical": 256
     },
     "domain_scene": {
-      "identical": 112,
-      "legacy_only": 16
+      "identical": 128
     },
     "domain_switch": {
       "identical": 256
     },
     "domain_vacuum": {
-      "identical": 224,
-      "legacy_only": 32
+      "identical": 256
     },
     "domain_valve": {
       "identical": 256
     },
     "eval:battery_is_read_only:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:battery_is_read_only:turn_2": {
       "both_failed": 1
@@ -53,13 +50,13 @@
       "both_failed": 1
     },
     "eval:contextual_brightness:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:contextual_brightness:turn_2": {
       "both_failed": 1
     },
     "eval:contextual_thermostat_setpoint:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:contextual_thermostat_setpoint:turn_2": {
       "both_failed": 1
@@ -71,13 +68,13 @@
       "identical": 1
     },
     "eval:elliptical_brightness:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:elliptical_brightness:turn_2": {
       "both_failed": 1
     },
     "eval:elliptical_temperature_setpoint:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:elliptical_temperature_setpoint:turn_2": {
       "both_failed": 1
@@ -89,13 +86,13 @@
       "both_failed": 1
     },
     "eval:fan_running_question:turn_1": {
-      "divergent": 1
+      "identical": 1
     },
     "eval:hypothetical_command_is_never_executed:turn_1": {
       "both_failed": 1
     },
     "eval:invalid_temperature_has_no_action:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:invalid_temperature_has_no_action:turn_2": {
       "both_failed": 1
@@ -104,25 +101,25 @@
       "identical": 1
     },
     "eval:media_operation_question_never_executes:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:media_pause_question_truthful:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:media_playing_question_read_only:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:natural_indirect_light_command:turn_1": {
       "identical": 1
     },
     "eval:natural_query_request:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:natural_wish_light_command:turn_1": {
       "identical": 1
     },
     "eval:negated_verb_question_uses_doch:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:past_state_never_uses_current_value:turn_1": {
       "both_failed": 1
@@ -134,37 +131,37 @@
       "identical": 1
     },
     "eval:query_location_correction:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:query_location_correction:turn_2": {
       "both_failed": 1
     },
     "eval:query_then_command_changes_intent_safely:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:query_then_command_changes_intent_safely:turn_2": {
       "both_failed": 1
     },
     "eval:relative_temperature_delta:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:relative_temperature_delta:turn_2": {
       "both_failed": 1
     },
     "eval:semantic_measurement_comparison:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:semantic_measurement_free_order:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:shared_predicate_named_targets:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:temperature_floor_query:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:temperature_synonym_query:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:unexplained_measurement_modifier_has_no_action:turn_1": {
       "both_failed": 1
@@ -179,49 +176,49 @@
       "identical": 1
     },
     "eval:vacuum_operation_question_never_executes:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:vacuum_running_question_read_only:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:verb_group_all_question:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:verb_group_which_question:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:verb_query_ambiguity_short_answer:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:verb_query_ambiguity_short_answer:turn_2": {
       "both_failed": 1
     },
     "eval:verb_query_explicit_target_followup:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:verb_query_explicit_target_followup:turn_2": {
-      "both_failed": 1
+      "identical": 1
     },
     "eval:verb_query_location_followup:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:verb_query_location_followup:turn_2": {
       "both_failed": 1
     },
     "eval:verb_query_other_followup:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:verb_query_other_followup:turn_2": {
       "both_failed": 1
     },
     "eval:verb_query_pronoun_followup:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "eval:verb_query_pronoun_followup:turn_2": {
       "both_failed": 1
     },
     "eval:window_state_question:turn_1": {
-      "legacy_only": 1
+      "identical": 1
     },
     "light_paraphrases": {
       "identical": 1024
@@ -314,32 +311,179 @@
         "v7": null
       }
     ],
-    "divergent": [
+    "identical": [
       {
-        "dataset": "eval:fan_running_question:turn_1",
-        "differences": [
-          "payload"
-        ],
+        "dataset": "eval:temperature_floor_query:turn_1",
+        "differences": [],
         "legacy": {
           "entities": [
-            "fan.wohnzimmer"
+            "sensor.kueche_temp",
+            "sensor.wohnzimmer_temp"
           ],
-          "intent": null,
+          "intent": "HassLocationPropertyQuery",
           "kind": "non_action",
-          "response": "Ja, Wohnzimmer Ventilator ist eingeschaltet."
+          "response": "Küche Temperatur: 22,5 Grad; Wohnzimmer Temperatur: 21,5 Grad."
         },
-        "text": "Läuft der Wohnzimmer Ventilator?",
+        "text": "Wie hoch ist die Temperatur im Erdgeschoss?",
         "v7": {
           "entities": [
-            "fan.wohnzimmer"
+            "sensor.kueche_temp",
+            "sensor.wohnzimmer_temp"
           ],
-          "intent": "HassStateQuery",
+          "intent": "HassLocationPropertyQuery",
           "kind": "non_action",
-          "response": "Wohnzimmer Ventilator ist aktiv."
+          "response": "Küche Temperatur: 22,5 Grad; Wohnzimmer Temperatur: 21,5 Grad."
         }
-      }
-    ],
-    "identical": [
+      },
+      {
+        "dataset": "eval:temperature_synonym_query:turn_1",
+        "differences": [],
+        "legacy": {
+          "entities": [
+            "sensor.wohnzimmer_temp"
+          ],
+          "intent": "HassGetState",
+          "kind": "non_action",
+          "response": "21.5 Grad."
+        },
+        "text": "Wie warm ist es im Wohnzimmer?",
+        "v7": {
+          "entities": [
+            "sensor.wohnzimmer_temp"
+          ],
+          "intent": "HassGetState",
+          "kind": "non_action",
+          "response": "21.5 Grad."
+        }
+      },
+      {
+        "dataset": "eval:contextual_thermostat_setpoint:turn_1",
+        "differences": [],
+        "legacy": {
+          "entities": [
+            "sensor.kueche_temp",
+            "sensor.wohnzimmer_temp"
+          ],
+          "intent": "HassLocationPropertyQuery",
+          "kind": "non_action",
+          "response": "Küche Temperatur: 22,5 Grad; Wohnzimmer Temperatur: 21,5 Grad."
+        },
+        "text": "Wie hoch ist die Temperatur im Erdgeschoss?",
+        "v7": {
+          "entities": [
+            "sensor.kueche_temp",
+            "sensor.wohnzimmer_temp"
+          ],
+          "intent": "HassLocationPropertyQuery",
+          "kind": "non_action",
+          "response": "Küche Temperatur: 22,5 Grad; Wohnzimmer Temperatur: 21,5 Grad."
+        }
+      },
+      {
+        "dataset": "eval:elliptical_temperature_setpoint:turn_1",
+        "differences": [],
+        "legacy": {
+          "entities": [
+            "sensor.wohnzimmer_temp"
+          ],
+          "intent": "HassGetState",
+          "kind": "non_action",
+          "response": "21.5 Grad."
+        },
+        "text": "Wie warm ist es im Wohnzimmer?",
+        "v7": {
+          "entities": [
+            "sensor.wohnzimmer_temp"
+          ],
+          "intent": "HassGetState",
+          "kind": "non_action",
+          "response": "21.5 Grad."
+        }
+      },
+      {
+        "dataset": "eval:relative_temperature_delta:turn_1",
+        "differences": [],
+        "legacy": {
+          "entities": [
+            "sensor.wohnzimmer_temp"
+          ],
+          "intent": "HassGetState",
+          "kind": "non_action",
+          "response": "21.5 Grad."
+        },
+        "text": "Wie warm ist es im Wohnzimmer?",
+        "v7": {
+          "entities": [
+            "sensor.wohnzimmer_temp"
+          ],
+          "intent": "HassGetState",
+          "kind": "non_action",
+          "response": "21.5 Grad."
+        }
+      },
+      {
+        "dataset": "eval:contextual_brightness:turn_1",
+        "differences": [],
+        "legacy": {
+          "entities": [
+            "light.kueche"
+          ],
+          "intent": "HassGetState",
+          "kind": "non_action",
+          "response": "aus."
+        },
+        "text": "Wie hell ist es in der Küche?",
+        "v7": {
+          "entities": [
+            "light.kueche"
+          ],
+          "intent": "HassGetState",
+          "kind": "non_action",
+          "response": "aus."
+        }
+      },
+      {
+        "dataset": "eval:elliptical_brightness:turn_1",
+        "differences": [],
+        "legacy": {
+          "entities": [
+            "light.kueche"
+          ],
+          "intent": "HassGetState",
+          "kind": "non_action",
+          "response": "aus."
+        },
+        "text": "Wie hell ist es in der Küche?",
+        "v7": {
+          "entities": [
+            "light.kueche"
+          ],
+          "intent": "HassGetState",
+          "kind": "non_action",
+          "response": "aus."
+        }
+      },
+      {
+        "dataset": "eval:query_location_correction:turn_1",
+        "differences": [],
+        "legacy": {
+          "entities": [
+            "sensor.wohnzimmer_temp"
+          ],
+          "intent": "HassGetState",
+          "kind": "non_action",
+          "response": "21.5 Grad."
+        },
+        "text": "Wie warm ist es im Wohnzimmer?",
+        "v7": {
+          "entities": [
+            "sensor.wohnzimmer_temp"
+          ],
+          "intent": "HassGetState",
+          "kind": "non_action",
+          "response": "21.5 Grad."
+        }
+      },
       {
         "dataset": "eval:cover_colloquial_alias:turn_1",
         "differences": [],
@@ -379,356 +523,8 @@
         }
       },
       {
-        "dataset": "eval:natural_wish_light_command:turn_1",
-        "differences": [],
-        "legacy": {
-          "data": {},
-          "domain": "homeassistant",
-          "entity_id": "light.kueche",
-          "kind": "plan",
-          "service": "turn_on"
-        },
-        "text": "Ich hätte gerne das Küchenlicht an",
-        "v7": {
-          "data": {},
-          "domain": "homeassistant",
-          "entity_id": "light.kueche",
-          "kind": "plan",
-          "service": "turn_on"
-        }
-      },
-      {
-        "dataset": "eval:natural_indirect_light_command:turn_1",
-        "differences": [],
-        "legacy": {
-          "data": {},
-          "domain": "homeassistant",
-          "entity_id": "light.kueche",
-          "kind": "plan",
-          "service": "turn_on"
-        },
-        "text": "Sorge bitte dafür, dass das Küchenlicht an ist",
-        "v7": {
-          "data": {},
-          "domain": "homeassistant",
-          "entity_id": "light.kueche",
-          "kind": "plan",
-          "service": "turn_on"
-        }
-      },
-      {
-        "dataset": "eval:media_imperative_remains_command:turn_1",
-        "differences": [],
-        "legacy": {
-          "data": {},
-          "domain": "media_player",
-          "entity_id": "media_player.atlas",
-          "kind": "plan",
-          "service": "media_play"
-        },
-        "text": "Spiele das Radio Atlas",
-        "v7": {
-          "data": {},
-          "domain": "media_player",
-          "entity_id": "media_player.atlas",
-          "kind": "plan",
-          "service": "media_play"
-        }
-      },
-      {
-        "dataset": "eval:vacuum_imperative_remains_command:turn_1",
-        "differences": [],
-        "legacy": {
-          "data": {},
-          "domain": "vacuum",
-          "entity_id": "vacuum.atlas",
-          "kind": "plan",
-          "service": "start"
-        },
-        "text": "Starte den Saugroboter Atlas",
-        "v7": {
-          "data": {},
-          "domain": "vacuum",
-          "entity_id": "vacuum.atlas",
-          "kind": "plan",
-          "service": "start"
-        }
-      },
-      {
-        "dataset": "eval:cover_state_question:turn_1",
-        "differences": [],
-        "legacy": {
-          "entities": [
-            "cover.buero"
-          ],
-          "intent": "HassCheckState",
-          "kind": "non_action",
-          "response": "Ja, Rollladen Büro ist geschlossen."
-        },
-        "text": "Ist der Rollladen Büro geschlossen?",
-        "v7": {
-          "entities": [
-            "cover.buero"
-          ],
-          "intent": "HassCheckState",
-          "kind": "non_action",
-          "response": "Ja, Rollladen Büro ist geschlossen."
-        }
-      },
-      {
-        "dataset": "eval:polite_brightness_command:turn_1",
-        "differences": [],
-        "legacy": {
-          "data": {
-            "brightness_pct": 30
-          },
-          "domain": "light",
-          "entity_id": "light.kueche",
-          "kind": "plan",
-          "service": "turn_on"
-        },
-        "text": "Kannst du das Küchenlicht auf 30 Prozent dimmen?",
-        "v7": {
-          "data": {
-            "brightness_pct": 30
-          },
-          "domain": "light",
-          "entity_id": "light.kueche",
-          "kind": "plan",
-          "service": "turn_on"
-        }
-      },
-      {
-        "dataset": "eval:explicit_entity_correction:turn_1",
-        "differences": [],
-        "legacy": {
-          "data": {},
-          "domain": "homeassistant",
-          "entity_id": "light.kueche",
-          "kind": "plan",
-          "service": "turn_on"
-        },
-        "text": "Mach Küchenlicht an",
-        "v7": {
-          "data": {},
-          "domain": "homeassistant",
-          "entity_id": "light.kueche",
-          "kind": "plan",
-          "service": "turn_on"
-        }
-      },
-      {
-        "dataset": "light_paraphrases",
-        "differences": [],
-        "legacy": {
-          "data": {},
-          "domain": "homeassistant",
-          "entity_id": "light.matrix_0",
-          "kind": "plan",
-          "service": "turn_on"
-        },
-        "text": "Mach das Licht Atlas an",
-        "v7": {
-          "data": {},
-          "domain": "homeassistant",
-          "entity_id": "light.matrix_0",
-          "kind": "plan",
-          "service": "turn_on"
-        }
-      },
-      {
-        "dataset": "light_paraphrases",
-        "differences": [],
-        "legacy": {
-          "data": {},
-          "domain": "homeassistant",
-          "entity_id": "light.matrix_0",
-          "kind": "plan",
-          "service": "turn_on"
-        },
-        "text": "Schalte das Licht Atlas ein",
-        "v7": {
-          "data": {},
-          "domain": "homeassistant",
-          "entity_id": "light.matrix_0",
-          "kind": "plan",
-          "service": "turn_on"
-        }
-      },
-      {
-        "dataset": "light_paraphrases",
-        "differences": [],
-        "legacy": {
-          "data": {},
-          "domain": "homeassistant",
-          "entity_id": "light.matrix_0",
-          "kind": "plan",
-          "service": "turn_on"
-        },
-        "text": "Kannst du das Licht Atlas anmachen?",
-        "v7": {
-          "data": {},
-          "domain": "homeassistant",
-          "entity_id": "light.matrix_0",
-          "kind": "plan",
-          "service": "turn_on"
-        }
-      }
-    ],
-    "legacy_only": [
-      {
-        "dataset": "eval:temperature_floor_query:turn_1",
-        "differences": [
-          "kind:QUERY!=UNSUPPORTED",
-          "reason:-!=UNSUPPORTED_PROPERTY",
-          "payload"
-        ],
-        "legacy": {
-          "entities": [
-            "sensor.kueche_temp",
-            "sensor.wohnzimmer_temp"
-          ],
-          "intent": "HassLocationPropertyQuery",
-          "kind": "non_action",
-          "response": "Küche Temperatur: 22,5 Grad; Wohnzimmer Temperatur: 21,5 Grad."
-        },
-        "text": "Wie hoch ist die Temperatur im Erdgeschoss?",
-        "v7": null
-      },
-      {
-        "dataset": "eval:temperature_synonym_query:turn_1",
-        "differences": [
-          "kind:QUERY!=UNSUPPORTED",
-          "reason:-!=UNSUPPORTED_PROPERTY",
-          "payload"
-        ],
-        "legacy": {
-          "entities": [
-            "sensor.wohnzimmer_temp"
-          ],
-          "intent": "HassGetState",
-          "kind": "non_action",
-          "response": "21.5 Grad."
-        },
-        "text": "Wie warm ist es im Wohnzimmer?",
-        "v7": null
-      },
-      {
-        "dataset": "eval:contextual_thermostat_setpoint:turn_1",
-        "differences": [
-          "kind:QUERY!=UNSUPPORTED",
-          "reason:-!=UNSUPPORTED_PROPERTY",
-          "payload"
-        ],
-        "legacy": {
-          "entities": [
-            "sensor.kueche_temp",
-            "sensor.wohnzimmer_temp"
-          ],
-          "intent": "HassLocationPropertyQuery",
-          "kind": "non_action",
-          "response": "Küche Temperatur: 22,5 Grad; Wohnzimmer Temperatur: 21,5 Grad."
-        },
-        "text": "Wie hoch ist die Temperatur im Erdgeschoss?",
-        "v7": null
-      },
-      {
-        "dataset": "eval:elliptical_temperature_setpoint:turn_1",
-        "differences": [
-          "kind:QUERY!=UNSUPPORTED",
-          "reason:-!=UNSUPPORTED_PROPERTY",
-          "payload"
-        ],
-        "legacy": {
-          "entities": [
-            "sensor.wohnzimmer_temp"
-          ],
-          "intent": "HassGetState",
-          "kind": "non_action",
-          "response": "21.5 Grad."
-        },
-        "text": "Wie warm ist es im Wohnzimmer?",
-        "v7": null
-      },
-      {
-        "dataset": "eval:relative_temperature_delta:turn_1",
-        "differences": [
-          "kind:QUERY!=UNSUPPORTED",
-          "reason:-!=UNSUPPORTED_PROPERTY",
-          "payload"
-        ],
-        "legacy": {
-          "entities": [
-            "sensor.wohnzimmer_temp"
-          ],
-          "intent": "HassGetState",
-          "kind": "non_action",
-          "response": "21.5 Grad."
-        },
-        "text": "Wie warm ist es im Wohnzimmer?",
-        "v7": null
-      },
-      {
-        "dataset": "eval:contextual_brightness:turn_1",
-        "differences": [
-          "kind:QUERY!=UNSUPPORTED",
-          "reason:-!=UNSUPPORTED_PROPERTY",
-          "payload"
-        ],
-        "legacy": {
-          "entities": [
-            "light.kueche"
-          ],
-          "intent": "HassGetState",
-          "kind": "non_action",
-          "response": "aus."
-        },
-        "text": "Wie hell ist es in der Küche?",
-        "v7": null
-      },
-      {
-        "dataset": "eval:elliptical_brightness:turn_1",
-        "differences": [
-          "kind:QUERY!=UNSUPPORTED",
-          "reason:-!=UNSUPPORTED_PROPERTY",
-          "payload"
-        ],
-        "legacy": {
-          "entities": [
-            "light.kueche"
-          ],
-          "intent": "HassGetState",
-          "kind": "non_action",
-          "response": "aus."
-        },
-        "text": "Wie hell ist es in der Küche?",
-        "v7": null
-      },
-      {
-        "dataset": "eval:query_location_correction:turn_1",
-        "differences": [
-          "kind:QUERY!=UNSUPPORTED",
-          "reason:-!=UNSUPPORTED_PROPERTY",
-          "payload"
-        ],
-        "legacy": {
-          "entities": [
-            "sensor.wohnzimmer_temp"
-          ],
-          "intent": "HassGetState",
-          "kind": "non_action",
-          "response": "21.5 Grad."
-        },
-        "text": "Wie warm ist es im Wohnzimmer?",
-        "v7": null
-      },
-      {
         "dataset": "eval:battery_is_read_only:turn_1",
-        "differences": [
-          "kind:QUERY!=UNSUPPORTED",
-          "reason:-!=NO_GRAMMAR",
-          "payload"
-        ],
+        "differences": [],
         "legacy": {
           "entities": [
             "sensor.upstairs_battery"
@@ -738,15 +534,18 @@
           "response": "12 Prozent."
         },
         "text": "Batterien oben unter 20 Prozent",
-        "v7": null
+        "v7": {
+          "entities": [
+            "sensor.upstairs_battery"
+          ],
+          "intent": "HassGetState",
+          "kind": "non_action",
+          "response": "12 Prozent."
+        }
       },
       {
         "dataset": "eval:invalid_temperature_has_no_action:turn_1",
-        "differences": [
-          "kind:QUERY!=UNSUPPORTED",
-          "reason:-!=UNSUPPORTED_PROPERTY",
-          "payload"
-        ],
+        "differences": [],
         "legacy": {
           "entities": [
             "sensor.wohnzimmer_temp"
@@ -756,49 +555,19 @@
           "response": "21.5 Grad."
         },
         "text": "Wie warm ist es im Wohnzimmer?",
-        "v7": null
-      },
-      {
-        "dataset": "eval:semantic_measurement_free_order:turn_1",
-        "differences": [
-          "kind:QUERY!=UNSUPPORTED",
-          "reason:-!=NO_GRAMMAR",
-          "payload"
-        ],
-        "legacy": {
+        "v7": {
           "entities": [
-            "sensor.kueche_temp",
             "sensor.wohnzimmer_temp"
-          ],
-          "intent": "HassLocationPropertyQuery",
-          "kind": "non_action",
-          "response": "Küche Temperatur: 22,5 Grad; Wohnzimmer Temperatur: 21,5 Grad."
-        },
-        "text": "Im Erdgeschoss aktuell die Temperatur wie viel?",
-        "v7": null
-      },
-      {
-        "dataset": "eval:semantic_measurement_comparison:turn_1",
-        "differences": [
-          "kind:QUERY!=UNSUPPORTED",
-          "reason:-!=NO_GRAMMAR",
-          "payload"
-        ],
-        "legacy": {
-          "entities": [
-            "sensor.upstairs_battery"
           ],
           "intent": "HassGetState",
           "kind": "non_action",
-          "response": "12 Prozent."
-        },
-        "text": "Oben Batterien weniger als 20 Prozent?",
-        "v7": null
+          "response": "21.5 Grad."
+        }
       }
     ]
   },
   "mode": "read_only_no_service_execution",
-  "project_version": "4.61.0",
+  "project_version": "4.62.0",
   "safety": {
     "ambiguous_action_leakage": 0,
     "query_to_action_leakage": 0,

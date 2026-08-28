@@ -13,8 +13,13 @@ from ha_nlu.nlu.domain_operations import (
     INTENT_BY_DOMAIN_ACTION,
 )
 from ha_nlu.nlu.semantic_catalog import (
+    DEVICE_CLASS_ENTRIES,
     SEMANTIC_RESOLUTION_WORDS,
+    MEASUREMENT_PROPERTY_SPECS,
+    VALUE_INTENT_BY_DOMAIN_PROPERTY,
+    V7_AUTHORITATIVE_COMMAND_CAPABILITIES,
     V7_AUTHORITATIVE_DIRECT_CAPABILITIES,
+    V7_AUTHORITATIVE_QUERY_CAPABILITIES,
 )
 
 
@@ -38,17 +43,39 @@ def test_every_registered_action_has_domain_and_action_vocabulary():
 
 
 def test_v7_authority_cohort_has_one_registered_semantic_source():
-    for domain, intent in V7_AUTHORITATIVE_DIRECT_CAPABILITIES:
+    assert V7_AUTHORITATIVE_DIRECT_CAPABILITIES == (
+        V7_AUTHORITATIVE_COMMAND_CAPABILITIES
+        | V7_AUTHORITATIVE_QUERY_CAPABILITIES
+    )
+    for domain, intent in V7_AUTHORITATIVE_COMMAND_CAPABILITIES:
         matching_actions = {
             action
             for (registered_domain, action), registered_intent
             in INTENT_BY_DOMAIN_ACTION.items()
             if registered_domain == domain and registered_intent == intent
         }
-        assert matching_actions
         assert domain in DOMAIN_EXPRESSIONS
+        matching_properties = {
+            property_name
+            for (registered_domain, property_name), registered_intent
+            in VALUE_INTENT_BY_DOMAIN_PROPERTY.items()
+            if registered_domain == domain and registered_intent == intent
+        }
+        assert bool(matching_actions) != bool(matching_properties)
         assert matching_actions <= ACTION_EXPRESSIONS.keys()
         assert SEMANTIC_RESOLUTION_WORDS
+    for domain, intent in V7_AUTHORITATIVE_QUERY_CAPABILITIES:
+        measurement_domains = {
+            specification[0]
+            for specification in MEASUREMENT_PROPERTY_SPECS.values()
+        }
+        device_class_domains = {entry.value[0] for entry in DEVICE_CLASS_ENTRIES}
+        assert (
+            domain in DOMAIN_EXPRESSIONS
+            or domain in measurement_domains
+            or domain in device_class_domains
+        )
+        assert intent.startswith("Hass")
 
 
 def test_v7_core_imports_vocabulary_through_catalogue_facade():

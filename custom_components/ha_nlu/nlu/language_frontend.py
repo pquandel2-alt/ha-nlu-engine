@@ -184,26 +184,13 @@ def _has_near_negation(
     text: str, entities: tuple[EntitySnapshot, ...] = ()
 ) -> bool:
     """Treat a one-edit negation typo as negative, never as ignorable noise."""
-    registry_words = {
-        word
-        for entity in entities
-        for name in (entity.friendly_name, *entity.aliases)
-        for word in normalize_for_compare(name).split()
-    }
     for raw in re.findall(r"[A-Za-zÄÖÜäöüß]{4,}", text):
         word = normalize_for_compare(raw)
         if word in _NEGATION_TYPO_PROTECTED:
             continue
         if word in _NEGATION_FORMS:
             return True
-        # Registry names are user data, not grammar.  A name such as
-        # "Gute Nacht" happens to be one edit away from "nicht" and must
-        # not turn a safe script command into a negated command.  Exact
-        # negation above remains authoritative even when it is also part of
-        # a configured name.
-        if word in registry_words:
-            continue
-        if any(
+        near_negation = any(
             abs(len(word) - len(negation)) <= 1
             and (
                 edit_distance(word, negation) == 1
@@ -220,8 +207,20 @@ def _has_near_negation(
                 )
             )
             for negation in _NEGATION_FORMS
+        )
+        if not near_negation:
+            continue
+        # Registry names are user data, not grammar.  Only pay the O(n)
+        # registry scan after a token has passed the bounded edit-distance
+        # gate; ordinary turns therefore remain independent of registry
+        # size.  A name such as "Gute Nacht" still cannot become negation.
+        if any(
+            word in normalize_for_compare(name).split()
+            for entity in entities
+            for name in (entity.friendly_name, *entity.aliases)
         ):
-            return True
+            continue
+        return True
     return False
 
 

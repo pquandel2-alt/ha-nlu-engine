@@ -60,6 +60,9 @@ BUERO_ROLLLADE = EntitySnapshot(
 ALL_ENTITIES = [KUECHE_FENSTER_ZU, KUECHE_LICHT, BUERO_LICHT, BUERO_ROLLLADE]
 
 AUTOMATION_SENTENCE = "Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht ein."
+SECOND_AUTOMATION_SENTENCE = (
+    "Wenn das Küchenfenster geöffnet wird, schalte das Bürolicht ein."
+)
 
 
 def _make_entity(monkeypatch, tmp_path: Path) -> NluConversationEntity:
@@ -168,6 +171,124 @@ def test_lists_only_homeintent_automations(monkeypatch, tmp_path):
 
     assert "HomeIntent-Automationen:" in result.response.speech
     assert AUTOMATION_SENTENCE in result.response.speech
+
+
+def test_management_detail_diagnosis_simulation_and_counts_are_live(
+    monkeypatch, tmp_path
+):
+    entity = _make_entity(monkeypatch, tmp_path)
+    _run(entity, AUTOMATION_SENTENCE, conversation_id="create-rich-query")
+    _run(entity, "Ja", conversation_id="create-rich-query")
+
+    detail = _run(
+        entity, "Zeige die Details der Automation zu Küchenlicht", "detail"
+    )
+    diagnosis = _run(
+        entity,
+        "Warum wurde die Automation für Küchenlicht nicht ausgelöst?",
+        "diagnosis",
+    )
+    simulation = _run(
+        entity, "Simuliere die Automation für Küchenlicht", "simulation"
+    )
+    active = _run(
+        entity, "Wie viele HomeIntent-Automationen sind aktiv?", "active-count"
+    )
+
+    assert "Auslöser" in detail.response.speech
+    assert "genaue Ursache nicht beweisen" in diagnosis.response.speech
+    assert "Simulation" in simulation.response.speech
+    assert "1 HomeIntent-Automationen" in active.response.speech
+
+
+def test_duplicate_automation_confirmation_round_trip(monkeypatch, tmp_path):
+    entity = _make_entity(monkeypatch, tmp_path)
+    _run(entity, AUTOMATION_SENTENCE, conversation_id="create-duplicate")
+    _run(entity, "Ja", conversation_id="create-duplicate")
+
+    question = _run(
+        entity, "Dupliziere die Automation für Küchenlicht", "duplicate"
+    )
+    result = _run(entity, "ja", "duplicate")
+
+    assert "wirklich duplizieren" in question.response.speech
+    assert "dupliziert" in result.response.speech
+    automations = pyyaml.safe_load(
+        (tmp_path / "automations.yaml").read_text(encoding="utf-8")
+    )
+    assert len(automations) == 2
+
+
+def test_pause_automation_until_tomorrow_confirmation_round_trip(
+    monkeypatch, tmp_path
+):
+    entity = _make_entity(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        ha_conversation.dt_util,
+        "now",
+        lambda: datetime(2026, 8, 21, 12, 0, tzinfo=timezone.utc),
+    )
+    _run(entity, AUTOMATION_SENTENCE, conversation_id="create-pause")
+    _run(entity, "Ja", conversation_id="create-pause")
+
+    question = _run(
+        entity,
+        "Pausiere die Automation für Küchenlicht bis morgen 20:15 Uhr",
+        "pause",
+    )
+    result = _run(entity, "ja", "pause")
+
+    assert "22.08.2026 um 20:15 Uhr" in question.response.speech
+    assert "pausiert" in result.response.speech
+
+
+def test_ambiguous_duplicate_accepts_ordinal_then_confirms(monkeypatch, tmp_path):
+    entity = _make_entity(monkeypatch, tmp_path)
+    for cid, sentence in (
+        ("create-first-copy", AUTOMATION_SENTENCE),
+        ("create-second-copy", SECOND_AUTOMATION_SENTENCE),
+    ):
+        _run(entity, sentence, cid)
+        _run(entity, "ja", cid)
+
+    question = _run(
+        entity, "Dupliziere die Automation für Küchenfenster", "choose-copy"
+    )
+    retry = _run(entity, "irgendeine", "choose-copy")
+    confirmation = _run(entity, "die zweite", "choose-copy")
+    result = _run(entity, "ja", "choose-copy")
+
+    assert "Welche soll kopiert" in question.response.speech
+    assert "nicht eindeutig" in retry.response.speech
+    assert "wirklich duplizieren" in confirmation.response.speech
+    assert "dupliziert" in result.response.speech
+
+
+def test_ambiguous_pause_accepts_named_selection_then_confirms(
+    monkeypatch, tmp_path
+):
+    entity = _make_entity(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        ha_conversation.dt_util,
+        "now",
+        lambda: datetime(2026, 8, 21, 12, 0, tzinfo=timezone.utc),
+    )
+    for cid, sentence in (
+        ("create-first-pause", AUTOMATION_SENTENCE),
+        ("create-second-pause", SECOND_AUTOMATION_SENTENCE),
+    ):
+        _run(entity, sentence, cid)
+        _run(entity, "ja", cid)
+
+    question = _run(
+        entity, "Pausiere die Automation bis morgen 20:15 Uhr", "choose-pause"
+    )
+    confirmation = _run(entity, "die erste", "choose-pause")
+    result = _run(entity, "ja", "choose-pause")
+
+    assert "Welche soll pausiert" in question.response.speech
+    assert "22.08.2026 um 20:15 Uhr" in confirmation.response.speech
+    assert "pausiert" in result.response.speech
 
 
 def test_planned_query_when_query_and_reschedule_round_trip(monkeypatch, tmp_path):

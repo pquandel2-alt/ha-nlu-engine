@@ -38,7 +38,12 @@ from ha_nlu.automation_management import (  # noqa: E402
 )
 from ha_nlu.conversation import NluConversationEntity  # noqa: E402
 from ha_nlu.entities import EntitySnapshot  # noqa: E402
-from ha_nlu.nlu.context import PendingAutomationManagement  # noqa: E402
+from ha_nlu.nlu.context import (  # noqa: E402
+    ConversationContext,
+    PendingAutomationManagement,
+    PendingServiceConfirmation,
+)
+from ha_nlu.service_call import ServiceCallPlan  # noqa: E402
 from homeassistant.components.conversation import ConversationInput  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
 from homeassistant.core import HomeAssistant  # noqa: E402
@@ -206,6 +211,45 @@ def test_multi_command_applies_policy_before_any_service_call(monkeypatch):
     entity.hass.services.async_call.assert_not_awaited()
     assert result.response.error_code == intent.IntentResponseErrorCode.FAILED_TO_HANDLE
     assert "Lesen" in result.response.speech
+
+
+def test_multi_command_executes_all_validated_actions_and_stores_atomic_undo(
+    monkeypatch,
+):
+    entity = _make_entity(monkeypatch, [FLUR_LICHT_OFF, KUECHE_LICHT])
+
+    result = _run(
+        entity,
+        "Schalte das Flurlicht ein und schalte das Küchenlicht aus",
+        "multi-success",
+    )
+
+    assert result.response.error_code is None
+    assert entity.hass.services.async_call.await_count == 2
+    pending = entity._context_store.get("multi-success")
+    assert pending is not None
+    assert pending.pending_undo is not None
+    assert len(pending.pending_undo.plans) == 2
+
+
+def test_multi_command_runtime_failure_stops_remaining_actions(monkeypatch):
+    third = EntitySnapshot("light.third", "Drittes Licht", "light", "off")
+    entity = _make_entity(
+        monkeypatch, [FLUR_LICHT_OFF, KUECHE_LICHT, third]
+    )
+    entity.hass.services.async_call = AsyncMock(
+        side_effect=[None, RuntimeError("second failed"), None]
+    )
+
+    result = _run(
+        entity,
+        "Schalte das Flurlicht ein und schalte das Küchenlicht aus "
+        "und schalte Drittes Licht ein",
+        "multi-failure",
+    )
+
+    assert "second failed" in result.response.speech
+    assert entity.hass.services.async_call.await_count == 2
 
 
 def test_state_query_returns_query_answer_and_does_not_call_service(monkeypatch):
@@ -473,6 +517,41 @@ def test_live_multiple_fuzzy_names_ask_before_selected_execution(monkeypatch):
     assert "mehrere passende Lichter" in question.response.speech
     entity.hass.services.async_call.assert_awaited_once_with(
         "homeassistant", "turn_on", {"entity_id": "light.a"}, blocking=True,
+    )
+
+
+def test_partial_shared_name_lists_distinct_devices_before_execution(monkeypatch):
+    lights = [
+        EntitySnapshot("light.left", "Deckenlicht links", "light", "off"),
+        EntitySnapshot("light.right", "Deckenlicht rechts", "light", "off"),
+    ]
+    entity = _make_entity(monkeypatch, lights)
+
+    question = _run(entity, "Mach das Deckenlicht an", "partial-selection")
+    entity.hass.services.async_call.assert_not_awaited()
+    answer = _run(entity, "das rechte", "partial-selection")
+
+    assert "Deckenlicht links" in question.response.speech
+    assert "Deckenlicht rechts" in question.response.speech
+    assert "Deckenlicht rechts eingeschaltet" in answer.response.speech
+    entity.hass.services.async_call.assert_awaited_once_with(
+        "homeassistant", "turn_on", {"entity_id": "light.right"}, blocking=True,
+    )
+
+
+def test_single_typo_requires_confirmation_before_execution(monkeypatch):
+    light = EntitySnapshot("light.left", "Deckenlicht links", "light", "off")
+    entity = _make_entity(monkeypatch, [light])
+
+    question = _run(entity, "Mach Deckenlicth links an", "typo-confirmation")
+    entity.hass.services.async_call.assert_not_awaited()
+    answer = _run(entity, "ja", "typo-confirmation")
+
+    assert "Deckenlicht links" in question.response.speech
+    assert "meintest du" in question.response.speech.casefold()
+    assert "Deckenlicht links eingeschaltet" in answer.response.speech
+    entity.hass.services.async_call.assert_awaited_once_with(
+        "homeassistant", "turn_on", {"entity_id": "light.left"}, blocking=True,
     )
 
 
@@ -755,6 +834,124 @@ def test_service_call_exception_produces_clean_failed_to_handle_response(monkeyp
     assert result.response.error_code == intent.IntentResponseErrorCode.FAILED_TO_HANDLE
     assert "boom" in result.response.speech
     assert "Service call homeassistant.turn_on" in caplog.text
+
+
+def _store_confirmation(entity, conversation_id: str) -> None:
+    entity._context_store.set(
+        conversation_id,
+        ConversationContext(
+            last_command=None,
+            last_entities=(),
+            last_area=None,
+            pending_clarification=None,
+            pending_service_confirmation=PendingServiceConfirmation(
+                ServiceCallPlan(
+                    "homeassistant", "turn_on", FLUR_LICHT_OFF.entity_id, {}
+                ),
+                "Flurlicht eingeschaltet.",
+            ),
+        ),
+    )
+
+
+def test_service_confirmation_retries_declines_and_executes(monkeypatch):
+    entity = _make_entity(monkeypatch, [FLUR_LICHT_OFF])
+
+    _store_confirmation(entity, "confirm-unclear")
+    unclear = _run(entity, "vielleicht", "confirm-unclear")
+    assert unclear.response.speech == "Bitte antworte mit Ja oder Nein."
+    entity.hass.services.async_call.assert_not_awaited()
+
+    _store_confirmation(entity, "confirm-no")
+    declined = _run(entity, "nein", "confirm-no")
+    assert declined.response.speech == "Abgebrochen. Es wurde nichts ausgeführt."
+    entity.hass.services.async_call.assert_not_awaited()
+
+    _store_confirmation(entity, "confirm-yes")
+    accepted = _run(entity, "ja", "confirm-yes")
+    assert accepted.response.speech == "Flurlicht eingeschaltet."
+    entity.hass.services.async_call.assert_awaited_once_with(
+        "homeassistant", "turn_on", {"entity_id": FLUR_LICHT_OFF.entity_id},
+        blocking=True,
+    )
+
+
+def test_confirmed_service_failure_is_reported_without_success(monkeypatch):
+    entity = _make_entity(monkeypatch, [FLUR_LICHT_OFF])
+    entity.hass.services.async_call = AsyncMock(side_effect=RuntimeError("confirm boom"))
+    _store_confirmation(entity, "confirm-failure")
+
+    result = _run(entity, "ja", "confirm-failure")
+
+    assert "confirm boom" in result.response.speech
+    assert result.response.error_code == intent.IntentResponseErrorCode.FAILED_TO_HANDLE
+
+
+def test_undo_reports_empty_context_then_reverses_last_light_action(monkeypatch):
+    entity = _make_entity(monkeypatch, [FLUR_LICHT_OFF])
+
+    empty = _run(entity, "Mach das rückgängig", "undo-empty")
+    assert "keine kürzlich" in empty.response.speech
+
+    _run(entity, "Schalte das Flurlicht ein", "undo-success")
+    undone = _run(entity, "Mach das rückgängig", "undo-success")
+
+    assert undone.response.speech == "Die letzte Aktion wurde rückgängig gemacht."
+    assert entity.hass.services.async_call.await_count == 2
+    assert entity.hass.services.async_call.await_args_list[-1].args[:2] == (
+        "light", "turn_off"
+    )
+
+
+def test_undo_service_failure_is_cleanly_reported(monkeypatch):
+    entity = _make_entity(monkeypatch, [FLUR_LICHT_OFF])
+    _run(entity, "Schalte das Flurlicht ein", "undo-failure")
+    entity.hass.services.async_call = AsyncMock(side_effect=RuntimeError("undo boom"))
+
+    result = _run(entity, "Mach das rückgängig", "undo-failure")
+
+    assert "undo boom" in result.response.speech
+
+
+def test_explanation_reports_empty_and_last_structured_command(monkeypatch):
+    entity = _make_entity(monkeypatch, [FLUR_LICHT_OFF])
+
+    empty = _run(entity, "Was hast du verstanden?", "explain-empty")
+    assert "noch keinen verstandenen Befehl" in empty.response.speech
+
+    _run(entity, "Schalte das Flurlicht ein", "explain-command")
+    explained = _run(entity, "Wie hast du das verstanden?", "explain-command")
+
+    assert "Aktion: einschalten" in explained.response.speech
+    assert "Ziel: Flurlicht" in explained.response.speech
+    assert explained.response.response_type == intent.IntentResponseType.QUERY_ANSWER
+
+
+def test_execution_audit_is_read_only_and_names_recorded_action(monkeypatch):
+    entity = _make_entity(monkeypatch, [FLUR_LICHT_OFF])
+    _run(entity, "Schalte das Flurlicht ein", "audit-action")
+    entity.hass.services.async_call.reset_mock()
+
+    result = _run(
+        entity, "Was wurde heute durch HomeIntent ausgeführt?", "audit-query"
+    )
+
+    assert "light.flur_licht" in result.response.speech
+    assert result.response.response_type == intent.IntentResponseType.QUERY_ANSWER
+    entity.hass.services.async_call.assert_not_awaited()
+
+
+def test_advanced_unavailable_query_is_read_only(monkeypatch):
+    unavailable = EntitySnapshot(
+        "light.offline", "Offline Licht", "light", "unavailable"
+    )
+    entity = _make_entity(monkeypatch, [unavailable])
+
+    result = _run(entity, "Welche Geräte sind nicht erreichbar?", "advanced")
+
+    assert "Offline Licht" in result.response.speech
+    assert result.response.response_type == intent.IntentResponseType.QUERY_ANSWER
+    entity.hass.services.async_call.assert_not_awaited()
 
 
 def test_undo_service_failure_is_logged(monkeypatch, caplog):

@@ -63,6 +63,13 @@ def create_parse_context(
 class ParseResult:
     frame: SemanticFrame
     resolved_entities: list[EntitySnapshot]
+    # Read-only semantic compilers may already own a grounded answer whose
+    # wording depends on a predicate rather than a generic query intent.
+    # These fields never create a service plan; engine.py preserves them as
+    # query context for deterministic follow-ups.
+    response_text: str | None = None
+    context_predicate: str | None = None
+    explanation_text: str | None = None
 
 
 @dataclass(frozen=True)

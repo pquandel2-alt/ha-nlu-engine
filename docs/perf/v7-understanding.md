@@ -1,6 +1,6 @@
 # V7 Understanding Pipeline – Performance Check
 
-Stand: 28. August 2026, HomeIntent V7-Release-Stand 4.61.0.
+Stand: 28. August 2026, HomeIntent V7-Release-Stand 4.62.0.
 
 Gemessen wurde `NluEngine.understand()` einschließlich verlustarmem
 Sprach-Frontend, Kandidatenmodell, zentralem Sicherheitsgate und bestehender
@@ -102,3 +102,29 @@ Das CI-Budget verwendet 20 Messwerte nach drei Warmups. Mit nur drei
 Messwerten wäre der ausgewiesene p95 praktisch der einzelne Maximalwert und
 damit als blockierendes Gate zu empfindlich gegenüber Runner-Jitter. Im
 20er-Kontrolllauf lagen alle p95-Werte unter 87 ms; das Budget bleibt 100 ms.
+
+## Kontrolle nach Query- und Property-Autoritätsausbau
+
+Nach der Ausweitung der autoritativen Capability-Matrix zeigte das Gate
+zunächst eine reale Regression: Sensor- und freie Zustandsabfragen lagen bei
+5.000 Entities bei 425–473 ms p95. Ursache war ein pro Entity neu
+kompilierter Wortgrenzen-Regex im eingebetteten Namensscan. Der Resolver
+verwendet nun einen semantisch gleichwertigen begrenzten Literalscan; Tests
+sichern Treffer an Satzzeichen sowie das Verbot von Teilworttreffern ab.
+
+Kontrolllauf mit 20 Messwerten und drei Warmups auf derselben virtualisierten
+x86_64-Entwicklungsumgebung:
+
+| Fall | Mittel | p95 |
+|---|---:|---:|
+| Licht an | 14,16 ms | 14,53 ms |
+| Licht aus | 14,01 ms | 14,22 ms |
+| Heizung auf Temperatur | 12,29 ms | 12,40 ms |
+| Sensorabfrage | 20,45 ms | 20,63 ms |
+| Bereichsgruppe | 35,85 ms | 36,86 ms |
+| Cover-Prozentwert | 55,02 ms | 55,57 ms |
+| freie semantische Query | 25,35 ms | 25,94 ms |
+
+Damit liegt jeder gemessene 5.000-Entity-p95 wieder unter dem blockierenden
+100-ms-Budget. Die offene Pi-4/5-Messung bleibt davon unberührt und wird
+nicht durch x86-Werte ersetzt.

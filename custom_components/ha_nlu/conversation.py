@@ -148,7 +148,11 @@ from .nlu.ha_automation_generator import (
 )
 from .nlu.language_frontend import analyse_language
 from .nlu.response_generator import _automation_label
-from .nlu.semantic_utterance import SpeechAct, analyse_utterance
+from .nlu.semantic_utterance import (
+    SpeechAct,
+    analyse_utterance,
+    is_contextual_followup,
+)
 from .nlu.understanding import UnderstandingAuthority
 from .service_call import QUERY_INTENTS, ServiceCallPlan
 from .semantic_dialog import continue_semantic_dialog, start_semantic_dialog
@@ -692,7 +696,13 @@ class NluConversationEntity(
             self._engine.understand(
                 user_input.text, entities, self._world_model, language_document
             )
-            if language_document.utterance.speech_act is SpeechAct.COMMAND
+            if language_document.utterance.speech_act in {
+                SpeechAct.COMMAND,
+                SpeechAct.QUERY,
+            }
+            and not (
+                pending is not None and is_contextual_followup(user_input.text)
+            )
             else None
         )
         result = (
