@@ -149,6 +149,7 @@ from .nlu.ha_automation_generator import (
 from .nlu.language_frontend import analyse_language
 from .nlu.response_generator import _automation_label
 from .nlu.semantic_utterance import SpeechAct, analyse_utterance
+from .nlu.understanding import UnderstandingAuthority
 from .service_call import QUERY_INTENTS, ServiceCallPlan
 from .semantic_dialog import continue_semantic_dialog, start_semantic_dialog
 from .reminder import (
@@ -682,23 +683,43 @@ class NluConversationEntity(
                 user_input, response, management_request, entities
             )
 
-        device_control = match_capability_audit_query(user_input.text, entities)
-        if device_control is None:
-            device_control = match_household_query(
-                user_input.text, entities, dt_util.now()
+        # Analyse command-shaped turns before the historical device matcher
+        # group. Only explicitly migrated capabilities may consume this
+        # early result. Automation turns stay lazy so they do not pay both
+        # the direct and automation interpreters; non-command fallbacks are
+        # computed below only if the established routers did not match.
+        direct_understanding = (
+            self._engine.understand(
+                user_input.text, entities, self._world_model, language_document
             )
-        if device_control is None:
-            device_control = match_extended_device_query(user_input.text, entities)
-        if device_control is None:
-            device_control = match_device_control(user_input.text, entities)
-        if device_control is None:
-            device_control = match_device_control_followup(
-                user_input.text, pending, entities
-            )
-        if device_control is not None:
-            return await self._async_handle_device_control_result(
-                user_input, response, device_control
-            )
+            if language_document.utterance.speech_act is SpeechAct.COMMAND
+            else None
+        )
+        result = (
+            direct_understanding.payload
+            if direct_understanding is not None
+            and direct_understanding.authority
+            is UnderstandingAuthority.V7_MIGRATED
+            else None
+        )
+        if result is None:
+            device_control = match_capability_audit_query(user_input.text, entities)
+            if device_control is None:
+                device_control = match_household_query(
+                    user_input.text, entities, dt_util.now()
+                )
+            if device_control is None:
+                device_control = match_extended_device_query(user_input.text, entities)
+            if device_control is None:
+                device_control = match_device_control(user_input.text, entities)
+            if device_control is None:
+                device_control = match_device_control_followup(
+                    user_input.text, pending, entities
+                )
+            if device_control is not None:
+                return await self._async_handle_device_control_result(
+                    user_input, response, device_control
+                )
 
         if pending is not None and pending.pending_clarification is not None:
             # A complete new command supersedes an open clarification.  Try
@@ -707,9 +728,15 @@ class NluConversationEntity(
             # "Welche Rollläden meinst du?".  Elliptical answers such as
             # "die linke" do not match a complete command and therefore
             # continue through the established clarification resolver.
-            result = self._engine.understand(
-                user_input.text, entities, self._world_model, language_document
-            ).payload
+            if result is None:
+                if direct_understanding is None:
+                    direct_understanding = self._engine.understand(
+                        user_input.text,
+                        entities,
+                        self._world_model,
+                        language_document,
+                    )
+                result = direct_understanding.payload
             if result is None:
                 clarification = pending.pending_clarification
                 selection = resolve_candidate_reply(
@@ -780,7 +807,7 @@ class NluConversationEntity(
                         response=response,
                         conversation_id=user_input.conversation_id,
                     )
-        else:
+        elif result is None:
             result = self._engine.match_correction_followup(
                 user_input.text, entities, pending
             )
@@ -939,9 +966,14 @@ class NluConversationEntity(
                     user_input.text, entities, self._world_model, pending
                 )
             if result is None:
-                result = self._engine.understand(
-                    user_input.text, entities, self._world_model, language_document
-                ).payload
+                if direct_understanding is None:
+                    direct_understanding = self._engine.understand(
+                        user_input.text,
+                        entities,
+                        self._world_model,
+                        language_document,
+                    )
+                result = direct_understanding.payload
 
         if result is None:
             return await self._async_handle_no_match(user_input, response, entities)

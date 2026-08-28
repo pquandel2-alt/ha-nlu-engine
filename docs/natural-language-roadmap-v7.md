@@ -68,11 +68,11 @@ liefern“, sondern diese Reihenfolge:
 
 Der aktuelle Stand ist funktional und sicherheitsbewusst:
 
-- 2.335 Tests bestehen, 12 sind übersprungen;
-- die gemessene Gesamt-Coverage liegt bei 85 % (12.968 Statements, davon
-  1.968 nicht ausgeführt); die zentralen Sprachmodule liegen überwiegend
-  deutlich höher, `conversation.py` als Orchestrator jedoch bei 66 %;
-- 140 Testdateien mit rund 22.800 Testzeilen sind vorhanden;
+- 2.383 Tests bestehen, 12 sind übersprungen;
+- die zuletzt gemessene Gesamt-Coverage liegt bei 85 %; die zentralen
+  Sprachmodule liegen überwiegend deutlich höher, `conversation.py` als
+  Orchestrator jedoch weiterhin nur bei 67 %;
+- 149 Python-Testdateien sind vorhanden;
 - `SemanticUtterance`, `SemanticAnalysis`, `SemanticFrame`, `WorldModel`,
   Constraint Resolver, Capability-Prüfung und strukturierte Dialogzustände
   existieren bereits;
@@ -93,10 +93,12 @@ Generalisierung:
 
 Die wesentlichen Architekturbremsen sind:
 
-1. **Semantik ist noch Fallback statt Autorität.** `NluEngine.match()` wählt
-   zuerst über Regexe einen spezialisierten Hassil-Parser. Erst wenn dieser
-   keinen Treffer liefert, laufen `SemanticQueryCompiler` beziehungsweise
-   `SemanticCommandCompiler`.
+1. **Semantik ist erst capabilityweise Autorität.** Seit dem Audit vom
+   28. August laufen direkte Turns in `NluEngine.understand()` semantisch
+   zuerst. Für Licht Ein/Aus ist V7 nach einem vollständigen Shadow-Gate
+   autoritativ; alle übrigen Capabilities behalten Legacy als
+   Kompatibilitätsfallback. `_select_parser()` bleibt dort weiterhin eine
+   offene Architekturbremse.
 2. **Routing ist reihenfolgeabhängig.** `conversation.py::_async_handle_message()`
    probiert viele Dialog-, Kalender-, Produktivitäts-, Geräte-, Automations-
    und Core-Matcher nacheinander. Der erste Treffer gewinnt. Die Bedeutung
@@ -113,10 +115,33 @@ Die wesentlichen Architekturbremsen sind:
    108 Python-Dateien, rund 31.000 Zeilen, 259 `re.compile()`-Aufrufe, 50
    Intent-YAML-Dateien und etwa 450 Hassil-Satzeinträge. Eine Verbesserung in
    einem Pfad gilt deshalb nicht automatisch für die anderen.
-6. **Der Dialogzustand ist fachlich reich, aber orchestral fragmentiert.**
-   Zahlreiche `pending_*`-Felder werden durch feste Prioritätsreihenfolge
-   behandelt. Ein neuer vollständiger Satz kann dadurch je nach offenem
-   Dialog unterschiedlich interpretiert werden.
+6. **Der Dialogzustand ist explizit klassifiziert, die Handler bleiben aber
+   orchestral fragmentiert.** `active_pending_dialog()` bildet bereits eine
+   deterministische State-Machine mit sichtbaren Konflikten. Die einzelnen
+   Zustände werden in `conversation.py` dennoch durch getrennte Handler
+   behandelt. Das ist nicht mit einer fehlenden State-Machine gleichzusetzen,
+   bleibt aber Integrations- und Testschuld.
+
+### 2.1 Verifizierter Shadow-Ausgangsstand
+
+`scripts/v7_shadow_report.py` vergleicht Legacy und vollständig kompiliertes
+V7 ohne Serviceausführung. Der versionierte Bericht
+`docs/perf/v7-shadow-baseline-4.61.0.json` umfasst 3.772 Turns:
+
+- 3.625 semantisch identische Ergebnisse,
+- 125 Treffer nur im Legacy-Pfad,
+- 0 Treffer nur im V7-Pfad,
+- 1 Divergenz bei einer read-only Ventilatorfrage; Ziel und Wahrheit stimmen,
+  die gesprochene Form unterscheidet sich,
+- 21 beidseitige sichere Fehlschläge.
+
+Query-to-Action-, Unsafe-Action- und Ambiguous-to-Action-Leakage sind in
+diesem Lauf jeweils null.
+
+Damit war die im externen Prüfplan vorgeschlagene Umschaltung der Kategorie
+„nur V7“ nicht anwendbar. Als erster Schnitt wurde stattdessen die vollständig
+identische Licht-Ein/Aus-Matrix gewählt. Medien-, Kontext- und Messwertpfade
+werden wegen der belegten Legacy-only-Fälle ausdrücklich noch nicht entfernt.
 
 ## 3. Zielarchitektur
 

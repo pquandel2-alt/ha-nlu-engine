@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from dataclasses import replace
 
-from ..entities import EntitySnapshot
+from ..entities import EntitySnapshot, normalize_for_compare
 from ..world_model import WorldModel
 from .language_frontend import LanguageDocument, TextVariant
 from .parser import ClarificationRequest, ParseResult
@@ -76,7 +76,9 @@ def _conflicts(document: LanguageDocument) -> tuple[str, ...]:
     return tuple(conflicts)
 
 
-def _missing_slots(document: LanguageDocument) -> tuple[str, ...]:
+def _missing_slots(
+    document: LanguageDocument, slots: dict[str, object]
+) -> tuple[str, ...]:
     analysis = document.semantics
     missing: list[str] = []
     if document.utterance.speech_act is SpeechAct.COMMAND:
@@ -85,6 +87,7 @@ def _missing_slots(document: LanguageDocument) -> tuple[str, ...]:
         if not (
             analysis.values(SemanticKind.DOMAIN)
             or analysis.values(SemanticKind.DEVICE_CLASS)
+            or slots.get("entities")
         ):
             missing.append("target")
     elif document.utterance.speech_act is SpeechAct.QUERY:
@@ -92,6 +95,7 @@ def _missing_slots(document: LanguageDocument) -> tuple[str, ...]:
             analysis.values(SemanticKind.DOMAIN)
             or analysis.values(SemanticKind.DEVICE_CLASS)
             or analysis.values(SemanticKind.PROPERTY)
+            or slots.get("entities")
         ):
             missing.append("target_or_property")
     return tuple(missing)
@@ -194,12 +198,41 @@ class SemanticInterpreter:
                     variant.text, entities, world_model, analysis
                 )
 
+            resolved_mentions = mentions
+            if isinstance(parse_result, ParseResult):
+                resolved_mentions = tuple(parse_result.resolved_entities)
+            elif isinstance(parse_result, ClarificationRequest):
+                resolved_mentions = parse_result.candidates
+            if resolved_mentions and "entities" not in slots:
+                slots["entities"] = tuple(
+                    entity.entity_id for entity in resolved_mentions
+                )
+                slots.setdefault(
+                    "domains",
+                    tuple(sorted({entity.domain for entity in resolved_mentions})),
+                )
+
             conflicts = _conflicts(candidate_document)
-            missing = _missing_slots(candidate_document)
-            complete = isinstance(parse_result, ParseResult) and not conflicts
+            missing = _missing_slots(candidate_document, slots)
+            complete = (
+                isinstance(parse_result, ParseResult)
+                and not conflicts
+                and not missing
+            )
             coverage = len(analysis.spans) * 5.0
+            registry_tokens = {
+                normalize_for_compare(token)
+                for entity in resolved_mentions
+                for name in (entity.friendly_name, *entity.aliases)
+                for token in name.split()
+            }
+            unexplained = tuple(
+                token
+                for token in analysis.unexplained_tokens
+                if normalize_for_compare(token) not in registry_tokens
+            )
             penalty = (
-                len(analysis.unexplained_tokens) * 3.0
+                len(unexplained) * 3.0
                 + len(conflicts) * 20.0
                 + variant.cost * 10.0
             )

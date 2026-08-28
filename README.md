@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.60.0**
+- Aktuelle Version: **4.61.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -804,12 +804,12 @@ python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
 ```
 
-Geprüfter V7-Release-Stand von Version 4.60.0:
+Geprüfter V7-Release-Stand von Version 4.61.0:
 
 ```text
-2374 passed, 12 skipped
+2383 passed, 12 skipped
 85 % Gesamt-Coverage
-65 % Coverage für conversation.py
+67 % Coverage für conversation.py
 ```
 
 Zusätzlich wurden ausgeführt:
@@ -829,6 +829,14 @@ folgenden Befehl ausgeführt werden:
 ./scripts/run_language_eval.sh
 ```
 
+Legacy und vollständig kompiliertes V7 lassen sich außerdem ohne
+Serviceausführung über den versionierten Shadow-Report vergleichen:
+
+```bash
+python scripts/v7_shadow_report.py \
+  --check docs/perf/v7-shadow-baseline-4.61.0.json --quiet
+```
+
 Zusätzlich erzeugt die Test-Suite weiterhin 1.024 intensive Lichtparaphrasen.
 Die neue domänenübergreifende Matrix kombiniert außerdem 2.304 fachlich
 passende Formulierungen aus Domäne, Ziel, Operation, sprachlicher Hülle und
@@ -843,7 +851,7 @@ Dadurch können sie dem Parser keine Antworten „beibringen“.
 ![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
 
 Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.60.0. Für echte
+Entwicklungsstands und kein aktueller Nachweis für Version 4.61.0. Für echte
 Zielhardware lässt sich seit 4.49 ein reproduzierbarer JSON-Bericht samt
 P95-Budget erzeugen:
 

@@ -31,7 +31,10 @@ from .primitives import SemanticAction, SemanticProperty, SemanticQuantity
 from .query_command import QueryCommand, QueryFilter, QueryScope, QueryTarget
 from .query_executor import QueryExecutor
 from .semantic_lexicon import SemanticAnalysis, SemanticKind, analyse_semantics
-from .domain_operations import INTENT_BY_DOMAIN_ACTION
+from .semantic_catalog import (
+    INTENT_BY_DOMAIN_ACTION,
+    SEMANTIC_RESOLUTION_WORDS,
+)
 from .semantic_location import (
     has_explicit_location_cue,
     resolve_coordinated_locations,
@@ -137,16 +140,6 @@ _STOP_WORDS = {
     "bitte", "kannst", "du", "mir", "mal", "doch", "jetzt", "vorhandenen",
     "im", "in", "am", "auf", "aus", "an", "zu", "und", "sind", "ist",
     "alle", "sämtliche", "sämtlichen", "jede", "jeden", "jedes", "beide",
-}
-_SEMANTIC_WORDS = {
-    "mache", "machen", "mach", "schalte", "schalten", "stelle", "stellen",
-    "setze", "setzen", "fahre", "fahren", "fahr", "gefahren", "öffne", "öffnen", "schließe",
-    "schließen", "drehe", "drehen", "lass", "lassen", "hoch", "runter", "herunter",
-    "halb", "halbe", "halber", "halben", "hälfte", "höhe", "prozent", "komplett", "ganz", "vollständig", "einschalten",
-    "ausschalten", "anmachen", "ausmachen", "aktivieren", "aktiviere", "starten",
-    "starte", "ausführen", "führe", "umschalten", "toggle",
-    "spiele", "spielen", "spiel", "weiter", "weiterspielen", "pausiere",
-    "pausieren", "pausiert", "halte", "halten", "stoppe", "stoppen", "gestoppt",
 }
 _QUERY_MARKER_RE = re.compile(
     r"\b(?:ist|sind|welch\w*|wie\s+viele|wo|gibt\s+es|haben\s+wir|irgendein\w*|keine?\w*)\b",
@@ -344,7 +337,7 @@ def _entity_candidates(
     floor_id: str | None = None,
     world_model: WorldModel | None = None,
 ) -> list[EntitySnapshot]:
-    ignored = frozenset(_SEMANTIC_WORDS | _STOP_WORDS)
+    ignored = frozenset(SEMANTIC_RESOLUTION_WORDS | _STOP_WORDS)
     ranked = rank_semantic_targets(
         text,
         entities,

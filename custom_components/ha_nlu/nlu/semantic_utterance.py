@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from .normalize import normalize
-from .domain_operations import (
+from .semantic_catalog import (
     ACTION_EXPRESSIONS,
     COMMAND_MARKER_EXPRESSIONS,
     DOMAIN_EXPRESSIONS,

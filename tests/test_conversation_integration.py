@@ -180,6 +180,20 @@ def test_turn_on_command_calls_service_and_responds_action_done(monkeypatch):
     assert result.response.speech
 
 
+def test_v7_light_authority_bypasses_legacy_device_router(monkeypatch):
+    entity = _make_entity(monkeypatch, [FLUR_LICHT_OFF])
+
+    def fail_legacy_router(*args, **kwargs):
+        raise AssertionError("migrated light command reached legacy device router")
+
+    monkeypatch.setattr(ha_conversation, "match_device_control", fail_legacy_router)
+
+    result = _run(entity, "Schalte das Flurlicht ein")
+
+    assert result.response.response_type == intent.IntentResponseType.ACTION_DONE
+    entity.hass.services.async_call.assert_awaited_once()
+
+
 def test_multi_command_applies_policy_before_any_service_call(monkeypatch):
     entity = _make_entity(monkeypatch, [FLUR_LICHT_OFF, KUECHE_LICHT])
     entity.entry.options["read_only_entities"] = ["light.kueche"]

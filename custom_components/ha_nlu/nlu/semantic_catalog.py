@@ -15,6 +15,7 @@ from .domain_operations import (
     DOMAIN_EXPRESSIONS,
     DOMAIN_WORDS,
     INTENT_BY_DOMAIN_ACTION,
+    regex_union,
 )
 from .semantic_state import SemanticState
 
@@ -129,6 +130,31 @@ CANONICAL_SPELLING_FORMS = frozenset({
     *(word for words in DOMAIN_WORDS.values() for word in words if " " not in word),
 })
 
+# Tokens ignored while registry names are ranked.  These are semantic
+# operation/value words, not sentence templates.  Keeping them here prevents
+# the entity resolver and compiler from growing independent action lists.
+SEMANTIC_RESOLUTION_WORDS = frozenset({
+    "mache", "machen", "mach", "schalte", "schalten", "stelle", "stellen",
+    "setze", "setzen", "fahre", "fahren", "fahr", "gefahren", "öffne",
+    "öffnen", "schließe", "schließen", "drehe", "drehen", "lass", "lassen",
+    "hoch", "runter", "herunter", "halb", "halbe", "halber", "halben",
+    "hälfte", "höhe", "prozent", "komplett", "ganz", "vollständig",
+    "einschalten", "ausschalten", "anmachen", "ausmachen", "aktivieren",
+    "aktiviere", "starten", "starte", "ausführen", "führe", "umschalten",
+    "toggle", "spiele", "spielen", "spiel", "weiter", "weiterspielen",
+    "pausiere", "pausieren", "pausiert", "halte", "halten", "stoppe",
+    "stoppen", "gestoppt",
+})
+
+# This is deliberately small and capability-specific.  An entry becomes
+# authoritative only after the versioned shadow report proves equivalence
+# for its complete compositional matrix.
+V7_AUTHORITATIVE_DIRECT_CAPABILITIES = frozenset({
+    ("light", "HassTurnOn"),
+    ("light", "HassTurnOff"),
+})
+V7_AUTHORITY_MIN_MARGIN = 10.0
+
 
 def catalogue_expression_groups() -> dict[str, tuple[CatalogueEntry, ...]]:
     """Return every non-domain semantic group for tooling and drift checks."""
@@ -158,6 +184,10 @@ __all__ = [
     "PROPERTY_ENTRIES",
     "QUANTIFIER_ENTRIES",
     "QUERY_SCOPE_ENTRIES",
+    "SEMANTIC_RESOLUTION_WORDS",
     "STATE_ENTRIES",
+    "V7_AUTHORITATIVE_DIRECT_CAPABILITIES",
+    "V7_AUTHORITY_MIN_MARGIN",
     "catalogue_expression_groups",
+    "regex_union",
 ]

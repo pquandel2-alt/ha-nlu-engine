@@ -1,6 +1,7 @@
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.parse_outcome import ParseFailureReason
 from ha_nlu.nlu.understanding import (
+    UnderstandingAuthority,
     UnderstandingKind,
     UnderstandingOutcome,
     compare_outcomes,
@@ -8,7 +9,7 @@ from ha_nlu.nlu.understanding import (
 from ha_nlu.nlu.semantic_utterance import SpeechAct
 
 
-def test_understand_returns_explicit_command_with_legacy_payload(engine, entities):
+def test_understand_returns_explicit_command_with_validated_payload(engine, entities):
     outcome = engine.understand("Mach das Flurlicht an", entities)
 
     assert outcome.kind is UnderstandingKind.COMMAND
@@ -16,6 +17,32 @@ def test_understand_returns_explicit_command_with_legacy_payload(engine, entitie
     assert outcome.payload is not None
     assert outcome.payload.plan.service == "turn_on"
     assert outcome.route == "HassTurnOn"
+
+
+def test_light_power_is_v7_authoritative_after_shadow_gate(engine, entities):
+    outcome = engine.understand("Mach das Flurlicht an", entities)
+
+    assert outcome.authority is UnderstandingAuthority.V7_MIGRATED
+    assert outcome.payload is not None
+    assert outcome.payload.plan.entity_id == "light.flur_licht"
+
+
+def test_unmigrated_capability_retains_legacy_authority(engine, entities):
+    outcome = engine.understand("Fahre Rollladen Büro hoch", entities)
+
+    assert outcome.authority is UnderstandingAuthority.LEGACY
+    assert outcome.payload is not None
+    assert outcome.payload.plan.service == "open_cover"
+
+
+def test_real_shadow_comparison_is_read_only_and_semantically_equal(engine, entities):
+    comparison = engine.compare_understanding_pipelines(
+        "Schalte das Flurlicht ein", entities
+    )
+
+    assert comparison.equivalent
+    assert comparison.authoritative.payload is not None
+    assert comparison.candidate.payload is not None
 
 
 def test_understand_returns_explicit_unsupported_reason(engine, entities):

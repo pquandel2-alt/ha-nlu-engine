@@ -104,6 +104,22 @@ def _metadata_json(tmp_path: Path) -> dict:
 # --- full YES round-trip: preview turn, then "Ja" persists + reloads -------
 
 
+def test_automation_turn_does_not_pay_direct_understanding_pipeline(
+    monkeypatch, tmp_path
+):
+    entity = _make_entity(monkeypatch, tmp_path)
+
+    def fail_direct_understanding(*args, **kwargs):
+        raise AssertionError("automation turn entered direct understanding")
+
+    monkeypatch.setattr(entity._engine, "understand", fail_direct_understanding)
+
+    result = _run(entity, AUTOMATION_SENTENCE, conversation_id="single-analysis")
+
+    assert "Soll diese Automation erstellt werden?" in result.response.speech
+    entity.hass.services.async_call.assert_not_awaited()
+
+
 def test_yes_reply_creates_the_automation_and_calls_automation_reload(monkeypatch, tmp_path):
     entity = _make_entity(monkeypatch, tmp_path)
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
+from ha_nlu.entities import EntitySnapshot, build_entity_index
 from ha_nlu.nlu.entity_resolution import (
     ResolutionStatus,
     rank_semantic_targets,
@@ -76,3 +76,25 @@ def test_semantic_ranking_keeps_equal_names_tied_for_clarification():
 
     assert len(ranked) == 2
     assert ranked[0].score == ranked[1].score
+
+
+def test_indexed_semantic_ranking_preserves_exact_name_and_alias_ties():
+    entities = [
+        EntitySnapshot("light.name", "Leselicht", "light", "off"),
+        EntitySnapshot(
+            "light.alias", "Sofalampe", "light", "off", aliases=("Leselicht",)
+        ),
+    ]
+    kwargs = {
+        "domains": frozenset({"light"}),
+        "ignored_tokens": frozenset({"mach", "an"}),
+    }
+
+    scanned = rank_semantic_targets("Mach Leselicht an", entities, **kwargs)
+    indexed = rank_semantic_targets(
+        "Mach Leselicht an", entities, index=build_entity_index(entities), **kwargs
+    )
+
+    assert [(item.entity.entity_id, item.score) for item in indexed] == [
+        (item.entity.entity_id, item.score) for item in scanned
+    ]

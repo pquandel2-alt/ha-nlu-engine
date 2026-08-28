@@ -1,6 +1,6 @@
 # V7 Understanding Pipeline – Performance Check
 
-Stand: 27. August 2026, HomeIntent V7-Release-Stand 4.60.0.
+Stand: 28. August 2026, HomeIntent V7-Release-Stand 4.61.0.
 
 Gemessen wurde `NluEngine.understand()` einschließlich verlustarmem
 Sprach-Frontend, Kandidatenmodell, zentralem Sicherheitsgate und bestehender
@@ -68,3 +68,37 @@ Entwicklungsumgebung lagen die 5.000-Entity-p95-Werte zwischen 19,35 ms für
 die Sensorabfrage und 60,26 ms für den langsamsten Namensfall. Diese kurze
 Kontrollmessung ist ein Regressionsindikator, ersetzt aber weiterhin nicht
 das Release-Gate auf echter Pi-Hardware.
+
+## Kontrolle nach der ersten V7-Autoritätsumschaltung
+
+Für Licht Ein/Aus läuft der Semantic Interpreter nun vor Legacy. Ein erster
+naiver Versuch mit zusätzlichem vollständigem Registry-Evidence-Scan wurde
+verworfen: er lag bei 5.000 Entities zwischen rund 0,8 und 1,1 Sekunden und
+war damit nicht releasefähig. Im aktiven Pfad übernimmt der Compiler bereits
+die autoritative Target-Auflösung; der redundante All-Mentions-Scan bleibt
+daher dem expliziten Shadow-Modus vorbehalten. Exakte eingebettete Namen
+werden außerdem über begrenzte N-Gramme im vorhandenen `EntityIndex`
+gefunden, wobei Friendly-Name-/Alias-Gleichstände unverändert erhalten
+bleiben.
+
+Kontrolllauf auf derselben virtualisierten x86_64-Umgebung, drei Iterationen
+und ein Warmup bei 5.000 synthetischen Entities:
+
+| Fall | Mittel | p95 |
+|---|---:|---:|
+| Licht an, V7 autoritativ | 21,12 ms | 21,32 ms |
+| Licht aus, V7 autoritativ | 20,88 ms | 21,24 ms |
+| Heizung auf Temperatur, Legacy-Fallback | 61,78 ms | 62,84 ms |
+| Sensorabfrage | 18,43 ms | 18,50 ms |
+| Bereichsgruppe | 45,17 ms | 54,46 ms |
+| Cover-Prozentwert | 63,04 ms | 63,17 ms |
+| freie semantische Query | 23,79 ms | 24,05 ms |
+
+Das lokale 100-ms-Budget bleibt eingehalten. Diese Werte sind kein Ersatz für
+die weiterhin offene Messung auf echter Pi-4/5-Hardware; ohne Zugriff auf
+solche Hardware wird kein Zielhardware-Ergebnis behauptet.
+
+Das CI-Budget verwendet 20 Messwerte nach drei Warmups. Mit nur drei
+Messwerten wäre der ausgewiesene p95 praktisch der einzelne Maximalwert und
+damit als blockierendes Gate zu empfindlich gegenüber Runner-Jitter. Im
+20er-Kontrolllauf lagen alle p95-Werte unter 87 ms; das Budget bleibt 100 ms.

@@ -20,7 +20,7 @@ from ..entities import (
     generate_aliases,
 )
 from ..entity_scope import resolve_entity_scope
-from .domain_operations import DOMAIN_WORDS
+from .semantic_catalog import DOMAIN_WORDS
 
 __all__ = (
     "ResolutionResult", "ResolutionStatus", "ResolveResult", "ResolveStatus",
@@ -51,6 +51,67 @@ def _word_set(text: str, ignored: frozenset[str]) -> set[str]:
     }
 
 
+def _indexed_exact_targets(
+    text: str,
+    index: EntityIndex,
+    domains: frozenset[str],
+    area_id: str | None,
+    floor_id: str | None,
+) -> tuple[RankedTarget, ...]:
+    """Resolve embedded exact names through bounded utterance n-grams."""
+    words = tuple(normalize_for_compare(word) for word in _WORD_RE.findall(text))
+    best_by_id: dict[str, RankedTarget] = {}
+    for start in range(len(words)):
+        for end in range(start + 1, len(words) + 1):
+            phrase = " ".join(words[start:end])
+            for entity in index.by_normalized_name.get(phrase, ()):
+                if domains and entity.domain not in domains:
+                    continue
+                if area_id is not None and entity.area_id != area_id:
+                    continue
+                if floor_id is not None and entity.floor_id != floor_id:
+                    continue
+                candidate = RankedTarget(
+                    entity,
+                    1030 + len(phrase),
+                    "friendly_name",
+                    phrase,
+                )
+                previous = best_by_id.get(entity.entity_id)
+                if previous is None or candidate.score > previous.score:
+                    best_by_id[entity.entity_id] = candidate
+            for entity in index.by_normalized_alias.get(phrase, ()):
+                if domains and entity.domain not in domains:
+                    continue
+                if area_id is not None and entity.area_id != area_id:
+                    continue
+                if floor_id is not None and entity.floor_id != floor_id:
+                    continue
+                configured = any(
+                    normalize_for_compare(alias) == phrase for alias in entity.aliases
+                )
+                source = "configured" if configured else next(
+                    (
+                        alias.source
+                        for alias in generate_aliases(entity)
+                        if normalize_for_compare(alias.text) == phrase
+                    ),
+                    "generated",
+                )
+                candidate = RankedTarget(
+                    entity,
+                    1000 + (30 if configured else 0) + len(phrase),
+                    source,
+                    phrase,
+                )
+                previous = best_by_id.get(entity.entity_id)
+                if previous is None or candidate.score > previous.score:
+                    best_by_id[entity.entity_id] = candidate
+    return tuple(
+        sorted(best_by_id.values(), key=lambda item: (-item.score, item.entity.entity_id))
+    )
+
+
 def rank_semantic_targets(
     text: str,
     entities: Iterable[EntitySnapshot],
@@ -71,6 +132,12 @@ def rank_semantic_targets(
     """
     normalized_text = normalize_for_compare(text)
     utterance = _word_set(text, ignored_tokens)
+    if index is not None:
+        indexed = _indexed_exact_targets(
+            text, index, domains, area_id, floor_id
+        )
+        if indexed:
+            return indexed
     if index is not None and len(domains) == 1:
         pool: Iterable[EntitySnapshot] = index.by_domain.get(next(iter(domains)), ())
     else:

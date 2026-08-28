@@ -70,10 +70,20 @@ from .nlu.semantic_compiler import (
     has_exclusion_clause,
 )
 from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
-from .nlu.semantic_interpreter import SemanticInterpreter
+from .nlu.semantic_interpreter import InterpreterResult, SemanticInterpreter
+from .nlu.semantic_catalog import (
+    V7_AUTHORITATIVE_DIRECT_CAPABILITIES,
+    V7_AUTHORITY_MIN_MARGIN,
+)
 from .nlu.meaning import SemanticTurn, analyse_turn
 from .nlu.semantic_utterance import ClauseRole, SpeechAct, analyse_utterance
-from .nlu.understanding import UnderstandingKind, UnderstandingOutcome
+from .nlu.understanding import (
+    ShadowComparison,
+    UnderstandingAuthority,
+    UnderstandingKind,
+    UnderstandingOutcome,
+    compare_outcomes,
+)
 from .nlu.verb_state_query import (
     match_contextual_verb_state_query,
     match_verb_state_query,
@@ -928,22 +938,38 @@ class NluEngine:
     ) -> UnderstandingOutcome[MatchResult | CommandPlan]:
         """Return a canonical, reason-carrying result for one direct turn.
 
-        During the V7 migration ``match()`` remains the authoritative legacy
-        payload producer.  This method is the new stable boundary: it runs the
-        loss-aware frontend once, preserves structured failure information,
-        and removes the need for callers to infer meaning from ``None`` or a
-        plan-less result.  Later V7 phases replace the payload producer behind
-        this API without changing its callers.
+        V7 interpretation runs first.  Capabilities listed in
+        ``V7_AUTHORITATIVE_DIRECT_CAPABILITIES`` use its validated payload;
+        all other capabilities retain ``match()`` as a compatibility
+        fallback.  The explicit cohort is expanded only after a reproducible
+        shadow comparison has classified every divergence.
         """
         document = document or analyse_language(text, entities)
-        result = self.match(text, entities, world_model)
         interpreted = SemanticInterpreter.interpret(
             document,
             entities,
             world_model,
-            compile_result=result is None,
-            resolve_registry=result is None,
+            compile_result=True,
+            # The compiler below performs authoritative target resolution.
+            # A second all-mentions scan only enriches shadow evidence and is
+            # prohibitively expensive for large registries, so production
+            # keeps it disabled while ``compare_understanding_pipelines()``
+            # explicitly enables it.
+            resolve_registry=False,
         )
+        v7_result = self._interpreted_match_result(interpreted, entities)
+        if self._is_v7_authoritative(v7_result, interpreted):
+            result: MatchResult | CommandPlan | None = v7_result
+            authority = UnderstandingAuthority.V7_MIGRATED
+        else:
+            result = self.match(text, entities, world_model)
+            if result is not None:
+                authority = UnderstandingAuthority.LEGACY
+            elif v7_result is not None:
+                result = v7_result
+                authority = UnderstandingAuthority.V7_FALLBACK
+            else:
+                authority = UnderstandingAuthority.NONE
         # The loss-aware frontend recognizes bounded safety-critical spelling
         # variants (especially a mistyped negation) that legacy grammars may
         # otherwise absorb into a wildcard entity name.  The canonical V7
@@ -953,17 +979,146 @@ class NluEngine:
             and not document.utterance.safe_to_execute_directly
         ):
             result = None
-        if result is None and isinstance(interpreted.parse_result, ParseResult):
-            result = self._build_match_result(interpreted.parse_result, entities)
-        elif result is None and isinstance(
-            interpreted.parse_result, ClarificationRequest
+            authority = UnderstandingAuthority.NONE
+        return self._direct_understanding_outcome(
+            text, document, interpreted, result, entities, authority
+        )
+
+    def compare_understanding_pipelines(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
+        document: LanguageDocument | None = None,
+    ) -> ShadowComparison:
+        """Compare legacy and fully compiled V7 without executing either.
+
+        This explicit diagnostic entry point keeps the production
+        ``understand()`` fast: registry resolution and semantic compilation
+        are only forced for the shadow side when a caller asks for a report.
+        Both payloads are immutable plans or read-only answers; neither path
+        invokes a Home Assistant service.
+        """
+        document = document or analyse_language(text, entities)
+        interpreted = SemanticInterpreter.interpret(
+            document,
+            entities,
+            world_model,
+            compile_result=True,
+            resolve_registry=True,
+        )
+        legacy_result = self.match(text, entities, world_model)
+        v7_result = self._interpreted_match_result(interpreted, entities)
+        if (
+            document.utterance.speech_act is SpeechAct.COMMAND
+            and not document.utterance.safe_to_execute_directly
         ):
-            result = MatchResult(
+            legacy_result = None
+            v7_result = None
+        legacy_outcome = self._direct_understanding_outcome(
+            text,
+            document,
+            interpreted,
+            legacy_result,
+            entities,
+            (
+                UnderstandingAuthority.LEGACY
+                if legacy_result is not None
+                else UnderstandingAuthority.NONE
+            ),
+        )
+        v7_outcome = self._direct_understanding_outcome(
+            text,
+            document,
+            interpreted,
+            v7_result,
+            entities,
+            (
+                UnderstandingAuthority.V7_FALLBACK
+                if v7_result is not None
+                else UnderstandingAuthority.NONE
+            ),
+        )
+        return compare_outcomes(legacy_outcome, v7_outcome)  # type: ignore[arg-type]
+
+    @staticmethod
+    def _interpreted_match_result(
+        interpreted: InterpreterResult,
+        entities: list[EntitySnapshot],
+    ) -> MatchResult | None:
+        """Turn the interpreter parse into the same validated payload shape."""
+        if isinstance(interpreted.parse_result, ParseResult):
+            return NluEngine._build_match_result(interpreted.parse_result, entities)
+        if isinstance(interpreted.parse_result, ClarificationRequest):
+            return MatchResult(
                 plan=None,
                 response_text=_clarification_question(interpreted.parse_result),
                 clarification=interpreted.parse_result,
             )
+        return None
+
+    @staticmethod
+    def _direct_capability(
+        result: MatchResult | CommandPlan | None,
+    ) -> tuple[str, str] | None:
+        """Return the deterministic domain/intent authority key."""
+        if not isinstance(result, MatchResult):
+            return None
+        if result.clarification is not None:
+            domains = {entity.domain for entity in result.clarification.candidates}
+            if len(domains) == 1:
+                return next(iter(domains)), result.clarification.pending_intent
+            return None
+        if result.frame is None:
+            return None
+        domains = {entity.domain for entity in result.command.entities} if (
+            result.command is not None
+        ) else set()
+        if len(domains) == 1:
+            return next(iter(domains)), result.frame.intent
+        if result.frame.target is not None and result.frame.target.domain is not None:
+            return result.frame.target.domain, result.frame.intent
+        return None
+
+    @classmethod
+    def _is_v7_authoritative(
+        cls,
+        result: MatchResult | CommandPlan | None,
+        interpreted: InterpreterResult,
+    ) -> bool:
+        if cls._direct_capability(result) not in V7_AUTHORITATIVE_DIRECT_CAPABILITIES:
+            return False
+        if isinstance(result, MatchResult) and result.clarification is not None:
+            return True
+        complete = tuple(
+            candidate for candidate in interpreted.candidates if candidate.complete
+        )
+        return bool(complete) and (
+            len(complete) == 1
+            or complete[0].score - complete[1].score >= V7_AUTHORITY_MIN_MARGIN
+        )
+
+    @staticmethod
+    def _candidate_margin(interpreted: InterpreterResult) -> float | None:
+        complete = tuple(
+            candidate for candidate in interpreted.candidates if candidate.complete
+        )
+        if len(complete) < 2:
+            return None
+        return complete[0].score - complete[1].score
+
+    def _direct_understanding_outcome(
+        self,
+        text: str,
+        document: LanguageDocument,
+        interpreted: InterpreterResult,
+        result: MatchResult | CommandPlan | None,
+        entities: list[EntitySnapshot],
+        authority: UnderstandingAuthority,
+    ) -> UnderstandingOutcome[MatchResult | CommandPlan]:
+        """Render one direct pipeline result as the canonical V7 outcome."""
         route = type(result).__name__ if result is not None else "no_match"
+        margin = self._candidate_margin(interpreted)
         corrections = (
             (interpreted.selected_variant.source,)
             if interpreted.selected_variant is not None
@@ -983,6 +1138,8 @@ class NluEngine:
                 unexplained_tokens=document.semantics.unexplained_tokens,
                 corrections=corrections,
                 route=route,
+                authority=authority,
+                margin=margin,
             )
 
         if isinstance(result, MatchResult):
@@ -1003,6 +1160,8 @@ class NluEngine:
                     unexplained_tokens=document.semantics.unexplained_tokens,
                     corrections=corrections,
                     route=route,
+                    authority=authority,
+                    margin=margin,
                 )
             return UnderstandingOutcome(
                 kind=(
@@ -1019,6 +1178,8 @@ class NluEngine:
                 unexplained_tokens=document.semantics.unexplained_tokens,
                 corrections=corrections,
                 route=(result.frame.intent if result.frame is not None else route),
+                authority=authority,
+                margin=margin,
             )
 
         feedback = self.understanding_feedback(text, entities)
@@ -1042,6 +1203,8 @@ class NluEngine:
             unexplained_tokens=document.semantics.unexplained_tokens,
             corrections=corrections,
             route=route,
+            authority=authority,
+            margin=margin,
         )
 
     def understand_automation(

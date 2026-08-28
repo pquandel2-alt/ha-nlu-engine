@@ -48,6 +48,18 @@ Originaltext + Registry + Dialogkontext
 Conversation-Integration erstellt pro frischem Turn genau ein
 `LanguageDocument` und reicht es an diese Grenzen weiter.
 
+Direkte Turns werden in `understand()` semantisch zuerst interpretiert. Eine
+explizite Capability-Liste in `semantic_catalog.py` entscheidet, für welche
+bereits vermessenen Paare aus HA-Domäne und Intent V7 autoritativ ist. Der
+erste aktive Schnitt umfasst `light/HassTurnOn` und
+`light/HassTurnOff`. Für alle anderen Capabilities bleibt der bisherige Pfad
+Kompatibilitätsfallback. `UnderstandingOutcome.authority` macht diese
+Entscheidung beobachtbar; der Live-Router lässt einen autoritativen V7-Treffer
+vor dem historischen Device-Router passieren. Ausführbare V7-Autorität setzt
+einen vollständigen Kandidaten und bei konkurrierenden vollständigen Lesarten
+mindestens zehn Scorepunkte Abstand voraus; echte Target-Mehrdeutigkeit bleibt
+unabhängig davon eine nicht ausführbare Klärung.
+
 ## Sicherheitsinvarianten
 
 - Der Originaltext bleibt erhalten; Varianten überschreiben ihn nicht.
@@ -82,11 +94,23 @@ nutzen denselben Resolver und dürfen ein mehrdeutiges Ziel nicht in ein
 
 ## Migration und Kompatibilität
 
-Die öffentliche V7-Grenze ist live. Bereits bewährte Hassil- und
-Spezialparser erzeugen während der Migration weiterhin einen Teil der
-validierten Payloads hinter dieser Grenze. Sie dürfen das gemeinsame
-Frontend und dessen Sicherheitsentscheidung nicht umgehen. Redundante
-Gruppen-Semantik wurde entfernt und auf den Semantic Compiler delegiert.
+Die öffentliche V7-Grenze und der erste autoritative Capability-Schnitt sind
+live. Bereits bewährte Hassil- und Spezialparser erzeugen während der
+Migration weiterhin den größeren Teil der validierten Payloads hinter dieser
+Grenze. Sie dürfen das gemeinsame Frontend und dessen Sicherheitsentscheidung
+nicht umgehen. Redundante Gruppen-Semantik wurde entfernt und auf den
+Semantic Compiler delegiert.
+
+Der read-only Shadow-Vergleich ist über
+`NluEngine.compare_understanding_pipelines()` reproduzierbar. Das Skript
+`scripts/v7_shadow_report.py` führt ihn über Dialogkorpus, 1.024
+Lichtparaphrasen und 2.688 domänenübergreifende Direktbefehle aus. Der
+versionierte Ausgangsbericht enthält 3.772 Turns: 3.625 semantisch identisch,
+125 nur Legacy, keinen nur-V7-Treffer, einen in der Antwortform divergenten
+Query-Turn und 21 beidseitige sichere Fehlschläge. Der Shadow-Pfad erzeugt
+nur unveränderliche Pläne und Antworten und besitzt keinen HA-Executor.
+Im selben Lauf sind Query-to-Action-, Unsafe-Action- und
+Ambiguous-to-Action-Leakage jeweils null.
 
 Das ist bewusst keine Behauptung, sämtliche historischen Parser seien schon
 gelöscht. Kalender, Produktivität und einzelne Managementfunktionen besitzen
@@ -105,6 +129,15 @@ bash scripts/run_language_eval.sh
 ```
 
 Der vollständige Projektlauf sowie Pyflakes und der blockierende
-Pyright-Strict-Scope bleiben zusätzlich verpflichtend. Performancewerte und
-die noch erforderliche Messung auf echter Pi-Hardware stehen in
+Pyright-Strict-Scope bleiben zusätzlich verpflichtend. CI prüft auf Python
+3.12 außerdem den versionierten Shadow-Bericht und ein 100-ms-p95-Budget bei
+5.000 synthetischen Entities. Performancewerte und die noch erforderliche
+Messung auf echter Pi-Hardware stehen in
 [`perf/v7-understanding.md`](perf/v7-understanding.md).
+
+`conversation.py` liegt nach dem Audit weiterhin bei 67 % Coverage und damit
+unter dem vorgeschlagenen 80-%-Ziel. Für den tatsächlich umgehängten
+Lichtpfad existiert ein End-to-End-Test, der fehlschlägt, sobald der alte
+Device-Router wieder erreicht wird. Die globale Zahl wird nicht durch Tests
+unberührter Kalender-/Managementzweige künstlich angehoben; sie bleibt als
+capabilityweise abzuarbeitende Orchestrator-Testschuld offen.

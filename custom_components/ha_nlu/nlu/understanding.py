@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Generic, Mapping, TypeVar
+from typing import Generic, Mapping, Sequence, TypeVar, cast
 
 from .parse_outcome import ParseFailureReason
 from .semantic_utterance import SpeechAct
@@ -27,6 +27,15 @@ class UnderstandingKind(Enum):
     AMBIGUOUS = auto()
     UNSUPPORTED = auto()
     UNSAFE = auto()
+
+
+class UnderstandingAuthority(Enum):
+    """Pipeline that supplied the payload for one understanding outcome."""
+
+    NONE = auto()
+    LEGACY = auto()
+    V7_FALLBACK = auto()
+    V7_MIGRATED = auto()
 
 
 class EvidenceKind(Enum):
@@ -94,6 +103,7 @@ class UnderstandingOutcome(Generic[T]):
     corrections: tuple[str, ...] = ()
     route: str | None = None
     margin: float | None = None
+    authority: UnderstandingAuthority = UnderstandingAuthority.NONE
 
     @property
     def actionable(self) -> bool:
@@ -148,7 +158,9 @@ def compare_outcomes(
         differences.append(
             f"actionable:{authoritative.actionable}!={candidate.actionable}"
         )
-    if authoritative.payload != candidate.payload:
+    if _payload_signature(authoritative.payload) != _payload_signature(
+        candidate.payload
+    ):
         differences.append("payload")
     return ShadowComparison(
         source_text=authoritative.source_text,
@@ -156,4 +168,68 @@ def compare_outcomes(
         candidate=candidate,
         equivalent=not differences,
         differences=tuple(differences),
+    )
+
+
+def _freeze(value: object) -> object:
+    """Return a deterministic comparison form for plan parameters."""
+    if isinstance(value, Mapping):
+        mapping = cast(Mapping[object, object], value)
+        return tuple(
+            sorted((str(key), _freeze(item)) for key, item in mapping.items())
+        )
+    if isinstance(value, (list, tuple)):
+        sequence = cast(Sequence[object], value)
+        return tuple(_freeze(item) for item in sequence)
+    if isinstance(value, (set, frozenset)):
+        items = cast(set[object] | frozenset[object], value)
+        return tuple(sorted((_freeze(item) for item in items), key=repr))
+    return value
+
+
+def _payload_signature(payload: object | None) -> object | None:
+    """Compare observable meaning, not parser-specific bookkeeping.
+
+    Legacy and V7 intentionally build independent frame and reasoning
+    objects.  A shadow comparison must flag a changed service, target,
+    parameter, query answer, or clarification set, but not object-internal
+    provenance that cannot affect the user-visible result.
+    """
+    if payload is None:
+        return None
+    commands = getattr(payload, "commands", None)
+    if commands is not None:
+        return ("commands", tuple(_payload_signature(item) for item in commands))
+    plan = getattr(payload, "plan", None)
+    if plan is not None:
+        return (
+            "plan",
+            getattr(plan, "domain", None),
+            getattr(plan, "service", None),
+            _freeze(getattr(plan, "entity_id", None)),
+            _freeze(getattr(plan, "data", {})),
+        )
+    clarification = getattr(payload, "clarification", None)
+    if clarification is not None:
+        return (
+            "clarification",
+            getattr(clarification, "pending_intent", None),
+            tuple(
+                getattr(entity, "entity_id", None)
+                for entity in getattr(clarification, "candidates", ())
+            ),
+            _freeze(getattr(clarification, "pending_parameters", {})),
+        )
+    frame = getattr(payload, "frame", None)
+    command = getattr(payload, "command", None)
+    entities = (
+        getattr(command, "entities", ())
+        if command is not None
+        else getattr(payload, "context_entities", ())
+    )
+    return (
+        "non_action",
+        getattr(frame, "intent", None),
+        tuple(getattr(entity, "entity_id", None) for entity in entities),
+        getattr(payload, "response_text", None),
     )
