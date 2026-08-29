@@ -69,7 +69,12 @@ class AgentDelivery:
             if isinstance(raw_targets, (list, tuple))
             else []
         )
-        actions = [] if event.state is AgentEventState.RESOLVED else [
+        interactive = event.state in {
+            AgentEventState.ACTIVE,
+            AgentEventState.NOTIFIED,
+            AgentEventState.SNOOZED,
+        }
+        actions = [] if not interactive else [
             {"action": f"HA_NLU_IGNORE_{event.event_id}", "title": "Ignorieren"},
             {
                 "action": f"HA_NLU_SNOOZE_{event.event_id}",
@@ -77,7 +82,7 @@ class AgentDelivery:
             },
         ]
         if (
-            event.state is not AgentEventState.RESOLVED
+            interactive
             and event.mode is AgentMode.ASK
             and event.proposed_action is not None
         ):

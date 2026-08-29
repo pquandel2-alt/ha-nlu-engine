@@ -24,7 +24,7 @@
           "custom_aliases": "Additional spoken aliases (Alias = entity.id, one per line)",
           "confirmation_level": "Confirmation risk threshold",
           "max_action_targets": "Maximum targets per action",
-          "allow_non_admin_critical": "Allow critical actions for non-admin users",
+          "allow_non_admin_critical": "Allow critical actions for authenticated non-admin users",
           "allow_non_admin_automations": "Allow non-admin users to create automations",
           "context_ttl_seconds": "Conversation context in seconds",
           "agent_enabled": "Enable proactive agent behavior",

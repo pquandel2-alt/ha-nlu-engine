@@ -44,6 +44,12 @@ Unter **Einstellungen > Geräte & Dienste > HomeIntent > Konfigurieren**:
   `tts.speak`.
 - **Standard-Cooldown** verhindert wiederholte Meldungen derselben
   Regelsituation.
+- **Zur Steuerung berechtigte Benutzer** gilt auch für Notification Actions.
+  HomeIntent übernimmt dafür die authentifizierte Benutzer-ID aus dem
+  Home-Assistant-Eventkontext. Fehlt sie bei aktiver Benutzer-Allowlist, wird
+  sichtbar abgelehnt und nichts ausgeführt.
+- Kritische Aktionen benötigen immer einen authentifizierten Benutzer. Für
+  authentifizierte Nicht-Administratoren sind sie standardmäßig deaktiviert.
 
 Kein Ziel ist im Code fest verdrahtet.
 
@@ -58,6 +64,9 @@ HomeIntent zeigt wie bisher eine Vorschau und verlangt die Bestätigung zur
 Automationserstellung. Nach der Bestätigung wird eine normale HA-Automation
 angelegt. Eine zieloffene Benachrichtigungsaktion wird an den Agenten
 gebunden und respektiert anschließend die konfigurierten Push-/TTS-Kanäle.
+Sprachlich erzeugte, zieloffene Benachrichtigungsregeln verwenden bewusst
+`INFORM`. Ein ausführbares `ASK` oder `AUTO` muss als fortgeschrittene Regel
+im HA-Action-Editor vollständig und explizit konfiguriert werden.
 
 Benachrichtigungen an ein im Satz eindeutig genanntes `notify.*`-Ziel bleiben
 bewusst eine direkte Automation. Sie sind eine explizite Benutzeranweisung
@@ -74,14 +83,17 @@ Mögliche Zustände sind:
 - `SNOOZED`
 - `RESOLVED`
 - `EXPIRED`
+- `DENIED`
+- `FAILED`
 
-Der Deduplizierungsschlüssel kombiniert Regel-ID und beobachtete Entität.
+Der Deduplizierungsschlüssel kombiniert die Regel-ID mit einem ausdrücklich
+gesetzten Suffix, andernfalls mit der beobachteten Entität oder `global`.
 Aktive, zugestellte oder snoozende Situationen erzeugen keine zweite Meldung.
 Abgeschlossene Situationen beachten anschließend den konfigurierten Cooldown.
 
 ## Push-Aktionen und Snooze
 
-Push-Meldungen enthalten abhängig von der Policy:
+Interaktive Push-Meldungen enthalten abhängig vom bereits bestimmten Modus:
 
 - **Ausführen** bei `ASK` und einer validierten vorgeschlagenen Aktion,
 - **Ignorieren**,
@@ -91,6 +103,15 @@ Action IDs tragen nur eine zufällige AgentEvent-ID. Sie enthalten weder
 Entity-ID noch Serviceparameter. Beim Ausführen lädt HomeIntent das Event,
 beansprucht es atomar gegen Doppelklicks, baut frische Entity-Snapshots und
 prüft Ziel und Execution Policy erneut.
+Dabei wird die vom Companion-Event getragene HA-Benutzer-ID ausgewertet. Eine
+konfigurierte Benutzer-Allowlist, Admin-only- und Read-only-Ziele sowie die
+CRITICAL-Policy gelten deshalb unverändert auch für Push-Taps. Ablehnungen und
+Servicefehler werden als eigene Lifecycle-Zustände gespeichert und über die
+konfigurierten Kanäle sichtbar zurückgemeldet.
+Wenn Home Assistant für das konfigurierte Notify-Ziel und das eingehende
+Companion-Event eine Geräte-ID bereitstellt, muss auch diese zum ursprünglich
+benachrichtigten Gerät passen. Fehlt die plattformabhängige Geräte-ID, bleibt
+die authentifizierte Benutzer- und Policy-Prüfung maßgeblich.
 
 Snooze verwendet eine vorhandene, persistente HomeIntent-One-Shot-Automation.
 Nach 30 Minuten wird die Situation erneut geprüft. Ist der beobachtete
@@ -110,7 +131,7 @@ Fragen wird niemals geraten.
 
 - `INFORM` liefert nur die Meldung aus.
 - `ASK` bietet eine Aktion an und führt sie erst nach einer gültigen
-  Notification Action aus.
+  Notification Action oder einer eindeutigen TTS-Bestätigung aus.
 - `AUTO` darf nur einen von der normalen Execution Policy erlaubten Plan mit
   niedrigem Risiko ausführen. Mittlere, hohe oder kritische Risiken werden
   automatisch auf `ASK` herabgestuft.
@@ -118,4 +139,7 @@ Fragen wird niemals geraten.
 Der öffentliche HA-Action-Editor zeigt `ha_nlu.proactive_message` auch für
 fortgeschrittene Regeln an. Vorgeschlagene Aktionen werden durch eine
 geschlossene Service-Allowlist geprüft; freie `domain.service`-Ausführung ist
-nicht möglich.
+nicht möglich. Derselbe Validator läuft beim Erzeugen, beim Neustart und
+unmittelbar vor der Ausführung eines persistierten Plans. Target-Felder sind
+in `action_data` verboten; Nutzdaten können das geprüfte Ziel daher nicht
+ersetzen oder erweitern.

@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.62.0**
+- Aktuelle Version: **4.64.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -42,28 +42,21 @@ Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
 
-## Was ist in Version 4.59 neu?
+## Was ist in Version 4.64 neu?
 
-Version 4.59 verbessert Prozentbefehle, Ortsnamen und den Wechsel zwischen
-Dialogen anhand eines realen Rollladenfalls:
+Version 4.64 härtet den proaktiven Agenten und sämtliche zentralen
+HA-Schreibpfade ab:
 
-- Prozentwerte werden nicht mehr ohne ausdrücklichen Temperaturbezug als
-  Heizungswert interpretiert. Ein unvollständig verstandener Rollladenbefehl
-  führt daher nicht mehr zur falschen Frage „Welche Heizung meinst du?“.
-- Getrennt geschriebene Home-Assistant-Orte und natürliche deutsche
-  Zusammensetzungen werden gleich behandelt. Ein registrierter Bereich
-  „Pole Raum“ kann dadurch als „Poleraum“ angesprochen werden.
-- Die artikelführende Form „die Rollladen“ wird auch ohne Umlaut als Mehrzahl
-  verstanden; „den Rollladen“ bleibt dagegen ein einzelnes Ziel.
-- Ein vollständiger neuer Befehl darf einen offenen semantischen
-  Ergänzungsdialog ersetzen. Ein früherer Heizungsdialog bindet folgende
-  Licht-, Rollladen- oder andere Gerätebefehle nicht mehr fälschlich.
-- Bei einer kleinen ASR-Abweichung wie „Polraum“ nutzt HomeIntent die
-  vorhandene begrenzte Lautkorrektur und bittet vor der Ausführung um
-  Bestätigung. Die Korrektur nennt jetzt den tatsächlich korrigierten Begriff
-  statt eines zufällig beteiligten Gerätenamens.
-- Diagnoseantworten für unbekannte Orte durchlaufen vor der Ablehnung die
-  sichere, bestätigungspflichtige ASR-Korrektur.
+- Kritische Push-Aktionen benötigen eine authentifizierte HA-Identität und
+  sind für Nicht-Administratoren standardmäßig gesperrt.
+- Persistierte Agentenpläne werden beim Laden und unmittelbar vor der
+  Ausführung erneut gegen eine geschlossene Aktions-Allowlist geprüft.
+- Conversation, Mehrfachbefehle, Undo und der Agent verwenden denselben
+  policy-gesteuerten Executor mit frischem Ziel-Snapshot.
+- Aktionsdaten können validierte Ziele nicht mehr ersetzen oder erweitern;
+  parallele Push-Taps führen eine Aktion höchstens einmal aus.
+- Ablehnungen und Servicefehler werden nachvollziehbar gespeichert und über
+  die konfigurierten Kanäle sichtbar zurückgemeldet.
 
 Ältere Änderungen stehen in den
 [GitHub-Releases](https://github.com/pquandel2-alt/ha-nlu-engine/releases).
@@ -803,12 +796,13 @@ Weitere Dokumentation:
 ```bash
 python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
+python -m pytest -q --cov=custom_components/ha_nlu --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 4.63.0:
+Geprüfter Release-Stand von Version 4.64.0:
 
 ```text
-2459 passed, 12 skipped
+2484 passed, 12 skipped
 87 % Gesamt-Coverage
 82 % Coverage für conversation.py
 ```
@@ -835,7 +829,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-4.63.0.json --quiet
+  --check docs/perf/v7-shadow-baseline-4.64.0.json --quiet
 ```
 
 Zusätzlich erzeugt die Test-Suite weiterhin 1.024 intensive Lichtparaphrasen.
@@ -852,7 +846,7 @@ Dadurch können sie dem Parser keine Antworten „beibringen“.
 ![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
 
 Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.62.0. Für echte
+Entwicklungsstands und kein aktueller Nachweis für Version 4.64.0. Für echte
 Zielhardware lässt sich seit 4.49 ein reproduzierbarer JSON-Bericht samt
 P95-Budget erzeugen:
 

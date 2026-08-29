@@ -68,11 +68,11 @@ liefern“, sondern diese Reihenfolge:
 
 Der aktuelle Stand ist funktional und sicherheitsbewusst:
 
-- 2.443 Tests bestehen, 12 sind übersprungen;
-- die zuletzt gemessene Gesamt-Coverage liegt bei 85 %; die zentralen
+- 2.484 Tests bestehen, 12 sind übersprungen;
+- die zuletzt gemessene Gesamt-Coverage liegt bei 87 %; die zentralen
   Sprachmodule liegen überwiegend deutlich höher, `conversation.py` erreicht
-  nach dem risikobasierten Dialogtestausbau 80 %;
-- 147 Python-Testdateien sind vorhanden;
+  nach dem risikobasierten Dialogtestausbau 82 %;
+- 152 Python-Testdateien sind vorhanden;
 - `SemanticUtterance`, `SemanticAnalysis`, `SemanticFrame`, `WorldModel`,
   Constraint Resolver, Capability-Prüfung und strukturierte Dialogzustände
   existieren bereits;

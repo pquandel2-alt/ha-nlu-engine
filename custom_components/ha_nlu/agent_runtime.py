@@ -15,17 +15,18 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from .agent_delivery import AgentDelivery
+from .agent_action_policy import validate_agent_service_plan
 from .agent_event import AgentEvent, AgentEventState, AgentMode, StoredServicePlan
 from .agent_event_store import AgentEventStore
 from .automation_executor import AutomationExecutor
 from .const import (
     CONF_AGENT_COOLDOWN_SECONDS,
     CONF_AGENT_ENABLED,
+    CONF_AGENT_NOTIFY_TARGETS,
     DEFAULT_AGENT_COOLDOWN_SECONDS,
 )
 from .hass_entities import build_entity_snapshots
 from .execution_policy import PolicyOutcome, evaluate_service_plan
-from .nlu.automation_operations import validate_registered_operation
 from .nlu.automation_confirmation import ConfirmationReply, classify_confirmation_reply
 from .risk import RiskLevel
 from .runtime_data import HaNluRuntimeData
@@ -40,25 +41,6 @@ ACTION_PREFIXES = {
     "HA_NLU_IGNORE_": "ignore",
     "HA_NLU_SNOOZE_": "snooze",
 }
-
-_CORE_ACTIONS: dict[tuple[str, str], frozenset[str]] = {
-    ("homeassistant", "turn_on"): frozenset(
-        {"light", "switch", "fan", "climate", "humidifier", "input_boolean"}
-    ),
-    ("homeassistant", "turn_off"): frozenset(
-        {"light", "switch", "fan", "climate", "humidifier", "input_boolean"}
-    ),
-    ("homeassistant", "toggle"): frozenset(
-        {"light", "switch", "fan", "input_boolean"}
-    ),
-    ("cover", "open_cover"): frozenset({"cover"}),
-    ("cover", "close_cover"): frozenset({"cover"}),
-    ("cover", "stop_cover"): frozenset({"cover"}),
-    ("lock", "lock"): frozenset({"lock"}),
-    ("lock", "unlock"): frozenset({"lock"}),
-    ("alarm_control_panel", "alarm_disarm"): frozenset({"alarm_control_panel"}),
-}
-
 
 class ProactiveAgentRuntime:
     """Connects native HA automation signals to policy, events and delivery."""
@@ -92,6 +74,18 @@ class ProactiveAgentRuntime:
         """Expire stale events and safely re-evaluate overdue snoozes."""
         now = dt_util.utcnow()
         for event in (await self._store.async_load_all()).values():
+            if event.proposed_action is not None:
+                plan_error = validate_agent_service_plan(event.proposed_action.to_plan())
+                if plan_error is not None:
+                    await self._store.async_save(
+                        replace(
+                            event,
+                            state=AgentEventState.EXPIRED,
+                            updated_at=now.isoformat(),
+                            last_error=plan_error,
+                        )
+                    )
+                    continue
             if _parse_datetime(event.expires_at) <= now:
                 if event.state not in {AgentEventState.RESOLVED, AgentEventState.EXPIRED}:
                     await self._store.async_save(
@@ -166,6 +160,7 @@ class ProactiveAgentRuntime:
                 source_comparator=source_comparator,
                 source_threshold=source_threshold,
                 proposed_action=(StoredServicePlan.from_plan(action) if action else None),
+                notification_device_ids=self._configured_notification_device_ids(),
             )
             await self._store.async_save(event)
 
@@ -197,7 +192,7 @@ class ProactiveAgentRuntime:
                     action,
                     entities,
                     self._entry.options,
-                    is_admin=True,
+                    is_admin=False,
                     user_id=None,
                     confirmed=False,
                     audit_trail=self._runtime_data.audit_trail,
@@ -228,8 +223,11 @@ class ProactiveAgentRuntime:
                 operation = value
                 event_id = raw_action.removeprefix(prefix)
                 break
-        if operation is None or len(event_id) != 32 or not event_id.isalnum():
+        if operation is None or len(event_id) != 32 or any(
+            char not in "0123456789abcdef" for char in event_id
+        ):
             return
+        user_id, is_admin = await self._async_notification_actor(event)
         async with self._lock:
             current = (await self._store.async_load_all()).get(event_id)
             if current is None or current.state not in {
@@ -237,6 +235,17 @@ class ProactiveAgentRuntime:
                 AgentEventState.NOTIFIED,
                 AgentEventState.SNOOZED,
             }:
+                return
+            event_device_id = getattr(event, "data", {}).get("device_id")
+            if (
+                current.notification_device_ids
+                and isinstance(event_device_id, str)
+                and event_device_id not in current.notification_device_ids
+            ):
+                _LOGGER.warning(
+                    "Ignored notification action for agent event %s from an unexpected device",
+                    event_id,
+                )
                 return
             if _parse_datetime(current.expires_at) <= dt_util.utcnow():
                 await self._store.async_save(
@@ -259,6 +268,8 @@ class ProactiveAgentRuntime:
             if operation == "snooze":
                 await self._async_snooze_locked(current, 1800)
                 return
+            if current.mode is not AgentMode.ASK or current.proposed_action is None:
+                return
             # Claim the event before physical I/O so parallel clicks are idempotent.
             claimed = replace(
                 current,
@@ -267,7 +278,11 @@ class ProactiveAgentRuntime:
             )
             await self._store.async_save(claimed)
 
-        await self._async_execute_claimed(claimed, user_id=None, is_admin=False)
+        finished = await self._async_execute_claimed(
+            claimed, user_id=user_id, is_admin=is_admin
+        )
+        if finished.state in {AgentEventState.DENIED, AgentEventState.FAILED}:
+            await self._async_deliver_failure_feedback(finished)
 
     async def async_handle_voice_reply(
         self, text: str, *, user_id: str | None, is_admin: bool
@@ -304,11 +319,10 @@ class ProactiveAgentRuntime:
             await self._store.async_save(claimed)
         if reply is ConfirmationReply.NO:
             return "In Ordnung. Ich führe die vorgeschlagene Aktion nicht aus."
-        await self._async_execute_claimed(
+        finished = await self._async_execute_claimed(
             claimed, user_id=user_id, is_admin=is_admin
         )
-        finished = (await self._store.async_load_all()).get(claimed.event_id)
-        if finished is not None and finished.state is AgentEventState.RESOLVED:
+        if finished.state is AgentEventState.RESOLVED:
             return "Erledigt."
         return (
             "Die Situation ist nicht mehr aktuell oder die Aktion ist nicht mehr erlaubt. "
@@ -374,19 +388,27 @@ class ProactiveAgentRuntime:
 
     async def _async_execute_claimed(
         self, event: AgentEvent, *, user_id: str | None, is_admin: bool
-    ) -> None:
+    ) -> AgentEvent:
         action = event.proposed_action
         if action is None or not self._source_still_matches(event):
-            await self._store.async_save(
-                replace(
-                    event,
-                    state=AgentEventState.RESOLVED,
-                    updated_at=dt_util.utcnow().isoformat(),
-                    last_error=(None if action is not None else "Keine Aktion gespeichert"),
-                )
+            updated = replace(
+                event,
+                state=AgentEventState.RESOLVED,
+                updated_at=dt_util.utcnow().isoformat(),
+                last_error=(None if action is not None else "Keine Aktion gespeichert"),
             )
-            return
+            await self._store.async_save(updated)
+            return updated
         plan = action.to_plan()
+        if plan_error := validate_agent_service_plan(plan):
+            updated = replace(
+                event,
+                state=AgentEventState.DENIED,
+                updated_at=dt_util.utcnow().isoformat(),
+                last_error=plan_error,
+            )
+            await self._store.async_save(updated)
+            return updated
         entities = build_entity_snapshots(self._hass, self._entry)
         result = await async_execute_service_plan(
             self._hass,
@@ -399,14 +421,55 @@ class ProactiveAgentRuntime:
             audit_trail=self._runtime_data.audit_trail,
             audit_actor_id=user_id or "proactive-agent",
         )
-        await self._store.async_save(
-            replace(
-                event,
-                state=(AgentEventState.RESOLVED if result.executed else AgentEventState.EXPIRED),
-                updated_at=dt_util.utcnow().isoformat(),
-                last_error=result.error,
-            )
+        updated = replace(
+            event,
+            state=(
+                AgentEventState.RESOLVED
+                if result.executed
+                else (
+                    AgentEventState.DENIED
+                    if result.decision.outcome is PolicyOutcome.DENY
+                    else AgentEventState.FAILED
+                )
+            ),
+            updated_at=dt_util.utcnow().isoformat(),
+            last_error=result.error,
         )
+        await self._store.async_save(updated)
+        return updated
+
+    async def _async_notification_actor(self, event: Any) -> tuple[str | None, bool]:
+        """Resolve the authenticated HA actor carried by a Companion event."""
+        context = getattr(event, "context", None)
+        raw_user_id = getattr(context, "user_id", None)
+        user_id = str(raw_user_id) if raw_user_id else None
+        if user_id is None:
+            return None, False
+        auth = getattr(self._hass, "auth", None)
+        getter = getattr(auth, "async_get_user", None)
+        if getter is None:
+            return None, False
+        try:
+            user = await getter(user_id)
+        except Exception:  # noqa: BLE001 - auth backends may fail during shutdown
+            _LOGGER.warning("Could not resolve notification actor %s", user_id)
+            return None, False
+        if user is None:
+            return None, False
+        return user_id, bool(getattr(user, "is_admin", False))
+
+    async def _async_deliver_failure_feedback(self, event: AgentEvent) -> None:
+        """Make a denied/failed push action visible without offering stale buttons."""
+        reason = event.last_error or "Die Aktion ist nicht mehr erlaubt."
+        feedback = replace(
+            event,
+            title="HomeIntent: Aktion nicht ausgeführt",
+            message=reason,
+            mode=AgentMode.INFORM,
+            state=AgentEventState.RESOLVED,
+            proposed_action=None,
+        )
+        await self._delivery.async_deliver(feedback, self._entry.options)
 
     async def _async_snooze_locked(self, event: AgentEvent, seconds: int) -> None:
         # HA time triggers use configured local wall-clock time. Persisted
@@ -521,6 +584,26 @@ class ProactiveAgentRuntime:
         except Exception:  # noqa: BLE001 - registry may be unavailable during startup
             return None
 
+    def _configured_notification_device_ids(self) -> tuple[str, ...]:
+        """Resolve configured notify entities to device IDs when HA exposes them."""
+        raw_targets = self._entry.options.get(CONF_AGENT_NOTIFY_TARGETS, ())
+        if not isinstance(raw_targets, (list, tuple)):
+            return ()
+        try:
+            from homeassistant.helpers import entity_registry as er
+
+            registry = er.async_get(self._hass)
+            device_ids = {
+                entry.device_id
+                for target in raw_targets
+                if isinstance(target, str)
+                if (entry := registry.async_get(target)) is not None
+                if entry.device_id
+            }
+        except Exception:  # noqa: BLE001 - registry may be unavailable during setup
+            return ()
+        return tuple(sorted(device_ids))
+
     def _parse_action(self, data: Mapping[str, Any]) -> ServiceCallPlan | None:
         domain = _optional_text(data.get("action_domain"), limit=100)
         service = _optional_text(data.get("action_service"), limit=100)
@@ -545,17 +628,11 @@ class ProactiveAgentRuntime:
                 raise ValueError("action_data ist kein gültiges JSON-Objekt") from err
         if not isinstance(action_data, Mapping):
             raise ValueError("action_data muss ein Objekt sein")
-        entity_domains = frozenset(item.split(".", 1)[0] for item in entity_ids)
-        core_domains = _CORE_ACTIONS.get((domain, service))
-        allowed = (
-            core_domains is not None and entity_domains <= core_domains
-        ) or validate_registered_operation(
-            domain, service, action_data, target_domains=entity_domains
-        )
-        if not allowed:
-            raise ValueError("Die vorgeschlagene Aktion ist nicht freigegeben")
         target: str | list[str] = entity_ids[0] if len(entity_ids) == 1 else entity_ids
-        return ServiceCallPlan(domain, service, target, dict(action_data))
+        plan = ServiceCallPlan(domain, service, target, dict(action_data))
+        if error := validate_agent_service_plan(plan):
+            raise ValueError(error)
+        return plan
 
 
 def _required_text(value: object, field: str, *, limit: int) -> str:

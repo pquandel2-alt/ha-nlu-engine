@@ -98,6 +98,9 @@ proactive_message:
       selector: {entity: {}}
     action_data:
       name: Aktionsdaten als JSON
+      description: >-
+        Nur die für die gewählte Aktion freigegebenen Parameter. Zielangaben
+        wie entity_id, device_id oder area_id sind hier nicht erlaubt.
       required: false
       selector: {text: {multiline: true}}
     cooldown_seconds:

@@ -98,8 +98,17 @@ def evaluate_service_plan(
         )
     if (
         risk is RiskLevel.CRITICAL
+        and user_id is None
+    ):
+        return PolicyDecision(
+            PolicyOutcome.DENY,
+            risk,
+            "Diese sicherheitskritische Aktion benötigt einen authentifizierten Benutzer.",
+        )
+    if (
+        risk is RiskLevel.CRITICAL
         and not is_admin
-        and not bool(options.get(CONF_ALLOW_NON_ADMIN_CRITICAL, True))
+        and not bool(options.get(CONF_ALLOW_NON_ADMIN_CRITICAL, False))
     ):
         return PolicyDecision(
             PolicyOutcome.DENY,

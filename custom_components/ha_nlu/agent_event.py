@@ -22,6 +22,8 @@ class AgentEventState(StrEnum):
     SNOOZED = "snoozed"
     RESOLVED = "resolved"
     EXPIRED = "expired"
+    DENIED = "denied"
+    FAILED = "failed"
 
 
 @dataclass(frozen=True)
@@ -68,6 +70,7 @@ class AgentEvent:
     reminder_automation_id: str | None = None
     delivery_attempts: int = 0
     delivered_channels: tuple[str, ...] = ()
+    notification_device_ids: tuple[str, ...] = ()
     last_error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -96,6 +99,7 @@ class AgentEvent:
                     ),
                 )
         delivered = raw.get("delivered_channels", ())
+        notification_devices = raw.get("notification_device_ids", ())
         return cls(
             event_id=str(raw["event_id"]),
             rule_id=str(raw["rule_id"]),
@@ -122,6 +126,11 @@ class AgentEvent:
             delivered_channels=(
                 tuple(str(item) for item in cast(Sequence[object], delivered))
                 if isinstance(delivered, (list, tuple))
+                else ()
+            ),
+            notification_device_ids=(
+                tuple(str(item) for item in cast(Sequence[object], notification_devices))
+                if isinstance(notification_devices, (list, tuple))
                 else ()
             ),
             last_error=_optional_str(raw.get("last_error")),

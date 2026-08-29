@@ -188,7 +188,7 @@ class HaNluOptionsFlow(OptionsFlow):
                     ): vol.All(vol.Coerce(int), vol.Range(min=1, max=500)),
                     vol.Optional(
                         CONF_ALLOW_NON_ADMIN_CRITICAL,
-                        default=defaults.get(CONF_ALLOW_NON_ADMIN_CRITICAL, True),
+                        default=defaults.get(CONF_ALLOW_NON_ADMIN_CRITICAL, False),
                     ): bool,
                     vol.Optional(
                         CONF_ALLOW_NON_ADMIN_AUTOMATIONS,

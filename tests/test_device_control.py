@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -208,6 +210,9 @@ def test_extended_device_router_never_executes_conditions_or_information_questio
 def _conversation_entity(monkeypatch, tmp_path):
     entity = NluConversationEntity(ConfigEntry())
     entity.hass = HomeAssistant()
+    entity.hass.auth = SimpleNamespace(
+        async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=True))
+    )
     entity.hass.config.path = lambda *parts: str(tmp_path.joinpath(*parts))
     monkeypatch.setattr(
         ha_conversation, "build_entity_snapshots", lambda hass, entry: ENTITIES
@@ -215,10 +220,14 @@ def _conversation_entity(monkeypatch, tmp_path):
     return entity
 
 
-def _run(entity, text, conversation_id="safe"):
+def _run(entity, text, conversation_id="safe", *, authenticated=True):
     return asyncio.run(
         entity._async_handle_message(
-            ConversationInput(text=text, conversation_id=conversation_id),
+            ConversationInput(
+                text=text,
+                conversation_id=conversation_id,
+                context=(SimpleNamespace(user_id="owner") if authenticated else None),
+            ),
             chat_log=None,
         )
     )
@@ -236,6 +245,17 @@ def test_unlock_requires_explicit_confirmation(monkeypatch, tmp_path):
     entity.hass.services.async_call.assert_awaited_once_with(
         "lock", "unlock", {"entity_id": "lock.haustuer"}, blocking=True
     )
+
+
+def test_anonymous_critical_voice_command_is_denied_before_confirmation(
+    monkeypatch, tmp_path
+):
+    entity = _conversation_entity(monkeypatch, tmp_path)
+
+    result = _run(entity, "Schließe Haustür auf", authenticated=False)
+
+    assert "authentifizierten Benutzer" in result.response.speech
+    entity.hass.services.async_call.assert_not_awaited()
 
 
 def test_confirmed_service_failure_is_logged(monkeypatch, tmp_path, caplog):

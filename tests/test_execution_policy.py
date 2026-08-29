@@ -17,10 +17,39 @@ def test_critical_action_can_be_restricted_to_admins():
     denied = evaluate_service_plan(
         plan, [lock], {"allow_non_admin_critical": False}, is_admin=False
     )
-    allowed = evaluate_service_plan(plan, [lock], {}, is_admin=True)
+    allowed = evaluate_service_plan(
+        plan, [lock], {}, is_admin=True, user_id="owner"
+    )
 
     assert denied.outcome is PolicyOutcome.DENY
     assert allowed.outcome is PolicyOutcome.CONFIRM
+
+
+def test_critical_action_requires_an_authenticated_actor_even_when_option_is_enabled():
+    lock = EntitySnapshot("lock.front", "Haustür", "lock", "locked")
+    plan = ServiceCallPlan("lock", "unlock", lock.entity_id)
+
+    decision = evaluate_service_plan(
+        plan,
+        [lock],
+        {"allow_non_admin_critical": True},
+        is_admin=False,
+        user_id=None,
+    )
+
+    assert decision.outcome is PolicyOutcome.DENY
+    assert "authentifizierten Benutzer" in (decision.reason or "")
+
+
+def test_authenticated_non_admin_critical_is_denied_by_default():
+    lock = EntitySnapshot("lock.front", "Haustür", "lock", "locked")
+    plan = ServiceCallPlan("lock", "unlock", lock.entity_id)
+
+    decision = evaluate_service_plan(
+        plan, [lock], {}, is_admin=False, user_id="resident"
+    )
+
+    assert decision.outcome is PolicyOutcome.DENY
 
 
 def test_confirmation_threshold_is_configurable():

@@ -7,6 +7,7 @@ from typing import Mapping
 
 from homeassistant.core import HomeAssistant
 
+from .agent_action_policy import RESERVED_TARGET_DATA_KEYS
 from .audit_log import AuditTrail
 from .entities import EntitySnapshot
 from .execution_policy import PolicyDecision, PolicyOutcome, evaluate_service_plan
@@ -40,6 +41,10 @@ async def async_execute_service_plan(
         return ExecutionResult(False, decision, decision.reason)
     if decision.outcome is PolicyOutcome.CONFIRM and not confirmed:
         return ExecutionResult(False, decision, "Die Aktion benötigt eine Bestätigung.")
+    if RESERVED_TARGET_DATA_KEYS & frozenset(plan.data):
+        return ExecutionResult(
+            False, decision, "Aktionsdaten dürfen das validierte Ziel nicht ersetzen."
+        )
     target_ids = (plan.entity_id,) if isinstance(plan.entity_id, str) else tuple(plan.entity_id)
     available_ids = {entity.entity_id for entity in entities}
     if not target_ids or any(entity_id not in available_ids for entity_id in target_ids):
@@ -50,7 +55,7 @@ async def async_execute_service_plan(
         await hass.services.async_call(
             plan.domain,
             plan.service,
-            {"entity_id": plan.entity_id, **plan.data},
+            {**plan.data, "entity_id": plan.entity_id},
             blocking=True,
         )
     except Exception as err:  # noqa: BLE001 - HA service failures are heterogeneous

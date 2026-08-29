@@ -37,7 +37,7 @@ jobs:
         if: matrix.python-version == '3.12'
         run: >-
           python scripts/v7_shadow_report.py
-          --check docs/perf/v7-shadow-baseline-4.63.0.json
+          --check docs/perf/v7-shadow-baseline-4.64.0.json
           --quiet
       - name: V7-Latenzbudget bei großer Registry prüfen
         if: matrix.python-version == '3.12'
@@ -73,7 +73,13 @@ jobs:
         if: matrix.python-version == '3.12'
         run: >-
           python -m pyright
+          custom_components/ha_nlu/agent_action_policy.py
+          custom_components/ha_nlu/agent_delivery.py
           custom_components/ha_nlu/agent_event.py
+          custom_components/ha_nlu/agent_event_store.py
+          custom_components/ha_nlu/agent_runtime.py
+          custom_components/ha_nlu/execution_policy.py
+          custom_components/ha_nlu/service_executor.py
           custom_components/ha_nlu/entity_scope.py
           custom_components/ha_nlu/risk.py
           custom_components/ha_nlu/automation_history.py

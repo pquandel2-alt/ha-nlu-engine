@@ -67,7 +67,7 @@ async def async_get_config_entry_diagnostics(
         "confirmation_level": entry.options.get(CONF_CONFIRMATION_LEVEL, "high"),
         "max_action_targets": entry.options.get(CONF_MAX_ACTION_TARGETS, 50),
         "allow_non_admin_critical": entry.options.get(
-            CONF_ALLOW_NON_ADMIN_CRITICAL, True
+            CONF_ALLOW_NON_ADMIN_CRITICAL, False
         ),
         "allow_non_admin_automations": entry.options.get(
             CONF_ALLOW_NON_ADMIN_AUTOMATIONS, True

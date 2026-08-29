@@ -34,6 +34,7 @@ def _event() -> AgentEvent:
             "homeassistant", "turn_off", ("switch.test",), {}
         ),
         delivered_channels=("push", "tts"),
+        notification_device_ids=("phone-device",),
     )
 
 

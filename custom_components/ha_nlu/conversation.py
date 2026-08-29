@@ -1104,13 +1104,19 @@ class NluConversationEntity(
             self._context_store.clear(user_input.conversation_id)
             try:
                 for plan in undo.plans:
-                    await self.hass.services.async_call(
-                        plan.domain,
-                        plan.service,
-                        {"entity_id": plan.entity_id, **plan.data},
-                        blocking=True,
+                    execution = await async_execute_service_plan(
+                        self.hass,
+                        plan,
+                        entities,
+                        self.entry.options,
+                        is_admin=is_admin,
+                        user_id=current_user_id,
+                        confirmed=True,
+                        audit_trail=self._audit_trail,
+                        audit_actor_id=current_user_id,
                     )
-                    self._record_execution(user_input, plan)
+                    if not execution.executed:
+                        raise RuntimeError(execution.error or "Rücknahme nicht erlaubt")
             except Exception as err:  # noqa: BLE001
                 _LOGGER.error("Undo service call failed: %s", err, exc_info=True)
                 response.async_set_error(
@@ -1955,25 +1961,29 @@ class NluConversationEntity(
                 multi_undo_supported = False
             else:
                 multi_undo_parts.append(inverse)
-            try:
-                await self.hass.services.async_call(
-                    sub_result.plan.domain,
-                    sub_result.plan.service,
-                    {"entity_id": sub_result.plan.entity_id, **sub_result.plan.data},
-                    blocking=True,
-                )
-                self._record_execution(user_input, sub_result.plan)
-            except Exception as err:  # noqa: BLE001 - HA service failures are heterogeneous
+            execution = await async_execute_service_plan(
+                self.hass,
+                sub_result.plan,
+                entities,
+                self.entry.options,
+                is_admin=is_admin,
+                user_id=actor_id,
+                confirmed=False,
+                audit_trail=self._audit_trail,
+                audit_actor_id=actor_id,
+            )
+            if not execution.executed:
+                error = execution.error or "Die Aktion konnte nicht ausgeführt werden."
                 _LOGGER.error(
                     "Service call %s.%s on %s failed: %s",
                     sub_result.plan.domain,
                     sub_result.plan.service,
                     sub_result.plan.entity_id,
-                    err,
+                    error,
                 )
                 response.async_set_error(
                     intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-                    f"Fehler beim Ausführen: {err}",
+                    f"Fehler beim Ausführen: {error}",
                 )
                 return conversation.ConversationResult(
                     response=response, conversation_id=user_input.conversation_id
@@ -2725,12 +2735,14 @@ class NluConversationEntity(
             response.async_set_speech(device_control.response_text)
         else:
             resolved_entities = list(device_control.resolved_entities)
+            actor_id = conversation_user_id(user_input)
+            is_admin = await user_is_admin(self.hass, user_input)
             policy = evaluate_service_plan(
                 device_control.plan,
                 resolved_entities,
                 self.entry.options,
-                is_admin=await user_is_admin(self.hass, user_input),
-                user_id=conversation_user_id(user_input),
+                is_admin=is_admin,
+                user_id=actor_id,
             )
             if policy.outcome is PolicyOutcome.DENY:
                 self._context_store.clear(user_input.conversation_id)
@@ -2756,11 +2768,11 @@ class NluConversationEntity(
                         pending_service_confirmation=PendingServiceConfirmation(
                             device_control.plan,
                             device_control.response_text,
-                            conversation_user_id(user_input),
+                            actor_id,
                             build_undo_plan(
                                 device_control.plan,
                                 resolved_entities,
-                                requested_by_user_id=conversation_user_id(user_input),
+                                requested_by_user_id=actor_id,
                             ),
                         ),
                     ),
@@ -2771,30 +2783,30 @@ class NluConversationEntity(
                 return conversation.ConversationResult(
                     response=response, conversation_id=user_input.conversation_id
                 )
-            try:
-                await self.hass.services.async_call(
-                    device_control.plan.domain,
-                    device_control.plan.service,
-                    {
-                        "entity_id": device_control.plan.entity_id,
-                        **device_control.plan.data,
-                    },
-                    blocking=True,
-                )
-                self._record_execution(user_input, device_control.plan)
-            except Exception as err:  # noqa: BLE001 - HA services raise heterogeneous errors
+            execution = await async_execute_service_plan(
+                self.hass,
+                device_control.plan,
+                build_entity_snapshots(self.hass, self.entry),
+                self.entry.options,
+                is_admin=is_admin,
+                user_id=actor_id,
+                confirmed=False,
+                audit_trail=self._audit_trail,
+                audit_actor_id=actor_id,
+            )
+            if not execution.executed:
                 self._context_store.clear(user_input.conversation_id)
+                error = execution.error or "Die Aktion konnte nicht ausgeführt werden."
                 _LOGGER.error(
                     "Device-control service call %s.%s on %s failed: %s",
                     device_control.plan.domain,
                     device_control.plan.service,
                     device_control.plan.entity_id,
-                    err,
-                    exc_info=True,
+                    error,
                 )
                 response.async_set_error(
                     intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-                    f"Fehler beim Ausführen: {err}",
+                    f"Fehler beim Ausführen: {error}",
                 )
             else:
                 response.async_set_speech(device_control.response_text)
@@ -2819,7 +2831,7 @@ class NluConversationEntity(
                             pending_undo=build_undo_plan(
                                 device_control.plan,
                                 resolved_entities,
-                                requested_by_user_id=conversation_user_id(user_input),
+                                requested_by_user_id=actor_id,
                             ),
                         ),
                     )
