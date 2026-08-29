@@ -40,3 +40,80 @@ enable_automation:
       required: true
       selector:
         text:
+
+proactive_message:
+  name: Proaktive Agentenmeldung verarbeiten
+  description: >-
+    Erzeugt eine deduplizierte Agentensituation und liefert sie gemäß den
+    Integrationsoptionen per Push und/oder TTS aus.
+  fields:
+    rule_id:
+      name: Regel-ID
+      required: true
+      selector: {text: {}}
+    title:
+      name: Titel
+      required: false
+      selector: {text: {}}
+    message:
+      name: Nachricht
+      required: true
+      selector: {text: {multiline: true}}
+    mode:
+      name: Verhalten
+      required: false
+      default: inform
+      selector:
+        select:
+          options: [inform, ask, auto]
+    source_entity_id:
+      name: Beobachtete Entität
+      required: false
+      selector: {entity: {}}
+    expected_source_state:
+      name: Erwarteter Zustand
+      required: false
+      selector: {text: {}}
+    source_comparator:
+      name: Numerischer Vergleich
+      required: false
+      selector:
+        select:
+          options: [above, below, equal]
+    source_threshold:
+      name: Numerischer Grenzwert
+      required: false
+      selector: {number: {mode: box}}
+    action_domain:
+      name: Aktionsdomain
+      required: false
+      selector: {text: {}}
+    action_service:
+      name: Aktionsservice
+      required: false
+      selector: {text: {}}
+    action_entity_id:
+      name: Aktionsziel
+      required: false
+      selector: {entity: {}}
+    action_data:
+      name: Aktionsdaten als JSON
+      required: false
+      selector: {text: {multiline: true}}
+    cooldown_seconds:
+      name: Cooldown
+      required: false
+      selector: {number: {min: 0, max: 86400, unit_of_measurement: s}}
+    expires_seconds:
+      name: Gültigkeitsdauer
+      required: false
+      selector: {number: {min: 60, max: 604800, unit_of_measurement: s}}
+
+recheck_agent_event:
+  name: Agentensituation erneut prüfen
+  description: Interner Dienst für neustartfeste Snooze-Aufträge.
+  fields:
+    event_id:
+      name: AgentEvent-ID
+      required: true
+      selector: {text: {}}

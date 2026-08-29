@@ -14,8 +14,8 @@
   "options": {
     "step": {
       "init": {
-        "title": "HomeIntent-Geräte auswählen",
-        "description": "Lege fest, welche Home-Assistant-Entitäten HomeIntent verstehen und steuern darf. Ohne eigene Auswahl gilt dynamisch die Assist-Freigabe.",
+        "title": "HomeIntent konfigurieren",
+        "description": "Lege Geräte, Sicherheit und die lokalen Ausgabekanäle des proaktiven Agenten fest. Von HomeIntent erzeugte Regeln bleiben in der Home-Assistant-Automationsoberfläche sichtbar.",
         "data": {
           "selected_entities": "Freigegebene Entitäten",
           "read_only_entities": "Nur lesbare Entitäten",
@@ -26,7 +26,13 @@
           "max_action_targets": "Maximale Ziele pro Aktion",
           "allow_non_admin_critical": "Kritische Aktionen für Nicht-Administratoren erlauben",
           "allow_non_admin_automations": "Automationserstellung für Nicht-Administratoren erlauben",
-          "context_ttl_seconds": "Dialogkontext in Sekunden"
+          "context_ttl_seconds": "Dialogkontext in Sekunden",
+          "agent_enabled": "Proaktives Agentenverhalten aktivieren",
+          "agent_delivery_channels": "Ausgabekanäle des Agenten",
+          "agent_notify_targets": "Push-Ziele",
+          "agent_tts_entity": "TTS-Engine",
+          "agent_media_players": "TTS-Lautsprecher oder Sprachsatelliten",
+          "agent_cooldown_seconds": "Standard-Cooldown in Sekunden"
         }
       }
     },
@@ -59,6 +65,14 @@
       "fields": {
         "automation_id": {"name": "Automations-ID"}
       }
+    },
+    "proactive_message": {
+      "name": "Proaktive Agentenmeldung verarbeiten",
+      "description": "Erzeugt eine deduplizierte lokale Agentensituation."
+    },
+    "recheck_agent_event": {
+      "name": "Agentensituation erneut prüfen",
+      "description": "Interner Dienst für Snooze und erneute Zustandsprüfung."
     }
   }
 }

@@ -1002,3 +1002,17 @@ def test_pronoun_follow_up_reuses_context_from_previous_command(monkeypatch):
     assert call_args.args[1] == "turn_off"
     assert call_args.args[2]["entity_id"] == "light.flur_licht"
     assert result.response.error_code is None
+
+
+def test_unclaimed_yes_can_resolve_one_open_tts_agent_question(monkeypatch):
+    entity = _make_entity(monkeypatch, [FLUR_LICHT_OFF])
+    voice_reply = AsyncMock(return_value="Erledigt.")
+    entity._runtime_data.proactive_agent = type(
+        "AgentStub", (), {"async_handle_voice_reply": voice_reply}
+    )()
+
+    result = _run(entity, "Ja", conversation_id="agent-voice")
+
+    assert result.response.speech == "Erledigt."
+    voice_reply.assert_awaited_once()
+    entity.hass.services.async_call.assert_not_awaited()

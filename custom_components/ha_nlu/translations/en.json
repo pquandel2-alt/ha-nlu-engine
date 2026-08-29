@@ -15,7 +15,7 @@
     "step": {
       "init": {
         "title": "Configure HomeIntent",
-        "description": "Choose which Home Assistant entities HomeIntent may understand and control. Without an explicit selection, the current Assist exposure is used dynamically.",
+        "description": "Configure devices, safety, and local delivery channels. HomeIntent rules remain visible in the Home Assistant automation UI.",
         "data": {
           "selected_entities": "Allowed entities",
           "read_only_entities": "Read-only entities",
@@ -26,7 +26,13 @@
           "max_action_targets": "Maximum targets per action",
           "allow_non_admin_critical": "Allow critical actions for non-admin users",
           "allow_non_admin_automations": "Allow non-admin users to create automations",
-          "context_ttl_seconds": "Conversation context in seconds"
+          "context_ttl_seconds": "Conversation context in seconds",
+          "agent_enabled": "Enable proactive agent behavior",
+          "agent_delivery_channels": "Agent delivery channels",
+          "agent_notify_targets": "Push targets",
+          "agent_tts_entity": "TTS engine",
+          "agent_media_players": "TTS speakers or voice satellites",
+          "agent_cooldown_seconds": "Default cooldown in seconds"
         }
       }
     },
@@ -49,6 +55,14 @@
       "name": "Re-enable automation",
       "description": "Internal service used to resume temporarily paused HomeIntent automations.",
       "fields": {"automation_id": {"name": "Automation ID"}}
+    },
+    "proactive_message": {
+      "name": "Process proactive agent message",
+      "description": "Creates a deduplicated local agent situation."
+    },
+    "recheck_agent_event": {
+      "name": "Recheck agent situation",
+      "description": "Internal service for snooze and fresh state checks."
     }
   }
 }

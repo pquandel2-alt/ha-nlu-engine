@@ -790,6 +790,7 @@ testbar.
 
 Weitere Dokumentation:
 
+- [`docs/proactive-agent.md`](docs/proactive-agent.md)
 - [`docs/architecture-v7.md`](docs/architecture-v7.md)
 - [`docs/natural-language-roadmap-v7.md`](docs/natural-language-roadmap-v7.md)
 - [`docs/architecture-v6.md`](docs/architecture-v6.md)
@@ -804,12 +805,12 @@ python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
 ```
 
-Geprüfter V7-Release-Stand von Version 4.62.0:
+Geprüfter Release-Stand von Version 4.63.0:
 
 ```text
-2443 passed, 12 skipped
-85 % Gesamt-Coverage
-80 % Coverage für conversation.py
+2459 passed, 12 skipped
+87 % Gesamt-Coverage
+82 % Coverage für conversation.py
 ```
 
 Zusätzlich wurden ausgeführt:
@@ -834,7 +835,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-4.62.0.json --quiet
+  --check docs/perf/v7-shadow-baseline-4.63.0.json --quiet
 ```
 
 Zusätzlich erzeugt die Test-Suite weiterhin 1.024 intensive Lichtparaphrasen.

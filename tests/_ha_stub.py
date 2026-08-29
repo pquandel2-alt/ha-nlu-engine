@@ -230,7 +230,15 @@ def install() -> None:
     def _utcnow() -> datetime:
         return datetime.now(timezone.utc)
 
+    def _parse_datetime(value: str) -> datetime | None:
+        try:
+            parsed = datetime.fromisoformat(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
     util_dt.utcnow = _utcnow
+    util_dt.parse_datetime = _parse_datetime
 
     # Wave 13 ("Relative-Zeit-Automationen"): conversation.py needs *local*
     # wall-clock time (not UTC) to compute "jetzt + Offset" for a relative-

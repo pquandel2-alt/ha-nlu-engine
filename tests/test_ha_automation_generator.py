@@ -502,6 +502,59 @@ def test_notify_uses_persistent_notification():
     assert result.config["actions"] == [{"action": "persistent_notification.create", "data": {"message": "Fenster ist offen"}}]
 
 
+def test_targetless_notify_with_stable_automation_id_uses_agent_runtime():
+    model = AutomationModel(
+        triggers=(TriggerModel(
+            type=TriggerType.STATE,
+            target=TriggerTarget(entity_id="binary_sensor.kueche_fenster"),
+            state=SemanticState.OPEN,
+        ),),
+        actions=(ActionModel(type=ActionType.NOTIFY, message="Fenster offen"),),
+    )
+    result = generate_ha_automation_config(
+        model, ALL_ENTITIES, automation_id="stable-rule-id"
+    )
+
+    assert result.error is None
+    assert result.config is not None
+    assert result.config["actions"] == [{
+        "action": "ha_nlu.proactive_message",
+        "data": {
+            "rule_id": "stable-rule-id",
+            "title": "HomeIntent",
+            "message": "Fenster offen",
+            "mode": "inform",
+            "source_entity_id": "binary_sensor.kueche_fenster",
+            "expected_source_state": "on",
+        },
+    }]
+
+
+def test_numeric_agent_rule_carries_recheck_predicate():
+    model = AutomationModel(
+        triggers=(TriggerModel(
+            type=TriggerType.NUMERIC_STATE,
+            target=TriggerTarget(entity_id="sensor.temperatur"),
+            comparator=NumericComparator.ABOVE,
+            threshold=28,
+        ),),
+        actions=(ActionModel(type=ActionType.NOTIFY, message="Zu warm"),),
+    )
+
+    result = generate_ha_automation_config(model, ALL_ENTITIES, automation_id="hot")
+
+    assert result.config is not None
+    assert result.config["actions"][0]["data"] == {
+        "rule_id": "hot",
+        "title": "HomeIntent",
+        "message": "Zu warm",
+        "mode": "inform",
+        "source_entity_id": "sensor.temperatur",
+        "source_comparator": "above",
+        "source_threshold": 28,
+    }
+
+
 def test_notify_can_use_one_explicit_notify_entity():
     model = _model(
         _trigger(),

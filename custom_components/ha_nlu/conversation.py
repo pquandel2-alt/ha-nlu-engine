@@ -155,6 +155,7 @@ from .nlu.semantic_utterance import (
 )
 from .nlu.understanding import UnderstandingAuthority
 from .service_call import QUERY_INTENTS, ServiceCallPlan
+from .service_executor import async_execute_service_plan
 from .semantic_dialog import continue_semantic_dialog, start_semantic_dialog
 from .reminder import (
     reminder_automation_text,
@@ -291,6 +292,7 @@ class NluConversationEntity(
         self._engine = runtime.engine
         self._context_store = runtime.context_store
         self._audit_trail = runtime.audit_trail
+        self._runtime_data = runtime
         # Rebuilt every turn in _async_handle_message() (World Model Wave,
         # 2026-08-14); None only until the first turn.
         self._world_model: WorldModel | None = None
@@ -373,6 +375,21 @@ class NluConversationEntity(
             )
 
         active_dialog = active_pending_dialog(pending)
+
+        # A normal pending conversation dialog always wins. Only an otherwise
+        # unclaimed yes/no reply may address one unique, unexpired ASK event
+        # that was actually spoken over TTS; ambiguity is never guessed.
+        if active_dialog is None and self._runtime_data.proactive_agent is not None:
+            agent_reply = await self._runtime_data.proactive_agent.async_handle_voice_reply(
+                user_input.text,
+                user_id=conversation_user_id(user_input),
+                is_admin=await user_is_admin(self.hass, user_input),
+            )
+            if agent_reply is not None:
+                response.async_set_speech(agent_reply)
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
 
         if (
             active_dialog is not None
@@ -1599,26 +1616,29 @@ class NluConversationEntity(
             self._context_store.clear(user_input.conversation_id)
 
         if result.plan is not None:
-            try:
-                await self.hass.services.async_call(
-                    result.plan.domain,
-                    result.plan.service,
-                    {"entity_id": result.plan.entity_id, **result.plan.data},
-                    blocking=True,
-                )
-                self._record_execution(user_input, result.plan)
-            except Exception as err:  # noqa: BLE001 - HA 2025.x service calls can raise beyond HomeAssistantError (vol.Invalid, TimeoutError, ...); must not propagate as "Unexpected error during intent recognition"
+            execution = await async_execute_service_plan(
+                self.hass,
+                result.plan,
+                entities,
+                self.entry.options,
+                is_admin=await user_is_admin(self.hass, user_input),
+                user_id=conversation_user_id(user_input),
+                confirmed=False,
+                audit_trail=self._audit_trail,
+                audit_actor_id=conversation_user_id(user_input),
+            )
+            if not execution.executed:
                 self._context_store.clear(user_input.conversation_id)
                 _LOGGER.error(
                     "Service call %s.%s on %s failed: %s",
                     result.plan.domain,
                     result.plan.service,
                     result.plan.entity_id,
-                    err,
+                    execution.error,
                 )
                 response.async_set_error(
                     intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-                    f"Fehler beim Ausführen: {err}",
+                    f"Fehler beim Ausführen: {execution.error}",
                 )
                 return conversation.ConversationResult(
                     response=response, conversation_id=user_input.conversation_id
@@ -2632,9 +2652,10 @@ class NluConversationEntity(
         # docstring for why) - pre-generated here, before persistence, and
         # threaded into both the generator and the executor so they agree.
         # None/unused for every ordinary (non-once) automation.
-        once_automation_id = (
-            uuid.uuid4().hex if model.once or model.max_runs is not None else None
-        )
+        # Every generated automation receives its stable id before rendering.
+        # Targetless notification actions embed this id as their proactive
+        # rule identity; one-shot lifecycle actions use the same id.
+        once_automation_id = uuid.uuid4().hex
 
         generation_result = generate_ha_automation_config(
             model, entities, automation_id=once_automation_id
@@ -3388,29 +3409,28 @@ class NluConversationEntity(
                 entities,
                 requested_by_user_id=current_user_id,
             )
-            try:
-                await self.hass.services.async_call(
-                    confirmation.plan.domain,
-                    confirmation.plan.service,
-                    {
-                        "entity_id": confirmation.plan.entity_id,
-                        **confirmation.plan.data,
-                    },
-                    blocking=True,
-                )
-                self._record_execution(user_input, confirmation.plan)
-            except Exception as err:  # noqa: BLE001 - HA service failures are heterogeneous
+            execution = await async_execute_service_plan(
+                self.hass,
+                confirmation.plan,
+                entities,
+                self.entry.options,
+                is_admin=await user_is_admin(self.hass, user_input),
+                user_id=current_user_id,
+                confirmed=True,
+                audit_trail=self._audit_trail,
+                audit_actor_id=current_user_id,
+            )
+            if not execution.executed:
                 _LOGGER.error(
                     "Confirmed service call %s.%s on %s failed: %s",
                     confirmation.plan.domain,
                     confirmation.plan.service,
                     confirmation.plan.entity_id,
-                    err,
-                    exc_info=True,
+                    execution.error,
                 )
                 response.async_set_error(
                     intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-                    f"Fehler beim Ausführen: {err}",
+                    f"Fehler beim Ausführen: {execution.error}",
                 )
             else:
                 response.async_set_speech(confirmation.success_text)

@@ -31,6 +31,8 @@ _LOGGER = logging.getLogger(__name__)
 SERVICE_DELETE_AUTOMATION = "delete_automation"
 SERVICE_RECORD_AUTOMATION_RUN = "record_automation_run"
 SERVICE_ENABLE_AUTOMATION = "enable_automation"
+SERVICE_PROACTIVE_MESSAGE = "proactive_message"
+SERVICE_RECHECK_AGENT_EVENT = "recheck_agent_event"
 
 # A self-deleting automation must finish the service action that requested
 # its deletion before ``automation.reload`` removes/unloads that automation.
@@ -50,6 +52,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.runtime_data = HaNluRuntimeData(
         context_store=ConversationContextStore(ttl_seconds=context_ttl)
     )
+    from .agent_runtime import ProactiveAgentRuntime
+
+    proactive_agent = ProactiveAgentRuntime(hass, entry, entry.runtime_data)
+    entry.runtime_data.proactive_agent = proactive_agent
+    entry.async_on_unload(proactive_agent.async_start())
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
@@ -104,6 +111,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             DOMAIN, SERVICE_ENABLE_AUTOMATION, _handle_enable_automation
         )
 
+    if not hass.services.has_service(DOMAIN, SERVICE_PROACTIVE_MESSAGE):
+
+        async def _handle_proactive_message(call: ServiceCall) -> None:
+            try:
+                await proactive_agent.async_signal(call.data)
+            except ValueError as err:
+                _LOGGER.warning("Invalid proactive message request: %s", err)
+
+        hass.services.async_register(
+            DOMAIN, SERVICE_PROACTIVE_MESSAGE, _handle_proactive_message
+        )
+
+    if not hass.services.has_service(DOMAIN, SERVICE_RECHECK_AGENT_EVENT):
+
+        async def _handle_recheck_agent_event(call: ServiceCall) -> None:
+            event_id = call.data.get("event_id")
+            if isinstance(event_id, str):
+                await proactive_agent.async_recheck(event_id)
+
+        hass.services.async_register(
+            DOMAIN, SERVICE_RECHECK_AGENT_EVENT, _handle_recheck_agent_event
+        )
+
     # Reconcile persistence before expiring missed one-shots. This recovers
     # a crash-interrupted transaction, removes orphan sidecar metadata and
     # repairs category assignments for every known HomeIntent automation.
@@ -112,6 +142,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _async_reconcile_and_cleanup_automations(hass),
             name="HomeIntent reconcile automation persistence",
         )
+    # Recovery is a bounded atomic sidecar read and must finish before an
+    # incoming notification action can address a persisted event.
+    await proactive_agent.async_recover()
 
     return True
 
@@ -124,6 +157,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, SERVICE_RECORD_AUTOMATION_RUN)
     if unloaded and hass.services.has_service(DOMAIN, SERVICE_ENABLE_AUTOMATION):
         hass.services.async_remove(DOMAIN, SERVICE_ENABLE_AUTOMATION)
+    if unloaded and hass.services.has_service(DOMAIN, SERVICE_PROACTIVE_MESSAGE):
+        hass.services.async_remove(DOMAIN, SERVICE_PROACTIVE_MESSAGE)
+    if unloaded and hass.services.has_service(DOMAIN, SERVICE_RECHECK_AGENT_EVENT):
+        hass.services.async_remove(DOMAIN, SERVICE_RECHECK_AGENT_EVENT)
     return unloaded
 
 

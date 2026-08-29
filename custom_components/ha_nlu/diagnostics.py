@@ -8,6 +8,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import (
+    CONF_AGENT_COOLDOWN_SECONDS,
+    CONF_AGENT_DELIVERY_CHANNELS,
+    CONF_AGENT_ENABLED,
+    CONF_AGENT_MEDIA_PLAYERS,
+    CONF_AGENT_NOTIFY_TARGETS,
+    CONF_AGENT_TTS_ENTITY,
     CONF_ADMIN_ONLY_ENTITIES,
     CONF_ALLOW_NON_ADMIN_AUTOMATIONS,
     CONF_ALLOW_NON_ADMIN_CRITICAL,
@@ -67,6 +73,20 @@ async def async_get_config_entry_diagnostics(
             CONF_ALLOW_NON_ADMIN_AUTOMATIONS, True
         ),
         "context_ttl_seconds": entry.options.get(CONF_CONTEXT_TTL_SECONDS, 30),
+        "proactive_agent_enabled": entry.options.get(CONF_AGENT_ENABLED, True),
+        "agent_delivery_channels": entry.options.get(
+            CONF_AGENT_DELIVERY_CHANNELS, ["push"]
+        ),
+        "agent_notify_target_count": len(
+            entry.options.get(CONF_AGENT_NOTIFY_TARGETS, [])
+        ),
+        "agent_tts_configured": bool(entry.options.get(CONF_AGENT_TTS_ENTITY)),
+        "agent_media_player_count": len(
+            entry.options.get(CONF_AGENT_MEDIA_PLAYERS, [])
+        ),
+        "agent_cooldown_seconds": entry.options.get(
+            CONF_AGENT_COOLDOWN_SECONDS, 1800
+        ),
         "conversation_text_stored": False,
         "world_model_persisted": False,
     }

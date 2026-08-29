@@ -77,6 +77,8 @@ def test_async_setup_entry_registers_the_delete_automation_service(tmp_path):
 
     assert hass.services.has_service(DOMAIN, "delete_automation") is True
     assert hass.services.has_service(DOMAIN, "record_automation_run") is True
+    assert hass.services.has_service(DOMAIN, "proactive_message") is True
+    assert hass.services.has_service(DOMAIN, "recheck_agent_event") is True
 
 
 def test_async_setup_entry_uses_configured_context_ttl(tmp_path):
@@ -130,6 +132,8 @@ def test_async_unload_entry_removes_the_service(tmp_path):
 
     assert hass.services.has_service(DOMAIN, "delete_automation") is False
     assert hass.services.has_service(DOMAIN, "record_automation_run") is False
+    assert hass.services.has_service(DOMAIN, "proactive_message") is False
+    assert hass.services.has_service(DOMAIN, "recheck_agent_event") is False
 
 
 def test_calling_the_service_deletes_the_matching_automation(monkeypatch, tmp_path):

@@ -46,6 +46,14 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    AGENT_CHANNEL_PUSH,
+    AGENT_CHANNEL_TTS,
+    CONF_AGENT_COOLDOWN_SECONDS,
+    CONF_AGENT_DELIVERY_CHANNELS,
+    CONF_AGENT_ENABLED,
+    CONF_AGENT_MEDIA_PLAYERS,
+    CONF_AGENT_NOTIFY_TARGETS,
+    CONF_AGENT_TTS_ENTITY,
     CONF_ALLOW_NON_ADMIN_AUTOMATIONS,
     CONF_ALLOW_NON_ADMIN_CRITICAL,
     CONF_CONFIRMATION_LEVEL,
@@ -190,5 +198,44 @@ class HaNluOptionsFlow(OptionsFlow):
                         CONF_CONTEXT_TTL_SECONDS,
                         default=defaults.get(CONF_CONTEXT_TTL_SECONDS, 30),
                     ): vol.All(vol.Coerce(int), vol.Range(min=10, max=600)),
+                    vol.Optional(
+                        CONF_AGENT_ENABLED,
+                        default=defaults.get(CONF_AGENT_ENABLED, True),
+                    ): bool,
+                    vol.Optional(
+                        CONF_AGENT_DELIVERY_CHANNELS,
+                        default=defaults.get(
+                            CONF_AGENT_DELIVERY_CHANNELS, [AGENT_CHANNEL_PUSH]
+                        ),
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                {"value": AGENT_CHANNEL_PUSH, "label": "Push"},
+                                {"value": AGENT_CHANNEL_TTS, "label": "TTS"},
+                            ],
+                            multiple=True,
+                            mode=SelectSelectorMode.LIST,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_AGENT_NOTIFY_TARGETS,
+                        default=defaults.get(CONF_AGENT_NOTIFY_TARGETS, []),
+                    ): EntitySelector(
+                        EntitySelectorConfig(domain="notify", multiple=True)
+                    ),
+                    vol.Optional(
+                        CONF_AGENT_TTS_ENTITY,
+                        default=defaults.get(CONF_AGENT_TTS_ENTITY),
+                    ): EntitySelector(EntitySelectorConfig(domain="tts")),
+                    vol.Optional(
+                        CONF_AGENT_MEDIA_PLAYERS,
+                        default=defaults.get(CONF_AGENT_MEDIA_PLAYERS, []),
+                    ): EntitySelector(
+                        EntitySelectorConfig(domain="media_player", multiple=True)
+                    ),
+                    vol.Optional(
+                        CONF_AGENT_COOLDOWN_SECONDS,
+                        default=defaults.get(CONF_AGENT_COOLDOWN_SECONDS, 1800),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=86400)),
                 }
         )

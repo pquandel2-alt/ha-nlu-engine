@@ -14,6 +14,16 @@ CONF_CONTEXT_TTL_SECONDS = "context_ttl_seconds"
 CONF_CUSTOM_ALIASES = "custom_aliases"
 CONF_CONTROL_USER_IDS = "control_user_ids"
 CONF_ADMIN_ONLY_ENTITIES = "admin_only_entities"
+CONF_AGENT_ENABLED = "agent_enabled"
+CONF_AGENT_DELIVERY_CHANNELS = "agent_delivery_channels"
+CONF_AGENT_NOTIFY_TARGETS = "agent_notify_targets"
+CONF_AGENT_TTS_ENTITY = "agent_tts_entity"
+CONF_AGENT_MEDIA_PLAYERS = "agent_media_players"
+CONF_AGENT_COOLDOWN_SECONDS = "agent_cooldown_seconds"
+
+AGENT_CHANNEL_PUSH = "push"
+AGENT_CHANNEL_TTS = "tts"
+DEFAULT_AGENT_COOLDOWN_SECONDS = 1800
 
 # Domains the intent set can act on or (for "sensor"/"binary_sensor") read
 # state from. Mirrors service_call.py's IntentSpec/QueryIntentSpec.allowed_domains.

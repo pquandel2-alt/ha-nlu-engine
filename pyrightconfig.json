@@ -4,6 +4,7 @@
   "pythonVersion": "3.12",
   "typeCheckingMode": "basic",
   "strict": [
+    "custom_components/ha_nlu/agent_event.py",
     "custom_components/ha_nlu/entity_scope.py",
     "custom_components/ha_nlu/risk.py",
     "custom_components/ha_nlu/automation_history.py",

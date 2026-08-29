@@ -685,6 +685,59 @@ def generate_ha_condition_configs(
     return rendered, None
 
 
+def _bind_proactive_delivery(
+    config: dict[str, Any],
+    *,
+    automation_id: str,
+    source_entity_id: str | None,
+    expected_source_state: str | None,
+    source_comparator: str | None,
+    source_threshold: float | None,
+) -> dict[str, Any]:
+    """Route targetless notifications through the entry-owned agent runtime."""
+    action = config.get("action")
+    data = config.get("data")
+    if (
+        action == "persistent_notification.create"
+        and isinstance(data, dict)
+        and isinstance(data.get("message"), str)
+    ):
+        proactive_data: dict[str, Any] = {
+            "rule_id": automation_id,
+            "title": "HomeIntent",
+            "message": data["message"],
+            "mode": "inform",
+        }
+        if source_entity_id is not None:
+            proactive_data["source_entity_id"] = source_entity_id
+        if expected_source_state is not None:
+            proactive_data["expected_source_state"] = expected_source_state
+        if source_comparator is not None and source_threshold is not None:
+            proactive_data["source_comparator"] = source_comparator
+            proactive_data["source_threshold"] = source_threshold
+        return {"action": "ha_nlu.proactive_message", "data": proactive_data}
+    for key in ("sequence", "parallel"):
+        children = config.get(key)
+        if isinstance(children, list):
+            return {
+                **config,
+                key: [
+                    _bind_proactive_delivery(
+                        child,
+                        automation_id=automation_id,
+                        source_entity_id=source_entity_id,
+                        expected_source_state=expected_source_state,
+                        source_comparator=source_comparator,
+                        source_threshold=source_threshold,
+                    )
+                    if isinstance(child, dict)
+                    else child
+                    for child in children
+                ],
+            }
+    return config
+
+
 def generate_ha_automation_config(
     model: AutomationModel, entities: list[EntitySnapshot], automation_id: str | None = None
 ) -> GenerationResult:
@@ -770,6 +823,41 @@ def generate_ha_automation_config(
             return GenerationResult(config=None, error=error)
         assert step_config is not None
         actions.append(step_config)
+
+    if automation_id is not None:
+        source_entity_id: str | None = None
+        expected_source_state: str | None = None
+        source_comparator: str | None = None
+        source_threshold: float | None = None
+        if len(triggers) == 1 and triggers[0].get("trigger") == "state":
+            raw_entity_id = triggers[0].get("entity_id")
+            if isinstance(raw_entity_id, str):
+                source_entity_id = raw_entity_id
+            raw_state = triggers[0].get("to")
+            if isinstance(raw_state, str):
+                expected_source_state = raw_state
+        if len(model.triggers) == 1 and model.triggers[0].type is TriggerType.NUMERIC_STATE:
+            numeric_trigger = model.triggers[0]
+            if numeric_trigger.target is not None:
+                numeric_candidates = _resolve_target_entities(
+                    numeric_trigger.target, entities
+                )
+                if len(numeric_candidates) == 1:
+                    source_entity_id = numeric_candidates[0].entity_id
+            if numeric_trigger.comparator is not None:
+                source_comparator = numeric_trigger.comparator.name.casefold()
+            source_threshold = numeric_trigger.threshold
+        actions = [
+            _bind_proactive_delivery(
+                action,
+                automation_id=automation_id,
+                source_entity_id=source_entity_id,
+                expected_source_state=expected_source_state,
+                source_comparator=source_comparator,
+                source_threshold=source_threshold,
+            )
+            for action in actions
+        ]
 
     if model.once:
         assert automation_id is not None
