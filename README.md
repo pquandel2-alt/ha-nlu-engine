@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.64.0**
+- Aktuelle Version: **4.65.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -799,10 +799,10 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/ha_nlu --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 4.64.0:
+Geprüfter Release-Stand von Version 4.65.0:
 
 ```text
-2484 passed, 12 skipped
+2519 passed, 12 skipped
 87 % Gesamt-Coverage
 82 % Coverage für conversation.py
 ```
@@ -829,7 +829,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-4.64.0.json --quiet
+  --check docs/perf/v7-shadow-baseline-4.65.0.json --quiet
 ```
 
 Zusätzlich erzeugt die Test-Suite weiterhin 1.024 intensive Lichtparaphrasen.
@@ -846,7 +846,7 @@ Dadurch können sie dem Parser keine Antworten „beibringen“.
 ![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
 
 Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.64.0. Für echte
+Entwicklungsstands und kein aktueller Nachweis für Version 4.65.0. Für echte
 Zielhardware lässt sich seit 4.49 ein reproduzierbarer JSON-Bericht samt
 P95-Budget erzeugen:
 

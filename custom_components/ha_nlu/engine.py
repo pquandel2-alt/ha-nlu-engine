@@ -91,8 +91,9 @@ from .nlu.verb_state_query import (
 from .nlu.semantic_location import resolve_coordinated_locations
 from .nlu.validator import validate_command
 from .automation_action_parser import AutomationActionParser
-from .automation_notification import notification_action_from_request
+from .automation_notification import is_notification_shaped, notification_action_from_request
 from .automation_condition_parser import AutomationConditionParser, split_on_top_level_and
+from .nlu.automation_shell_normalization import strip_automation_shell
 from .calendar_automation import parse_calendar_automation_draft
 from .automation_trigger_parser import _AUTOMATION_TRIGGER_RE, AutomationTriggerParser
 from .location_property_query import LocationPropertyQueryParser, LocationQueryFeedback
@@ -1902,6 +1903,104 @@ class NluEngine:
             ),
         )
 
+    def _try_extract_notification_from_trigger_clause(
+        self,
+        text: str,
+        parse_context: ParseContext,
+        entities: list[EntitySnapshot] | tuple[EntitySnapshot, ...],
+    ) -> tuple[str, str] | None:
+        """Extract a trailing notification action from a trigger-first clause
+        with no comma at all, e.g. "sobald das Fenster geöffnet wird eine
+        Push-Nachricht an Philipp schickt" - the shape left behind once
+        ``strip_automation_shell()`` removes a meta-shell that had no comma
+        of its own before "die" either.
+
+        Returns (trigger_text, action_text) only once both halves
+        independently validate through their own dedicated parser
+        (``AutomationTriggerParser``/``notification_action_from_request()``)
+        - never a guess. Returns ``None`` if no trigger connector is found,
+        no trailing notification pattern is detected, or either half fails
+        to parse.
+        """
+        notification_pattern_re = re.compile(
+            r"\b(?:eine\s+)?(?:push[\s-]nachricht|benachrichtigung|nachricht|meldung|mitteilung)\s+"
+            r"(?:an\s+den|an\s+die|an\s+dem|an|dem|der)\s+"
+            r"[a-zäöüß][a-z0-9äöüß_-]*"
+            r"(?:\s+(?:schick\w*|send\w*|geb\w*|sag\w*))?",
+            re.IGNORECASE,
+        )
+        # ``(?<!\S)`` (not preceded by a non-whitespace char) instead of a
+        # literal leading ``\s+`` so the connector is also recognized right
+        # at the start of the string - the common case once an automation
+        # shell has been stripped off the front of the sentence.
+        for marker in re.finditer(r"(?<!\S)(wenn|sobald|falls)\b", text, re.IGNORECASE):
+            trigger_with_action = text[marker.end():].strip(" ,")
+            if not trigger_with_action:
+                continue
+
+            notification_match = notification_pattern_re.search(trigger_with_action)
+            if notification_match is None:
+                continue
+
+            trigger_only = trigger_with_action[: notification_match.start()].strip(" ,")
+            if not trigger_only:
+                continue
+
+            trigger_text = f"{marker.group(1)} {trigger_only}"
+            parsed_trigger = self._automation_trigger_parser.parse(trigger_text, parse_context)
+            if parsed_trigger is None:
+                continue
+
+            action_text = trigger_with_action[notification_match.start():].strip()
+            notification = notification_action_from_request(action_text, trigger_text, entities)
+            if notification is None:
+                continue
+
+            return (trigger_text, action_text)
+
+        return None
+
+    def _parse_action_or_notification(
+        self,
+        action_text: str,
+        trigger_text: str,
+        entities: list[EntitySnapshot] | tuple[EntitySnapshot, ...],
+        parse_context: ParseContext,
+    ) -> tuple[ActionModel | ActionGroup, ...] | None:
+        """Prefer the dedicated notification-vocabulary reader in
+        ``automation_notification.py`` over the general action parser for a
+        recipient-shaped clause; fall back to the general parser otherwise.
+
+        ``notify_action.yaml``'s pre-existing grammar branches ("benachrichtige
+        [mich|uns] [dass] {message}", "[schick|sende] ... eine Nachricht [dass]
+        {message}") all end in a free-form wildcard ``{message}`` slot. Given a
+        bare recipient clause with no "dass ..." content of its own (e.g.
+        "benachrichtige mich" or "sende eine Nachricht an Philipp"), that
+        wildcard can still match by swallowing the recipient token/prepositional
+        phrase itself, producing a nonsensical raw message and never resolving
+        a named recipient to its notify.* target.
+        ``notification_action_from_request()``'s three patterns all
+        ``fullmatch`` a tightly scoped verb+recipient / message+recipient
+        shape with no trailing free text, so they never match a genuine
+        explicit-content dictation ("... dass der Akku leer ist") - trying
+        them first only ever intercepts the recipient-shaped clauses this
+        module is meant to own, and falls through to the general parser
+        (unchanged) for everything else.
+
+        If the clause matches a notification shape but the recipient itself
+        could not be resolved (unknown or ambiguous), that is a hard failure
+        - falling through to the general parser here would let the same
+        wildcard ``{message}`` slot swallow the unresolved recipient token
+        as free-text message content, silently producing a wrong automation
+        instead of refusing (never guess).
+        """
+        notification = notification_action_from_request(action_text, trigger_text, entities)
+        if notification is not None:
+            return (notification,)
+        if is_notification_shaped(action_text):
+            return None
+        return self._parse_action_semantically(action_text, parse_context)
+
     def _parse_action_semantically(
         self, text: str, context: ParseContext
     ) -> tuple[ActionModel | ActionGroup, ...] | None:
@@ -2028,11 +2127,15 @@ class NluEngine:
         anywhere else - this fallback only ever runs inside this method, for
         this trigger-clause.
         """
-        utterance = analyse_utterance(text)
-        if utterance.speech_act is SpeechAct.QUERY or not _AUTOMATION_TRIGGER_RE.search(text):
+        # Strip optional automation meta-shells ("Erstelle eine Automation, die...")
+        # before clause analysis, so trigger/action boundaries are recognized correctly.
+        automation_shell_stripped_text, shell_was_present = strip_automation_shell(text)
+
+        utterance = analyse_utterance(automation_shell_stripped_text)
+        if utterance.speech_act is SpeechAct.QUERY or not _AUTOMATION_TRIGGER_RE.search(automation_shell_stripped_text):
             return None
 
-        normalized = normalize(text)
+        normalized = normalize(automation_shell_stripped_text)
         repeat_match = _AUTOMATION_REPEAT_RE.search(normalized)
         max_runs = None
         if repeat_match is not None:
@@ -2059,6 +2162,29 @@ class NluEngine:
         )
 
         split = split_trigger_action(normalized)
+        if split is not None:
+            # ``split_trigger_action`` assumes trigger-then-action order
+            # around the first comma. When the action actually comes first
+            # ("Benachrichtige Philipp, wenn ..."), the first half won't
+            # parse as a Trigger while the second half will - and the first
+            # half parses as a valid Action on its own. Swap the halves in
+            # that one specific, verified case rather than guessing.
+            first_half, second_half = split
+            if self._automation_trigger_parser.parse(first_half, parse_context) is None:
+                second_as_trigger = self._automation_trigger_parser.parse(
+                    second_half, parse_context
+                )
+                if second_as_trigger is not None:
+                    first_as_action = self._parse_action_semantically(
+                        first_half, parse_context
+                    )
+                    if not first_as_action:
+                        notification = notification_action_from_request(
+                            first_half, second_half, entities
+                        )
+                        first_as_action = (notification,) if notification is not None else None
+                    if first_as_action:
+                        split = (second_half, first_half)
         if split is None:
             candidates: list[tuple[str, str]] = []
             # The common utterance model already knows an action-first
@@ -2119,6 +2245,16 @@ class NluEngine:
                     candidates.append((trigger_candidate, action_candidate))
             candidates = list(dict.fromkeys(candidates))
             if len(candidates) != 1:
+                # Fallback for notification patterns trailing in trigger-first clauses:
+                # "sobald das Fenster geöffnet wird eine Push-Nachricht an Philipp schicken"
+                # Extract trailing notification action, then try to parse the trigger alone.
+                split_candidate = self._try_extract_notification_from_trigger_clause(
+                    normalized, parse_context, entities
+                )
+                if split_candidate is not None:
+                    candidates.append(split_candidate)
+                candidates = list(dict.fromkeys(candidates))
+            if len(candidates) != 1:
                 return None
             split = candidates[0]
         trigger_text, action_text = split
@@ -2153,12 +2289,9 @@ class NluEngine:
             trigger, condition_node = split_result
             triggers = (trigger,)
 
-        actions = self._parse_action_semantically(action_text, parse_context)
-        if not actions:
-            notification = notification_action_from_request(
-                action_text, trigger_text, entities
-            )
-            actions = (notification,) if notification is not None else None
+        actions = self._parse_action_or_notification(
+            action_text, trigger_text, entities, parse_context
+        )
         if not actions:
             return None
 

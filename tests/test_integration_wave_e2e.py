@@ -79,6 +79,9 @@ LIGHT_BUERO_2 = EntitySnapshot(
     area_id="buero_2", area_name="Büro 2",
     capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
 )
+NOTIFY_PHILIPP = EntitySnapshot(
+    "notify.mobile_app_philipp", "Philipp Handy", "notify", "unknown"
+)
 
 ALL_ENTITIES = [
     STUDIO_LIGHT,
@@ -89,6 +92,7 @@ ALL_ENTITIES = [
     KUECHE_LICHT,
     LIGHT_BUERO_1,
     LIGHT_BUERO_2,
+    NOTIFY_PHILIPP,
 ]
 
 
@@ -225,3 +229,97 @@ def test_case_8_unresolvable_reference_returns_not_understood(monkeypatch):
 
     entity.hass.services.async_call.assert_not_awaited()
     assert result.response.error_code == intent.IntentResponseErrorCode.NO_INTENT_MATCH
+
+
+# --- Case 9: naturally-phrased notification automations (semantic gap fix,
+# HomeIntent 4.65.0) - the exact example from the original bug report, plus
+# the safety-critical recipient-resolution cases, through the real pipeline
+# end-to-end. See ``tests/test_engine_match_automation.py`` and
+# ``tests/test_automation_notification.py`` for the same feature exercised
+# closer to the unit under test. ---------------------------------------------
+
+
+def _make_entity_with(monkeypatch, entities: list[EntitySnapshot]) -> NluConversationEntity:
+    entry = ConfigEntry()
+    entity = NluConversationEntity(entry)
+    entity.hass = HomeAssistant()
+    monkeypatch.setattr(
+        ha_conversation, "build_entity_snapshots", lambda hass, entry: entities
+    )
+    return entity
+
+
+def test_case_9_original_bug_report_sentence_now_recognized(monkeypatch):
+    entity = _make_entity(monkeypatch)
+
+    result = _run(
+        entity,
+        "Erstelle eine Automation die sobald das Wohnzimmer Fenster geöffnet wird "
+        "eine Push Nachricht an Philipp schickt",
+        conversation_id="notify-automation",
+    )
+
+    entity.hass.services.async_call.assert_not_awaited()
+    assert result.response.error_code is None
+    assert "Ich konnte Trigger und Aktion" not in result.response.speech
+    assert "Automation erkannt" in result.response.speech
+    assert "Soll diese Automation erstellt werden?" in result.response.speech
+
+
+def test_case_9b_recipient_first_phrasing_also_recognized(monkeypatch):
+    entity = _make_entity(monkeypatch)
+
+    result = _run(
+        entity,
+        "Benachrichtige Philipp, wenn das Wohnzimmer Fenster geöffnet wird",
+        conversation_id="notify-automation-2",
+    )
+
+    entity.hass.services.async_call.assert_not_awaited()
+    assert result.response.error_code is None
+    assert "Automation erkannt" in result.response.speech
+
+
+def test_case_9c_unknown_recipient_gives_understandable_feedback_creates_nothing(monkeypatch):
+    entity = _make_entity(monkeypatch)
+
+    result = _run(
+        entity,
+        "Wenn das Wohnzimmer Fenster geöffnet wird, schicke eine Nachricht an Klaus",
+        conversation_id="notify-automation-3",
+    )
+
+    entity.hass.services.async_call.assert_not_awaited()
+    assert "Automation erkannt" not in result.response.speech
+    assert "Soll diese Automation erstellt werden?" not in result.response.speech
+
+
+def test_case_9d_ambiguous_recipient_creates_nothing(monkeypatch):
+    notify_philipp_2 = EntitySnapshot(
+        "notify.mobile_app_philipp_2", "Philipp iPad", "notify", "unknown"
+    )
+    entity = _make_entity_with(monkeypatch, ALL_ENTITIES + [notify_philipp_2])
+
+    result = _run(
+        entity,
+        "Benachrichtige Philipp, wenn das Wohnzimmer Fenster geöffnet wird",
+        conversation_id="notify-automation-4",
+    )
+
+    entity.hass.services.async_call.assert_not_awaited()
+    assert "Automation erkannt" not in result.response.speech
+    assert "Soll diese Automation erstellt werden?" not in result.response.speech
+
+
+def test_case_9e_question_about_an_automation_does_not_create_one(monkeypatch):
+    entity = _make_entity(monkeypatch)
+
+    result = _run(
+        entity,
+        "Schickt die Automation eine Push-Nachricht an Philipp, wenn das Wohnzimmer Fenster "
+        "geöffnet wird?",
+        conversation_id="notify-automation-5",
+    )
+
+    entity.hass.services.async_call.assert_not_awaited()
+    assert "Soll diese Automation erstellt werden?" not in result.response.speech

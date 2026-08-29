@@ -390,3 +390,154 @@ def test_dreimal_qualifier_sets_a_bounded_run_count(engine):
     assert result.validation_error is None
     assert result.model.once is False
     assert result.model.max_runs == 3
+
+
+# ============================================================================
+# Notification-specific features: action-first, action-trailing, automation shells
+# ============================================================================
+
+WOHNZIMMER_FENSTER = EntitySnapshot(
+    "binary_sensor.wohnzimmer_fenster", "Wohnzimmerfenster", "binary_sensor", "off",
+    area_id="wohnzimmer", area_name="Wohnzimmer", device_class="window",
+)
+# NOTIFY_PHILIPP is already part of ENTITIES (defined above) - appending it
+# again here would put two distinct EntitySnapshot objects with the same
+# entity_id in NOTIFY_ENTITIES, making every recipient resolution ambiguous
+# (2 matches instead of 1) and silently forcing "no automation" everywhere.
+NOTIFY_ENTITIES = ENTITIES + [WOHNZIMMER_FENSTER]
+
+
+def test_action_first_notification_with_recipient_resolves_notify_target(engine):
+    """Benachrichtige Philipp, wenn..."""
+    result = engine.match_automation(
+        "Benachrichtige Philipp, wenn das Wohnzimmer Fenster geöffnet wird", NOTIFY_ENTITIES
+    )
+    assert isinstance(result, AutomationMatchResult)
+    assert result.validation_error is None
+    assert result.model.actions[0].type is ActionType.NOTIFY
+    assert result.model.actions[0].target.entity_id == "notify.mobile_app_philipp"
+    assert "Wohnzimmer Fenster" in result.model.actions[0].message
+
+
+def test_action_trailing_notification_with_recipient_to_preposition(engine):
+    """...eine Push-Nachricht an Philipp schickt"""
+    result = engine.match_automation(
+        "Wenn das Wohnzimmer Fenster geöffnet wird, schicke eine Push-Nachricht an Philipp",
+        NOTIFY_ENTITIES,
+    )
+    assert isinstance(result, AutomationMatchResult)
+    assert result.validation_error is None
+    assert result.model.actions[0].type is ActionType.NOTIFY
+    assert result.model.actions[0].target.entity_id == "notify.mobile_app_philipp"
+    assert "Wohnzimmer Fenster" in result.model.actions[0].message
+
+
+def test_automation_shell_with_notification_and_recipient(engine):
+    """Erstelle eine Automation die sobald das Wohnzimmer Fenster geöffnet wird
+    eine Push Nachricht an Philipp schickt"""
+    result = engine.match_automation(
+        "Erstelle eine Automation die sobald das Wohnzimmer Fenster geöffnet wird eine Push-Nachricht an Philipp schickt",
+        NOTIFY_ENTITIES,
+    )
+    assert isinstance(result, AutomationMatchResult)
+    assert result.validation_error is None
+    assert result.model.actions[0].type is ActionType.NOTIFY
+    assert result.model.actions[0].target.entity_id == "notify.mobile_app_philipp"
+    assert "Wohnzimmer Fenster" in result.model.actions[0].message
+    # Original text with shell is preserved for preview
+    assert "Erstelle eine Automation" in result.model.source_text
+
+
+def test_automation_shell_variants_all_recognized(engine):
+    """Multiple shells are recognized: Erstelle, Lege an, Ich möchte"""
+    for shell_text in [
+        "Erstelle eine Automation die ",
+        "Lege eine Regel an, die ",
+        "Ich möchte eine Automation, die ",
+    ]:
+        text = f"{shell_text}wenn das Wohnzimmer Fenster geöffnet wird, benachrichtige mich"
+        result = engine.match_automation(text, NOTIFY_ENTITIES)
+        assert isinstance(result, AutomationMatchResult)
+        assert result.model.actions[0].type is ActionType.NOTIFY
+
+
+def test_notification_variant_keywords_recognized(engine):
+    """Push-Nachricht, Nachricht, Benachrichtigung, Push Nachricht"""
+    base = "Wenn das Wohnzimmer Fenster geöffnet wird, "
+    for variant in [
+        "schicke eine Push-Nachricht an Philipp",
+        "schicke eine Benachrichtigung an Philipp",
+        "sende eine Nachricht an Philipp",
+        "schicke Philipp eine Mitteilung",
+    ]:
+        result = engine.match_automation(
+            f"{base}{variant}", NOTIFY_ENTITIES
+        )
+        assert isinstance(result, AutomationMatchResult), f"Failed: {variant}"
+        assert result.model.actions[0].type is ActionType.NOTIFY
+        assert result.model.actions[0].target.entity_id == "notify.mobile_app_philipp"
+
+
+def test_notification_with_generated_message_from_trigger(engine):
+    """Message is derived from trigger when not explicitly stated"""
+    result = engine.match_automation(
+        "Wenn das Wohnzimmer Fenster geöffnet wird, benachrichtige mich",
+        NOTIFY_ENTITIES,
+    )
+    assert isinstance(result, AutomationMatchResult)
+    assert "Wohnzimmer Fenster" in result.model.actions[0].message
+    assert "geöffnet" in result.model.actions[0].message
+
+
+def test_notification_without_shell_trigger_first_form_still_works(engine):
+    """Sobald X, sende Nachricht an Y"""
+    result = engine.match_automation(
+        "Sobald das Wohnzimmer Fenster geöffnet wird, sende eine Nachricht an Philipp",
+        NOTIFY_ENTITIES,
+    )
+    assert isinstance(result, AutomationMatchResult)
+    assert result.model.actions[0].type is ActionType.NOTIFY
+    assert result.model.actions[0].target.entity_id == "notify.mobile_app_philipp"
+
+
+def test_notification_without_shell_action_first_form_still_works(engine):
+    """Benachrichtige mich, wenn X"""
+    result = engine.match_automation(
+        "Benachrichtige mich, wenn das Wohnzimmer Fenster geöffnet wird",
+        NOTIFY_ENTITIES,
+    )
+    assert isinstance(result, AutomationMatchResult)
+    assert result.model.actions[0].type is ActionType.NOTIFY
+    assert result.model.actions[0].target is None  # mich -> proactive channel
+
+
+def test_notification_to_recipient_without_explicit_verb(engine):
+    """Eine Push-Nachricht an Philipp (implicit schicke/sende)"""
+    result = engine.match_automation(
+        "Wenn das Wohnzimmer Fenster geöffnet wird, eine Push-Nachricht an Philipp",
+        NOTIFY_ENTITIES,
+    )
+    assert isinstance(result, AutomationMatchResult)
+    assert result.model.actions[0].type is ActionType.NOTIFY
+    assert result.model.actions[0].target.entity_id == "notify.mobile_app_philipp"
+
+
+def test_notification_with_unknown_recipient_returns_none(engine):
+    """Unknown recipient name → no automation created"""
+    result = engine.match_automation(
+        "Wenn das Wohnzimmer Fenster geöffnet wird, schicke eine Nachricht an Klaus",
+        NOTIFY_ENTITIES,
+    )
+    # No Klaus in the notify entities, so no valid automation
+    assert result is None
+
+
+def test_notification_trigger_first_with_window_variants(engine):
+    """Wohnzimmer Fenster and Wohnzimmerfenster both work"""
+    for fenster_text in ["Wohnzimmer Fenster", "Wohnzimmerfenster"]:
+        result = engine.match_automation(
+            f"Wenn das {fenster_text} geöffnet wird, benachrichtige mich",
+            NOTIFY_ENTITIES,
+        )
+        assert isinstance(result, AutomationMatchResult)
+        assert result.model.triggers[0].target.area_id == "wohnzimmer"
