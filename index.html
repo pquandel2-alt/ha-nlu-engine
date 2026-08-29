@@ -37,7 +37,7 @@
         </linearGradient></defs>
       </svg>
       <span class="brand__text">HomeIntent</span>
-      <span class="brand__ver">4.62</span>
+      <span class="brand__ver">4.63</span>
     </a>
 
     <nav class="nav__links" aria-label="Hauptnavigation">
@@ -71,7 +71,7 @@
     <div class="hero__copy">
       <div class="pill reveal">
         <span class="pill__dot"></span>
-        Version 4.62.0 · 2.443 Tests grün · MIT
+        Version 4.64.0 · 2.484 Tests grün · MIT
       </div>
 
       <h1 class="reveal" style="--d:.05s">
@@ -82,7 +82,8 @@
       <p class="lead reveal" style="--d:.12s">
         HomeIntent ist ein eigener Conversation Agent für Home&nbsp;Assistant Assist.
         Er versteht deutsche Smart-Home-Sprache, löst Geräte gegen deine echte
-        Konfiguration auf und erzeugt daraus geprüfte Serviceaufrufe —
+        Konfiguration auf, erzeugt geprüfte Serviceaufrufe und kann über native
+        HA-Automationen proaktiv per Push oder TTS informieren —
         <strong>vollständig lokal, ohne LLM, ohne Cloud, ohne GPU.</strong>
       </p>
 
@@ -231,7 +232,7 @@
     <p class="footnote reveal">
       Beispielhaus: 3 Lichter (Küche, Flur, Stehlampe im Wohnzimmer), 2 Rollläden,
       1 Thermostat, 1 Türschloss, 2 Radios. Die gezeigten Ergebnisse entsprechen
-      dem dokumentierten Verhalten von Version 4.62.0.
+      dem dokumentierten Verhalten von Version 4.64.0.
     </p>
   </div>
 </section>
@@ -524,7 +525,7 @@
       <div class="glass tile reveal" style="--d:.12s">
         <h4>Shadow-Gate vor jedem Release</h4>
         <p>Alter und neuer Pfad laufen rein lesend gegeneinander. Der
-        versionierte Bericht zu 4.62.0 umfasst <strong>3.772 Turns</strong>:</p>
+        versionierte Bericht zu 4.64.0 umfasst <strong>3.772 Turns</strong>:</p>
         <div class="plan">
           <div class="plan__row"><span>semantisch identisch</span><b>3.752</b></div>
           <div class="plan__row"><span>Divergenz</span><b>0</b></div>
@@ -551,7 +552,7 @@
 
     <p class="footnote reveal">
       Reproduzierbar über <code>scripts/v7_shadow_report.py --check
-      docs/perf/v7-shadow-baseline-4.62.0.json</code>. Der aktive autoritative
+      docs/perf/v7-shadow-baseline-4.64.0.json</code>. Der aktive autoritative
       Schnitt umfasst Ein/Aus für Licht, Schalter, Ventilator, Heizung,
       Luftbefeuchter und Input-Boolean, Öffnen/Schließen für Cover und Ventile,
       Media Play/Pause, Saugroboter Start/Stopp, Szenenaktivierung, Cover- und
@@ -685,7 +686,7 @@
       <div class="limit reveal" style="--d:.24s"><span>—</span><p>Eine Geräteaktion wird nur angeboten, wenn die nötige Fähigkeit im <strong>aktuellen</strong> HA-Zustand erkennbar ist.</p></div>
       <div class="limit reveal" style="--d:.28s"><span>—</span><p>Integrationsspezifische Device-Trigger ohne vollständiges Subtypschema werden <strong>abgelehnt</strong> statt geraten.</p></div>
       <div class="limit reveal" style="--d:.32s"><span>—</span><p>Die V7-Autorität gilt für einen <strong>ausdrücklich vermessenen Ausschnitt</strong>. Kalender, Produktivität und einzelne Managementfunktionen laufen weiterhin über fachspezifische Parser — hinter derselben Sicherheitsgrenze, aber noch nicht im Compiler.</p></div>
-      <div class="limit reveal" style="--d:.36s"><span>—</span><p>Die Benchmark-Grafik im Repository ist eine <strong>Momentaufnahme eines älteren Stands</strong> und kein Leistungsnachweis für 4.62.0. Reale Zahlen muss man auf der eigenen Hardware messen.</p></div>
+      <div class="limit reveal" style="--d:.36s"><span>—</span><p>Die Benchmark-Grafik im Repository ist eine <strong>Momentaufnahme eines älteren Stands</strong> und kein Leistungsnachweis für 4.64.0. Reale Zahlen muss man auf der eigenen Hardware messen.</p></div>
     </div>
   </div>
 </section>
@@ -748,7 +749,7 @@
 <section class="cta">
   <div class="wrap cta__inner reveal">
     <h2>Ein Assistent, dem du<br>den Hausschlüssel <em>geben würdest.</em></h2>
-    <p>Lokal, deterministisch, quelloffen unter MIT. Version 4.62.0.</p>
+    <p>Lokal, deterministisch, quelloffen unter MIT. Version 4.64.0.</p>
     <div class="cta__btns">
       <a class="btn btn--primary btn--lg" href="https://github.com/pquandel2-alt/ha-nlu-engine" target="_blank" rel="noopener">Auf GitHub ansehen</a>
       <a class="btn btn--ghost btn--lg" href="https://my.home-assistant.io/redirect/hacs_repository/?owner=pquandel2-alt&amp;repository=ha-nlu-engine&amp;category=integration" target="_blank" rel="noopener">In HACS öffnen</a>
