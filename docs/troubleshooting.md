@@ -77,3 +77,23 @@ Sie enthält Zähler und Richtlinieneinstellungen, aber keine Äußerungen,
 Entity-IDs oder Zustände. Für einen Fehlerbericht sind zusätzlich die
 Home-Assistant-Version, HomeIntent-Version, genaue Uhrzeit und der relevante
 Protokollausschnitt hilfreich.
+
+## Gedächtnis oder Routinen reagieren nicht
+
+Gedächtnis und Routineerkennung sind standardmäßig deaktiviert. Beide
+Schalter befinden sich in den Integrationsoptionen. Persönliche Präferenzen
+benötigen eine von Assist übermittelte Benutzer-ID und eine ausdrückliche
+Ja/Nein-Bestätigung. HomeIntent speichert keine beiläufige Aussage.
+
+## AUTO wird nur als ASK angeboten
+
+Das ist die sichere Normalform. Prüfen, ob AUTO global aktiviert ist, jede
+Ziel-ID in der AUTO-Allowlist steht, der frische Zustand verfügbar ist und die
+Aktion LOW-Risk sowie reversibel ist. Cover, Schloss, Alarm und vergleichbare
+höhere Risiken werden nicht durch Routinewissen zu AUTO.
+
+## Proaktive Ereignisregeln bleiben still
+
+Mindestens eine Ereigniskategorie muss explizit eingetragen sein. Ruhezeiten
+unterdrücken TTS, nicht jedoch konfigurierte kritische Kanäle. Ein veralteter,
+unbekannter oder bereits deduplizierter Zustand erzeugt keine zweite Ausgabe.

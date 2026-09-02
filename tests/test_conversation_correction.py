@@ -70,6 +70,24 @@ def test_explicit_entity_correction_keeps_previous_action(engine):
     assert corrected.plan.service == "turn_on"
 
 
+def test_explicit_entity_correction_accepts_only_article(engine):
+    entities = [
+        EntitySnapshot(
+            "light.wohnzimmer", "Wohnzimmerlicht", "light", "off",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+        EntitySnapshot(
+            "light.floor", "Stehlampe", "light", "off",
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        ),
+    ]
+    first = engine.match("Mach das Wohnzimmerlicht an", entities)
+    corrected = engine.match_correction_followup(
+        "Nein, ich meinte nur die Stehlampe.", entities, _context(first)
+    )
+    assert corrected.plan.entity_id == "light.floor"
+
+
 def test_short_negative_correction_retargets_without_repeating_action(engine):
     entities = [
         EntitySnapshot(

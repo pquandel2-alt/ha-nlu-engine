@@ -847,7 +847,9 @@ class NluEngine:
             is_single_coordinated_meaning = (
                 re.search(r"\b(?:außer|ausser|mit\s+ausnahme\s+von)\b", normalized_whole, re.I)
                 is not None
-                or resolve_coordinated_locations(normalized_whole, entities) is not None
+                or resolve_coordinated_locations(
+                    normalized_whole, entities, world_model
+                ) is not None
             )
             if is_single_coordinated_meaning:
                 whole_analysis = analyse_semantics(normalized_whole)

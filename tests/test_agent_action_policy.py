@@ -41,3 +41,15 @@ def test_unregistered_persisted_service_is_rejected():
         ServiceCallPlan("shell_command", "arbitrary", "switch.allowed")
     )
     assert error == "Die vorgeschlagene Aktion ist nicht freigegeben."
+
+
+def test_brightness_agent_action_is_closed_and_bounded():
+    assert validate_agent_service_plan(
+        ServiceCallPlan("light", "turn_on", "light.floor", {"brightness_pct": 30})
+    ) is None
+    assert validate_agent_service_plan(
+        ServiceCallPlan("light", "turn_on", "light.floor", {"brightness_pct": 101})
+    ) is not None
+    assert validate_agent_service_plan(
+        ServiceCallPlan("light", "turn_on", "light.floor", {"rgb_color": "red"})
+    ) is not None

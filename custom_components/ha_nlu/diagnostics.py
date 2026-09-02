@@ -14,12 +14,22 @@ from .const import (
     CONF_AGENT_MEDIA_PLAYERS,
     CONF_AGENT_NOTIFY_TARGETS,
     CONF_AGENT_TTS_ENTITY,
+    CONF_AGENT_AUTO_ENABLED,
+    CONF_ANOMALY_THRESHOLD_PERCENT,
+    CONF_BANTER_LEVEL,
     CONF_ADMIN_ONLY_ENTITIES,
     CONF_ALLOW_NON_ADMIN_AUTOMATIONS,
     CONF_ALLOW_NON_ADMIN_CRITICAL,
     CONF_CONFIRMATION_LEVEL,
     CONF_CONTEXT_TTL_SECONDS,
+    CONF_MEMORY_ENABLED,
+    CONF_MEMORY_RETENTION_DAYS,
+    CONF_PERSONA_STYLE,
+    CONF_ROUTINE_DETECTION_ENABLED,
+    CONF_ROUTINE_MIN_OBSERVATIONS,
     CONF_CONTROL_USER_IDS,
+    CONF_DOCUMENTS_ENABLED,
+    CONF_HOUSE_RELATIONS,
     CONF_CUSTOM_ALIASES,
     CONF_MAX_ACTION_TARGETS,
     CONF_READ_ONLY_ENTITIES,
@@ -27,6 +37,7 @@ from .const import (
     DOMAIN,
 )
 from .customization import parse_custom_aliases
+from .house_graph import parse_relation_specs
 
 
 async def async_get_config_entry_diagnostics(
@@ -51,6 +62,35 @@ async def async_get_config_entry_diagnostics(
         )
     except ValueError:
         alias_count = "invalid"
+    try:
+        relation_count: int | str = len(
+            parse_relation_specs(entry.options.get(CONF_HOUSE_RELATIONS))
+        )
+    except ValueError:
+        relation_count = "invalid"
+    runtime_data = getattr(entry, "runtime_data", None)
+    memory = getattr(runtime_data, "memory", None)
+    memory_summary = (
+        await memory.async_redacted_export()
+        if memory is not None and getattr(memory, "enabled", False)
+        else {
+            "schema_version": None,
+            "record_counts": {},
+            "provenance_counts": {},
+            "contains_transcripts": False,
+            "person_ids_included": False,
+            "content_included": False,
+        }
+    )
+    routine_statistics = getattr(runtime_data, "routine_statistics", {})
+    routine_series_count = (
+        len(routine_statistics) if isinstance(routine_statistics, dict) else 0
+    )
+    routine_observation_count = (
+        sum(item.observation_count for item in routine_statistics.values())
+        if isinstance(routine_statistics, dict)
+        else 0
+    )
     return {
         "domain": DOMAIN,
         "entry_version": entry.version,
@@ -87,6 +127,25 @@ async def async_get_config_entry_diagnostics(
         "agent_cooldown_seconds": entry.options.get(
             CONF_AGENT_COOLDOWN_SECONDS, 1800
         ),
+        "memory_enabled": entry.options.get(CONF_MEMORY_ENABLED, False),
+        "memory_retention_days": entry.options.get(CONF_MEMORY_RETENTION_DAYS, 90),
+        "persona_style": entry.options.get(CONF_PERSONA_STYLE, "neutral"),
+        "banter_level": entry.options.get(CONF_BANTER_LEVEL, 0),
+        "routine_detection_enabled": entry.options.get(
+            CONF_ROUTINE_DETECTION_ENABLED, False
+        ),
+        "routine_min_observations": entry.options.get(
+            CONF_ROUTINE_MIN_OBSERVATIONS, 10
+        ),
+        "anomaly_threshold_percent": entry.options.get(
+            CONF_ANOMALY_THRESHOLD_PERCENT, 5
+        ),
+        "agent_auto_enabled": entry.options.get(CONF_AGENT_AUTO_ENABLED, False),
+        "documents_enabled": entry.options.get(CONF_DOCUMENTS_ENABLED, False),
+        "house_relation_count": relation_count,
+        "learned_memory": memory_summary,
+        "routine_series_count": routine_series_count,
+        "routine_observation_count": routine_observation_count,
         "conversation_text_stored": False,
         "world_model_persisted": False,
     }

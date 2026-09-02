@@ -54,21 +54,42 @@ from .const import (
     CONF_AGENT_MEDIA_PLAYERS,
     CONF_AGENT_NOTIFY_TARGETS,
     CONF_AGENT_TTS_ENTITY,
+    CONF_AGENT_AUTO_ENABLED,
+    CONF_AGENT_AUTO_ENTITY_IDS,
+    CONF_AGENT_EVENT_CATEGORIES,
+    CONF_AGENT_QUIET_END,
+    CONF_AGENT_QUIET_START,
+    CONF_ANOMALY_THRESHOLD_PERCENT,
     CONF_ALLOW_NON_ADMIN_AUTOMATIONS,
     CONF_ALLOW_NON_ADMIN_CRITICAL,
     CONF_CONFIRMATION_LEVEL,
     CONF_CONTEXT_TTL_SECONDS,
+    CONF_BANTER_LEVEL,
     CONF_CONTROL_USER_IDS,
+    CONF_DOCUMENTS_DIRECTORY,
+    CONF_DOCUMENTS_ENABLED,
+    CONF_HOUSE_RELATIONS,
     CONF_CUSTOM_ALIASES,
     CONF_ADMIN_ONLY_ENTITIES,
     CONF_MAX_ACTION_TARGETS,
+    CONF_MEMORY_ENABLED,
+    CONF_MEMORY_RETENTION_DAYS,
+    CONF_PERSONA_STYLE,
     CONF_READ_ONLY_ENTITIES,
     CONF_SELECTED_ENTITIES,
+    CONF_ROUTINE_DETECTION_ENABLED,
+    CONF_ROUTINE_MIN_OBSERVATIONS,
     DOMAIN,
     SELECTABLE_DOMAINS,
 )
 from .hass_entities import default_exposed_entities
 from .customization import parse_custom_aliases
+from .house_graph import parse_relation_specs
+from .agent_config_validation import (
+    parse_event_categories,
+    validate_documents_directory,
+    validate_quiet_time,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -87,7 +108,13 @@ class HaNluConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_create_entry(
             title=TITLE,
             data={},
-            options={},
+            options={
+                CONF_MEMORY_ENABLED: False,
+                CONF_ROUTINE_DETECTION_ENABLED: False,
+                CONF_AGENT_AUTO_ENABLED: False,
+                CONF_AGENT_AUTO_ENTITY_IDS: [],
+                CONF_DOCUMENTS_ENABLED: False,
+            },
         )
 
     @staticmethod
@@ -110,6 +137,27 @@ class HaNluOptionsFlow(OptionsFlow):
                     step_id="init",
                     data_schema=await self._async_schema(user_input),
                     errors={CONF_CUSTOM_ALIASES: "invalid_alias_rules"},
+                )
+            try:
+                parse_relation_specs(user_input.get(CONF_HOUSE_RELATIONS))
+            except ValueError:
+                return self.async_show_form(
+                    step_id="init",
+                    data_schema=await self._async_schema(user_input),
+                    errors={CONF_HOUSE_RELATIONS: "invalid_house_relations"},
+                )
+            try:
+                validate_quiet_time(user_input.get(CONF_AGENT_QUIET_START, "22:00"))
+                validate_quiet_time(user_input.get(CONF_AGENT_QUIET_END, "07:00"))
+                parse_event_categories(user_input.get(CONF_AGENT_EVENT_CATEGORIES, ""))
+                validate_documents_directory(
+                    user_input.get(CONF_DOCUMENTS_DIRECTORY, "homeintent_documents")
+                )
+            except ValueError:
+                return self.async_show_form(
+                    step_id="init",
+                    data_schema=await self._async_schema(user_input),
+                    errors={"base": "invalid_agent_options"},
                 )
             return self.async_create_entry(title="", data=user_input)
 
@@ -237,5 +285,67 @@ class HaNluOptionsFlow(OptionsFlow):
                         CONF_AGENT_COOLDOWN_SECONDS,
                         default=defaults.get(CONF_AGENT_COOLDOWN_SECONDS, 1800),
                     ): vol.All(vol.Coerce(int), vol.Range(min=0, max=86400)),
+                    vol.Optional(
+                        CONF_MEMORY_ENABLED,
+                        default=defaults.get(CONF_MEMORY_ENABLED, False),
+                    ): bool,
+                    vol.Optional(
+                        CONF_MEMORY_RETENTION_DAYS,
+                        default=defaults.get(CONF_MEMORY_RETENTION_DAYS, 90),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=3650)),
+                    vol.Optional(
+                        CONF_PERSONA_STYLE,
+                        default=defaults.get(CONF_PERSONA_STYLE, "neutral"),
+                    ): vol.In(("neutral", "precise", "jarvis")),
+                    vol.Optional(
+                        CONF_BANTER_LEVEL,
+                        default=defaults.get(CONF_BANTER_LEVEL, 0),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3)),
+                    vol.Optional(
+                        CONF_AGENT_QUIET_START,
+                        default=defaults.get(CONF_AGENT_QUIET_START, "22:00"),
+                    ): TextSelector(TextSelectorConfig()),
+                    vol.Optional(
+                        CONF_AGENT_QUIET_END,
+                        default=defaults.get(CONF_AGENT_QUIET_END, "07:00"),
+                    ): TextSelector(TextSelectorConfig()),
+                    vol.Optional(
+                        CONF_AGENT_EVENT_CATEGORIES,
+                        default=defaults.get(CONF_AGENT_EVENT_CATEGORIES, ""),
+                    ): TextSelector(TextSelectorConfig()),
+                    vol.Optional(
+                        CONF_ROUTINE_DETECTION_ENABLED,
+                        default=defaults.get(CONF_ROUTINE_DETECTION_ENABLED, False),
+                    ): bool,
+                    vol.Optional(
+                        CONF_ROUTINE_MIN_OBSERVATIONS,
+                        default=defaults.get(CONF_ROUTINE_MIN_OBSERVATIONS, 10),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=3, max=10000)),
+                    vol.Optional(
+                        CONF_ANOMALY_THRESHOLD_PERCENT,
+                        default=defaults.get(CONF_ANOMALY_THRESHOLD_PERCENT, 5),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=50)),
+                    vol.Optional(
+                        CONF_AGENT_AUTO_ENABLED,
+                        default=defaults.get(CONF_AGENT_AUTO_ENABLED, False),
+                    ): bool,
+                    vol.Optional(
+                        CONF_AGENT_AUTO_ENTITY_IDS,
+                        default=defaults.get(CONF_AGENT_AUTO_ENTITY_IDS, []),
+                    ): EntitySelector(
+                        EntitySelectorConfig(domain=SELECTABLE_DOMAINS, multiple=True)
+                    ),
+                    vol.Optional(
+                        CONF_DOCUMENTS_ENABLED,
+                        default=defaults.get(CONF_DOCUMENTS_ENABLED, False),
+                    ): bool,
+                    vol.Optional(
+                        CONF_DOCUMENTS_DIRECTORY,
+                        default=defaults.get(CONF_DOCUMENTS_DIRECTORY, "homeintent_documents"),
+                    ): TextSelector(TextSelectorConfig()),
+                    vol.Optional(
+                        CONF_HOUSE_RELATIONS,
+                        default=defaults.get(CONF_HOUSE_RELATIONS, ""),
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
                 }
         )

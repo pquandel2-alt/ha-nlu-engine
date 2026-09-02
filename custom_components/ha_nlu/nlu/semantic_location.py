@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
 from ..areas import AreaResolutionStatus, resolve_area_scored
 from ..entities import EntitySnapshot, generate_aliases
@@ -13,12 +14,17 @@ from ..floors import (
     resolve_floor_scored,
 )
 
+if TYPE_CHECKING:
+    from ..world_model import WorldModel
+
 
 _LEVEL_CUE_RE = re.compile(r"(?<!nach\s)\b(?:oben|unten)\b", re.I)
 
 
 def resolve_location_name(
-    name: str, entities: list[EntitySnapshot]
+    name: str,
+    entities: list[EntitySnapshot],
+    world_model: WorldModel | None = None,
 ) -> tuple[str | None, str | None] | None:
     """Resolve one registry location using the strongest exact evidence.
 
@@ -27,8 +33,16 @@ def resolve_location_name(
     stealing an exact floor name (``Erdgeschoss``), while an exact area name
     still beats a merely contained floor name.
     """
-    area = resolve_area_scored(name, entities)
-    floor = resolve_floor_scored(name, entities)
+    area = resolve_area_scored(
+        name,
+        entities,
+        snapshots=world_model.areas if world_model is not None else None,
+    )
+    floor = resolve_floor_scored(
+        name,
+        entities,
+        snapshots=world_model.floors if world_model is not None else None,
+    )
     area_score = (
         area.score if area.status is AreaResolutionStatus.RESOLVED else None
     )
@@ -73,7 +87,9 @@ def has_explicit_location_cue(text: str, entities: list[EntitySnapshot]) -> bool
 
 
 def resolve_semantic_location(
-    text: str, entities: list[EntitySnapshot]
+    text: str,
+    entities: list[EntitySnapshot],
+    world_model: WorldModel | None = None,
 ) -> tuple[str, str | None, str | None] | None:
     """Return ``(spoken_text, area_id, floor_id)`` for one clear location."""
     whole_home = re.search(
@@ -96,12 +112,25 @@ def resolve_semantic_location(
             return None
         return level.group(0), None, resolved_level.floor_id
 
-    names = {
-        name
-        for entity in entities
-        for name in (entity.area_name, *entity.area_aliases, entity.floor_name)
-        if name
-    }
+    names = (
+        {
+            name
+            for area in world_model.areas
+            for name in (area.name, *area.aliases)
+        }
+        | {floor.name for floor in world_model.floors}
+        if world_model is not None
+        else {
+            name
+            for entity in entities
+            for name in (
+                entity.area_name,
+                *entity.area_aliases,
+                entity.floor_name,
+            )
+            if name
+        }
+    )
     # HA registry names may contain orthographic word boundaries that spoken
     # compounds naturally omit ("Pole Raum" -> "Poleraum").  Treat only the
     # whitespace-free form of the *same registered location* as equivalent;
@@ -127,7 +156,7 @@ def resolve_semantic_location(
     longest = len(mentioned[0][0])
     selected = [item for item in mentioned if len(item[0]) == longest]
     resolved = {
-        resolve_location_name(canonical, entities)
+        resolve_location_name(canonical, entities, world_model)
         for _, canonical in selected
     }
     resolved.discard(None)
@@ -138,7 +167,9 @@ def resolve_semantic_location(
 
 
 def resolve_coordinated_locations(
-    text: str, entities: list[EntitySnapshot]
+    text: str,
+    entities: list[EntitySnapshot],
+    world_model: WorldModel | None = None,
 ) -> tuple[tuple[str, str | None, str | None], ...] | None:
     """Resolve an explicit ``A und B`` location union.
 
@@ -149,12 +180,25 @@ def resolve_coordinated_locations(
     an intersection into a union, and ``oder`` remains ambiguous instead of
     being interpreted as "both".
     """
-    names = {
-        name
-        for entity in entities
-        for name in (entity.area_name, *entity.area_aliases, entity.floor_name)
-        if name
-    }
+    names = (
+        {
+            name
+            for area in world_model.areas
+            for name in (area.name, *area.aliases)
+        }
+        | {floor.name for floor in world_model.floors}
+        if world_model is not None
+        else {
+            name
+            for entity in entities
+            for name in (
+                entity.area_name,
+                *entity.area_aliases,
+                entity.floor_name,
+            )
+            if name
+        }
+    )
     mentions: list[tuple[int, int, str]] = []
     occupied: list[tuple[int, int]] = []
     for name in sorted(names, key=len, reverse=True):
@@ -169,7 +213,7 @@ def resolve_coordinated_locations(
 
     resolved: list[tuple[str, str | None, str | None]] = []
     for index, (_, end, spoken) in enumerate(mentions):
-        location = resolve_location_name(spoken, entities)
+        location = resolve_location_name(spoken, entities, world_model)
         if location is None:
             return None
         if index < len(mentions) - 1:

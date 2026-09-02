@@ -8,6 +8,9 @@ from typing import Any
 from .engine import NluEngine
 from .audit_log import AuditTrail
 from .nlu.context import ConversationContextStore
+from .memory import MemoryStore
+from .situation import RoutineStatistics, SituationEvaluator
+from .dialog_manager import DialogManager
 
 
 @dataclass
@@ -20,3 +23,9 @@ class HaNluRuntimeData:
     )
     audit_trail: AuditTrail = field(default_factory=AuditTrail)
     proactive_agent: Any | None = None
+    situation_runtime: Any | None = None
+    memory: MemoryStore | None = None
+    situation_evaluator: SituationEvaluator = field(default_factory=SituationEvaluator)
+    routine_statistics: dict[str, RoutineStatistics] = field(default_factory=dict)
+    dialog_manager: DialogManager = field(default_factory=DialogManager)
+    document_index: Any | None = None

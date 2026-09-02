@@ -101,6 +101,20 @@ jobs:
           custom_components/ha_nlu/nlu/semantic_interpreter.py
           custom_components/ha_nlu/name_similarity.py
           custom_components/ha_nlu/nlu/entity_clarification.py
+          custom_components/ha_nlu/house_graph.py
+          custom_components/ha_nlu/memory.py
+          custom_components/ha_nlu/situation.py
+          custom_components/ha_nlu/planner.py
+          custom_components/ha_nlu/response_planner.py
+          custom_components/ha_nlu/proactive_decision.py
+          custom_components/ha_nlu/dialog_manager.py
+          custom_components/ha_nlu/adapters.py
+          custom_components/ha_nlu/memory_intent.py
+          custom_components/ha_nlu/goal_intent.py
+          custom_components/ha_nlu/document_intent.py
+          custom_components/ha_nlu/comfort_intent.py
+          custom_components/ha_nlu/automation_scenarios.py
+          custom_components/ha_nlu/agent_config_validation.py
       - name: Statische Importprüfung
         run: python -m pyflakes custom_components tests scripts
 

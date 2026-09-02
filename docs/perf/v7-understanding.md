@@ -55,6 +55,23 @@ Legacy-Parser auf den gemeinsamen indexierten Resolver migriert oder entfernt
 werden. Vor einem finalen V7-Release bleibt ein Lauf auf echter Pi-4/5-
 Hardware erforderlich.
 
+### Kontrolle nach dem lokalen JARVIS-Kernausbau (2026-09-02)
+
+Der gemeinsame Resolver verwendet für die entscheidende exakte Namensstufe
+jetzt den bereits pro Turn aufgebauten `EntityIndex`. Der Semantic Compiler
+überspringt außerdem Registry-Namensscans, wenn Domäne beziehungsweise
+Geräteklasse schon eindeutig sind, und löst Räume/Etagen aus den vorhandenen
+`WorldModel`-Snapshots statt sie erneut aus 5.000 Entities aufzubauen.
+
+Im finalen isolierten CI-Kommando lagen sechs der sieben p95-Werte zwischen
+20,12 und 70,07 ms. Die freie semantische Query lag bei einem Median von
+54,56 ms, aber einem p95 von 125,25 ms und überschritt damit weiterhin das
+unveränderte 100-ms-Gate. Frühere Wiederholungen desselben Laufs schwankten
+für diesen Fall zwischen 98,19 und 327,79 ms. Das Gate und die Baseline wurden
+nicht angepasst; die Ausreißer auf der virtualisierten Entwicklungsumgebung
+bleiben ein offener Release-Blocker und müssen zusätzlich auf Zielhardware
+reproduziert werden.
+
 ## Kontrolle nach dem Entity-Candidate-Ausbau
 
 Nach Einführung von `EntityCandidateSet`, Herkunftsscores und bounded fuzzy

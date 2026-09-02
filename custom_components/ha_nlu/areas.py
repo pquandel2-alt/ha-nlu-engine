@@ -120,7 +120,12 @@ def _score_area(spoken: str, spoken_norm: str, area: AreaSnapshot) -> float | No
     return best
 
 
-def resolve_area_scored(name: str, entities: list[EntitySnapshot]) -> AreaResolutionResult:
+def resolve_area_scored(
+    name: str,
+    entities: list[EntitySnapshot],
+    *,
+    snapshots: tuple[AreaSnapshot, ...] | None = None,
+) -> AreaResolutionResult:
     """Scored area resolution (v2 plan Phase 7, alias support added later):
     same candidate generation + scoring + ambiguity detection pattern as
     resolve_entity_scored (Phase 6), just without the entity-only
@@ -133,7 +138,7 @@ def resolve_area_scored(name: str, entities: list[EntitySnapshot]) -> AreaResolu
     spoken_norm = normalize_for_compare(spoken)
 
     ranked: list[tuple[AreaSnapshot, float]] = []
-    for area in area_snapshots(entities):
+    for area in snapshots if snapshots is not None else area_snapshots(entities):
         score = _score_area(spoken, spoken_norm, area)
         if score is not None:
             ranked.append((area, score))

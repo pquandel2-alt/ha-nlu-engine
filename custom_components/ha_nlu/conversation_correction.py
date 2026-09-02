@@ -57,6 +57,12 @@ class ConversationCorrectionResolver:
         if match is None:
             return None
         location = match.group("location").strip()
+        location = re.sub(
+            r"^nur\s+(?:(?:die|der|das|den|dem)\s+)?",
+            "",
+            location,
+            flags=re.IGNORECASE,
+        )
         domain = previous.entities[0].domain
         named = resolve_entity_scored(
             location, [entity for entity in entities if entity.domain == domain]

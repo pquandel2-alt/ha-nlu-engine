@@ -16,7 +16,15 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from .const import CONF_CONTEXT_TTL_SECONDS, DOMAIN
+from .const import (
+    CONF_CONTEXT_TTL_SECONDS,
+    CONF_DOCUMENTS_DIRECTORY,
+    CONF_DOCUMENTS_ENABLED,
+    CONF_MEMORY_ENABLED,
+    CONF_MEMORY_RETENTION_DAYS,
+    DOMAIN,
+)
+from .memory import MemoryKind, MemoryStore
 from .nlu.context import ConversationContextStore
 from .runtime_data import HaNluRuntimeData
 
@@ -49,14 +57,68 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if isinstance(configured_ttl, (int, float)) and configured_ttl >= 10
         else 30.0
     )
-    entry.runtime_data = HaNluRuntimeData(
-        context_store=ConversationContextStore(ttl_seconds=context_ttl)
+    configured_retention = entry.options.get(CONF_MEMORY_RETENTION_DAYS, 90)
+    retention_days = (
+        configured_retention
+        if isinstance(configured_retention, int) and configured_retention >= 1
+        else 90
     )
+    memory = MemoryStore(
+        hass.config.path(".storage", "ha_nlu_memory.sqlite3"),
+        enabled=bool(entry.options.get(CONF_MEMORY_ENABLED, False)),
+        retention_days=retention_days,
+    )
+    entry.runtime_data = HaNluRuntimeData(
+        context_store=ConversationContextStore(ttl_seconds=context_ttl),
+        memory=memory,
+    )
+    await memory.async_initialize()
+    if memory.enabled:
+        await memory.async_apply_retention(
+            {kind: retention_days for kind in MemoryKind}
+        )
+    if bool(entry.options.get(CONF_DOCUMENTS_ENABLED, False)):
+        from pathlib import Path
+
+        from .adapters import LocalDocumentIndex
+
+        configured_directory = entry.options.get(
+            CONF_DOCUMENTS_DIRECTORY, "homeintent_documents"
+        )
+        relative = (
+            Path(configured_directory)
+            if isinstance(configured_directory, str)
+            else Path("homeintent_documents")
+        )
+        if (
+            relative.is_absolute()
+            or ".." in relative.parts
+            or not relative.parts
+            or str(relative) in {"", "."}
+        ):
+            _LOGGER.warning("HomeIntent document directory must stay below the HA config directory")
+        else:
+            document_index = LocalDocumentIndex(
+                hass.config.path(*relative.parts),
+                hass.config.path(".storage", "ha_nlu_documents.sqlite3"),
+                enabled=True,
+            )
+            entry.runtime_data.document_index = document_index
+            indexing_task = hass.async_create_task(
+                document_index.async_reindex(),
+                name="HomeIntent local document indexing",
+            )
+            entry.async_on_unload(indexing_task.cancel)
     from .agent_runtime import ProactiveAgentRuntime
 
     proactive_agent = ProactiveAgentRuntime(hass, entry, entry.runtime_data)
     entry.runtime_data.proactive_agent = proactive_agent
     entry.async_on_unload(proactive_agent.async_start())
+    from .event_runtime import SituationRuntime
+
+    situation_runtime = SituationRuntime(hass, entry, entry.runtime_data)
+    entry.runtime_data.situation_runtime = situation_runtime
+    entry.async_on_unload(situation_runtime.async_start())
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 

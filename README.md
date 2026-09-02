@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.65.0**
+- Aktuelle Version: **4.66.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -42,7 +42,23 @@ Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
 
-## Was ist in Version 4.64 neu?
+## Was ist in Version 4.66 neu?
+
+Der Produktivcode enthält jetzt einen lokalen Agentenkern mit typisiertem
+Hausgraph, opt-in SQLite-Gedächtnis, zentralen Dialogaufgaben,
+Ereignisnormalisierung, klassischen Routine-/Anomaliestatistiken,
+regelbasierter Persona und einem policygebundenen Mehrschrittplaner. Neue
+datenschutz- oder risikorelevante Funktionen wie Gedächtnis,
+Routineerkennung, Ereigniskategorien und AUTO-Allowlist sind bei neuen
+Config Entries deaktiviert beziehungsweise leer.
+
+Zusätzlich nutzt die exakte Entity-Auflösung jetzt den gemeinsamen
+Turn-Index, Dialogkorrekturen kompensieren bereits ausgeführte reversible
+Schritte kontrolliert und gespeicherte beziehungsweise vorgeschlagene
+Aktionen werden unmittelbar vor Ausführung erneut gegen frische Zustände,
+Capabilities und Policy geprüft.
+
+## Was war in Version 4.64 neu?
 
 Version 4.64 härtet den proaktiven Agenten und sämtliche zentralen
 HA-Schreibpfade ab:
@@ -748,6 +764,9 @@ Für zuverlässige Ergebnisse:
   aktuellen Home-Assistant-Zustand erkennbar ist.
 - Hassil-Grammatiken bleiben als schneller Spezial- und Kompatibilitätspfad
   neben dem semantischen Compiler bestehen.
+- Der lokale Dokumentadapter indexiert TXT, Markdown und begrenzte
+  textbasierte PDFs. Verschlüsselte oder reine Scan-PDFs werden nicht per OCR
+  interpretiert.
 
 ## Architektur
 
@@ -783,6 +802,9 @@ testbar.
 
 Weitere Dokumentation:
 
+- [`docs/jarvis-core.md`](docs/jarvis-core.md)
+- [`docs/security-privacy.md`](docs/security-privacy.md)
+- [`docs/agent-configuration.md`](docs/agent-configuration.md)
 - [`docs/proactive-agent.md`](docs/proactive-agent.md)
 - [`docs/architecture-v7.md`](docs/architecture-v7.md)
 - [`docs/natural-language-roadmap-v7.md`](docs/natural-language-roadmap-v7.md)
@@ -799,12 +821,12 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/ha_nlu --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 4.65.0:
+Geprüfter Release-Stand von Version 4.66.0:
 
 ```text
-2519 passed, 12 skipped
+2577 passed, 12 skipped
 87 % Gesamt-Coverage
-82 % Coverage für conversation.py
+78 % Coverage für conversation.py
 ```
 
 Zusätzlich wurden ausgeführt:

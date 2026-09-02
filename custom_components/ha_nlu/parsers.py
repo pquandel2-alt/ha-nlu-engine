@@ -189,7 +189,9 @@ class SingleTargetParser:
         resolution_entities = _query_resolution_entities(
             text, result.intent.name, context.entities
         )
-        resolved = resolve_entity(resolution_name, resolution_entities)
+        resolved = resolve_entity(
+            resolution_name, resolution_entities, index=context.index
+        )
         if resolved.status is ResolveStatus.AMBIGUOUS:
             # Commands and singular queries share the same clarification
             # contract. Queries stay read-only after selection; dropping an
@@ -370,7 +372,9 @@ class QuantifierParser:
         name_slot = result.entities.get("name")
         if name_slot is not None:
             exclude_name = _strip_locative_prepositions(str(name_slot.value))
-            excluded = resolve_entity(exclude_name, context.entities)
+            excluded = resolve_entity(
+                exclude_name, context.entities, index=context.index
+            )
             if excluded.status is not ResolveStatus.OK or excluded.entity is None:
                 return None  # exclusion target doesn't resolve unambiguously - never guess
             if excluded.entity not in matches:
@@ -486,7 +490,7 @@ class PercentageParser:
             if name_slot is None:
                 return None
             name = _strip_locative_prepositions(str(name_slot.value))
-            resolved = resolve_entity(name, context.entities)
+            resolved = resolve_entity(name, context.entities, index=context.index)
             if resolved.status is not ResolveStatus.OK or resolved.entity is None:
                 return None
 
@@ -610,7 +614,7 @@ class FanExtendedParser:
         if name_slot is None:
             return None
         name = _strip_locative_prepositions(str(name_slot.value))
-        resolved = resolve_entity(name, context.entities)
+        resolved = resolve_entity(name, context.entities, index=context.index)
         if resolved.status is not ResolveStatus.OK or resolved.entity is None:
             return None
 
@@ -671,7 +675,7 @@ class ClimateExtendedParser:
         if name_slot is None:
             return None
         name = _strip_locative_prepositions(str(name_slot.value))
-        resolved = resolve_entity(name, context.entities)
+        resolved = resolve_entity(name, context.entities, index=context.index)
         if resolved.status is not ResolveStatus.OK or resolved.entity is None:
             return None
 
@@ -749,7 +753,7 @@ class LightExtendedParser:
         if name_slot is None:
             return None
         name = _strip_locative_prepositions(str(name_slot.value))
-        resolved = resolve_entity(name, context.entities)
+        resolved = resolve_entity(name, context.entities, index=context.index)
         if resolved.status is not ResolveStatus.OK or resolved.entity is None:
             return None
 
@@ -1019,7 +1023,7 @@ class TemporalParser:
         if name_slot is None:
             return None
         name = _strip_locative_prepositions(str(name_slot.value))
-        resolved = resolve_entity(name, context.entities)
+        resolved = resolve_entity(name, context.entities, index=context.index)
         if resolved.status is not ResolveStatus.OK or resolved.entity is None:
             return None  # not found or ambiguous - never guess, no clarification round-trip here
         if resolved.entity.domain not in spec.allowed_domains:

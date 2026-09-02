@@ -21,6 +21,9 @@ CORE_AGENT_ACTIONS: dict[tuple[str, str], AgentActionSpec] = {
     ("homeassistant", "turn_on"): AgentActionSpec(
         frozenset({"light", "switch", "fan", "climate", "humidifier", "input_boolean"})
     ),
+    ("light", "turn_on"): AgentActionSpec(
+        frozenset({"light"}), frozenset({"brightness_pct"})
+    ),
     ("homeassistant", "turn_off"): AgentActionSpec(
         frozenset({"light", "switch", "fan", "climate", "humidifier", "input_boolean"})
     ),
@@ -62,6 +65,13 @@ def validate_agent_service_plan(plan: ServiceCallPlan) -> str | None:
             return "Die Agentenaktion enthält nicht freigegebene Aktionsdaten."
         if not _data_values_are_safe(data):
             return "Die Agentenaktion enthält ungültige Aktionsdaten."
+        brightness = data.get("brightness_pct")
+        if brightness is not None and (
+            isinstance(brightness, bool)
+            or not isinstance(brightness, (int, float))
+            or not 1 <= brightness <= 100
+        ):
+            return "Die Helligkeit der Agentenaktion liegt außerhalb des sicheren Bereichs."
         return None
 
     if validate_registered_operation(

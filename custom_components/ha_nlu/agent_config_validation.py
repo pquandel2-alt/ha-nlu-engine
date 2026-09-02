@@ -1,0 +1,57 @@
+"""Pure validation for privacy- and risk-relevant agent options."""
+
+from __future__ import annotations
+
+from datetime import time
+from pathlib import PurePath
+from typing import Iterable, cast
+
+
+EVENT_CATEGORIES = frozenset(
+    {
+        "safety",
+        "safety_alarm",
+        "device_unavailable",
+        "opening_while_away",
+        "window_heating",
+        "light_unoccupied",
+        "long_running_state",
+        "routine_anomaly",
+    }
+)
+
+
+def validate_quiet_time(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("Ruhezeit muss HH:MM sein")
+    try:
+        hour, minute = value.split(":", 1)
+        time(int(hour), int(minute))
+    except (TypeError, ValueError) as err:
+        raise ValueError("Ruhezeit muss HH:MM sein") from err
+    return value
+
+
+def validate_documents_directory(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("Dokumentverzeichnis muss relativ sein")
+    path = PurePath(value.strip())
+    if path.is_absolute() or not path.parts or ".." in path.parts or str(path) in {"", "."}:
+        raise ValueError("Dokumentverzeichnis muss unterhalb des HA-Konfigurationsordners liegen")
+    return str(path)
+
+
+def parse_event_categories(value: object) -> frozenset[str]:
+    if value is None or value == "":
+        return frozenset()
+    items: Iterable[object]
+    if isinstance(value, str):
+        items = value.split(",")
+    elif isinstance(value, (list, tuple, set)):
+        items = cast(Iterable[object], value)
+    else:
+        raise ValueError("Ereigniskategorien müssen eine Liste sein")
+    categories = frozenset(str(item).strip() for item in items if str(item).strip())
+    if not categories <= EVENT_CATEGORIES:
+        raise ValueError("Unbekannte Ereigniskategorie")
+    return categories

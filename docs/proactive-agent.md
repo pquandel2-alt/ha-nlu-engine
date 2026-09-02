@@ -136,6 +136,26 @@ Fragen wird niemals geraten.
   niedrigem Risiko ausführen. Mittlere, hohe oder kritische Risiken werden
   automatisch auf `ASK` herabgestuft.
 
+Zusätzlich muss AUTO global aktiviert und jede Ziel-ID ausdrücklich in der
+AUTO-Allowlist stehen. Neue Config Entries starten mit deaktiviertem AUTO und
+leerer Allowlist. Nur reversible Ein/Aus- beziehungsweise begrenzte
+Öffnen/Schließen-Operationen sind Kandidaten. Erinnerung oder statistische
+Wiederholung erweitert diese Liste niemals.
+
+Konfigurierte `state_changed`-Kategorien laufen vor der Ausgabe durch die
+zentrale Ereignisnormalisierung, Situationsbewertung und die gemeinsame
+`ProactiveDecisionEngine`. Diese prüft in fester Reihenfolge Qualität und
+Alter, Deduplizierung/Cooldown, Relevanz, Erreichbarkeit/Kanal sowie erst
+danach eine optional vorgeschlagene, geschlossene Aktion und die Execution
+Policy. Ohne konfigurierte
+Kategorie bleibt dieser Listener ausgabeseitig still. Routinebewertung ist
+separat opt-in und beginnt erst nach der konfigurierten Mindestzahl von
+Beobachtungen; neue Muster werden nur informiert oder angeboten. Explizites
+Feedback (`hilfreich`, `unnötig`, `falsch`, `künftig ignorieren`, `später erneut
+fragen`) bleibt eine inhaltsarme Entscheidungshistorie. `ignorieren` und
+`später` unterdrücken ausschließlich Hinweise und können keine
+Aktionsberechtigung freischalten.
+
 Der öffentliche HA-Action-Editor zeigt `ha_nlu.proactive_message` auch für
 fortgeschrittene Regeln an. Vorgeschlagene Aktionen werden durch eine
 geschlossene Service-Allowlist geprüft; freie `domain.service`-Ausführung ist

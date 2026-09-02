@@ -175,6 +175,7 @@ def _compile_measurement_query(
     text: str,
     entities: list[EntitySnapshot],
     analysis: SemanticAnalysis,
+    world_model: WorldModel | None = None,
 ) -> ParseResult | None:
     """Compile one property/location question from independent facts."""
     if analysis.values(SemanticKind.COMMAND_MARKER):
@@ -189,7 +190,7 @@ def _compile_measurement_query(
     spec = MEASUREMENT_PROPERTY_SPECS.get(canonical)
     if spec is None:
         return None
-    location = resolve_semantic_location(text, entities)
+    location = resolve_semantic_location(text, entities, world_model)
     if location is None:
         return None
     if _has_unexplained_meaning(analysis, (location[0],)):
@@ -563,8 +564,14 @@ class SemanticCommandCompiler:
             value for value in analysis.values(SemanticKind.DOMAIN)
             if isinstance(value, str)
         )
-        coordinated_locations = resolve_coordinated_locations(positive_text, entities)
-        location = None if coordinated_locations else resolve_semantic_location(positive_text, entities)
+        coordinated_locations = resolve_coordinated_locations(
+            positive_text, entities, world_model
+        )
+        location = (
+            None
+            if coordinated_locations
+            else resolve_semantic_location(positive_text, entities, world_model)
+        )
         locations = coordinated_locations or ((location,) if location else ())
         # A spoken scope is a hard constraint.  If HA does not know it (or
         # two floors make "oben" ambiguous), never silently widen the
@@ -581,16 +588,17 @@ class SemanticCommandCompiler:
 
         # If the user named an entity but omitted a generic device noun, infer
         # only the domain(s) of registry names that are actually present.
-        preliminary = _entity_candidates(
-            positive_text,
-            entities,
-            domains,
-            area_id=location[1] if location else None,
-            floor_id=location[2] if location else None,
-            world_model=world_model,
-        )
-        if not domains and preliminary:
-            domains = frozenset(entity.domain for entity in preliminary)
+        if not domains:
+            preliminary = _entity_candidates(
+                positive_text,
+                entities,
+                domains,
+                area_id=location[1] if location else None,
+                floor_id=location[2] if location else None,
+                world_model=world_model,
+            )
+            if preliminary:
+                domains = frozenset(entity.domain for entity in preliminary)
 
         intents = _intents(
             positive_text,
@@ -809,7 +817,9 @@ class SemanticQueryCompiler:
         # wins the command interpretation and is never converted to a query.
         analysis = analysis or analyse_semantics(text)
         if analysis.values(SemanticKind.PROPERTY):
-            return _compile_measurement_query(text, entities, analysis)
+            return _compile_measurement_query(
+                text, entities, analysis, world_model
+            )
         if (
             not (_QUERY_MARKER_RE.search(text) or text.rstrip().endswith("?"))
             or analysis.values(SemanticKind.COMMAND_MARKER)
@@ -825,14 +835,28 @@ class SemanticQueryCompiler:
             if isinstance(domain, str)
         )
         targets = list(dict.fromkeys(targets))
-        named_mentions = mentioned_entities(text, entities)
-        if not targets and named_mentions:
-            named_domains = {entity.domain for entity in named_mentions}
-            named_device_classes = {entity.device_class for entity in named_mentions}
-            if len(named_domains) == 1 and len(named_device_classes) == 1:
-                targets.append(
-                    (next(iter(named_domains)), next(iter(named_device_classes)))
-                )
+        named_mentions: tuple[EntitySnapshot, ...] = ()
+        needs_named_resolution = (
+            not targets
+            or bool(analysis.unexplained_tokens)
+            or _SINGULAR_NAMED_QUERY_RE.search(text) is not None
+            or _BARE_NAMED_STATE_QUERY_RE.search(text) is not None
+        )
+        if needs_named_resolution:
+            named_mentions = mentioned_entities(text, entities)
+        if not targets:
+            if named_mentions:
+                named_domains = {entity.domain for entity in named_mentions}
+                named_device_classes = {
+                    entity.device_class for entity in named_mentions
+                }
+                if len(named_domains) == 1 and len(named_device_classes) == 1:
+                    targets.append(
+                        (
+                            next(iter(named_domains)),
+                            next(iter(named_device_classes)),
+                        )
+                    )
         states = [
             value
             for value in analysis.values(SemanticKind.STATE)
@@ -849,8 +873,14 @@ class SemanticQueryCompiler:
         ):
             return None
 
-        coordinated_locations = resolve_coordinated_locations(text, entities)
-        location = None if coordinated_locations else resolve_semantic_location(text, entities)
+        coordinated_locations = resolve_coordinated_locations(
+            text, entities, world_model
+        )
+        location = (
+            None
+            if coordinated_locations
+            else resolve_semantic_location(text, entities, world_model)
+        )
         locations = coordinated_locations or ((location,) if location else ())
         has_location_cue = _LOCATION_CUE_RE.search(text) is not None
         if has_location_cue and not locations:

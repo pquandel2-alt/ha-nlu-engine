@@ -159,6 +159,26 @@ def test_index_without_domain_or_area_does_not_change_ambiguity():
     assert len(with_index.candidates) == 2
 
 
+def test_index_exact_tier_matches_full_scan_without_scope():
+    """The fast exact-name path preserves duplicate-name ambiguity."""
+    entities = [
+        EntitySnapshot("light.a", "Stehlampe", "light", "off"),
+        EntitySnapshot("light.b", "Stehlampe", "light", "off"),
+        EntitySnapshot("light.c", "Stehlampe Ecke", "light", "off"),
+    ]
+    index = build_entity_index(entities)
+
+    without_index = resolve_entity_scored("Stehlampe", entities)
+    with_index = resolve_entity_scored("Stehlampe", entities, index=index)
+
+    assert with_index == without_index
+    assert with_index.status is ResolutionStatus.AMBIGUOUS
+    assert {item.entity_id for item in with_index.candidates} == {
+        "light.a",
+        "light.b",
+    }
+
+
 def test_index_domain_prefilter_can_diverge_from_full_scan_by_design():
     """Documents the caveat spelled out in resolve_entity_scored's docstring:
     ``domain``/``area_id`` are additive *bonuses* in the index-less path (an

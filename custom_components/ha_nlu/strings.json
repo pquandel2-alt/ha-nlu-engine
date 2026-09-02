@@ -32,12 +32,29 @@
           "agent_notify_targets": "Push-Ziele",
           "agent_tts_entity": "TTS-Engine",
           "agent_media_players": "TTS-Lautsprecher oder Sprachsatelliten",
-          "agent_cooldown_seconds": "Standard-Cooldown in Sekunden"
+          "agent_cooldown_seconds": "Standard-Cooldown in Sekunden",
+          "memory_enabled": "Lokales dauerhaftes Gedächtnis aktivieren",
+          "memory_retention_days": "Aufbewahrung erlernter Daten in Tagen",
+          "persona_style": "Antwortstil (neutral, precise oder jarvis)",
+          "banter_level": "Banter-Level (0 bis 3)",
+          "agent_quiet_start": "Ruhezeit beginnt (HH:MM)",
+          "agent_quiet_end": "Ruhezeit endet (HH:MM)",
+          "agent_event_categories": "Aktive Ereigniskategorien (kommagetrennt; leer: konfigurierte Regeln)",
+          "routine_detection_enabled": "Lokale Routine- und Anomalieerkennung aktivieren",
+          "routine_min_observations": "Mindestzahl für statistische Muster",
+          "anomaly_threshold_percent": "Anomalieschwelle in Prozent",
+          "agent_auto_enabled": "Eng begrenztes LOW-Risk-AUTO aktivieren",
+          "agent_auto_entity_ids": "Explizit für AUTO freigegebene Entitäten",
+          "documents_enabled": "Lokalen Dokumentindex aktivieren",
+          "documents_directory": "Freigegebenes Unterverzeichnis im Home-Assistant-Konfigurationsordner",
+          "house_relations": "Hausbeziehungen (source_id | relation | target_id)"
         }
       }
     },
     "error": {
-      "invalid_alias_rules": "Die Aliasregeln sind ungültig oder ein Alias verweist auf mehrere Ziele."
+      "invalid_alias_rules": "Die Aliasregeln sind ungültig oder ein Alias verweist auf mehrere Ziele.",
+      "invalid_house_relations": "Die Hausbeziehungen sind ungültig.",
+      "invalid_agent_options": "Ruhezeit, Ereigniskategorien oder Dokumentverzeichnis sind ungültig."
     }
   },
   "services": {

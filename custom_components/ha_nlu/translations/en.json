@@ -32,12 +32,29 @@
           "agent_notify_targets": "Push targets",
           "agent_tts_entity": "TTS engine",
           "agent_media_players": "TTS speakers or voice satellites",
-          "agent_cooldown_seconds": "Default cooldown in seconds"
+          "agent_cooldown_seconds": "Default cooldown in seconds",
+          "memory_enabled": "Enable local persistent memory",
+          "memory_retention_days": "Learned-data retention in days",
+          "persona_style": "Response style (neutral, precise, or jarvis)",
+          "banter_level": "Banter level (0 to 3)",
+          "agent_quiet_start": "Quiet hours start (HH:MM)",
+          "agent_quiet_end": "Quiet hours end (HH:MM)",
+          "agent_event_categories": "Enabled event categories (comma-separated)",
+          "routine_detection_enabled": "Enable local routine and anomaly detection",
+          "routine_min_observations": "Minimum observations for statistical patterns",
+          "anomaly_threshold_percent": "Anomaly threshold in percent",
+          "agent_auto_enabled": "Enable narrowly scoped LOW-risk AUTO",
+          "agent_auto_entity_ids": "Entities explicitly allowed for AUTO",
+          "documents_enabled": "Enable local document index",
+          "documents_directory": "Allowed subdirectory inside the Home Assistant configuration directory",
+          "house_relations": "House relations (source_id | relation | target_id)"
         }
       }
     },
     "error": {
-      "invalid_alias_rules": "The alias rules are invalid or one alias points to multiple targets."
+      "invalid_alias_rules": "The alias rules are invalid or one alias points to multiple targets.",
+      "invalid_house_relations": "The configured house relations are invalid.",
+      "invalid_agent_options": "Quiet hours, event categories, or the document directory are invalid."
     }
   },
   "services": {

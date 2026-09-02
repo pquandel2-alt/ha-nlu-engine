@@ -20,6 +20,8 @@ from .agent_event import AgentEvent, AgentEventState, AgentMode, StoredServicePl
 from .agent_event_store import AgentEventStore
 from .automation_executor import AutomationExecutor
 from .const import (
+    CONF_AGENT_AUTO_ENABLED,
+    CONF_AGENT_AUTO_ENTITY_IDS,
     CONF_AGENT_COOLDOWN_SECONDS,
     CONF_AGENT_ENABLED,
     CONF_AGENT_NOTIFY_TARGETS,
@@ -161,6 +163,7 @@ class ProactiveAgentRuntime:
                 source_threshold=source_threshold,
                 proposed_action=(StoredServicePlan.from_plan(action) if action else None),
                 notification_device_ids=self._configured_notification_device_ids(),
+                safety_critical=bool(data.get("safety_critical", False)),
             )
             await self._store.async_save(event)
 
@@ -173,6 +176,22 @@ class ProactiveAgentRuntime:
 
         if mode is AgentMode.AUTO and action is not None:
             entities = build_entity_snapshots(self._hass, self._entry)
+            target_ids = (
+                (action.entity_id,)
+                if isinstance(action.entity_id, str)
+                else tuple(action.entity_id)
+            )
+            raw_allowlist = self._entry.options.get(CONF_AGENT_AUTO_ENTITY_IDS)
+            auto_allowlist = (
+                set(raw_allowlist)
+                if isinstance(raw_allowlist, (list, tuple, set))
+                else set()
+            )
+            # Config entries predating this option retain their explicitly
+            # authored AUTO rules. New/updated entries receive an explicit
+            # empty allowlist and therefore cannot AUTO until configured.
+            if raw_allowlist is None:
+                auto_allowlist = set(target_ids)
             auto_decision = evaluate_service_plan(
                 action,
                 entities,
@@ -181,7 +200,12 @@ class ProactiveAgentRuntime:
                 user_id=None,
             )
             if (
-                auto_decision.outcome is not PolicyOutcome.ALLOW
+                not bool(self._entry.options.get(CONF_AGENT_AUTO_ENABLED, True))
+                or not set(target_ids) <= auto_allowlist
+                or action.service not in {
+                    "turn_on", "turn_off", "open_cover", "close_cover"
+                }
+                or auto_decision.outcome is not PolicyOutcome.ALLOW
                 or auto_decision.risk is not RiskLevel.LOW
             ):
                 # AUTO can only execute a plan that is both policy-ALLOW and LOW.

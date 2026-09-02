@@ -90,7 +90,12 @@ def _score_floor_name(spoken: str, spoken_norm: str, floor_name: str) -> float |
     return None
 
 
-def resolve_floor_scored(name: str, entities: list[EntitySnapshot]) -> FloorResolutionResult:
+def resolve_floor_scored(
+    name: str,
+    entities: list[EntitySnapshot],
+    *,
+    snapshots: tuple[FloorSnapshot, ...] | None = None,
+) -> FloorResolutionResult:
     """Scored floor resolution (v2 plan Phase 28): same candidate generation +
     scoring + ambiguity detection pattern as resolve_area_scored (Phase 7),
     just for floor names instead of room names.
@@ -101,7 +106,7 @@ def resolve_floor_scored(name: str, entities: list[EntitySnapshot]) -> FloorReso
     spoken_norm = normalize_for_compare(spoken)
 
     ranked: list[tuple[FloorSnapshot, float]] = []
-    for floor in floor_snapshots(entities):
+    for floor in snapshots if snapshots is not None else floor_snapshots(entities):
         score = _score_floor_name(spoken, spoken_norm, floor.name)
         if score is not None:
             ranked.append((floor, score))

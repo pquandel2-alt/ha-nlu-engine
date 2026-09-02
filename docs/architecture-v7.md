@@ -146,3 +146,19 @@ Bestätigung/Abbruch, Wizard-Retries, Todo-Mutationen, Mehrfachbefehle mit
 Undo, Automationsauswahl sowie Laufzeitfehler. Ein End-to-End-Test schlägt
 weiterhin fehl, sobald ein migrierter V7-Pfad wieder den alten Device-Router
 erreicht.
+
+## Nachgelagerter lokaler Agentenkern
+
+V7 bleibt der einzige Spracheinstieg. Dahinter teilen sich Dialogmanager,
+Hausgraph, Gedächtnis, Situationen und Planer dieselben stabilen IDs aus dem
+pro Turn gebauten `WorldModel`. Der vollständige Vertrag ist in
+[`jarvis-core.md`](jarvis-core.md) dokumentiert. Keine dieser Schichten darf
+Home-Assistant-Dienste ausführen; auch Mehrschrittpläne und persistierte
+Agentenaktionen laufen ausschließlich durch Execution Policy und gemeinsamen
+Executor mit frischem Snapshot.
+
+Katalogisierte Komfort- und Haushaltsszenarien werden erst nach dem
+`LanguageDocument` erkannt. Sie arbeiten ausschließlich mit stabilen IDs und
+geben typisierte ASK-Vorschläge beziehungsweise `AutomationModel`-Bäume an
+die vorhandenen Validator-, Vorschau- und Bestätigungsstrecken weiter. Sie
+führen keine rohe Äußerung direkt in einen Home-Assistant-Serviceaufruf um.

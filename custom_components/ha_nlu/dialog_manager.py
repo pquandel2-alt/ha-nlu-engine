@@ -1,0 +1,188 @@
+"""Central typed coordinator for multiple pending household dialogs.
+
+The manager owns priority, replacement, correction and explanation.  It does
+not parse device commands and cannot execute actions; it consumes already
+typed slots produced by the V7 understanding boundary.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta, timezone
+from enum import IntEnum, StrEnum
+from typing import Mapping
+
+
+class DialogTaskKind(StrEnum):
+    ENTITY_SELECTION = "entity_selection"
+    MISSING_SLOT = "missing_slot"
+    SAFETY_CONFIRMATION = "safety_confirmation"
+    AUTOMATION = "automation"
+    MEMORY_CONFIRMATION = "memory_confirmation"
+    COMFORT_CONFIRMATION = "comfort_confirmation"
+    PLAN_CONFIRMATION = "plan_confirmation"
+
+
+class DialogPriority(IntEnum):
+    FOLLOWUP = 10
+    SELECTION = 20
+    CONFIRMATION = 30
+    SAFETY = 40
+
+
+@dataclass(frozen=True)
+class DialogTask:
+    task_id: str
+    kind: DialogTaskKind
+    priority: DialogPriority
+    created_at: datetime
+    expires_at: datetime
+    slots: Mapping[str, object] = field(default_factory=lambda: _empty_mapping())
+    missing_slots: tuple[str, ...] = ()
+    candidates: tuple[str, ...] = ()
+    reason: str = ""
+    requested_by_user_id: str | None = None
+
+
+@dataclass(frozen=True)
+class DialogDecision:
+    task: DialogTask | None
+    response: str | None
+    completed: bool = False
+    cancelled: bool = False
+    replaced: bool = False
+
+
+class DialogManager:
+    """Conversation-scoped task queue with one deterministic active task."""
+
+    def __init__(self, *, ttl_seconds: int = 120) -> None:
+        self.ttl = timedelta(seconds=max(10, ttl_seconds))
+        self._tasks: dict[str, dict[str, DialogTask]] = {}
+
+    def add(self, conversation_id: str, task: DialogTask) -> None:
+        self._tasks.setdefault(conversation_id, {})[task.task_id] = task
+
+    def create(
+        self,
+        conversation_id: str,
+        task_id: str,
+        kind: DialogTaskKind,
+        priority: DialogPriority,
+        *,
+        slots: Mapping[str, object] | None = None,
+        missing_slots: tuple[str, ...] = (),
+        candidates: tuple[str, ...] = (),
+        reason: str = "",
+        requested_by_user_id: str | None = None,
+        now: datetime | None = None,
+    ) -> DialogTask:
+        current = now or datetime.now(timezone.utc)
+        task = DialogTask(
+            task_id,
+            kind,
+            priority,
+            current,
+            current + self.ttl,
+            dict(slots or {}),
+            missing_slots,
+            candidates,
+            reason,
+            requested_by_user_id,
+        )
+        self.add(conversation_id, task)
+        return task
+
+    def active(
+        self, conversation_id: str, *, now: datetime | None = None
+    ) -> DialogTask | None:
+        current = now or datetime.now(timezone.utc)
+        tasks = self._tasks.get(conversation_id, {})
+        expired = [task_id for task_id, task in tasks.items() if task.expires_at <= current]
+        for task_id in expired:
+            tasks.pop(task_id, None)
+        return max(
+            tasks.values(),
+            key=lambda item: (item.priority, item.created_at, item.task_id),
+            default=None,
+        )
+
+    def cancel(self, conversation_id: str, task_id: str | None = None) -> int:
+        tasks = self._tasks.get(conversation_id, {})
+        if task_id is None:
+            count = len(tasks)
+            tasks.clear()
+            return count
+        return int(tasks.pop(task_id, None) is not None)
+
+    def explain(self, conversation_id: str) -> str:
+        task = self.active(conversation_id)
+        if task is None:
+            return "Es ist keine Rückfrage offen."
+        missing = ", ".join(task.missing_slots)
+        detail = f" Mir fehlt: {missing}." if missing else ""
+        reason = task.reason or "Die Bedeutung ist noch nicht eindeutig."
+        return f"{reason}{detail} Ich führe bis zur Klärung nichts aus."
+
+    def understood(self, conversation_id: str) -> str:
+        task = self.active(conversation_id)
+        if task is None:
+            return "Es ist kein unvollständiger Auftrag offen."
+        visible = ", ".join(
+            f"{key}={value}" for key, value in sorted(task.slots.items())
+        )
+        return f"Offener Auftrag: {visible or 'noch keine sicheren Angaben'}."
+
+    def replace_with_complete_command(self, conversation_id: str) -> DialogDecision:
+        replaced = self.cancel(conversation_id) > 0
+        return DialogDecision(None, None, completed=True, replaced=replaced)
+
+    def select(
+        self,
+        conversation_id: str,
+        selection: str | int,
+        *,
+        user_id: str | None,
+    ) -> DialogDecision:
+        task = self.active(conversation_id)
+        if task is None:
+            return DialogDecision(None, "Dazu ist keine eindeutige Auswahl offen.")
+        if task.requested_by_user_id is not None and task.requested_by_user_id != user_id:
+            return DialogDecision(task, "Diese Rückfrage gehört zu einem anderen Benutzer.")
+        selected: str | None = None
+        if isinstance(selection, int):
+            if 1 <= selection <= len(task.candidates):
+                selected = task.candidates[selection - 1]
+        else:
+            matches = [item for item in task.candidates if item.casefold() == selection.casefold()]
+            if len(matches) == 1:
+                selected = matches[0]
+        if selected is None:
+            return DialogDecision(task, "Die Auswahl ist nicht eindeutig; der Dialog bleibt offen.")
+        slots = {**task.slots, "selection": selected}
+        updated = replace(task, slots=slots, missing_slots=tuple(slot for slot in task.missing_slots if slot != "selection"))
+        self.add(conversation_id, updated)
+        completed = not updated.missing_slots
+        if completed:
+            self.cancel(conversation_id, updated.task_id)
+        return DialogDecision(updated, None, completed=completed)
+
+    def correct(
+        self,
+        conversation_id: str,
+        corrections: Mapping[str, object],
+    ) -> DialogDecision:
+        task = self.active(conversation_id)
+        if task is None:
+            return DialogDecision(None, "Es gibt keinen relevanten Auftrag zum Korrigieren.")
+        updated = replace(
+            task,
+            slots={**task.slots, **corrections},
+            missing_slots=tuple(slot for slot in task.missing_slots if slot not in corrections),
+        )
+        self.add(conversation_id, updated)
+        return DialogDecision(updated, None, completed=not updated.missing_slots)
+
+
+def _empty_mapping() -> dict[str, object]:
+    return {}

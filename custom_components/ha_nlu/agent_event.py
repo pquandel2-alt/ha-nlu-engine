@@ -72,6 +72,7 @@ class AgentEvent:
     delivered_channels: tuple[str, ...] = ()
     notification_device_ids: tuple[str, ...] = ()
     last_error: str | None = None
+    safety_critical: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
@@ -134,6 +135,7 @@ class AgentEvent:
                 else ()
             ),
             last_error=_optional_str(raw.get("last_error")),
+            safety_critical=bool(raw.get("safety_critical", False)),
         )
 
 

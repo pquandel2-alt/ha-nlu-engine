@@ -32,6 +32,7 @@ from homeassistant.util import dt as dt_util
 
 from .automation_executor import AutomationExecutor
 from .alias_learning import append_alias_rule, parse_alias_learning
+from .agent_action_policy import validate_agent_service_plan
 from .automation_action_edit import (
     action_edit_operation,
     homeintent_candidates,
@@ -39,6 +40,7 @@ from .automation_action_edit import (
     reordered_actions,
     select_candidate_reply,
 )
+from .automation_scenarios import interpret_downstairs_shutdown
 from .automation_management import (
     AutomationManagementKind,
     format_scheduled_time,
@@ -70,6 +72,7 @@ from .calendar_event import (
 )
 from .calendar_management import parse_calendar_management
 from .capability_audit import match_capability_audit_query
+from .comfort_intent import is_comfort_request, select_comfort_suggestion
 from .conversation_location import (
     materialize_local_reference,
     resolve_conversation_area,
@@ -77,9 +80,12 @@ from .conversation_location import (
 from .const import (
     CONF_ALLOW_NON_ADMIN_AUTOMATIONS,
     CONF_CUSTOM_ALIASES,
+    CONF_HOUSE_RELATIONS,
     DOMAIN,
     NOT_UNDERSTOOD_TEXT,
 )
+from .dialog_manager import DialogPriority, DialogTaskKind
+from .document_intent import interpret_document_search
 from .device_control import DeviceControlResult, match_device_control, match_device_control_followup
 from .engine import (
     AutomationDraftMatchResult,
@@ -112,6 +118,11 @@ from .management_dialogs import (
     store_automation_action_edit,
     store_automation_structure_edit,
 )
+from .house_graph import FactProvenance, HouseGraph, parse_relation_specs
+from .goal_intent import interpret_goal
+from .memory import MemoryKind
+from .memory_intent import MemoryOperation, interpret_memory_intent
+from .planner import MaterializedPlan, PlanExecutor, PlanStatus, StepKind, materialize_goal
 from .nlu.automation_confirmation import ConfirmationReply, classify_confirmation_reply
 from .nlu.automation_model import AutomationModel, TriggerTarget, resolve_pending_schedule
 from .nlu.automation_validator import validate_automation
@@ -146,7 +157,7 @@ from .nlu.ha_automation_generator import (
     generate_ha_automation_config,
     resolve_automation_action_entity_ids,
 )
-from .nlu.language_frontend import analyse_language
+from .nlu.language_frontend import LanguageDocument, analyse_language
 from .nlu.response_generator import _automation_label
 from .nlu.semantic_utterance import (
     SpeechAct,
@@ -296,6 +307,7 @@ class NluConversationEntity(
         # Rebuilt every turn in _async_handle_message() (World Model Wave,
         # 2026-08-14); None only until the first turn.
         self._world_model: WorldModel | None = None
+        self._house_graph: HouseGraph | None = None
         # Lazily constructed on first use in _async_handle_message() (V5.26)
         # rather than here: self.hass isn't set yet at __init__ time (HA's
         # entity platform assigns it before async_added_to_hass() runs, not
@@ -352,6 +364,16 @@ class NluConversationEntity(
         entities = build_entity_snapshots(self.hass, self.entry)
         devices = build_device_snapshots(self.hass, self.entry)
         self._world_model = assemble_world_model(entities, devices)
+        try:
+            configured_relations = parse_relation_specs(
+                self.entry.options.get(CONF_HOUSE_RELATIONS)
+            )
+            self._house_graph = self._world_model.build_house_graph(
+                configured_relations
+            )
+        except ValueError:
+            # Invalid migrated configuration never weakens language safety.
+            self._house_graph = self._world_model.build_house_graph()
         pending = self._context_store.get(user_input.conversation_id)
         conversation_area = resolve_conversation_area(self.hass, user_input)
         localized_text = materialize_local_reference(
@@ -375,6 +397,37 @@ class NluConversationEntity(
             )
 
         active_dialog = active_pending_dialog(pending)
+
+        if active_dialog is None:
+            scenario = interpret_downstairs_shutdown(language_document, entities)
+            if scenario is not None:
+                return self._handle_automation_match_result(
+                    user_input, response, scenario, entities
+                )
+            comfort_result = await self._async_handle_comfort_turn(
+                user_input,
+                response,
+                language_document,
+                entities,
+                area_id=(conversation_area.area_id if conversation_area is not None else None),
+            )
+            if comfort_result is not None:
+                return comfort_result
+            document_result = await self._async_handle_document_turn(
+                user_input, response, language_document
+            )
+            if document_result is not None:
+                return document_result
+            plan_result = await self._async_handle_goal_turn(
+                user_input, response, language_document, entities
+            )
+            if plan_result is not None:
+                return plan_result
+            memory_result = await self._async_handle_memory_turn(
+                user_input, response, language_document, entities
+            )
+            if memory_result is not None:
+                return memory_result
 
         # A normal pending conversation dialog always wins. Only an otherwise
         # unclaimed yes/no reply may address one unique, unexpired ASK event
@@ -835,9 +888,86 @@ class NluConversationEntity(
                         conversation_id=user_input.conversation_id,
                     )
         elif result is None:
-            result = self._engine.match_correction_followup(
+            correction = self._engine.match_correction_followup(
                 user_input.text, entities, pending
             )
+            if correction is not None and correction.plan is not None:
+                undo = pending.pending_undo if pending is not None else None
+                actor_id = conversation_user_id(user_input)
+                if undo is None:
+                    response.async_set_speech(
+                        "Die vorige Aktion kann ich nicht sicher rückgängig machen. Bitte korrigiere sie mit einem vollständigen neuen Befehl."
+                    )
+                    return conversation.ConversationResult(
+                        response=response,
+                        conversation_id=user_input.conversation_id,
+                    )
+                if undo.requested_by_user_id is not None and undo.requested_by_user_id != actor_id:
+                    response.async_set_error(
+                        intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                        "Diese Korrektur gehört zu einem anderen Benutzer.",
+                    )
+                    return conversation.ConversationResult(
+                        response=response,
+                        conversation_id=user_input.conversation_id,
+                    )
+                is_admin = await user_is_admin(self.hass, user_input)
+                for inverse in undo.plans:
+                    fresh = build_entity_snapshots(self.hass, self.entry)
+                    compensated = await async_execute_service_plan(
+                        self.hass,
+                        inverse,
+                        fresh,
+                        self.entry.options,
+                        is_admin=is_admin,
+                        user_id=actor_id,
+                        confirmed=True,
+                        audit_trail=self._audit_trail,
+                        audit_actor_id=actor_id,
+                    )
+                    if not compensated.executed:
+                        self._context_store.clear(user_input.conversation_id)
+                        response.async_set_error(
+                            intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                            "Die vorige Aktion konnte nicht sicher zurückgenommen werden; die Korrektur wurde nicht ausgeführt.",
+                        )
+                        return conversation.ConversationResult(
+                            response=response,
+                            conversation_id=user_input.conversation_id,
+                        )
+                    expected_state = {
+                        "turn_on": "on",
+                        "turn_off": "off",
+                        "open_cover": "open",
+                        "close_cover": "closed",
+                    }.get(inverse.service)
+                    if expected_state is not None:
+                        target_ids = (
+                            (inverse.entity_id,)
+                            if isinstance(inverse.entity_id, str)
+                            else tuple(inverse.entity_id)
+                        )
+                        observed = {
+                            item.entity_id: item.state
+                            for item in build_entity_snapshots(self.hass, self.entry)
+                            if item.entity_id in target_ids
+                        }
+                        if any(observed.get(item) != expected_state for item in target_ids):
+                            self._context_store.clear(user_input.conversation_id)
+                            response.async_set_error(
+                                intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                                "Die Rücknahme wurde nicht im aktuellen Zustand beobachtet; die Korrektur wurde sicher gestoppt.",
+                            )
+                            return conversation.ConversationResult(
+                                response=response,
+                                conversation_id=user_input.conversation_id,
+                            )
+                # The correction is a new action after compensation, so it
+                # must receive another fresh snapshot and policy evaluation.
+                entities = build_entity_snapshots(self.hass, self.entry)
+                result = correction
+            else:
+                result = correction
             if result is None:
                 result = self._engine.match_followup(user_input.text, pending)
             if result is None:
@@ -1049,6 +1179,390 @@ class NluConversationEntity(
 
         return await self._async_handle_match_result(
             user_input, response, result, entities
+        )
+
+    async def _async_handle_comfort_turn(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        language_document: LanguageDocument,
+        entities: list[EntitySnapshot],
+        *,
+        area_id: str | None,
+    ) -> conversation.ConversationResult | None:
+        """Turn a vague comfort command into one explicit, confirmed ASK."""
+        manager = self._runtime_data.dialog_manager
+        conversation_id = user_input.conversation_id
+        active = manager.active(conversation_id)
+        if (
+            active is not None
+            and active.kind is DialogTaskKind.MISSING_SLOT
+            and active.task_id == "comfort-missing-action"
+        ):
+            normalized = language_document.normalized_text.casefold()
+            if re.search(r"\bwarum\s+fragst\s+du\b", normalized):
+                response.async_set_speech(manager.explain(conversation_id))
+            elif re.search(r"\bwas\s+hast\s+du\s+verstanden\b", normalized):
+                response.async_set_speech(manager.understood(conversation_id))
+            elif re.search(r"\b(?:abbrechen|vergiss\s+es|lass\s+das)\b", normalized):
+                manager.cancel(conversation_id)
+                response.async_set_speech("In Ordnung. Ich ändere nichts.")
+            else:
+                manager.cancel(conversation_id)
+                return None
+            return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+        if active is not None and active.kind is DialogTaskKind.COMFORT_CONFIRMATION:
+            actor_id = conversation_user_id(user_input)
+            if active.requested_by_user_id != actor_id:
+                response.async_set_speech("Diese Komfort-Rückfrage gehört zu einem anderen Benutzer.")
+                return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+            reply = classify_confirmation_reply(language_document.source_text)
+            if reply is ConfirmationReply.NO:
+                manager.cancel(conversation_id)
+                response.async_set_speech("In Ordnung. Ich ändere nichts.")
+            elif reply is ConfirmationReply.YES:
+                proposed = active.slots.get("plan")
+                if not isinstance(proposed, ServiceCallPlan):
+                    manager.cancel(conversation_id)
+                    response.async_set_speech("Der Vorschlag ist nicht mehr vollständig. Ich ändere nichts.")
+                else:
+                    fresh = build_entity_snapshots(self.hass, self.entry)
+                    validation_error = validate_agent_service_plan(proposed)
+                    if validation_error is not None:
+                        manager.cancel(conversation_id)
+                        response.async_set_speech(f"Ich habe nichts geändert: {validation_error}")
+                    else:
+                        execution = await async_execute_service_plan(
+                            self.hass,
+                            proposed,
+                            fresh,
+                            self.entry.options,
+                            is_admin=await user_is_admin(self.hass, user_input),
+                            user_id=actor_id,
+                            confirmed=True,
+                            audit_trail=self._audit_trail,
+                            audit_actor_id=actor_id or "voice",
+                        )
+                        manager.cancel(conversation_id)
+                        response.async_set_speech(
+                            "Die bestätigte Komfortänderung wurde ausgeführt."
+                            if execution.executed
+                            else f"Ich habe nichts geändert: {execution.error or 'Policy abgelehnt.'}"
+                        )
+            elif len(language_document.tokens) <= 3:
+                response.async_set_speech("Bitte antworte eindeutig mit Ja oder Nein.")
+            else:
+                manager.cancel(conversation_id)
+                return None
+            return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+
+        if not is_comfort_request(language_document):
+            return None
+        # A complete comfort request replaces an older optional task, but it
+        # never confirms that task implicitly.
+        manager.cancel(conversation_id)
+        store = self._runtime_data.memory
+        actor_id = conversation_user_id(user_input)
+        records = (
+            await store.async_list(person_id=actor_id, kinds=(MemoryKind.PREFERENCE,))
+            if store is not None and store.enabled and actor_id is not None
+            else ()
+        )
+        suggestion = select_comfort_suggestion(records, entities, area_id=area_id)
+        if suggestion is None:
+            manager.create(
+                conversation_id,
+                "comfort-missing-action",
+                DialogTaskKind.MISSING_SLOT,
+                DialogPriority.FOLLOWUP,
+                missing_slots=("konkrete Aktion",),
+                reason="Gemütlicher ist ohne eine eindeutige bestätigte Präferenz mehrdeutig.",
+                requested_by_user_id=actor_id,
+            )
+            response.async_set_speech(
+                "Was soll ich konkret ändern – zum Beispiel Lichthelligkeit oder Temperatur? Ich habe noch nichts ausgeführt."
+            )
+        else:
+            manager.create(
+                conversation_id,
+                "comfort-confirmation",
+                DialogTaskKind.COMFORT_CONFIRMATION,
+                DialogPriority.CONFIRMATION,
+                slots={"plan": suggestion.plan, "target": suggestion.target_name},
+                reason=f"Der Vorschlag beruht auf einer {suggestion.explanation}.",
+                requested_by_user_id=actor_id,
+            )
+            brightness = suggestion.plan.data["brightness_pct"]
+            response.async_set_speech(
+                f"Für diesen Kontext ist {suggestion.target_name} mit {brightness} Prozent als bestätigte Präferenz hinterlegt. Soll ich genau das anwenden?"
+            )
+        return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+
+    async def _async_handle_document_turn(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        language_document: LanguageDocument,
+    ) -> conversation.ConversationResult | None:
+        query = interpret_document_search(language_document)
+        if query is None:
+            return None
+        index = self._runtime_data.document_index
+        if index is None:
+            response.async_set_speech("Der lokale Dokumentindex ist deaktiviert.")
+        else:
+            hits = await index.async_search(query, limit=3)
+            if not hits:
+                response.async_set_speech("Dazu habe ich in den freigegebenen lokalen Dokumenten keinen Treffer gefunden.")
+            else:
+                rendered = "; ".join(
+                    f"{hit.title} ({hit.relative_path}): {hit.excerpt}"
+                    for hit in hits
+                )
+                response.async_set_speech(f"Lokale Dokumenttreffer: {rendered}")
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    async def _async_handle_goal_turn(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        language_document: LanguageDocument,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult | None:
+        manager = self._runtime_data.dialog_manager
+        conversation_id = user_input.conversation_id
+        active = manager.active(conversation_id)
+        if active is not None and active.kind is DialogTaskKind.PLAN_CONFIRMATION:
+            actor_id = conversation_user_id(user_input)
+            if active.requested_by_user_id is not None and active.requested_by_user_id != actor_id:
+                response.async_set_speech("Diese Planbestätigung gehört zu einem anderen Benutzer.")
+                return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+            reply = classify_confirmation_reply(language_document.source_text)
+            if reply is ConfirmationReply.NO:
+                manager.cancel(conversation_id)
+                response.async_set_speech("In Ordnung. Der Plan wurde nicht ausgeführt.")
+            elif reply is ConfirmationReply.UNCLEAR:
+                if len(language_document.tokens) > 3:
+                    manager.cancel(conversation_id)
+                    return None
+                response.async_set_speech("Bitte bestätige den gesamten Plan eindeutig mit Ja oder Nein.")
+            else:
+                stored_plan = active.slots.get("plan")
+                if not isinstance(stored_plan, MaterializedPlan):
+                    manager.cancel(conversation_id)
+                    response.async_set_speech("Der Plan ist nicht mehr vollständig. Ich habe nichts ausgeführt.")
+                else:
+                    is_admin = await user_is_admin(self.hass, user_input)
+
+                    async def refresh() -> list[EntitySnapshot]:
+                        return build_entity_snapshots(self.hass, self.entry)
+
+                    async def execute(plan, fresh, confirmed):
+                        return await async_execute_service_plan(
+                            self.hass,
+                            plan,
+                            fresh,
+                            self.entry.options,
+                            is_admin=is_admin,
+                            user_id=actor_id,
+                            confirmed=confirmed,
+                            audit_trail=self._audit_trail,
+                            audit_actor_id=actor_id or "voice",
+                        )
+
+                    async def verify(entity_id: str, expected: str) -> bool:
+                        current = next(
+                            (
+                                item
+                                for item in build_entity_snapshots(self.hass, self.entry)
+                                if item.entity_id == entity_id
+                            ),
+                            None,
+                        )
+                        return current is not None and current.state == expected
+
+                    result = await PlanExecutor(refresh, execute, verify).execute(
+                        stored_plan, confirmed=True
+                    )
+                    manager.cancel(conversation_id)
+                    if result.status is PlanStatus.COMPLETED:
+                        response.async_set_speech("Der Plan wurde vollständig ausgeführt und verifiziert.")
+                    else:
+                        response.async_set_speech("Der Plan wurde sicher gestoppt, weil ein Schritt fehlschlug oder nicht verifiziert werden konnte.")
+            return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+
+        goal = interpret_goal(language_document)
+        if goal is None:
+            return None
+        try:
+            plan = materialize_goal(
+                goal,
+                entities,
+                options=self.entry.options,
+                is_admin=await user_is_admin(self.hass, user_input),
+                user_id=conversation_user_id(user_input),
+            )
+        except (PermissionError, ValueError) as err:
+            response.async_set_speech(f"Ich kann dafür keinen sicheren Plan erstellen: {err}")
+            return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+        actions = [step.description for step in plan.steps if step.kind is StepKind.ACTION]
+        details = "; ".join(actions[:3])
+        if len(actions) > 3:
+            details += f"; sowie {len(actions) - 3} weitere geprüfte Schritte"
+        if not plan.requires_confirmation:
+            response.async_set_speech(plan.summary)
+            return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+        manager.create(
+            conversation_id,
+            "goal-plan",
+            DialogTaskKind.PLAN_CONFIRMATION,
+            DialogPriority.CONFIRMATION,
+            slots={"plan": plan},
+            reason="Ein vollständiger Mehrschrittplan wartet auf Bestätigung.",
+            requested_by_user_id=conversation_user_id(user_input),
+        )
+        response.async_set_speech(
+            f"Planvorschau: {details}. {plan.summary} Soll ich den gesamten Plan ausführen?"
+        )
+        return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+
+    async def _async_handle_memory_turn(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        language_document: LanguageDocument,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult | None:
+        """Handle explicit memory meanings after the shared language frontend."""
+        store = self._runtime_data.memory
+        manager = self._runtime_data.dialog_manager
+        conversation_id = user_input.conversation_id
+        active = manager.active(conversation_id)
+        if active is not None and active.kind is DialogTaskKind.MEMORY_CONFIRMATION:
+            actor_id = conversation_user_id(user_input)
+            if (
+                active.requested_by_user_id is not None
+                and active.requested_by_user_id != actor_id
+            ):
+                response.async_set_speech("Diese Gedächtnisrückfrage gehört zu einem anderen Benutzer.")
+                return conversation.ConversationResult(
+                    response=response, conversation_id=conversation_id
+                )
+            normalized = language_document.normalized_text.casefold()
+            if re.search(r"\bwas\s+hast\s+du\s+verstanden\b", normalized):
+                response.async_set_speech(manager.understood(conversation_id))
+            elif re.search(r"\bwarum\s+fragst\s+du\b", normalized):
+                response.async_set_speech(manager.explain(conversation_id))
+            elif re.search(r"\b(?:abbrechen|vergiss\s+es|lass\s+das)\b", normalized):
+                manager.cancel(conversation_id)
+                response.async_set_speech("In Ordnung. Ich speichere und lösche nichts.")
+            else:
+                reply = classify_confirmation_reply(language_document.source_text)
+                if reply is ConfirmationReply.NO:
+                    manager.cancel(conversation_id)
+                    response.async_set_speech("In Ordnung. Es wurde nichts dauerhaft geändert.")
+                elif reply is ConfirmationReply.YES:
+                    operation = active.slots.get("operation")
+                    if operation == MemoryOperation.RESET.value:
+                        deleted = await store.async_reset() if store is not None else 0
+                        response.async_set_speech(f"{deleted} gespeicherte Einträge wurden kontrolliert gelöscht.")
+                    elif store is None or not store.enabled:
+                        response.async_set_speech("Das lokale dauerhafte Gedächtnis ist deaktiviert.")
+                    else:
+                        content = active.slots.get("content")
+                        person_id = active.slots.get("person_id")
+                        if not isinstance(content, dict) or not isinstance(person_id, str):
+                            response.async_set_speech("Die Erinnerung ist nicht mehr vollständig. Ich speichere nichts.")
+                        else:
+                            await store.async_remember(
+                                MemoryKind.PREFERENCE,
+                                content,
+                                provenance=FactProvenance.CONFIRMED_MEMORY,
+                                confirmed=True,
+                                person_id=person_id,
+                            )
+                            response.async_set_speech("Gespeichert. Du kannst diese Erinnerung jederzeit einzeln oder zusammen mit deinen Routinen löschen.")
+                    manager.cancel(conversation_id)
+                elif len(language_document.tokens) <= 3:
+                    response.async_set_speech("Bitte antworte eindeutig mit Ja oder Nein.")
+                else:
+                    # A complete new command replaces this optional memory dialog.
+                    manager.cancel(conversation_id)
+                    return None
+            return conversation.ConversationResult(
+                response=response, conversation_id=conversation_id
+            )
+
+        request = interpret_memory_intent(language_document, entities)
+        if request is None:
+            return None
+        if store is None or not store.enabled:
+            response.async_set_speech("Das lokale dauerhafte Gedächtnis ist deaktiviert.")
+        elif request.operation is MemoryOperation.LIST:
+            records = await store.async_list(person_id=conversation_user_id(user_input))
+            counts: dict[str, int] = {}
+            for record in records:
+                counts[record.kind.value] = counts.get(record.kind.value, 0) + 1
+            summary = ", ".join(f"{count} {kind}" for kind, count in sorted(counts.items()))
+            response.async_set_speech(
+                f"Gespeichert sind {summary}." if summary else "Für dich sind keine dauerhaften Erinnerungen gespeichert."
+            )
+        elif request.operation is MemoryOperation.FORGET_ROUTINES:
+            person_id = conversation_user_id(user_input)
+            if person_id is None:
+                response.async_set_speech("Persönliche Routinen kann ich nur einem authentifizierten Benutzer zuordnen.")
+            else:
+                deleted = await store.async_forget_person(
+                    person_id,
+                    kinds=(MemoryKind.ROUTINE_GRANT, MemoryKind.DECISION),
+                )
+                response.async_set_speech(f"{deleted} persönliche Routinen und Routineentscheidungen wurden gelöscht.")
+        elif request.operation is MemoryOperation.RESET:
+            reset_user_id = conversation_user_id(user_input)
+            if reset_user_id is None or not await user_is_admin(self.hass, user_input):
+                response.async_set_speech("Das vollständige Gedächtnis darf nur ein authentifizierter Administrator zurücksetzen.")
+                return conversation.ConversationResult(
+                    response=response, conversation_id=conversation_id
+                )
+            manager.create(
+                conversation_id,
+                "memory-reset",
+                DialogTaskKind.MEMORY_CONFIRMATION,
+                DialogPriority.SAFETY,
+                slots={"operation": MemoryOperation.RESET.value},
+                reason="Das würde alle dauerhaften HomeIntent-Erinnerungen löschen.",
+                requested_by_user_id=reset_user_id,
+            )
+            response.async_set_speech("Soll ich wirklich alle dauerhaften HomeIntent-Erinnerungen löschen?")
+        elif request.target_entity_id is None:
+            if request.ambiguous_entity_ids:
+                response.async_set_speech("Mehrere Geräte passen zur genannten Präferenz. Bitte nenne eines eindeutig.")
+            else:
+                response.async_set_speech("Welches eindeutige Gerät soll Teil dieser Präferenz sein?")
+        else:
+            person_id = conversation_user_id(user_input)
+            if person_id is None:
+                response.async_set_speech("Persönliche Präferenzen speichere ich nur für einen authentifizierten Benutzer.")
+            else:
+                content = {**request.content, "entity_id": request.target_entity_id}
+                manager.create(
+                    conversation_id,
+                    "memory-preference",
+                    DialogTaskKind.MEMORY_CONFIRMATION,
+                    DialogPriority.CONFIRMATION,
+                    slots={
+                        "operation": request.operation.value,
+                        "content": content,
+                        "person_id": person_id,
+                    },
+                    reason="Eine persönliche Präferenz soll dauerhaft gespeichert werden.",
+                    requested_by_user_id=person_id,
+                )
+                response.async_set_speech("Soll ich mir diese persönliche Präferenz dauerhaft merken?")
+        return conversation.ConversationResult(
+            response=response, conversation_id=conversation_id
         )
 
     async def _async_handle_undo_request(

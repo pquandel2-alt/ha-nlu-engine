@@ -185,7 +185,7 @@ class SemanticInterpreter:
                 if "domains" not in slots:
                     slots["domains"] = tuple(sorted({entity.domain for entity in mentions}))
             locations = (
-                resolve_coordinated_locations(variant.text, entities)
+                resolve_coordinated_locations(variant.text, entities, world_model)
                 if resolve_registry
                 else None
             )
@@ -193,7 +193,7 @@ class SemanticInterpreter:
                 slots["locations"] = tuple(item[0] for item in locations)
             else:
                 location = (
-                    resolve_semantic_location(variant.text, entities)
+                    resolve_semantic_location(variant.text, entities, world_model)
                     if resolve_registry
                     else None
                 )

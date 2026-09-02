@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import time
 from typing import Mapping
 
 from homeassistant.core import HomeAssistant
@@ -16,6 +17,8 @@ from .const import (
     CONF_AGENT_MEDIA_PLAYERS,
     CONF_AGENT_NOTIFY_TARGETS,
     CONF_AGENT_TTS_ENTITY,
+    CONF_AGENT_QUIET_END,
+    CONF_AGENT_QUIET_START,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -51,7 +54,7 @@ class AgentDelivery:
             except Exception as err:  # noqa: BLE001 - HA services fail heterogeneously
                 _LOGGER.warning("Agent push delivery failed: %s", err)
                 errors.append(f"push: {err}")
-        if AGENT_CHANNEL_TTS in channels:
+        if AGENT_CHANNEL_TTS in channels and not _quiet_tts(event, options):
             try:
                 await self._async_tts(event, options)
                 delivered.append(AGENT_CHANNEL_TTS)
@@ -142,3 +145,26 @@ class AgentDelivery:
             },
             blocking=True,
         )
+
+
+def _quiet_tts(event: AgentEvent, options: Mapping[str, object]) -> bool:
+    if event.safety_critical:
+        return False
+    start = _parse_time(options.get(CONF_AGENT_QUIET_START))
+    end = _parse_time(options.get(CONF_AGENT_QUIET_END))
+    if start is None or end is None:
+        return False
+    from homeassistant.util import dt as dt_util
+
+    current = dt_util.now().timetz().replace(tzinfo=None)
+    return start <= current < end if start < end else current >= start or current < end
+
+
+def _parse_time(value: object) -> time | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        hour, minute = value.split(":", 1)
+        return time(int(hour), int(minute))
+    except (TypeError, ValueError):
+        return None

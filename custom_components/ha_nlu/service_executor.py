@@ -51,6 +51,19 @@ async def async_execute_service_plan(
         return ExecutionResult(
             False, decision, "Mindestens ein Ziel ist nicht mehr verfügbar oder freigegeben."
         )
+    fresh_targets = [entity for entity in entities if entity.entity_id in target_ids]
+    if any(entity.state in {"unknown", "unavailable"} for entity in fresh_targets):
+        return ExecutionResult(
+            False, decision, "Mindestens ein Ziel meldet keinen verlässlichen aktuellen Zustand."
+        )
+    required = _required_capabilities(plan)
+    if required and any(
+        entity.capabilities and not required <= entity.capabilities
+        for entity in fresh_targets
+    ):
+        return ExecutionResult(
+            False, decision, "Mindestens ein Ziel unterstützt die Aktion nicht mehr."
+        )
     try:
         await hass.services.async_call(
             plan.domain,
@@ -65,3 +78,21 @@ async def async_execute_service_plan(
 
         audit_trail.record(dt_util.now(), audit_actor_id, plan)
     return ExecutionResult(True, decision)
+
+
+def _required_capabilities(plan: ServiceCallPlan) -> frozenset[str]:
+    if plan.service == "turn_on":
+        return frozenset(
+            {"TURN_ON", "BRIGHTNESS"}
+            if "brightness_pct" in plan.data
+            else {"TURN_ON"}
+        )
+    if plan.service == "turn_off":
+        return frozenset({"TURN_OFF"})
+    if plan.service in {"open_cover", "open_valve"}:
+        return frozenset({"OPEN"})
+    if plan.service in {"close_cover", "close_valve"}:
+        return frozenset({"CLOSE"})
+    if plan.service == "set_cover_position":
+        return frozenset({"POSITION"})
+    return frozenset()

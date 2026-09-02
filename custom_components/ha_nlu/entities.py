@@ -371,6 +371,28 @@ def resolve_entity_scored(
         elif area_id is not None:
             candidates = list(index.by_area.get(area_id, ()))
 
+    # An exact normalized registry name always outranks contains/fuzzy tiers
+    # by more than the ambiguity margin. Reuse the per-turn index for that
+    # decisive tier instead of regenerating aliases for the complete HA
+    # registry. A narrowed caller-provided candidate list remains a hard
+    # boundary: indexed hits outside it are discarded before scoring.
+    if index is not None:
+        exact_by_id = {
+            entity.entity_id: entity
+            for entity in (
+                *index.by_normalized_name.get(spoken_norm, ()),
+                *index.by_normalized_alias.get(spoken_norm, ()),
+            )
+        }
+        exact_indexed = tuple(exact_by_id.values())
+        if exact_indexed:
+            if candidates is not entities:
+                exact_indexed = tuple(
+                    entity for entity in exact_indexed if entity in candidates
+                )
+            if exact_indexed:
+                candidates = list(exact_indexed)
+
     ranked: list[EntityCandidate] = []
     for allow_fuzzy in (False, True):
         for entity in candidates:
@@ -438,7 +460,12 @@ def resolve_entity_scored(
     )
 
 
-def resolve_entity(name: str, entities: list[EntitySnapshot]) -> ResolveResult:
+def resolve_entity(
+    name: str,
+    entities: list[EntitySnapshot],
+    *,
+    index: EntityIndex | None = None,
+) -> ResolveResult:
     """Resolve a spoken name to an entity within the given entity set.
 
     Thin, context-free wrapper around ``resolve_entity_scored`` (v2 plan
@@ -447,7 +474,7 @@ def resolve_entity(name: str, entities: list[EntitySnapshot]) -> ResolveResult:
     contains-tier competitor always exceeds the ambiguity margin), duplicate
     names/aliases surface as AMBIGUOUS rather than "first one wins".
     """
-    result = resolve_entity_scored(name, entities)
+    result = resolve_entity_scored(name, entities, index=index)
     if result.status is ResolutionStatus.RESOLVED:
         return ResolveResult(
             status=ResolveStatus.OK,

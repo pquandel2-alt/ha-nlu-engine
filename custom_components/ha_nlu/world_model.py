@@ -10,17 +10,18 @@ those snapshot modules already do: it reuses ``entities.build_entity_index()``,
 ``areas.area_snapshots()`` and ``floors.floor_snapshots()`` rather than
 re-deriving "distinct areas/floors referenced by these entities" a third time.
 
-Not yet consumed by ``engine.py``/``conversation.py`` (see this module's
-Brain/docs entry) - built and tested as real infrastructure first, mirroring
-how ``nlu/reasoning.py``'s ``ReasoningEngine`` already sat built-and-tested
-before being wired into the live pipeline, to avoid introducing a second,
-parallel resolution/lookup path next to the ones parsers already use.
+``conversation.py`` builds this model once for every live turn and passes it
+to the canonical language entry.  The same object is also the source for the
+typed house graph; no second entity or location truth is constructed.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Iterable, Mapping, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .house_graph import HouseGraph, RelationSpec
 
 from .areas import AreaSnapshot, area_snapshots
 from .devices import DeviceSnapshot
@@ -112,6 +113,14 @@ class WorldModel:
             and (floor_id is None or entity.floor_id == floor_id)
             and (capability is None or capability in entity.capabilities)
         )
+
+    def build_house_graph(
+        self, configured_relations: Iterable["RelationSpec"] = ()
+    ) -> "HouseGraph":
+        """Project this exact turn snapshot into the shared typed graph."""
+        from .house_graph import build_house_graph
+
+        return build_house_graph(self, configured_relations)
 
 
 def build_world_model(

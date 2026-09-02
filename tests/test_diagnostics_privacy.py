@@ -11,6 +11,9 @@ import _ha_stub  # noqa: E402
 _ha_stub.install()
 
 from ha_nlu.diagnostics import async_get_config_entry_diagnostics  # noqa: E402
+from ha_nlu.house_graph import FactProvenance  # noqa: E402
+from ha_nlu.memory import MemoryKind, MemoryStore  # noqa: E402
+from ha_nlu.runtime_data import HaNluRuntimeData  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
 from homeassistant.core import HomeAssistant  # noqa: E402
 
@@ -49,3 +52,27 @@ def test_diagnostics_expose_policy_facts_but_no_entity_ids_or_text():
     assert "sensor.private" not in serialized
     assert "private-user-id" not in serialized
     assert "Geheimlicht" not in serialized
+
+
+def test_diagnostics_show_only_redacted_learned_counts(tmp_path):
+    entry = ConfigEntry(options={"memory_enabled": True})
+    entry.version = 1
+    memory = MemoryStore(tmp_path / "memory.sqlite", enabled=True)
+    asyncio.run(
+        memory.async_remember(
+            MemoryKind.PREFERENCE,
+            {"entity_id": "light.secret", "brightness_percent": 30},
+            provenance=FactProvenance.CONFIRMED_MEMORY,
+            confirmed=True,
+            person_id="private-user",
+        )
+    )
+    entry.runtime_data = HaNluRuntimeData(memory=memory)
+    diagnostics = asyncio.run(
+        async_get_config_entry_diagnostics(HomeAssistant(), entry)
+    )
+    assert diagnostics["learned_memory"]["record_counts"] == {"preference": 1}
+    serialized = repr(diagnostics)
+    assert "light.secret" not in serialized
+    assert "private-user" not in serialized
+    assert "brightness_percent" not in serialized
