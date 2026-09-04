@@ -69,6 +69,9 @@ from .const import (
     CONF_DOCUMENTS_DIRECTORY,
     CONF_DOCUMENTS_ENABLED,
     CONF_HOUSE_RELATIONS,
+    CONF_FRIGATE_ENABLED,
+    CONF_FRIGATE_MQTT_TOPIC,
+    CONF_HA_SOURCES_ENABLED,
     CONF_CUSTOM_ALIASES,
     CONF_ADMIN_ONLY_ENTITIES,
     CONF_MAX_ACTION_TARGETS,
@@ -88,6 +91,7 @@ from .house_graph import parse_relation_specs
 from .agent_config_validation import (
     parse_event_categories,
     validate_documents_directory,
+    validate_mqtt_topic,
     validate_quiet_time,
 )
 
@@ -152,6 +156,9 @@ class HaNluOptionsFlow(OptionsFlow):
                 parse_event_categories(user_input.get(CONF_AGENT_EVENT_CATEGORIES, ""))
                 validate_documents_directory(
                     user_input.get(CONF_DOCUMENTS_DIRECTORY, "homeintent_documents")
+                )
+                validate_mqtt_topic(
+                    user_input.get(CONF_FRIGATE_MQTT_TOPIC, "frigate/events")
                 )
             except ValueError:
                 return self.async_show_form(
@@ -347,5 +354,17 @@ class HaNluOptionsFlow(OptionsFlow):
                         CONF_HOUSE_RELATIONS,
                         default=defaults.get(CONF_HOUSE_RELATIONS, ""),
                     ): TextSelector(TextSelectorConfig(multiline=True)),
+                    vol.Optional(
+                        CONF_FRIGATE_ENABLED,
+                        default=defaults.get(CONF_FRIGATE_ENABLED, False),
+                    ): bool,
+                    vol.Optional(
+                        CONF_FRIGATE_MQTT_TOPIC,
+                        default=defaults.get(CONF_FRIGATE_MQTT_TOPIC, "frigate/events"),
+                    ): TextSelector(TextSelectorConfig()),
+                    vol.Optional(
+                        CONF_HA_SOURCES_ENABLED,
+                        default=defaults.get(CONF_HA_SOURCES_ENABLED, False),
+                    ): bool,
                 }
         )

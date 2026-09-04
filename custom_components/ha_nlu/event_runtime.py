@@ -20,6 +20,7 @@ from .const import (
 from .agent_config_validation import parse_event_categories
 from .hass_entities import build_entity_snapshots
 from .agent_event import AgentMode
+from .effect_monitor import ExpectedEffect
 from .proactive_decision import ProactiveDecisionEngine
 from .runtime_data import HaNluRuntimeData
 from .service_call import ServiceCallPlan
@@ -54,11 +55,21 @@ class SituationRuntime:
         self._decision_engine = ProactiveDecisionEngine()
 
     def async_start(self) -> Any:
+        self._runtime_data.effect_monitor.set_expired_handler(
+            self.async_handle_expected_effect_expired
+        )
         bus = getattr(self._hass, "bus", None)
         listen = getattr(bus, "async_listen", None)
         if listen is None:
-            return lambda: None
-        return listen("state_changed", self.async_handle_state_changed)
+            unlisten = lambda: None
+        else:
+            unlisten = listen("state_changed", self.async_handle_state_changed)
+
+        def stop() -> None:
+            unlisten()
+            self._runtime_data.effect_monitor.set_expired_handler(None)
+
+        return stop
 
     async def async_handle_state_changed(self, raw_event: Any) -> None:
         data = getattr(raw_event, "data", {})
@@ -69,12 +80,13 @@ class SituationRuntime:
         old_state = data.get("old_state")
         if not isinstance(entity_id, str) or new_state is None:
             return
-        categories = self._configured_categories()
-        if not categories:
-            return
         entities = build_entity_snapshots(self._hass, self._entry)
         entity = next((item for item in entities if item.entity_id == entity_id), None)
         if entity is None:
+            return
+        self._runtime_data.effect_monitor.observe(entity_id, entity.state)
+        categories = self._configured_categories()
+        if not categories:
             return
         previous = getattr(old_state, "state", None)
         people = tuple(
@@ -188,6 +200,32 @@ class SituationRuntime:
                 mode=decision.mode,
                 action=decision.action,
             )
+
+    async def async_handle_expected_effect_expired(
+        self, effect: ExpectedEffect
+    ) -> None:
+        """Report a missing observable effect without retrying the action."""
+        if "expected_effect_missing" not in self._configured_categories():
+            return
+        entities = build_entity_snapshots(self._hass, self._entry)
+        entity = next(
+            (item for item in entities if item.entity_id == effect.entity_id), None
+        )
+        if entity is None or entity.state in {"unknown", "unavailable"}:
+            return
+        await self._signal(
+            effect.entity_id,
+            "expected_effect_missing",
+            "Die erwartete Gerätewirkung wurde nicht beobachtet.",
+            (
+                f"Erwarteter Zustand: {effect.expected_state}",
+                f"Beobachteter Zustand: {entity.state}",
+                "Die Aktion wird nicht automatisch wiederholt.",
+            ),
+            entity.state,
+            critical=False,
+            mode=AgentMode.INFORM,
+        )
 
     async def _signal(
         self,

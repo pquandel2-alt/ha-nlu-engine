@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import statistics
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta, timezone
 from enum import StrEnum
@@ -274,12 +274,28 @@ class PatternAssessment:
     uncertainty: str
 
 
+@dataclass(frozen=True)
+class RoutineObservation:
+    """One bounded statistical sample without transcript or authority data."""
+
+    occurred_at: datetime
+    weekday: int
+    hour: int
+    event_type: str
+    duration_seconds: float | None
+    occupied: bool | None
+    operating_mode: str
+
+
 @dataclass
 class RoutineStatistics:
     """Explainable classical statistics; no result grants autonomy."""
 
     minimum_observations: int = 10
     anomaly_threshold: float = 0.05
+    retention: timedelta = timedelta(days=180)
+    maximum_observations: int = 4096
+    moving_window: int = 20
     _hour_weekday: Counter[tuple[int, int]] = field(
         default_factory=lambda: Counter[tuple[int, int]]()
     )
@@ -294,6 +310,10 @@ class RoutineStatistics:
     _feedback: Counter[RoutineFeedback] = field(
         default_factory=lambda: Counter[RoutineFeedback]()
     )
+    _observations: deque[RoutineObservation] = field(
+        default_factory=lambda: deque[RoutineObservation]()
+    )
+    _anomaly_active: bool = False
 
     def observe(self, event: NormalizedEvent) -> None:
         key = (event.occurred_at.weekday(), event.occurred_at.hour)
@@ -303,10 +323,90 @@ class RoutineStatistics:
         if self._last_event is not None:
             self._sequences[(self._last_event, event.event_type.value)] += 1
         self._last_event = event.event_type.value
+        self._observations.append(
+            RoutineObservation(
+                event.occurred_at,
+                key[0],
+                key[1],
+                event.event_type.value,
+                (
+                    max(0.0, event.duration_seconds)
+                    if event.duration_seconds is not None
+                    and math.isfinite(event.duration_seconds)
+                    else None
+                ),
+                event.occupied,
+                event.operating_mode,
+            )
+        )
+        self._prune(event.occurred_at)
 
     @property
     def observation_count(self) -> int:
-        return sum(self._hour_weekday.values())
+        return len(self._observations) or sum(self._hour_weekday.values())
+
+    def _prune(self, now: datetime) -> None:
+        cutoff = now - self.retention
+        limit = max(1, self.maximum_observations)
+        while self._observations and (
+            self._observations[0].occurred_at < cutoff
+            or len(self._observations) > limit
+        ):
+            self._observations.popleft()
+
+    @staticmethod
+    def _quantile(values: list[float], fraction: float) -> float:
+        ordered = sorted(values)
+        if not ordered:
+            raise ValueError("Quantil benötigt Beobachtungen")
+        index = round(fraction * (len(ordered) - 1))
+        return ordered[max(0, min(len(ordered) - 1, index))]
+
+    def robust_duration_summary(
+        self, observations: Iterable[RoutineObservation]
+    ) -> str:
+        """Median/IQR and bounded moving mean for explainable duration norms."""
+        durations = [
+            item.duration_seconds
+            for item in observations
+            if item.duration_seconds is not None
+        ]
+        if not durations:
+            return "keine belastbare Zustandsdauer"
+        median = statistics.median(durations)
+        q1 = self._quantile(durations, 0.25)
+        q3 = self._quantile(durations, 0.75)
+        recent = durations[-max(1, self.moving_window):]
+        moving = statistics.fmean(recent)
+        return (
+            f"Median {median:.0f} s; robuste Spanne {q1:.0f}-{q3:.0f} s; "
+            f"gleitender Mittelwert {moving:.0f} s"
+        )
+
+    @staticmethod
+    def _seasonally_near(month: int, reference: int) -> bool:
+        distance = abs(month - reference)
+        return min(distance, 12 - distance) <= 1
+
+    def _context_window(self, event: NormalizedEvent) -> tuple[RoutineObservation, ...]:
+        """Prefer same season/mode/presence, falling back only if too sparse."""
+        retained = tuple(
+            item
+            for item in self._observations
+            if event.occurred_at - item.occurred_at <= self.retention
+        )
+        seasonal = tuple(
+            item
+            for item in retained
+            if self._seasonally_near(item.occurred_at.month, event.occurred_at.month)
+            and item.operating_mode == event.operating_mode
+            and (
+                event.occupied is None
+                or item.occupied is None
+                or item.occupied is event.occupied
+            )
+        )
+        return seasonal if len(seasonal) >= self.minimum_observations else retained
 
     def record_feedback(
         self,
@@ -328,6 +428,11 @@ class RoutineStatistics:
         """Return content-free decision-history counters for diagnostics."""
         return {feedback.value: count for feedback, count in self._feedback.items()}
 
+    @property
+    def last_alert_at(self) -> datetime | None:
+        """Timestamp used only to bind explicit feedback to a recent signal."""
+        return self._last_alert_at
+
     def assess(
         self,
         event: NormalizedEvent,
@@ -335,7 +440,9 @@ class RoutineStatistics:
         cooldown: timedelta = timedelta(hours=1),
         hysteresis: float = 0.02,
     ) -> PatternAssessment:
-        count = self.observation_count
+        self._prune(event.occurred_at)
+        window = self._context_window(event)
+        count = len(window) if window else self.observation_count
         key = (event.occurred_at.weekday(), event.occurred_at.hour)
         if self._ignored:
             return PatternAssessment(
@@ -357,7 +464,11 @@ class RoutineStatistics:
                 0.0,
                 "Benutzerfeedback erweitert keine Aktionsberechtigung.",
             )
-        bin_count = self._hour_weekday[key]
+        bin_count = (
+            sum(1 for item in window if (item.weekday, item.hour) == key)
+            if window
+            else self._hour_weekday[key]
+        )
         if count < self.minimum_observations:
             return PatternAssessment(
                 False,
@@ -369,23 +480,34 @@ class RoutineStatistics:
                 f"Es fehlen {self.minimum_observations - count} Beobachtungen.",
             )
         frequency = bin_count / count
-        threshold = max(0.0, self.anomaly_threshold - hysteresis)
-        unusual = frequency < threshold
+        enter_threshold = max(0.0, self.anomaly_threshold)
+        exit_threshold = min(1.0, enter_threshold + max(0.0, hysteresis))
+        unusual = (
+            frequency < exit_threshold
+            if self._anomaly_active
+            else frequency < enter_threshold
+        )
         if self._last_alert_at is not None and event.occurred_at - self._last_alert_at < cooldown:
             unusual = False
         confidence = min(0.99, count / (count + self.minimum_observations))
         if unusual:
             self._last_alert_at = event.occurred_at
-        durations = self._durations.get(key, [])
-        normal_duration = (
-            f"Median {statistics.median(durations):.0f} s"
-            if durations
-            else "keine belastbare Zustandsdauer"
+        self._anomaly_active = unusual
+        relevant_durations = tuple(
+            item for item in window if (item.weekday, item.hour) == key
+        )
+        normal_duration = self.robust_duration_summary(relevant_durations)
+        transition_count = self._sequences.get(
+            (self._last_event or "", event.event_type.value), 0
         )
         return PatternAssessment(
             unusual,
             f"Zeitfenster-Anteil {frequency:.1%}",
-            f"mindestens {threshold:.1%}; {normal_duration}",
+            (
+                f"Erwartungsgrenze {enter_threshold:.1%}, "
+                f"Hysterese bis {exit_threshold:.1%}; {normal_duration}; "
+                f"bekannte Folge {transition_count}-mal"
+            ),
             count,
             "zeitliche Abweichung von der lokalen Routine" if unusual else "im erwarteten Bereich",
             confidence,

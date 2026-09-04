@@ -47,7 +47,10 @@
           "agent_auto_entity_ids": "Explizit für AUTO freigegebene Entitäten",
           "documents_enabled": "Lokalen Dokumentindex aktivieren",
           "documents_directory": "Freigegebenes Unterverzeichnis im Home-Assistant-Konfigurationsordner",
-          "house_relations": "Hausbeziehungen (source_id | relation | target_id)"
+          "house_relations": "Hausbeziehungen (source_id | relation | target_id)",
+          "frigate_enabled": "Strukturierte Frigate-Metadaten einlesen",
+          "frigate_mqtt_topic": "Frigate-MQTT-Thema (ohne Wildcards)",
+          "ha_sources_enabled": "Strukturierte Zustände vorhandener HA-Quellen einlesen"
         }
       }
     },

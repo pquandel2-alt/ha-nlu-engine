@@ -115,6 +115,19 @@ def test_multi_item_add_executes_one_native_call_per_item(monkeypatch):
         }
 
 
+def test_cross_domain_delete_ambiguity_never_calls_a_service(monkeypatch):
+    agent = _entity(monkeypatch, [SHOPPING])
+
+    result = _run(
+        agent,
+        "Lösche den Eintrag Termin aus der Einkaufsliste im Kalender",
+        "cross-domain",
+    )
+
+    assert "Kalender oder eine Liste" in result.response.speech
+    agent.hass.services.async_call.assert_not_awaited()
+
+
 def test_ambiguous_list_is_selected_in_followup(monkeypatch):
     agent = _entity(monkeypatch, [SHOPPING, WORK])
     question = _run(agent, "Füge Milch und Brot zur Liste hinzu", "list-select")

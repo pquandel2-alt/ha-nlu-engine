@@ -20,7 +20,7 @@ import asyncio
 import sys
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -37,6 +37,7 @@ from ha_nlu.automation_management import (  # noqa: E402
     AutomationManagementRequest,
 )
 from ha_nlu.conversation import NluConversationEntity  # noqa: E402
+from ha_nlu.dialog_manager import DialogTaskKind  # noqa: E402
 from ha_nlu.entities import EntitySnapshot  # noqa: E402
 from ha_nlu.nlu.context import (  # noqa: E402
     ConversationContext,
@@ -887,6 +888,23 @@ def test_confirmed_service_failure_is_reported_without_success(monkeypatch):
     assert result.response.error_code == intent.IntentResponseErrorCode.FAILED_TO_HANDLE
 
 
+def test_legacy_confirmation_uses_central_explain_understood_and_cancel(monkeypatch):
+    entity = _make_entity(monkeypatch, [FLUR_LICHT_OFF])
+    conversation_id = "central-meta"
+    _store_confirmation(entity, conversation_id)
+
+    why = _run(entity, "Warum fragst du?", conversation_id)
+    understood = _run(entity, "Was hast du verstanden?", conversation_id)
+    cancelled = _run(entity, "Lass das", conversation_id)
+    later_yes = _run(entity, "Ja", conversation_id)
+
+    assert "führe bis zur Klärung nichts aus" in why.response.speech
+    assert "SERVICE_CONFIRMATION" in understood.response.speech
+    assert "verworfen" in cancelled.response.speech
+    assert later_yes.response.error_code == intent.IntentResponseErrorCode.NO_INTENT_MATCH
+    entity.hass.services.async_call.assert_not_awaited()
+
+
 def test_undo_reports_empty_context_then_reverses_last_light_action(monkeypatch):
     entity = _make_entity(monkeypatch, [FLUR_LICHT_OFF])
 
@@ -1016,3 +1034,46 @@ def test_unclaimed_yes_can_resolve_one_open_tts_agent_question(monkeypatch):
     assert result.response.speech == "Erledigt."
     voice_reply.assert_awaited_once()
     entity.hass.services.async_call.assert_not_awaited()
+
+
+def test_alias_confirmation_payload_is_owned_by_central_dialog_manager(monkeypatch):
+    entity = _make_entity(monkeypatch, [FLUR_LICHT_OFF])
+    updater = Mock()
+    entity.hass.config_entries = type(
+        "ConfigEntries", (), {"async_update_entry": updater}
+    )()
+
+    question = _run(
+        entity, "Nenne Flurlicht künftig Orientierungslicht", "native-alias"
+    )
+    task = entity._runtime_data.dialog_manager.active("native-alias")
+
+    assert "Soll ich" in question.response.speech
+    assert task is not None and task.kind is DialogTaskKind.ALIAS_CONFIRMATION
+    assert task.payload is not None
+    assert entity._context_store.get("native-alias") is None
+
+    explanation = _run(entity, "Warum fragst du?", "native-alias")
+    result = _run(entity, "Ja", "native-alias")
+
+    assert "ausdrücklich bestätigt" in explanation.response.speech
+    assert "Gespeichert" in result.response.speech
+    assert entity._runtime_data.dialog_manager.active("native-alias") is None
+    updater.assert_called_once()
+    entity.hass.services.async_call.assert_not_awaited()
+
+
+def test_complete_command_replaces_native_alias_confirmation(monkeypatch):
+    entity = _make_entity(monkeypatch, [FLUR_LICHT_OFF])
+    updater = Mock()
+    entity.hass.config_entries = type(
+        "ConfigEntries", (), {"async_update_entry": updater}
+    )()
+    _run(entity, "Nenne Flurlicht künftig Orientierungslicht", "replace-alias")
+
+    result = _run(entity, "Schalte das Flurlicht ein", "replace-alias")
+
+    assert result.response.error_code is None
+    assert entity._runtime_data.dialog_manager.active("replace-alias") is None
+    updater.assert_not_called()
+    entity.hass.services.async_call.assert_awaited_once()

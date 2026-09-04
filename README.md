@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.66.0**
+- Aktuelle Version: **4.67.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -57,6 +57,13 @@ Turn-Index, Dialogkorrekturen kompensieren bereits ausgeführte reversible
 Schritte kontrolliert und gespeicherte beziehungsweise vorgeschlagene
 Aktionen werden unmittelbar vor Ausführung erneut gegen frische Zustände,
 Capabilities und Policy geprüft.
+
+Die laufende Härtung nach dem 4.66-Release ergänzt robuste saisonale
+Routinefenster, natürlichsprachliches Routinefeedback und benannte lokale
+Prozeduren. Erfolgreiche Geräteaktionen besitzen eine beobachtbare
+Wirkungsfrist; eine ausbleibende Wirkung kann nur informieren und löst keinen
+Retry aus. Frigate-/MQTT-Metadaten und vorhandene HA-Zustandsquellen sind als
+standardmäßig deaktivierte, read-only Evidenzadapter verdrahtet.
 
 ## Was war in Version 4.64 neu?
 
@@ -821,12 +828,12 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/ha_nlu --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 4.66.0:
+Geprüfter Release-Stand von Version 4.67.0:
 
 ```text
-2577 passed, 12 skipped
+2612 passed, 12 skipped
 87 % Gesamt-Coverage
-78 % Coverage für conversation.py
+80 % Coverage für conversation.py
 ```
 
 Zusätzlich wurden ausgeführt:
@@ -851,7 +858,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-4.65.0.json --quiet
+  --check docs/perf/v7-shadow-baseline-4.67.0.json --quiet
 ```
 
 Zusätzlich erzeugt die Test-Suite weiterhin 1.024 intensive Lichtparaphrasen.

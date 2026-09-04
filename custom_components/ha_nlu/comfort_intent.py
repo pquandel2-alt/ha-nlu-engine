@@ -15,6 +15,7 @@ from .service_call import ServiceCallPlan
 
 _COMFORT_RE = re.compile(
     r"\b(?:mach|mache|macht)\b.*\b(?:gemuetlich|gemütlich)(?:er)?\b"
+    r"|\b(?:mach|mache|macht)\b.*\bkomfortabler\b"
 )
 
 

@@ -12,6 +12,12 @@ Plan. AUTO ist nur für explizit konfigurierte IDs, reversible Operationen und
 LOW-Risk erlaubt; bei fehlender Freigabe wird es ASK. Kritische Aktionen sind
 kein lernbares AUTO.
 
+Eine nach erfolgreicher Ausführung registrierte Wirkungserwartung besitzt
+keine Ausführungsberechtigung. Ihr Ablauf darf nur informieren; es gibt weder
+Retry noch Folgeplan. Frigate-Daten bleiben statistische Evidenz, enthalten
+keine Rohbilder und können weder Faktenstatus noch Policy-Allowlist erhöhen.
+Die Adapterpuffer sind RAM-begrenzt und werden nach Neustart nicht wiederbelebt.
+
 Das Gedächtnis ist opt-in, lokal, migrationsfähig, ablaufbar und löschbar.
 Persönliche dauerhafte Einträge benötigen Bestätigung und Benutzerbindung.
 Beim kontrollierten Löschen werden Inhalt und Personenzuordnung im Tombstone

@@ -46,7 +46,11 @@ Originaltext + Registry + Dialogkontext
 `NluEngine.understand()` ist die kanonische Grenze für direkte Turns,
 `NluEngine.understand_automation()` für Automationsformulierungen. Die
 Conversation-Integration erstellt pro frischem Turn genau ein
-`LanguageDocument` und reicht es an diese Grenzen weiter.
+`LanguageDocument` und reicht es an diese Grenzen sowie an die lesenden
+Haushalts-, Kalender- und Produktivitätsrouter weiter. Kalender und
+Produktivität liefern gemeinsam ein typisiertes `UnderstandingOutcome`;
+gleichzeitige vollständige Treffer werden anhand expliziter Domänenevidenz
+aufgelöst oder ohne Payload als `AMBIGUOUS` zurückgegeben.
 
 Direkte Turns werden in `understand()` semantisch zuerst interpretiert. Eine
 explizite Capability-Liste in `semantic_catalog.py` entscheidet, für welche
@@ -118,10 +122,17 @@ Im selben Lauf sind Query-to-Action-, Unsafe-Action- und
 Ambiguous-to-Action-Leakage jeweils null.
 
 Das ist bewusst keine Behauptung, sämtliche historischen Parser seien schon
-gelöscht. Kalender, Produktivität und einzelne Managementfunktionen besitzen
-weiterhin fachspezifische Parser. Ihr nächster Umbau ist eine interne
-Migration hinter dieselbe `UnderstandingOutcome`-Grenze; die zentrale
+gelöscht. Kalender und Produktivität besitzen weiterhin fachspezifische
+Parser, liegen am Hauptrouter aber hinter derselben `LanguageDocument`- und
+`UnderstandingOutcome`-Grenze. Einzelne Automation- und Managementfunktionen
+werden noch schrittweise auf diesen Vertrag migriert; die zentrale
 Sicherheitsklassifikation schützt sie bereits heute.
+
+Dialogzustände werden während der Migration im zentralen `DialogManager`
+priorisiert und benutzergebunden. Alias-Lernbestätigungen besitzen dort
+bereits ihren alleinigen typisierten Payload; historische Automation-,
+Kalender-, Produktivitäts- und Entity-Auswahldialoge werden bis zur jeweiligen
+Payload-Migration als Kompatibilitäts-Tasks gespiegelt.
 
 ## Qualitätsgates
 

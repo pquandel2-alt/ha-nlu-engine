@@ -7,7 +7,9 @@ import re
 from .entities import EntitySnapshot
 from .entity_scope import DOMAIN_WORDS, resolve_entity_scope
 from .device_control import DeviceControlResult
+from .nlu.language_frontend import LanguageDocument
 from .nlu.normalize import normalize
+from .nlu.semantic_utterance import SpeechAct
 
 
 _DOMAINS = frozenset(DOMAIN_WORDS)
@@ -31,9 +33,13 @@ def _state_text(entity: EntitySnapshot) -> str:
 
 
 def match_extended_device_query(
-    text: str, entities: list[EntitySnapshot]
+    text: str,
+    entities: list[EntitySnapshot],
+    document: LanguageDocument | None = None,
 ) -> DeviceControlResult | None:
-    text = normalize(text)
+    if document is not None and document.utterance.speech_act is not SpeechAct.QUERY:
+        return None
+    text = document.normalized_text if document is not None else normalize(text)
     if _QUERY_CUE.search(text) is None:
         return None
     scope = resolve_entity_scope(text, entities, _DOMAINS)

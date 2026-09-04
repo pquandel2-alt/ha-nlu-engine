@@ -14,7 +14,8 @@ deaktivierter Routineerkennung, deaktiviertem AUTO und leerer AUTO-Allowlist.
 - `agent_event_categories`: kommagetrennte, ausdrücklich aktive
   Situationskategorien; erlaubt sind `safety`, `safety_alarm`,
   `device_unavailable`, `opening_while_away`, `window_heating`,
-  `light_unoccupied`, `long_running_state` und `routine_anomaly`. Leer
+  `light_unoccupied`, `long_running_state`, `routine_anomaly` und
+  `expected_effect_missing`. Leer
   bedeutet keine automatische State-Change-Ausgabe; unbekannte Werte werden
   abgelehnt.
 - `routine_detection_enabled`: klassische lokale Statistik.
@@ -29,6 +30,13 @@ deaktivierter Routineerkennung, deaktiviertem AUTO und leerer AUTO-Allowlist.
 - `documents_directory`: relatives, freigegebenes Unterverzeichnis unterhalb
   des Home-Assistant-Konfigurationsordners; absolute Pfade und `..` werden
   abgelehnt.
+- `frigate_enabled`: aktiviert ausschließlich strukturierte Frigate-Ereignis-
+  und MQTT-Metadaten. Standard ist aus.
+- `frigate_mqtt_topic`: konkretes Topic, standardmäßig `frigate/events`;
+  Wildcards, leere und überlange Topics werden abgelehnt.
+- `ha_sources_enabled`: übernimmt feldbegrenzt Zustandsänderungen vorhandener
+  Kalender-, Wetter-, Anwesenheits-, Todo- und Timer-Entitäten als lokale
+  Evidenz. Standard ist aus.
 - `house_relations`: eine Beziehung pro Zeile als
   `source_id | relation | target_id`. Zulässige Typen stehen in der
   Hausgraph-Dokumentation; ungültige oder unbekannte stabile IDs werden nicht

@@ -100,10 +100,12 @@ Die wesentlichen Architekturbremsen sind:
    Messwertqueries. Nur nicht migrierte Fachcapabilities behalten Legacy als
    Kompatibilitätsfallback. `_select_parser()` bleibt für diese Restmenge eine
    offene Architekturbremse.
-2. **Routing ist reihenfolgeabhängig.** `conversation.py::_async_handle_message()`
-   probiert viele Dialog-, Kalender-, Produktivitäts-, Geräte-, Automations-
-   und Core-Matcher nacheinander. Der erste Treffer gewinnt. Die Bedeutung
-   wird dadurch nicht einmal zentral erkannt und danach fachlich geroutet.
+2. **Routing ist noch teilweise reihenfolgeabhängig.** Kalender und
+   Produktivität werden inzwischen gemeinsam ausgewertet; ein Doppelmatch
+   wird anhand expliziter Domänenevidenz entschieden oder sicher als
+   `AMBIGUOUS` abgelehnt. Andere Dialog-, Automation-, Management- und
+   Core-Matcher werden in `conversation.py::_async_handle_message()` noch
+   nacheinander probiert und bleiben offene Migrationsarbeit.
 3. **Vokabular und Operationen sind verteilt.** Trotz
    `nlu/domain_operations.py` besitzen unter anderem `engine.py`,
    `group_semantics.py`, `device_control.py`, Kalender-, Produktivitäts- und

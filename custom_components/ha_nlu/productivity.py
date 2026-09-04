@@ -14,6 +14,7 @@ from enum import Enum, auto
 
 from .entities import EntitySnapshot, normalize_for_compare
 from .nlu.entity_clarification import CandidateReplyKind, resolve_candidate_reply
+from .nlu.language_frontend import LanguageDocument
 
 
 class TodoOperation(Enum):
@@ -369,8 +370,13 @@ def parse_timer_request(text: str, entities: list[EntitySnapshot]) -> TimerReque
 
 
 def parse_productivity_request(
-    text: str, entities: list[EntitySnapshot], now: datetime | None = None
+    text: str,
+    entities: list[EntitySnapshot],
+    now: datetime | None = None,
+    document: LanguageDocument | None = None,
 ) -> ProductivityRequest | None:
+    if document is not None:
+        text = document.source_text
     return parse_todo_request(text, entities, now) or parse_timer_request(text, entities)
 
 

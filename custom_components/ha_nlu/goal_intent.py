@@ -20,4 +20,6 @@ def interpret_goal(document: LanguageDocument) -> Goal | None:
         return Goal(GoalKind.SAVE_UNOCCUPIED)
     if re.search(r"\buntersuch(?:e|en)\b.*\b(?:zustand|ursache)\b", text):
         return Goal(GoalKind.INVESTIGATE_STATE)
+    if re.search(r"\b(?:mach|mache)\b.*\b(?:raum|zimmer)\b.*\bkomfortabler\b", text):
+        return Goal(GoalKind.IMPROVE_COMFORT)
     return None

@@ -8,6 +8,8 @@ from dataclasses import dataclass
 
 from .device_control import DeviceControlResult
 from .entities import EntitySnapshot, normalize_for_compare
+from .nlu.language_frontend import LanguageDocument
+from .nlu.semantic_utterance import SpeechAct
 from .query_target import mentioned_entities
 
 
@@ -90,10 +92,16 @@ def _names(entities: tuple[EntitySnapshot, ...], maximum: int = 12) -> str:
 
 
 def match_capability_audit_query(
-    text: str, entities: list[EntitySnapshot]
+    text: str,
+    entities: list[EntitySnapshot],
+    document: LanguageDocument | None = None,
 ) -> DeviceControlResult | None:
     """Answer setup/capability questions without exposing hidden HA state."""
-    key = normalize_for_compare(text)
+    if document is not None and document.utterance.speech_act is not SpeechAct.QUERY:
+        return None
+    key = normalize_for_compare(
+        document.normalized_text if document is not None else text
+    )
     audit = audit_capabilities(entities)
 
     if re.search(

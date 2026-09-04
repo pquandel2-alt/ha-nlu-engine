@@ -14,6 +14,7 @@ from ha_nlu.adapters import (
 from ha_nlu.agent_config_validation import (
     parse_event_categories,
     validate_documents_directory,
+    validate_mqtt_topic,
     validate_quiet_time,
 )
 from ha_nlu.dialog_manager import (
@@ -371,6 +372,45 @@ def test_routine_statistics_never_claims_certainty_before_minimum():
     assert "fehlen" in assessment.uncertainty
 
 
+def test_routine_statistics_reports_robust_duration_and_moving_mean():
+    stats = RoutineStatistics(minimum_observations=4, anomaly_threshold=0.5)
+    durations = (10.0, 11.0, 12.0, 10_000.0)
+    for index, duration in enumerate(durations):
+        event = NormalizedEvent(
+            f"evt:{index}", EventType.ACTIVATED, "light.floor", "off", "on",
+            NOW + timedelta(weeks=index), "living", (), True, "normal",
+            "home_assistant", EventQuality.GOOD, duration_seconds=duration,
+        )
+        stats.observe(event)
+    assessment = stats.assess(
+        NormalizedEvent(
+            "evt:assess", EventType.ACTIVATED, "light.floor", "off", "on",
+            NOW + timedelta(weeks=4), "living", (), True, "normal",
+            "home_assistant", EventQuality.GOOD,
+        )
+    )
+    assert "Median" in assessment.normal
+    assert "robuste Spanne" in assessment.normal
+    assert "gleitender Mittelwert" in assessment.normal
+
+
+def test_routine_statistics_bounds_retention_and_observation_count():
+    stats = RoutineStatistics(
+        minimum_observations=1,
+        retention=timedelta(days=30),
+        maximum_observations=2,
+    )
+    for index in range(4):
+        stats.observe(
+            NormalizedEvent(
+                f"evt:{index}", EventType.OPENED, "binary_sensor.window",
+                "off", "on", NOW + timedelta(days=index * 20), "cellar", (),
+                False, "away", "home_assistant", EventQuality.GOOD,
+            )
+        )
+    assert stats.observation_count == 2
+
+
 def test_response_persona_is_suppressed_for_critical_alarm():
     plan = ResponsePlan(
         DialogAct.WARN,
@@ -486,6 +526,21 @@ def test_dialog_manager_priority_user_binding_correction_and_replacement():
     assert manager.replace_with_complete_command("conv").replaced
 
 
+def test_dialog_manager_mirrors_and_expires_legacy_state_centrally():
+    manager = DialogManager()
+    task = manager.mirror_legacy(
+        "conv",
+        kind=DialogTaskKind.SAFETY_CONFIRMATION,
+        priority=DialogPriority.SAFETY,
+        slots={"legacy_kind": "SERVICE_CONFIRMATION"},
+        requested_by_user_id="owner",
+    )
+    assert task is not None
+    assert manager.active("conv") is task
+    assert manager.mirror_legacy("conv", kind=None) is None
+    assert manager.active("conv") is None
+
+
 def test_planner_materializes_policy_checked_plan_and_revalidates_each_step():
     entities = _entities()
     plan = materialize_goal(
@@ -519,6 +574,36 @@ def test_planner_materializes_policy_checked_plan_and_revalidates_each_step():
     assert executed == 1
 
 
+def test_unoccupied_goal_requires_direct_presence_evidence():
+    light_empty = EntitySnapshot(
+        "light.empty", "Licht leer", "light", "on", area_id="empty",
+        capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+    )
+    light_used = EntitySnapshot(
+        "light.used", "Licht belegt", "light", "on", area_id="used",
+        capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+    )
+    evidence = [
+        EntitySnapshot(
+            "binary_sensor.empty", "Präsenz leer", "binary_sensor", "off",
+            area_id="empty", device_class="occupancy",
+        ),
+        EntitySnapshot(
+            "binary_sensor.used", "Präsenz belegt", "binary_sensor", "on",
+            area_id="used", device_class="occupancy",
+        ),
+    ]
+    plan = materialize_goal(
+        Goal(GoalKind.SAVE_UNOCCUPIED),
+        [light_empty, light_used, *evidence],
+        options={},
+        is_admin=True,
+        user_id="owner",
+    )
+    actions = [step.action for step in plan.steps if step.action is not None]
+    assert [action.entity_id for action in actions] == ["light.empty"]
+
+
 def test_planner_stops_after_failed_verification():
     entities = _entities()
     plan = materialize_goal(
@@ -545,6 +630,51 @@ def test_planner_stops_after_failed_verification():
     assert calls == ["turn_off", "turn_on"]
 
 
+def test_planner_dependencies_form_a_verified_sequence():
+    first = EntitySnapshot(
+        "light.first", "Erstes Licht", "light", "on",
+        capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+    )
+    second = EntitySnapshot(
+        "switch.second", "Zweiter Schalter", "switch", "on",
+        capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+    )
+    plan = materialize_goal(
+        Goal(
+            GoalKind.PREPARE_NIGHT,
+            {"entity_ids": [first.entity_id, second.entity_id]},
+        ),
+        [first, second],
+        options={},
+        is_admin=True,
+        user_id="owner",
+    )
+    assert plan.steps[1].dependencies == ("check-fresh-state",)
+    assert plan.steps[2].dependencies == (plan.steps[1].step_id,)
+
+
+def test_movie_brightness_compensation_restores_observed_level():
+    light = EntitySnapshot(
+        "light.movie", "Filmlicht", "light", "on",
+        capabilities=frozenset({"TURN_ON", "TURN_OFF", "BRIGHTNESS"}),
+        attributes={"brightness": 128},
+    )
+    plan = materialize_goal(
+        Goal(
+            GoalKind.PREPARE_MOVIE,
+            {"entity_ids": [light.entity_id], "brightness_percent": 30},
+        ),
+        [light],
+        options={},
+        is_admin=True,
+        user_id="owner",
+    )
+    action_step = plan.steps[1]
+    assert action_step.compensation is not None
+    assert action_step.compensation.domain == "light"
+    assert action_step.compensation.data == {"brightness_pct": 50}
+
+
 @pytest.mark.parametrize(
     ("text", "kind"),
     [
@@ -552,6 +682,7 @@ def test_planner_stops_after_failed_verification():
         ("Bereite das Haus auf Abwesenheit vor", GoalKind.PREPARE_AWAY),
         ("Schalte unbesetzte Bereiche energiesparend", GoalKind.SAVE_UNOCCUPIED),
         ("Untersuche die Ursache des Zustands", GoalKind.INVESTIGATE_STATE),
+        ("Mach diesen Raum komfortabler", GoalKind.IMPROVE_COMFORT),
     ],
 )
 def test_closed_goal_interpreter(text: str, kind: GoalKind):
@@ -623,6 +754,7 @@ def test_adapter_rejects_unknown_metadata_and_ha_source():
 def test_agent_options_are_closed_and_path_safe():
     assert validate_quiet_time("22:30") == "22:30"
     assert validate_documents_directory("homeintent/docs") == "homeintent/docs"
+    assert validate_mqtt_topic("frigate/events") == "frigate/events"
     assert parse_event_categories("safety, light_unoccupied") == {
         "safety",
         "light_unoccupied",
@@ -635,6 +767,9 @@ def test_agent_options_are_closed_and_path_safe():
             validate_documents_directory(invalid)
     with pytest.raises(ValueError):
         parse_event_categories("unknown_category")
+    for invalid_topic in ("", "frigate/#", "frigate/+/events", "bad\x00topic"):
+        with pytest.raises(ValueError):
+            validate_mqtt_topic(invalid_topic)
 
 
 def test_routine_feedback_suppresses_without_granting_authority():

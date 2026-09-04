@@ -21,6 +21,7 @@ class DialogTaskKind(StrEnum):
     MEMORY_CONFIRMATION = "memory_confirmation"
     COMFORT_CONFIRMATION = "comfort_confirmation"
     PLAN_CONFIRMATION = "plan_confirmation"
+    ALIAS_CONFIRMATION = "alias_confirmation"
 
 
 class DialogPriority(IntEnum):
@@ -42,6 +43,7 @@ class DialogTask:
     candidates: tuple[str, ...] = ()
     reason: str = ""
     requested_by_user_id: str | None = None
+    payload: object | None = None
 
 
 @dataclass(frozen=True)
@@ -75,6 +77,7 @@ class DialogManager:
         candidates: tuple[str, ...] = (),
         reason: str = "",
         requested_by_user_id: str | None = None,
+        payload: object | None = None,
         now: datetime | None = None,
     ) -> DialogTask:
         current = now or datetime.now(timezone.utc)
@@ -89,6 +92,7 @@ class DialogManager:
             candidates,
             reason,
             requested_by_user_id,
+            payload,
         )
         self.add(conversation_id, task)
         return task
@@ -182,6 +186,50 @@ class DialogManager:
         )
         self.add(conversation_id, updated)
         return DialogDecision(updated, None, completed=not updated.missing_slots)
+
+    def mirror_legacy(
+        self,
+        conversation_id: str,
+        *,
+        kind: DialogTaskKind | None,
+        priority: DialogPriority = DialogPriority.FOLLOWUP,
+        slots: Mapping[str, object] | None = None,
+        candidates: tuple[str, ...] = (),
+        reason: str = "",
+        requested_by_user_id: str | None = None,
+    ) -> DialogTask | None:
+        """Project one compatibility dialog into the central task queue.
+
+        The historical payload remains in ``ConversationContext`` during its
+        incremental migration, but selection, ownership, priority and
+        replacement become visible at the single coordinator immediately.
+        """
+        task_id = "legacy-context"
+        if kind is None:
+            self.cancel(conversation_id, task_id)
+            return None
+        existing = self._tasks.get(conversation_id, {}).get(task_id)
+        desired_slots = dict(slots or {})
+        if (
+            existing is not None
+            and existing.kind is kind
+            and existing.priority == priority
+            and existing.slots == desired_slots
+            and existing.candidates == candidates
+            and existing.requested_by_user_id == requested_by_user_id
+        ):
+            return existing
+        self.cancel(conversation_id, task_id)
+        return self.create(
+            conversation_id,
+            task_id,
+            kind,
+            priority,
+            slots=desired_slots,
+            candidates=candidates,
+            reason=reason,
+            requested_by_user_id=requested_by_user_id,
+        )
 
 
 def _empty_mapping() -> dict[str, object]:

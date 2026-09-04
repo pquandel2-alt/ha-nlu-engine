@@ -838,12 +838,15 @@ class SemanticQueryCompiler:
         named_mentions: tuple[EntitySnapshot, ...] = ()
         needs_named_resolution = (
             not targets
-            or bool(analysis.unexplained_tokens)
             or _SINGULAR_NAMED_QUERY_RE.search(text) is not None
             or _BARE_NAMED_STATE_QUERY_RE.search(text) is not None
         )
         if needs_named_resolution:
-            named_mentions = mentioned_entities(text, entities)
+            named_mentions = mentioned_entities(
+                text,
+                entities,
+                index=(world_model.entity_index if world_model is not None else None),
+            )
         if not targets:
             if named_mentions:
                 named_domains = {entity.domain for entity in named_mentions}
@@ -890,6 +893,21 @@ class SemanticQueryCompiler:
         # understood. Dynamic registry location and entity names are removed
         # from this check because they cannot live in the lexicon.
         registry_texts = [item[0] for item in locations]
+        # Resolve the typed location before attempting the O(n) registry-name
+        # scan. Area/floor names intentionally arrive as unexplained lexical
+        # tokens; once they are accounted for, a plural category query does
+        # not need to compare its text with every entity name. If meaningful
+        # residue remains, retain the established safe named-entity fallback.
+        if (
+            not named_mentions
+            and analysis.unexplained_tokens
+            and _has_unexplained_meaning(analysis, tuple(registry_texts))
+        ):
+            named_mentions = mentioned_entities(
+                text,
+                entities,
+                index=(world_model.entity_index if world_model is not None else None),
+            )
         for entity in named_mentions:
             registry_texts.extend((entity.friendly_name, *entity.aliases))
         if _has_unexplained_meaning(

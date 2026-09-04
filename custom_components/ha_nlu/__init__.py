@@ -119,6 +119,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     situation_runtime = SituationRuntime(hass, entry, entry.runtime_data)
     entry.runtime_data.situation_runtime = situation_runtime
     entry.async_on_unload(situation_runtime.async_start())
+    from .adapters import StructuredAdapterRuntime
+
+    adapter_runtime = StructuredAdapterRuntime(
+        hass, entry, entry.runtime_data.adapter_evidence.append
+    )
+    entry.runtime_data.adapter_runtime = adapter_runtime
+    entry.async_on_unload(await adapter_runtime.async_start())
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
@@ -213,6 +220,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unloaded:
+        await entry.runtime_data.effect_monitor.async_close()
     if unloaded and hass.services.has_service(DOMAIN, SERVICE_DELETE_AUTOMATION):
         hass.services.async_remove(DOMAIN, SERVICE_DELETE_AUTOMATION)
     if unloaded and hass.services.has_service(DOMAIN, SERVICE_RECORD_AUTOMATION_RUN):

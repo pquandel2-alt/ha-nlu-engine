@@ -9,7 +9,9 @@ from typing import Mapping, cast
 from .device_control import DeviceControlResult
 from .entities import EntitySnapshot, normalize_for_compare
 from .nlu.domain_operations import DOMAIN_WORDS
+from .nlu.language_frontend import LanguageDocument
 from .nlu.normalize import normalize
+from .nlu.semantic_utterance import SpeechAct
 from .query_target import list_attribute_values, mentioned_entities, resolve_query_targets
 
 
@@ -88,10 +90,15 @@ def _numeric_state(entity: EntitySnapshot) -> float | None:
 
 
 def match_household_query(
-    text: str, entities: list[EntitySnapshot], now: datetime
+    text: str,
+    entities: list[EntitySnapshot],
+    now: datetime,
+    document: LanguageDocument | None = None,
 ) -> DeviceControlResult | None:
     """Answer deterministic household questions without creating a plan."""
-    value = normalize(text)
+    if document is not None and document.utterance.speech_act is not SpeechAct.QUERY:
+        return None
+    value = document.normalized_text if document is not None else normalize(text)
     key = normalize_for_compare(value)
 
     if re.search(r"\b(?:wie\s+spaet|wieviel\s+uhr|welche\s+uhrzeit)\b", key):

@@ -18,10 +18,12 @@ import _ha_stub  # noqa: E402
 _ha_stub.install()
 
 import ha_nlu.conversation as ha_conversation  # noqa: E402
+import ha_nlu.device_control as device_control_module  # noqa: E402
 from ha_nlu.const import SELECTABLE_DOMAINS  # noqa: E402
 from ha_nlu.conversation import NluConversationEntity  # noqa: E402
 from ha_nlu.device_control import match_device_control  # noqa: E402
 from ha_nlu.entities import EntitySnapshot  # noqa: E402
+from ha_nlu.nlu.language_frontend import analyse_language  # noqa: E402
 from homeassistant.components.conversation import ConversationInput  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
 from homeassistant.core import HomeAssistant  # noqa: E402
@@ -101,6 +103,21 @@ def test_climate_mode_is_checked_against_reported_modes():
     )
     assert unsupported.plan is None
     assert "nicht" in unsupported.response_text
+
+
+def test_device_router_reuses_shared_language_document(monkeypatch):
+    text = "Stelle die Lautstärke von Wohnzimmer TV auf 35 Prozent"
+    document = analyse_language(text, ENTITIES)
+    monkeypatch.setattr(
+        device_control_module,
+        "analyse_utterance",
+        lambda _text: (_ for _ in ()).throw(
+            AssertionError("zweite Diskursanalyse")
+        ),
+    )
+    result = match_device_control(text, ENTITIES, document)
+    assert result is not None and result.plan is not None
+    assert result.plan.service == "volume_set"
 
 
 def test_climate_temperature_is_checked_against_reported_range():

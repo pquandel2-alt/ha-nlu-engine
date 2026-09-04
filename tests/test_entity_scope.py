@@ -3,6 +3,7 @@ from ha_nlu.entity_scope import resolve_entity_scope
 from ha_nlu.extended_device_control import match_extended_device_control
 from ha_nlu.extended_device_query import match_extended_device_query
 from ha_nlu.device_control import _mentioned_entity, _result
+from ha_nlu.nlu.language_frontend import analyse_language
 
 
 ENTITIES = [
@@ -43,6 +44,14 @@ def test_extended_query_accepts_natural_request_shell():
         "Sag mir bitte, welche Luftbefeuchter im Büro an sind", ENTITIES
     )
     assert result is not None and "Befeuchter Büro" in result.response_text
+
+
+def test_extended_query_honours_shared_speech_act():
+    document = analyse_language("Schalte den Befeuchter ein", ENTITIES)
+
+    assert match_extended_device_query(
+        "Welche Luftbefeuchter sind im Büro an?", ENTITIES, document
+    ) is None
 
 
 def test_extended_group_value_is_checked_for_every_target():

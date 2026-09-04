@@ -219,6 +219,29 @@ def test_unclear_reply_re_asks_and_keeps_the_pending_confirmation(monkeypatch, t
     assert len(_automations_yaml(tmp_path)) == 1
 
 
+def test_complete_device_command_replaces_pending_automation(monkeypatch, tmp_path):
+    entity = _make_entity(monkeypatch, tmp_path)
+    conversation_id = "topic-switch"
+    _run(entity, AUTOMATION_SENTENCE, conversation_id)
+
+    replacement = _run(
+        entity,
+        "Lass das, mach lieber das Küchenlicht an.",
+        conversation_id,
+    )
+
+    assert replacement.response.error_code is None
+    entity.hass.services.async_call.assert_awaited_once_with(
+        "homeassistant",
+        "turn_on",
+        {"entity_id": KUECHE_LICHT.entity_id},
+        blocking=True,
+    )
+    assert _automations_yaml(tmp_path) == []
+    later_yes = _run(entity, "Ja", conversation_id)
+    assert later_yes.response.error_code == intent.IntentResponseErrorCode.NO_INTENT_MATCH
+
+
 # --- two automations in a row append, never overwrite -----------------------
 
 

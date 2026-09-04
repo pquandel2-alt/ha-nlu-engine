@@ -276,9 +276,24 @@ def all_mentioned_entities(
 
 
 def mentioned_entities(
-    text: str, entities: list[EntitySnapshot]
+    text: str,
+    entities: list[EntitySnapshot],
+    *,
+    index: EntityIndex | None = None,
 ) -> tuple[EntitySnapshot, ...]:
     """Return unique longest explicit registry-name or alias mentions."""
+    if index is not None:
+        indexed = _indexed_exact_targets(text, index, frozenset(), None, None)
+        if indexed:
+            best = max(
+                len(normalize_for_compare(candidate.matched_name))
+                for candidate in indexed
+            )
+            return tuple(
+                candidate.entity
+                for candidate in indexed
+                if len(normalize_for_compare(candidate.matched_name)) == best
+            )
     found = _rank_mentions(text, entities)
     if not found:
         return ()

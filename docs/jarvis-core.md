@@ -47,6 +47,25 @@ Kandidatenliste gültig; eine unklare Kurzantwort lässt den Dialog offen.
 Vollständige neue Befehle können einen optionalen Gedächtnisdialog ersetzen.
 „Was hast du verstanden?“ und „Warum fragst du?“ lesen ausschließlich den
 strukturierten Taskzustand.
+Historische Automation-, Kalender-, Produktivitäts- und Auswahlzustände werden
+während ihrer schrittweisen Payload-Migration als typisierte Kompatibilitäts-
+Tasks in denselben Manager gespiegelt. Ein expliziter Themenwechsel verwirft
+den alten Task. Eine Aktion direkt nach einem offenen „Wenn …“-Trigger bleibt
+dagegen bewusst dessen zweite Hälfte, solange der Benutzer nicht mit
+„Lass das, mach lieber …“ wechselt.
+
+Das explizite Lernen lokaler Entity-Aliase ist bereits vollständig migriert:
+Entwurf, Benutzerbindung und Bestätigung liegen nur noch in einem nativen
+`ALIAS_CONFIRMATION`-Task. Der frühere Context-Payloadtyp wird ausschließlich
+zum sicheren Beenden bereits vor einem Reload geöffneter Alt-Sessions gelesen.
+
+Neue Kalender- und Produktivitätsturns teilen sich ein verlustarmes
+`LanguageDocument` und ein `UnderstandingOutcome`. Treffen beide Fachparser,
+entscheidet nur ein expliziter Kalender-/Termin- beziehungsweise
+Listen-/Timerbezug; widersprüchliche Hinweise führen ohne Aktion zur
+Klärung. Read-only Haushalts- und Capability-Abfragen verwenden ebenfalls
+das einmal am Turn-Eingang erzeugte Dokument und akzeptieren nur den zentral
+klassifizierten Query-Speech-Act.
 
 „Mach es hier gemütlicher“ wird nur dann zu einem konkreten ASK-Vorschlag,
 wenn genau eine bestätigte, personengebundene Präferenz auf ein aktuelles,
@@ -73,8 +92,9 @@ policyerlaubter Vorschlag kann ASK werden. Die Schicht führt selbst nichts
 aus.
 
 Routineerkennung ist standardmäßig aus. Sie nutzt Häufigkeiten nach Stunde
-und Wochentag, Zustandsdauern, Mediane, Sequenzen, Mindestbeobachtungszahl,
-Cooldown und Hysterese. Jede Bewertung nennt Beobachtung, Normalbereich,
+und Wochentag, saisonale Monatsfenster, Betriebsmodus und Belegung,
+Zustandsdauern, robuste Median-/IQR-Quantile, gleitende Mittelwerte,
+Sequenzen, Mindestbeobachtungszahl, Cooldown und gelatchte Hysterese. Jede Bewertung nennt Beobachtung, Normalbereich,
 Anzahl, Relevanz, Confidence und Unsicherheit. Wiederholung allein gewährt
 niemals AUTO.
 
@@ -105,6 +125,17 @@ sein; der Planer hat keinen eigenen HA-Schreibpfad. Nach jedem Schritt wird
 die Wirkung geprüft. Bei Fehler stoppt der Plan, und nur ausdrücklich
 reversible, bereits ausgeführte Schritte werden in umgekehrter Reihenfolge
 erneut policygebunden kompensiert.
+Abhängigkeiten bilden eine echte Reihenfolge und werden vor jedem Schritt
+geprüft. Eine bereits eingeschaltete Lampe wird nach einer Filmhelligkeits-
+Änderung nur dann auf den alten Wert kompensiert, wenn dieser im frischen
+Ausgangssnapshot belegt war; andernfalls gilt der Schritt nicht als reversibel.
+
+Zusätzlich registriert der gemeinsame Executor nach einem erfolgreichen,
+beobachtbaren Dienstaufruf eine kurze Wirkungserwartung. Der State-Listener
+erfüllt sie mit einem passenden neuen Zustand. Läuft sie ab, kann die opt-in
+Kategorie `expected_effect_missing` ausschließlich INFORM erzeugen; HomeIntent
+wiederholt die Aktion niemals automatisch. Beim Unload werden alle Timer
+abgebrochen.
 
 Das geschlossene Szenario „Wenn niemand mehr unten ist …“ bindet genau einen
 konfigurierten Anwesenheitssensor, die abschaltbaren Geräte derselben Etage
@@ -116,15 +147,18 @@ Sensoren oder Flurlichter erzeugen keine Automation.
 
 Alle Adapter sind opt-in und read-only:
 
-- Frigate nimmt nur vorhandene Objekt-, Paket- und Personenmetadaten an;
-  Erkennungen bleiben Schätzungen.
+- Frigate nimmt über `frigate_events` und optional das konkrete MQTT-Topic nur
+  vorhandene Objekt-, Paket- und Personenmetadaten an; Erkennungen bleiben
+  Schätzungen. MQTT-Nutzlasten sind auf 64 KiB begrenzt, Wildcards verboten.
 - Der Dokumentindex ist auf ein freigegebenes Stammverzeichnis, UTF-8-TXT,
   Markdown und begrenzte PDF-Textoperatoren, Dateizahl und Dateigröße
   beschränkt. Symlink-Ausbrüche werden verworfen. Treffer kommen mit
   relativer Quelle aus SQLite FTS5. Verschlüsselte oder reine Scan-PDFs
   werden nicht per OCR interpretiert.
-- Der HA-Quellenadapter akzeptiert nur strukturierte Daten aus Kalender,
-  Wetter, Recorder, Logbook, Energie, Anwesenheit, Todo und Timer.
+- Der HA-Quellenadapter übernimmt opt-in feldbegrenzt vorhandene Kalender-,
+  Wetter-, Anwesenheits-, Todo- und Timer-Zustände. Die bereits bestehenden
+  fachlichen Lesewege für Recorder, Logbook und Energie bleiben deren
+  autoritative HA-Abfragepfade und werden nicht dupliziert.
 
 Die Adapter erzeugen Evidenz, niemals einen Serviceplan oder eine erfundene
 Zusammenfassung.

@@ -163,3 +163,13 @@ nicht möglich. Derselbe Validator läuft beim Erzeugen, beim Neustart und
 unmittelbar vor der Ausführung eines persistierten Plans. Target-Felder sind
 in `action_data` verboten; Nutzdaten können das geprüfte Ziel daher nicht
 ersetzen oder erweitern.
+
+## Erwartete Wirkung
+
+Der gemeinsame Executor registriert nach bekannten Zustandsdiensten eine
+zeitlich begrenzte Erwartung pro stabiler Entity-ID. Ein passendes
+`state_changed` erfüllt sie. Bei Ablauf erzeugt die ausdrücklich aktivierte
+Kategorie `expected_effect_missing` eine knappe INFORM-Meldung mit erwartetem
+und beobachtetem Zustand. Sie enthält keine Aktion und wiederholt den
+ursprünglichen Dienst nicht. Ein neuer Dienst für dieselbe Entität ersetzt die
+ältere Erwartung; Unload entfernt Listener und Timer.

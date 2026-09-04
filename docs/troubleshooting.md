@@ -97,3 +97,12 @@ höhere Risiken werden nicht durch Routinewissen zu AUTO.
 Mindestens eine Ereigniskategorie muss explizit eingetragen sein. Ruhezeiten
 unterdrücken TTS, nicht jedoch konfigurierte kritische Kanäle. Ein veralteter,
 unbekannter oder bereits deduplizierter Zustand erzeugt keine zweite Ausgabe.
+
+## Frigate- oder HA-Quellenevidenz bleibt leer
+
+Beide Adapter sind standardmäßig deaktiviert. Für Frigate muss zusätzlich die
+HA-MQTT-Integration verfügbar und das konkrete Topic ohne `+` oder `#`
+konfiguriert sein; alternativ werden strukturierte `frigate_events`
+verarbeitet. HomeIntent liest keine Bilder. HA-Quellenevidenz entsteht nur aus
+Zustandsänderungen unterstützter vorhandener Entitäten und wird ausschließlich
+im begrenzten RAM-Puffer gehalten.

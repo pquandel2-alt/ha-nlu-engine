@@ -108,13 +108,28 @@ def materialize_goal(
     entity_ids = tuple(cast(str, item) for item in requested_items)
     if not entity_ids and goal.kind in {
         GoalKind.PREPARE_NIGHT,
-        GoalKind.SAVE_UNOCCUPIED,
         GoalKind.PREPARE_AWAY,
     }:
         entity_ids = tuple(
             entity.entity_id
             for entity in snapshots
             if "TURN_OFF" in entity.capabilities
+            and entity.state in {"on", "playing", "heating", "cooling"}
+        )
+    if not entity_ids and goal.kind is GoalKind.SAVE_UNOCCUPIED:
+        unoccupied_areas = {
+            entity.area_id
+            for entity in snapshots
+            if entity.area_id is not None
+            and entity.domain == "binary_sensor"
+            and entity.device_class in {"occupancy", "presence"}
+            and entity.state in {"off", "clear", "not_home"}
+        }
+        entity_ids = tuple(
+            entity.entity_id
+            for entity in snapshots
+            if entity.area_id in unoccupied_areas
+            and "TURN_OFF" in entity.capabilities
             and entity.state in {"on", "playing", "heating", "cooling"}
         )
     if any(item not in by_id for item in entity_ids):
@@ -145,12 +160,26 @@ def materialize_goal(
         GoalKind.SAVE_UNOCCUPIED,
         GoalKind.PREPARE_AWAY,
     } else "turn_on"
+    dependency_id = check_id
     for index, entity_id in enumerate(entity_ids, start=1):
         entity = by_id[entity_id]
         capability = "TURN_OFF" if service == "turn_off" else "TURN_ON"
         if capability not in entity.capabilities:
             raise ValueError(f"{entity.friendly_name} unterstützt {capability} nicht")
-        action = ServiceCallPlan("homeassistant", service, entity_id, {})
+        action_data: dict[str, object] = {}
+        brightness = goal.parameters.get("brightness_percent")
+        if (
+            service == "turn_on"
+            and entity.domain == "light"
+            and isinstance(brightness, int)
+        ):
+            if not 1 <= brightness <= 100 or "BRIGHTNESS" not in entity.capabilities:
+                raise ValueError(
+                    f"{entity.friendly_name} unterstützt die gewünschte Helligkeit nicht"
+                )
+            action_data["brightness_pct"] = brightness
+        action_domain = "light" if action_data else "homeassistant"
+        action = ServiceCallPlan(action_domain, service, entity_id, action_data)
         if error := validate_agent_service_plan(action):
             raise ValueError(error)
         policy = evaluate_service_plan(
@@ -158,9 +187,22 @@ def materialize_goal(
         )
         if policy.outcome is PolicyOutcome.DENY:
             raise PermissionError(policy.reason or "Aktion ist nicht erlaubt")
-        inverse = ServiceCallPlan(
-            "homeassistant", "turn_on" if service == "turn_off" else "turn_off", entity_id, {}
-        )
+        inverse: ServiceCallPlan | None
+        if service == "turn_off":
+            inverse = ServiceCallPlan("homeassistant", "turn_on", entity_id, {})
+        elif entity.state == "off":
+            inverse = ServiceCallPlan("homeassistant", "turn_off", entity_id, {})
+        else:
+            # A brightness change on an already-on light cannot be safely
+            # compensated unless HA exposed its previous brightness.
+            raw_brightness = entity.attributes.get("brightness")
+            if action_data and isinstance(raw_brightness, (int, float)):
+                prior_percent = max(1, min(100, round(float(raw_brightness) * 100 / 255)))
+                inverse = ServiceCallPlan(
+                    "light", "turn_on", entity_id, {"brightness_pct": prior_percent}
+                )
+            else:
+                inverse = None
         expected = "off" if service == "turn_off" else "on"
         steps.append(
             PlanStep(
@@ -170,14 +212,15 @@ def materialize_goal(
                 preconditions=("entity_available", capability.casefold()),
                 effects=(f"state={expected}",),
                 invariants=("same_stable_entity_id", "policy_allow_or_confirmed"),
-                dependencies=(check_id,),
+                dependencies=(dependency_id,),
                 action=action,
                 risk=classify_service_plan(action, snapshots),
-                reversible=True,
+                reversible=inverse is not None,
                 verification={entity_id: expected},
                 compensation=inverse,
             )
         )
+        dependency_id = f"action-{index}"
     aggregate = max((step.risk for step in steps), default=RiskLevel.LOW)
     # Every action-bearing household goal is confirmed as one materialized
     # unit, even if each individual LOW step would be directly allowed.
@@ -225,11 +268,18 @@ class PlanExecutor:
             return PlanResult(plan.plan_id, PlanStatus.NEEDS_CONFIRMATION, ())
         results: list[StepResult] = []
         executed: list[PlanStep] = []
+        completed_ids: set[str] = set()
         for step in plan.steps:
             fresh = await self._refresh_entities()
             if step.kind is StepKind.CHECK:
                 results.append(StepResult(step.step_id, True, "Frischer Snapshot geladen."))
+                completed_ids.add(step.step_id)
                 continue
+            if any(dependency not in completed_ids for dependency in step.dependencies):
+                results.append(
+                    StepResult(step.step_id, False, "Eine Planabhängigkeit ist nicht erfüllt.")
+                )
+                return PlanResult(plan.plan_id, PlanStatus.STOPPED, tuple(results))
             action = step.action
             if action is None:
                 results.append(StepResult(step.step_id, False, "Aktionsschritt ohne Aktion."))
@@ -256,6 +306,7 @@ class PlanExecutor:
                     plan.plan_id, PlanStatus.STOPPED, tuple(results), compensated
                 )
             executed.append(step)
+            completed_ids.add(step.step_id)
             results.append(StepResult(step.step_id, True, "Ausgeführt und verifiziert."))
         return PlanResult(plan.plan_id, PlanStatus.COMPLETED, tuple(results))
 

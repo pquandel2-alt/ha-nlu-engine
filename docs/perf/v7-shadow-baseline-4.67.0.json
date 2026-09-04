@@ -567,7 +567,7 @@
     ]
   },
   "mode": "read_only_no_service_execution",
-  "project_version": "4.65.0",
+  "project_version": "4.67.0",
   "safety": {
     "ambiguous_action_leakage": 0,
     "query_to_action_leakage": 0,

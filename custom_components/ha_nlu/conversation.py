@@ -31,7 +31,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .automation_executor import AutomationExecutor
-from .alias_learning import append_alias_rule, parse_alias_learning
+from .alias_learning import AliasLearningDraft, append_alias_rule, parse_alias_learning
 from .agent_action_policy import validate_agent_service_plan
 from .automation_action_edit import (
     action_edit_operation,
@@ -70,7 +70,7 @@ from .calendar_event import (
     update_calendar_event_draft,
     writable_calendars,
 )
-from .calendar_management import parse_calendar_management
+from .calendar_management import CalendarManagementRequest
 from .capability_audit import match_capability_audit_query
 from .comfort_intent import is_comfort_request, select_comfort_suggestion
 from .conversation_location import (
@@ -122,7 +122,18 @@ from .house_graph import FactProvenance, HouseGraph, parse_relation_specs
 from .goal_intent import interpret_goal
 from .memory import MemoryKind
 from .memory_intent import MemoryOperation, interpret_memory_intent
-from .planner import MaterializedPlan, PlanExecutor, PlanStatus, StepKind, materialize_goal
+from .management_understanding import understand_management
+from .planner import (
+    Goal,
+    GoalKind,
+    MaterializedPlan,
+    PlanExecutor,
+    PlanStatus,
+    StepKind,
+    materialize_goal,
+)
+from .procedure_intent import ProcedureOperation, interpret_procedure_intent
+from .routine_intent import interpret_routine_feedback
 from .nlu.automation_confirmation import ConfirmationReply, classify_confirmation_reply
 from .nlu.automation_model import AutomationModel, TriggerTarget, resolve_pending_schedule
 from .nlu.automation_validator import validate_automation
@@ -138,7 +149,6 @@ from .nlu.context import (
     PendingAutomationManagement,
     PendingAutomationStructureEdit,
     PendingAutomationWizard,
-    PendingAliasLearning,
     PendingCalendarEvent,
     PendingServiceConfirmation,
     PendingSemanticCommand,
@@ -195,7 +205,6 @@ from .productivity import (
     TodoOperation,
     TodoRequest,
     format_duration,
-    parse_productivity_request,
     select_productivity_candidate,
 )
 from .phonetic_correction import PhoneticSuggestion, phonetic_suggestions
@@ -260,6 +269,45 @@ _GENERATION_ERROR_SPOKEN_DE = {
         "Diese Aktion wird von Home Assistant nicht unterstützt. Die Automation wurde nicht erstellt."
     ),
 }
+
+
+def _is_complete_actionable_understanding(
+    payload: MatchResult | CommandPlan | None,
+) -> bool:
+    """Whether a fresh V7 turn is complete enough to replace a dialog."""
+    if isinstance(payload, MatchResult):
+        return payload.plan is not None and payload.clarification is None
+    if isinstance(payload, CommandPlan):
+        return bool(payload.commands) and all(
+            command.clarification is None for command in payload.commands
+        ) and any(command.plan is not None for command in payload.commands)
+    return False
+
+
+def _legacy_manager_kind(
+    kind: PendingDialogKind,
+) -> tuple[DialogTaskKind, DialogPriority]:
+    """Map every historical pending state onto the central coordinator."""
+    if kind is PendingDialogKind.CLARIFICATION:
+        return DialogTaskKind.ENTITY_SELECTION, DialogPriority.SELECTION
+    if kind is PendingDialogKind.SERVICE_CONFIRMATION:
+        return DialogTaskKind.SAFETY_CONFIRMATION, DialogPriority.SAFETY
+    if kind in {
+        PendingDialogKind.AUTOMATION_CONFIRMATION,
+        PendingDialogKind.AUTOMATION_DELETION,
+        PendingDialogKind.CALENDAR_MUTATION,
+        PendingDialogKind.AUTOMATION_MANAGEMENT,
+        PendingDialogKind.ALIAS_LEARNING,
+    }:
+        return DialogTaskKind.SAFETY_CONFIRMATION, DialogPriority.CONFIRMATION
+    if kind in {
+        PendingDialogKind.AUTOMATION_DRAFT,
+        PendingDialogKind.AUTOMATION_ACTION_EDIT,
+        PendingDialogKind.AUTOMATION_STRUCTURE_EDIT,
+        PendingDialogKind.AUTOMATION_WIZARD,
+    }:
+        return DialogTaskKind.AUTOMATION, DialogPriority.FOLLOWUP
+    return DialogTaskKind.MISSING_SLOT, DialogPriority.FOLLOWUP
 
 
 async def async_setup_entry(
@@ -379,6 +427,18 @@ class NluConversationEntity(
         localized_text = materialize_local_reference(
             user_input.text, conversation_area
         )
+        explicit_topic_switch = False
+        if pending is not None:
+            replacement = re.search(
+                r"\b(?:lass\s+das\s*,?\s*)?(?P<verb>mach|schalt|schalte|stell|stelle|fahr|fahre)\s+lieber\s+(?P<rest>.+)",
+                localized_text,
+                re.IGNORECASE,
+            )
+            if replacement is not None:
+                explicit_topic_switch = True
+                localized_text = (
+                    f"{replacement.group('verb')} {replacement.group('rest')}"
+                )
         if localized_text != user_input.text:
             user_input = replace(user_input, text=localized_text)
         language_document = analyse_language(user_input.text, entities)
@@ -397,8 +457,184 @@ class NluConversationEntity(
             )
 
         active_dialog = active_pending_dialog(pending)
+        direct_understanding = None
+        manager = self._runtime_data.dialog_manager
+        if active_dialog is None:
+            manager.mirror_legacy(user_input.conversation_id, kind=None)
+        else:
+            manager_kind, manager_priority = _legacy_manager_kind(active_dialog.kind)
+            raw_candidates = (
+                getattr(active_dialog.payload, "candidates", ())
+                if active_dialog.kind is PendingDialogKind.CLARIFICATION
+                else ()
+            )
+            candidates = tuple(
+                item.entity_id
+                for item in raw_candidates
+                if isinstance(item, EntitySnapshot)
+            )
+            legacy_owner = getattr(
+                active_dialog.payload, "requested_by_user_id", None
+            )
+            manager.mirror_legacy(
+                user_input.conversation_id,
+                kind=manager_kind,
+                priority=manager_priority,
+                slots={"legacy_kind": active_dialog.kind.name},
+                candidates=candidates,
+                reason="Ein bestehender Dialog benötigt eine eindeutige Fortsetzung.",
+                requested_by_user_id=(
+                    legacy_owner if isinstance(legacy_owner, str) else None
+                ),
+            )
+            if (
+                language_document.utterance.speech_act is SpeechAct.COMMAND
+                and language_document.utterance.safe_to_execute_directly
+                and not is_contextual_followup(user_input.text)
+                and (
+                    active_dialog.kind not in {
+                        PendingDialogKind.AUTOMATION_DRAFT,
+                        PendingDialogKind.AUTOMATION_ACTION_EDIT,
+                        PendingDialogKind.AUTOMATION_STRUCTURE_EDIT,
+                        PendingDialogKind.AUTOMATION_WIZARD,
+                    }
+                    or explicit_topic_switch
+                )
+            ):
+                candidate = self._engine.understand(
+                    user_input.text, entities, self._world_model, language_document
+                )
+                if _is_complete_actionable_understanding(candidate.payload):
+                    self._context_store.clear(user_input.conversation_id)
+                    manager.replace_with_complete_command(user_input.conversation_id)
+                    pending = None
+                    active_dialog = None
+                    direct_understanding = candidate
+
+        active_task = manager.active(user_input.conversation_id)
+        if (
+            active_dialog is None
+            and active_task is not None
+            and active_task.kind is DialogTaskKind.ALIAS_CONFIRMATION
+            and language_document.utterance.speech_act is SpeechAct.COMMAND
+            and language_document.utterance.safe_to_execute_directly
+            and not is_contextual_followup(user_input.text)
+        ):
+            candidate = self._engine.understand(
+                user_input.text, entities, self._world_model, language_document
+            )
+            if _is_complete_actionable_understanding(candidate.payload):
+                manager.replace_with_complete_command(user_input.conversation_id)
+                active_task = None
+                direct_understanding = candidate
+
+        if active_dialog is not None or active_task is not None:
+            normalized_meta = language_document.normalized_text.casefold()
+            actor_id = conversation_user_id(user_input)
+            is_meta_turn = bool(
+                re.search(
+                    r"\b(?:was\s+hast\s+du\s+verstanden|warum\s+fragst\s+du)\b",
+                    normalized_meta,
+                )
+                or re.fullmatch(
+                    r"\s*(?:lass\s+das|abbrechen|abbruch|stopp|stop|vergiss\s+es)[.!]?\s*",
+                    normalized_meta,
+                )
+            )
+            if (
+                is_meta_turn
+                and active_task is not None
+                and active_task.requested_by_user_id is not None
+                and active_task.requested_by_user_id != actor_id
+            ):
+                response.async_set_speech(
+                    "Diese Rückfrage gehört zu einem anderen Benutzer."
+                )
+                return conversation.ConversationResult(
+                    response=response,
+                    conversation_id=user_input.conversation_id,
+                )
+            if re.search(r"\bwas\s+hast\s+du\s+verstanden\b", normalized_meta):
+                response.async_set_speech(manager.understood(user_input.conversation_id))
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
+            if re.search(r"\bwarum\s+fragst\s+du\b", normalized_meta):
+                response.async_set_speech(manager.explain(user_input.conversation_id))
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
+            if re.fullmatch(
+                r"\s*(?:lass\s+das|abbrechen|abbruch|stopp|stop|vergiss\s+es)[.!]?\s*",
+                normalized_meta,
+            ):
+                self._context_store.clear(user_input.conversation_id)
+                manager.cancel(user_input.conversation_id)
+                response.async_set_speech(
+                    "In Ordnung. Ich habe den offenen Auftrag verworfen."
+                )
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
+
+        if (
+            active_dialog is None
+            and active_task is not None
+            and active_task.kind is DialogTaskKind.ALIAS_CONFIRMATION
+            and isinstance(active_task.payload, AliasLearningDraft)
+        ):
+            actor_id = conversation_user_id(user_input)
+            if (
+                active_task.requested_by_user_id is not None
+                and active_task.requested_by_user_id != actor_id
+            ):
+                response.async_set_speech(
+                    "Diese Rückfrage gehört zu einem anderen Benutzer."
+                )
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
+            reply = classify_confirmation_reply(user_input.text)
+            draft = active_task.payload
+            if reply is ConfirmationReply.NO:
+                manager.cancel(user_input.conversation_id, active_task.task_id)
+                response.async_set_speech(
+                    "Abgebrochen. Der Alias wurde nicht gespeichert."
+                )
+            elif reply is not ConfirmationReply.YES:
+                response.async_set_speech("Bitte antworte mit Ja oder Nein.")
+            else:
+                try:
+                    aliases = append_alias_rule(
+                        self.entry.options.get(CONF_CUSTOM_ALIASES), draft
+                    )
+                    self.hass.config_entries.async_update_entry(
+                        self.entry,
+                        options={**self.entry.options, CONF_CUSTOM_ALIASES: aliases},
+                    )
+                except ValueError as err:
+                    response.async_set_speech(str(err))
+                else:
+                    response.async_set_speech(
+                        f"Gespeichert. Mit „{draft.alias}“ meine ich künftig "
+                        f"{draft.entity_name}."
+                    )
+                manager.cancel(user_input.conversation_id, active_task.task_id)
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
 
         if active_dialog is None:
+            procedure_result = await self._async_handle_procedure_turn(
+                user_input, response, language_document, entities
+            )
+            if procedure_result is not None:
+                return procedure_result
+            routine_feedback_result = await self._async_handle_routine_feedback_turn(
+                user_input, response, language_document, entities
+            )
+            if routine_feedback_result is not None:
+                return routine_feedback_result
             scenario = interpret_downstairs_shutdown(language_document, entities)
             if scenario is not None:
                 return self._handle_automation_match_result(
@@ -648,15 +884,19 @@ class NluConversationEntity(
 
         alias_draft = parse_alias_learning(user_input.text, entities)
         if alias_draft is not None:
-            self._context_store.set(
+            self._context_store.clear(user_input.conversation_id)
+            manager.create(
                 user_input.conversation_id,
-                ConversationContext(
-                    last_command=None,
-                    last_entities=(),
-                    last_area=None,
-                    pending_clarification=None,
-                    pending_alias_learning=PendingAliasLearning(alias_draft),
-                ),
+                "alias-confirmation",
+                DialogTaskKind.ALIAS_CONFIRMATION,
+                DialogPriority.CONFIRMATION,
+                slots={
+                    "alias": alias_draft.alias,
+                    "entity_name": alias_draft.entity_name,
+                },
+                reason="Ein neuer lokaler Alias muss ausdrücklich bestätigt werden.",
+                requested_by_user_id=conversation_user_id(user_input),
+                payload=alias_draft,
             )
             response.async_set_speech(
                 f"Soll ich „{alias_draft.alias}“ lokal als Alias für "
@@ -712,20 +952,30 @@ class NluConversationEntity(
                         entity for entity in entities
                         if entity.domain != "todo" or entity.entity_id in personal_todos
                     ]
-        productivity = parse_productivity_request(
-            user_input.text, productivity_entities, dt_util.now()
+        management = understand_management(
+            language_document,
+            productivity_entities,
+            all_calendars,
+            dt_util.now(),
         )
-        if productivity is not None:
-            return await self._async_handle_productivity_request(
-                user_input, response, productivity, entities
+        if management is not None and management.payload is None:
+            response.async_set_speech(
+                management.speech or "Diese Verwaltungsanfrage ist mehrdeutig."
             )
-
-        calendar_management = parse_calendar_management(
-            user_input.text, all_calendars, dt_util.now()
-        )
-        if calendar_management is not None:
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+        if management is not None and isinstance(
+            management.payload, (TodoRequest, TimerRequest)
+        ):
+            return await self._async_handle_productivity_request(
+                user_input, response, management.payload, entities
+            )
+        if management is not None and isinstance(
+            management.payload, CalendarManagementRequest
+        ):
             return await async_handle_calendar_management(
-                self, user_input, response, calendar_management, all_calendars
+                self, user_input, response, management.payload, all_calendars
             )
 
         calendar_draft = start_calendar_event_draft(
@@ -762,7 +1012,7 @@ class NluConversationEntity(
         # early result. Automation turns stay lazy so they do not pay both
         # the direct and automation interpreters; non-command fallbacks are
         # computed below only if the established routers did not match.
-        direct_understanding = (
+        direct_understanding = direct_understanding or (
             self._engine.understand(
                 user_input.text, entities, self._world_model, language_document
             )
@@ -783,15 +1033,21 @@ class NluConversationEntity(
             else None
         )
         if result is None:
-            device_control = match_capability_audit_query(user_input.text, entities)
+            device_control = match_capability_audit_query(
+                user_input.text, entities, language_document
+            )
             if device_control is None:
                 device_control = match_household_query(
-                    user_input.text, entities, dt_util.now()
+                    user_input.text, entities, dt_util.now(), language_document
                 )
             if device_control is None:
-                device_control = match_extended_device_query(user_input.text, entities)
+                device_control = match_extended_device_query(
+                    user_input.text, entities, language_document
+                )
             if device_control is None:
-                device_control = match_device_control(user_input.text, entities)
+                device_control = match_device_control(
+                    user_input.text, entities, language_document
+                )
             if device_control is None:
                 device_control = match_device_control_followup(
                     user_input.text, pending, entities
@@ -924,6 +1180,7 @@ class NluConversationEntity(
                         confirmed=True,
                         audit_trail=self._audit_trail,
                         audit_actor_id=actor_id,
+                        effect_monitor=self._runtime_data.effect_monitor,
                     )
                     if not compensated.executed:
                         self._context_store.clear(user_input.conversation_id)
@@ -1181,6 +1438,201 @@ class NluConversationEntity(
             user_input, response, result, entities
         )
 
+    async def _async_handle_procedure_turn(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        language_document: LanguageDocument,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult | None:
+        """Manage named goals; execution always rematerializes a fresh plan."""
+        request = interpret_procedure_intent(language_document)
+        if request is None:
+            return None
+        store = self._runtime_data.memory
+        manager = self._runtime_data.dialog_manager
+        conversation_id = user_input.conversation_id
+        actor_id = conversation_user_id(user_input)
+        if store is None or not store.enabled:
+            response.async_set_speech("Das lokale dauerhafte Gedächtnis ist deaktiviert.")
+            return conversation.ConversationResult(
+                response=response, conversation_id=conversation_id
+            )
+        if actor_id is None:
+            response.async_set_speech(
+                "Benannte Prozeduren verwalte ich nur für einen authentifizierten Benutzer."
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=conversation_id
+            )
+        records = await store.async_list(
+            person_id=actor_id, kinds=(MemoryKind.PROCEDURE,)
+        )
+        if request.operation is ProcedureOperation.LIST:
+            names = sorted(
+                str(record.content.get("name"))
+                for record in records
+                if isinstance(record.content.get("name"), str)
+            )
+            if not names:
+                speech = "Für dich sind keine benannten Prozeduren gespeichert."
+            else:
+                visible = ", ".join(names[:3])
+                suffix = f" und {len(names) - 3} weitere" if len(names) > 3 else ""
+                speech = f"Gespeicherte Prozeduren: {visible}{suffix}."
+            response.async_set_speech(speech)
+        elif request.operation is ProcedureOperation.SAVE_ACTIVE_PLAN:
+            active = manager.active(conversation_id)
+            plan = active.slots.get("plan") if active is not None else None
+            if not isinstance(plan, MaterializedPlan) or request.name is None:
+                response.async_set_speech(
+                    "Es ist kein vollständiger Plan offen, den ich benennen könnte."
+                )
+            elif any(
+                normalize_for_compare(str(record.content.get("name", "")))
+                == request.name
+                for record in records
+            ):
+                response.async_set_speech(
+                    "Eine Prozedur mit diesem Namen existiert bereits. Bitte lösche oder benenne sie zuerst um."
+                )
+            else:
+                manager.cancel(conversation_id)
+                manager.create(
+                    conversation_id,
+                    "procedure-save",
+                    DialogTaskKind.MEMORY_CONFIRMATION,
+                    DialogPriority.CONFIRMATION,
+                    slots={
+                        "operation": ProcedureOperation.SAVE_ACTIVE_PLAN.value,
+                        "kind": MemoryKind.PROCEDURE.value,
+                        "content": {
+                            "name": request.name,
+                            "goal_kind": plan.goal.kind.value,
+                            "parameters": dict(plan.goal.parameters),
+                        },
+                        "person_id": actor_id,
+                    },
+                    reason="Ein benannter Mehrschrittplan soll dauerhaft gespeichert werden.",
+                    requested_by_user_id=actor_id,
+                )
+                response.async_set_speech(
+                    f"Soll ich die Prozedur {request.name} dauerhaft speichern?"
+                )
+        else:
+            matches = [
+                record
+                for record in records
+                if request.name is not None
+                and normalize_for_compare(str(record.content.get("name", "")))
+                == request.name
+            ]
+            if len(matches) != 1:
+                response.async_set_speech(
+                    "Diese Prozedur ist nicht eindeutig gespeichert. Ich habe nichts geändert."
+                )
+            elif request.operation is ProcedureOperation.FORGET:
+                deleted = await store.async_forget(matches[0].memory_id)
+                response.async_set_speech(
+                    "Die Prozedur wurde kontrolliert gelöscht."
+                    if deleted
+                    else "Die Prozedur konnte nicht gelöscht werden."
+                )
+            else:
+                record = matches[0]
+                raw_goal = record.content.get("goal_kind")
+                raw_parameters = record.content.get("parameters")
+                try:
+                    goal_kind = GoalKind(str(raw_goal))
+                    if not isinstance(raw_parameters, dict):
+                        raise ValueError("ungültige Parameter")
+                    plan = materialize_goal(
+                        Goal(goal_kind, raw_parameters),
+                        entities,
+                        options=self.entry.options,
+                        is_admin=await user_is_admin(self.hass, user_input),
+                        user_id=actor_id,
+                    )
+                except (PermissionError, ValueError):
+                    response.async_set_speech(
+                        "Die Prozedur ist mit dem aktuellen Hauszustand nicht mehr sicher ausführbar."
+                    )
+                else:
+                    manager.create(
+                        conversation_id,
+                        "procedure-plan",
+                        DialogTaskKind.PLAN_CONFIRMATION,
+                        DialogPriority.CONFIRMATION,
+                        slots={"plan": plan},
+                        reason="Die gespeicherte Prozedur wurde frisch materialisiert und wartet auf Bestätigung.",
+                        requested_by_user_id=actor_id,
+                    )
+                    response.async_set_speech(
+                        f"Die Prozedur {request.name} ergibt aktuell {plan.summary} Soll ich sie ausführen?"
+                    )
+        return conversation.ConversationResult(
+            response=response, conversation_id=conversation_id
+        )
+
+    async def _async_handle_routine_feedback_turn(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        language_document: LanguageDocument,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult | None:
+        """Bind explicit feedback to exactly one recent routine signal."""
+        request = interpret_routine_feedback(language_document)
+        if request is None:
+            return None
+        now = dt_util.utcnow()
+        recent = [
+            (entity_id, stats)
+            for entity_id, stats in self._runtime_data.routine_statistics.items()
+            if stats.last_alert_at is not None
+            and timedelta(0) <= now - stats.last_alert_at <= timedelta(minutes=15)
+        ]
+        if not recent:
+            response.async_set_speech(
+                "Es gibt keinen eindeutigen aktuellen Routinehinweis für dieses Feedback."
+            )
+        elif len(recent) > 1:
+            names_by_id = {entity.entity_id: entity.friendly_name for entity in entities}
+            names = ", ".join(
+                names_by_id.get(entity_id, "unbekanntes Gerät")
+                for entity_id, _ in recent[:3]
+            )
+            response.async_set_speech(
+                f"Mehrere Routinehinweise sind offen: {names}. Bitte beziehe dich eindeutig auf einen."
+            )
+        else:
+            entity_id, stats = recent[0]
+            stats.record_feedback(request.feedback, now=now)
+            actor_id = conversation_user_id(user_input)
+            store = self._runtime_data.memory
+            if store is not None and store.enabled and actor_id is not None:
+                await store.async_remember(
+                    MemoryKind.DECISION,
+                    {
+                        "routine_entity_id": entity_id,
+                        "feedback": request.feedback.value,
+                    },
+                    provenance=FactProvenance.CONFIRMED_MEMORY,
+                    confirmed=True,
+                    person_id=actor_id,
+                )
+            messages = {
+                "helpful": "Danke. Ich habe den Hinweis als hilfreich bewertet.",
+                "unnecessary": "Verstanden. Ich habe den Hinweis als unnötig bewertet.",
+                "wrong": "Verstanden. Ich habe den Hinweis als falsch bewertet.",
+                "ignore": "Verstanden. Dieses lokale Muster wird künftig nicht mehr gemeldet.",
+                "later": "Verstanden. Ich frage zu diesem Muster frühestens später erneut.",
+            }
+            response.async_set_speech(messages[request.feedback.value])
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
     async def _async_handle_comfort_turn(
         self,
         user_input: conversation.ConversationInput,
@@ -1242,6 +1694,7 @@ class NluConversationEntity(
                             confirmed=True,
                             audit_trail=self._audit_trail,
                             audit_actor_id=actor_id or "voice",
+                            effect_monitor=self._runtime_data.effect_monitor,
                         )
                         manager.cancel(conversation_id)
                         response.async_set_speech(
@@ -1370,6 +1823,7 @@ class NluConversationEntity(
                             confirmed=confirmed,
                             audit_trail=self._audit_trail,
                             audit_actor_id=actor_id or "voice",
+                            effect_monitor=self._runtime_data.effect_monitor,
                         )
 
                     async def verify(entity_id: str, expected: str) -> bool:
@@ -1396,13 +1850,39 @@ class NluConversationEntity(
         goal = interpret_goal(language_document)
         if goal is None:
             return None
+        actor_id = conversation_user_id(user_input)
+        if goal.kind is GoalKind.PREPARE_MOVIE:
+            store = self._runtime_data.memory
+            preferences = (
+                await store.async_list(
+                    person_id=actor_id, kinds=(MemoryKind.PREFERENCE,)
+                )
+                if store is not None and store.enabled and actor_id is not None
+                else ()
+            )
+            matching_preferences = [
+                record
+                for record in preferences
+                if record.content.get("activity") == "television"
+                and isinstance(record.content.get("entity_id"), str)
+                and isinstance(record.content.get("brightness_percent"), int)
+            ]
+            if len(matching_preferences) == 1:
+                preference = matching_preferences[0].content
+                goal = Goal(
+                    GoalKind.PREPARE_MOVIE,
+                    {
+                        "entity_ids": [preference["entity_id"]],
+                        "brightness_percent": preference["brightness_percent"],
+                    },
+                )
         try:
             plan = materialize_goal(
                 goal,
                 entities,
                 options=self.entry.options,
                 is_admin=await user_is_admin(self.hass, user_input),
-                user_id=conversation_user_id(user_input),
+                user_id=actor_id,
             )
         except (PermissionError, ValueError) as err:
             response.async_set_speech(f"Ich kann dafür keinen sicheren Plan erstellen: {err}")
@@ -1421,7 +1901,7 @@ class NluConversationEntity(
             DialogPriority.CONFIRMATION,
             slots={"plan": plan},
             reason="Ein vollständiger Mehrschrittplan wartet auf Bestätigung.",
-            requested_by_user_id=conversation_user_id(user_input),
+            requested_by_user_id=actor_id,
         )
         response.async_set_speech(
             f"Planvorschau: {details}. {plan.summary} Soll ich den gesamten Plan ausführen?"
@@ -1476,14 +1956,30 @@ class NluConversationEntity(
                         if not isinstance(content, dict) or not isinstance(person_id, str):
                             response.async_set_speech("Die Erinnerung ist nicht mehr vollständig. Ich speichere nichts.")
                         else:
+                            raw_kind = active.slots.get("kind")
+                            try:
+                                kind = (
+                                    MemoryKind(str(raw_kind))
+                                    if raw_kind is not None
+                                    else MemoryKind.PREFERENCE
+                                )
+                            except ValueError:
+                                response.async_set_speech(
+                                    "Der Erinnerungstyp ist ungültig. Ich speichere nichts."
+                                )
+                                manager.cancel(conversation_id)
+                                return conversation.ConversationResult(
+                                    response=response,
+                                    conversation_id=conversation_id,
+                                )
                             await store.async_remember(
-                                MemoryKind.PREFERENCE,
+                                kind,
                                 content,
                                 provenance=FactProvenance.CONFIRMED_MEMORY,
                                 confirmed=True,
                                 person_id=person_id,
                             )
-                            response.async_set_speech("Gespeichert. Du kannst diese Erinnerung jederzeit einzeln oder zusammen mit deinen Routinen löschen.")
+                            response.async_set_speech("Gespeichert. Du kannst diese Erinnerung jederzeit kontrolliert löschen.")
                     manager.cancel(conversation_id)
                 elif len(language_document.tokens) <= 3:
                     response.async_set_speech("Bitte antworte eindeutig mit Ja oder Nein.")
@@ -1628,6 +2124,7 @@ class NluConversationEntity(
                         confirmed=True,
                         audit_trail=self._audit_trail,
                         audit_actor_id=current_user_id,
+                        effect_monitor=self._runtime_data.effect_monitor,
                     )
                     if not execution.executed:
                         raise RuntimeError(execution.error or "Rücknahme nicht erlaubt")
@@ -2146,6 +2643,7 @@ class NluConversationEntity(
                 confirmed=False,
                 audit_trail=self._audit_trail,
                 audit_actor_id=conversation_user_id(user_input),
+                effect_monitor=self._runtime_data.effect_monitor,
             )
             if not execution.executed:
                 self._context_store.clear(user_input.conversation_id)
@@ -2485,6 +2983,7 @@ class NluConversationEntity(
                 confirmed=False,
                 audit_trail=self._audit_trail,
                 audit_actor_id=actor_id,
+                effect_monitor=self._runtime_data.effect_monitor,
             )
             if not execution.executed:
                 error = execution.error or "Die Aktion konnte nicht ausgeführt werden."
@@ -3307,6 +3806,7 @@ class NluConversationEntity(
                 confirmed=False,
                 audit_trail=self._audit_trail,
                 audit_actor_id=actor_id,
+                effect_monitor=self._runtime_data.effect_monitor,
             )
             if not execution.executed:
                 self._context_store.clear(user_input.conversation_id)
@@ -3945,6 +4445,7 @@ class NluConversationEntity(
                 confirmed=True,
                 audit_trail=self._audit_trail,
                 audit_actor_id=current_user_id,
+                effect_monitor=self._runtime_data.effect_monitor,
             )
             if not execution.executed:
                 _LOGGER.error(

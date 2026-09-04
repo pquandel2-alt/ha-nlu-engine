@@ -4,6 +4,7 @@ import pytest
 
 from ha_nlu.capability_audit import audit_capabilities, match_capability_audit_query
 from ha_nlu.entities import EntitySnapshot
+from ha_nlu.nlu.language_frontend import analyse_language
 
 
 ENTITIES = [
@@ -51,3 +52,11 @@ def test_capability_audit_questions_are_read_only(question, expected):
 
 def test_capability_audit_does_not_claim_unrelated_language():
     assert match_capability_audit_query("Starte den Saugroboter", ENTITIES) is None
+
+
+def test_capability_audit_honours_shared_speech_act():
+    document = analyse_language("Starte den Saugroboter", ENTITIES)
+
+    assert match_capability_audit_query(
+        "Welche Geräte kannst du steuern?", ENTITIES, document
+    ) is None

@@ -318,7 +318,9 @@ class QuantifierParser:
         }
         result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
         if result is None or result.intent is None:
-            return parse_flexible_group_command(text, context.entities)
+            return parse_flexible_group_command(
+                text, context.entities, context.world_model
+            )
 
         spec = INTENTS.get(result.intent.name)
         if spec is None:
@@ -351,7 +353,9 @@ class QuantifierParser:
         if area_slot is not None:
             area_name = _strip_locative_prepositions(str(area_slot.value))
             if area_name:
-                location = resolve_group_location(area_name, context.entities)
+                location = resolve_group_location(
+                    area_name, context.entities, context.world_model
+                )
                 if location is None:
                     return None  # neither a unique floor nor a unique room - never guess
                 area_id, floor_id = location
@@ -365,7 +369,11 @@ class QuantifierParser:
                 return None  # no single oben/unten floor among today's entities - never guess
             floor_id = level_resolved.floor_id
 
-        matches = resolve_candidates(
+        matches = list(
+            context.world_model.select_entities(
+                domain=domain, area_id=area_id, floor_id=floor_id
+            )
+        ) if context.world_model is not None else resolve_candidates(
             context.entities, Constraints(domain=domain, area_id=area_id, floor_id=floor_id)
         )
 
@@ -425,7 +433,9 @@ class PercentageParser:
     def parse(self, text: str, context: ParseContext) -> ParseResult | None:
         result = self._recognize(text)
         if result is None or result.intent is None:
-            return parse_flexible_percentage_group(text, context.entities)
+            return parse_flexible_percentage_group(
+                text, context.entities, context.world_model
+            )
 
         percent_slot = result.entities.get("percent")
         half_requested = bool(re.search(r"\b(halb|hälfte)\b", text, re.IGNORECASE))
@@ -446,12 +456,18 @@ class PercentageParser:
             area_slot = result.entities.get("area")
             if area_slot is not None:
                 area_name = _strip_locative_prepositions(str(area_slot.value))
-                location = resolve_group_location(area_name, context.entities)
+                location = resolve_group_location(
+                    area_name, context.entities, context.world_model
+                )
                 if location is None:
                     return None
                 area_id, floor_id = location
 
-            matches = resolve_candidates(
+            matches = list(
+                context.world_model.select_entities(
+                    domain=domain, area_id=area_id, floor_id=floor_id
+                )
+            ) if context.world_model is not None else resolve_candidates(
                 context.entities,
                 Constraints(domain=domain, area_id=area_id, floor_id=floor_id),
             )

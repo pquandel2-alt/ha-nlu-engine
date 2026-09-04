@@ -17,6 +17,7 @@ EVENT_CATEGORIES = frozenset(
         "light_unoccupied",
         "long_running_state",
         "routine_anomaly",
+        "expected_effect_missing",
     }
 )
 
@@ -39,6 +40,15 @@ def validate_documents_directory(value: object) -> str:
     if path.is_absolute() or not path.parts or ".." in path.parts or str(path) in {"", "."}:
         raise ValueError("Dokumentverzeichnis muss unterhalb des HA-Konfigurationsordners liegen")
     return str(path)
+
+
+def validate_mqtt_topic(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("MQTT-Thema muss Text sein")
+    topic = value.strip()
+    if not topic or len(topic) > 256 or "#" in topic or "+" in topic or "\x00" in topic:
+        raise ValueError("MQTT-Thema muss konkret und ohne Wildcards sein")
+    return topic
 
 
 def parse_event_categories(value: object) -> frozenset[str]:

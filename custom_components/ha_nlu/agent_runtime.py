@@ -221,6 +221,7 @@ class ProactiveAgentRuntime:
                     confirmed=False,
                     audit_trail=self._runtime_data.audit_trail,
                     audit_actor_id="proactive-agent",
+                    effect_monitor=self._runtime_data.effect_monitor,
                 )
                 event = replace(
                     event,
@@ -444,6 +445,7 @@ class ProactiveAgentRuntime:
             confirmed=True,
             audit_trail=self._runtime_data.audit_trail,
             audit_actor_id=user_id or "proactive-agent",
+            effect_monitor=self._runtime_data.effect_monitor,
         )
         updated = replace(
             event,

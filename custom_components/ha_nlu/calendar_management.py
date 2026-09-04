@@ -10,6 +10,7 @@ from typing import Any, Mapping
 
 from .calendar_event import select_calendar
 from .entities import EntitySnapshot, normalize_for_compare
+from .nlu.language_frontend import LanguageDocument
 
 
 class CalendarManagementKind(Enum):
@@ -147,8 +148,11 @@ def parse_calendar_management(
     text: str,
     calendars: tuple[EntitySnapshot, ...],
     now: datetime,
+    document: LanguageDocument | None = None,
 ) -> CalendarManagementRequest | None:
     """Parse bounded calendar management language without stealing device commands."""
+    if document is not None:
+        text = document.source_text
     if re.search(r"\b(?:auftrag|automation)\b|(?:bedingung|auslöser|ausloeser|trigger)", text, re.I):
         return None
     rename_match = _RENAME_RE.search(text)

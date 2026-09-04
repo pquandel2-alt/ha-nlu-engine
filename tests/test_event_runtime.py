@@ -19,6 +19,7 @@ from ha_nlu.const import (  # noqa: E402
     CONF_ROUTINE_DETECTION_ENABLED,
     CONF_ROUTINE_MIN_OBSERVATIONS,
 )
+from ha_nlu.effect_monitor import ExpectedEffect  # noqa: E402
 from ha_nlu.entities import EntitySnapshot  # noqa: E402
 from ha_nlu.event_runtime import SituationRuntime  # noqa: E402
 from ha_nlu.runtime_data import HaNluRuntimeData  # noqa: E402
@@ -69,11 +70,41 @@ def test_state_event_is_normalized_and_signalled_at_most_once(monkeypatch):
 
 def test_listener_returns_unsubscribe_callback():
     hass = HomeAssistant()
-    unsubscribe = object()
+    stopped = []
+    unsubscribe = lambda: stopped.append(True)
     listen = lambda event_type, callback: unsubscribe
     hass.bus = SimpleNamespace(async_listen=listen)
     runtime = SituationRuntime(hass, ConfigEntry(), HaNluRuntimeData())
-    assert runtime.async_start() is unsubscribe
+    stop = runtime.async_start()
+    assert callable(stop)
+    stop()
+    assert stopped == [True]
+
+
+def test_missing_expected_effect_is_inform_only(monkeypatch):
+    hass = HomeAssistant()
+    agent = SimpleNamespace(async_signal=AsyncMock())
+    runtime = SituationRuntime(
+        hass,
+        ConfigEntry(options={CONF_AGENT_EVENT_CATEGORIES: "expected_effect_missing"}),
+        HaNluRuntimeData(proactive_agent=agent),
+    )
+    entity = EntitySnapshot("light.office", "Bürolicht", "light", "on")
+    monkeypatch.setattr("ha_nlu.event_runtime.build_entity_snapshots", lambda *_: [entity])
+    effect = ExpectedEffect(
+        "effect_1",
+        entity.entity_id,
+        "off",
+        datetime(2026, 9, 1, 20, tzinfo=timezone.utc),
+        datetime(2026, 9, 1, 20, 0, 10, tzinfo=timezone.utc),
+    )
+
+    asyncio.run(runtime.async_handle_expected_effect_expired(effect))
+
+    payload = agent.async_signal.await_args.args[0]
+    assert payload["mode"] == "inform"
+    assert "action_service" not in payload
+    assert "nicht automatisch wiederholt" in payload["message"]
 
 
 def test_night_opening_explains_presence_quality_and_history(monkeypatch):

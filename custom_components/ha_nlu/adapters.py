@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib
+import json
+import logging
 import re
 import sqlite3
 import zlib
@@ -11,7 +14,49 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Awaitable, Callable, Iterable, Mapping, Protocol, cast
+
+from .const import (
+    CONF_FRIGATE_ENABLED,
+    CONF_FRIGATE_MQTT_TOPIC,
+    CONF_HA_SOURCES_ENABLED,
+)
+from .agent_config_validation import validate_mqtt_topic
+
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class _EntryLike(Protocol):
+    options: Mapping[str, object]
+
+
+class _BusLike(Protocol):
+    def async_listen(self, event_type: str, callback: Callable[..., object]) -> Callable[[], None]: ...
+
+
+class _HassLike(Protocol):
+    bus: _BusLike
+
+
+class _EventLike(Protocol):
+    data: Mapping[str, object]
+    time_fired: datetime
+
+
+class _MessageLike(Protocol):
+    payload: str | bytes
+
+
+class _MqttLike(Protocol):
+    def async_subscribe(
+        self,
+        hass: object,
+        topic: str,
+        callback: Callable[..., object],
+        *,
+        qos: int,
+    ) -> Awaitable[Callable[[], None]]: ...
 
 
 class EvidenceQuality(StrEnum):
@@ -36,20 +81,32 @@ class FrigateMetadataAdapter:
     ALLOWED_LABELS = frozenset({"person", "package", "car", "dog", "cat"})
 
     def normalize(self, payload: Mapping[str, object]) -> AdapterEvidence | None:
-        event_id = payload.get("id")
-        label = payload.get("label")
-        camera = payload.get("camera")
-        score = payload.get("score")
+        record = payload.get("after")
+        values: Mapping[str, object] = (
+            cast(Mapping[str, object], record)
+            if isinstance(record, Mapping)
+            else payload
+        )
+        event_id = values.get("id")
+        label = values.get("label")
+        camera = values.get("camera")
+        score = values.get("score", values.get("top_score"))
         if not isinstance(event_id, str) or not isinstance(label, str):
             return None
         if label.casefold() not in self.ALLOWED_LABELS or not isinstance(camera, str):
             return None
         confidence = float(score) if isinstance(score, (int, float)) else 0.0
+        started = values.get("start_time")
+        observed_at = (
+            datetime.fromtimestamp(float(started), timezone.utc)
+            if isinstance(started, (int, float))
+            else datetime.now(timezone.utc)
+        )
         return AdapterEvidence(
             f"frigate:{event_id}",
             "frigate_metadata",
             label.casefold(),
-            datetime.now(timezone.utc),
+            observed_at,
             {"camera_id": camera, "confidence": max(0.0, min(1.0, confidence))},
             EvidenceQuality.ESTIMATE,
         )
@@ -189,6 +246,122 @@ class HomeAssistantSourceAdapter:
             dict(content),
             EvidenceQuality.DIRECT,
         )
+
+
+class StructuredAdapterRuntime:
+    """Opt-in HA/Frigate bridge retaining only bounded structured evidence."""
+
+    _DOMAIN_SOURCES = {
+        "calendar": "calendar",
+        "weather": "weather",
+        "person": "presence",
+        "device_tracker": "presence",
+        "todo": "todo",
+        "timer": "timer",
+    }
+
+    def __init__(
+        self,
+        hass: _HassLike,
+        entry: _EntryLike,
+        sink: Callable[[AdapterEvidence], object],
+    ) -> None:
+        self._hass = hass
+        self._entry = entry
+        self._sink = sink
+        self._frigate = FrigateMetadataAdapter()
+        self._ha_source = HomeAssistantSourceAdapter()
+
+    async def async_start(self) -> Callable[[], None]:
+        unsubscribers: list[Callable[[], None]] = []
+        bus = getattr(self._hass, "bus", None)
+        listen = bus.async_listen if bus is not None else None
+        if listen is not None and bool(
+            self._entry.options.get(CONF_HA_SOURCES_ENABLED, False)
+        ):
+            unsubscribers.append(listen("state_changed", self._handle_state_changed))
+        if bool(self._entry.options.get(CONF_FRIGATE_ENABLED, False)):
+            if listen is not None:
+                unsubscribers.append(listen("frigate_events", self._handle_frigate_event))
+            mqtt_unsubscribe = await self._async_subscribe_mqtt()
+            if mqtt_unsubscribe is not None:
+                unsubscribers.append(mqtt_unsubscribe)
+
+        def stop() -> None:
+            for unsubscribe in reversed(unsubscribers):
+                unsubscribe()
+            unsubscribers.clear()
+
+        return stop
+
+    def _handle_state_changed(self, event: _EventLike) -> None:
+        data = event.data
+        entity_id = data.get("entity_id")
+        new_state = data.get("new_state")
+        if not isinstance(entity_id, str) or new_state is None:
+            return
+        source = self._DOMAIN_SOURCES.get(entity_id.partition(".")[0])
+        state = getattr(new_state, "state", None)
+        if source is None or not isinstance(state, str):
+            return
+        attributes = getattr(new_state, "attributes", {})
+        content: dict[str, object] = {"state": state}
+        if source in {"weather", "timer"} and isinstance(attributes, Mapping):
+            attribute_values = cast(Mapping[str, object], attributes)
+            for key in ("temperature", "humidity", "remaining", "finishes_at"):
+                value = attribute_values.get(key)
+                if isinstance(value, (str, int, float, bool)):
+                    content[key] = value
+        observed_at = event.time_fired
+        if observed_at.tzinfo is None:
+            observed_at = datetime.now(timezone.utc)
+        self._sink(
+            self._ha_source.wrap(
+                source, entity_id, content, observed_at=observed_at
+            )
+        )
+
+    def _handle_frigate_event(self, event: _EventLike) -> None:
+        self._store_frigate(event.data)
+
+    def _handle_mqtt_message(self, message: _MessageLike) -> None:
+        raw = message.payload
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="replace")
+        if len(raw.encode("utf-8")) > 65_536:
+            return
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError):
+            return
+        if isinstance(payload, Mapping):
+            self._store_frigate(cast(Mapping[str, object], payload))
+
+    def _store_frigate(self, payload: Mapping[str, object]) -> None:
+        evidence = self._frigate.normalize(payload)
+        if evidence is not None:
+            self._sink(evidence)
+
+    async def _async_subscribe_mqtt(self) -> Callable[[], None] | None:
+        try:
+            mqtt = cast(_MqttLike, importlib.import_module("homeassistant.components.mqtt"))
+        except ImportError:
+            _LOGGER.warning("Frigate MQTT is enabled, but Home Assistant MQTT is unavailable")
+            return None
+        topic = self._entry.options.get(CONF_FRIGATE_MQTT_TOPIC, "frigate/events")
+        try:
+            validated_topic = validate_mqtt_topic(topic)
+        except ValueError:
+            _LOGGER.warning("Frigate MQTT topic is invalid")
+            return None
+        try:
+            unsubscribe = await mqtt.async_subscribe(
+                self._hass, validated_topic, self._handle_mqtt_message, qos=0
+            )
+        except Exception:  # noqa: BLE001 - optional integration boundary
+            _LOGGER.warning("Could not subscribe to Frigate MQTT metadata", exc_info=True)
+            return None
+        return unsubscribe
 
 
 _PDF_STREAM_RE = re.compile(rb"(?P<dict><<.{0,4096}?>>)[\r\n ]*stream\r?\n(?P<data>.*?)\r?\nendstream", re.S)

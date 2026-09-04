@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from .agent_action_policy import RESERVED_TARGET_DATA_KEYS
 from .audit_log import AuditTrail
 from .entities import EntitySnapshot
+from .effect_monitor import EffectMonitor
 from .execution_policy import PolicyDecision, PolicyOutcome, evaluate_service_plan
 from .service_call import ServiceCallPlan
 
@@ -32,6 +33,7 @@ async def async_execute_service_plan(
     confirmed: bool,
     audit_trail: AuditTrail | None = None,
     audit_actor_id: str | None = None,
+    effect_monitor: EffectMonitor | None = None,
 ) -> ExecutionResult:
     """Re-evaluate policy immediately before the only physical write."""
     decision = evaluate_service_plan(
@@ -77,6 +79,8 @@ async def async_execute_service_plan(
         from homeassistant.util import dt as dt_util
 
         audit_trail.record(dt_util.now(), audit_actor_id, plan)
+    if effect_monitor is not None:
+        effect_monitor.register(plan)
     return ExecutionResult(True, decision)
 
 

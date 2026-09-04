@@ -39,6 +39,10 @@
     ,"custom_components/ha_nlu/comfort_intent.py"
     ,"custom_components/ha_nlu/automation_scenarios.py"
     ,"custom_components/ha_nlu/agent_config_validation.py"
+    ,"custom_components/ha_nlu/routine_intent.py"
+    ,"custom_components/ha_nlu/procedure_intent.py"
+    ,"custom_components/ha_nlu/effect_monitor.py"
+    ,"custom_components/ha_nlu/management_understanding.py"
   ],
   "reportMissingImports": false
 }

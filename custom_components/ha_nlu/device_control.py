@@ -12,6 +12,7 @@ from .nlu.entity_resolution import (
     resolve_named_target,
 )
 from .nlu.context import ConversationContext
+from .nlu.language_frontend import LanguageDocument
 from .nlu.normalize import normalize
 from .nlu.semantic_utterance import Modality, Polarity, SpeechAct, analyse_utterance
 from .service_call import ServiceCallPlan
@@ -54,11 +55,18 @@ _UNSAFE_DEVICE_MODIFIER_RE = re.compile(
 
 
 def _safe_device_text(
-    text: str, *, allow_contextual_ellipsis: bool = False
+    text: str,
+    *,
+    document: LanguageDocument | None = None,
+    allow_contextual_ellipsis: bool = False,
 ) -> str | None:
     """Return normalized command text only after one shared R3/R4 gate."""
     discourse_text = _NEGATED_UNMUTE_RE.sub("hebe die stummschaltung auf", text)
-    utterance = analyse_utterance(discourse_text)
+    utterance = (
+        document.utterance
+        if document is not None and discourse_text == text
+        else analyse_utterance(discourse_text)
+    )
     contextual_ellipsis = (
         allow_contextual_ellipsis
         and utterance.speech_act is SpeechAct.STATEMENT
@@ -418,10 +426,12 @@ def match_device_control_followup(
 
 
 def match_device_control(
-    text: str, entities: list[EntitySnapshot]
+    text: str,
+    entities: list[EntitySnapshot],
+    document: LanguageDocument | None = None,
 ) -> DeviceControlResult | None:
     """Match extended device commands; return None for unrelated language."""
-    value = _safe_device_text(text)
+    value = _safe_device_text(text, document=document)
     if value is None:
         return None
 

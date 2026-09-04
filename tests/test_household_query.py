@@ -6,6 +6,7 @@ import pytest
 
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.household_query import match_household_query
+from ha_nlu.nlu.language_frontend import analyse_language
 
 
 NOW = datetime(2026, 8, 26, 14, 7, tzinfo=timezone.utc)
@@ -85,6 +86,14 @@ def test_household_query_answers_from_snapshot_without_service_plan(question, ex
 )
 def test_household_query_does_not_claim_commands_or_unrelated_language(text):
     assert match_household_query(text, ENTITIES, NOW) is None
+
+
+def test_shared_language_document_is_authoritative_for_query_routing():
+    command_document = analyse_language("Schalte das Wohnzimmerlicht ein", ENTITIES)
+
+    assert match_household_query(
+        "Wie spät ist es?", ENTITIES, NOW, command_document
+    ) is None
 
 
 def test_explicit_outdoor_sensor_question_is_not_claimed_as_general_weather():

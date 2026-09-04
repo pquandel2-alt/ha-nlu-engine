@@ -145,3 +145,27 @@ x86_64-Entwicklungsumgebung:
 Damit liegt jeder gemessene 5.000-Entity-p95 wieder unter dem blockierenden
 100-ms-Budget. Die offene Pi-4/5-Messung bleibt davon unberührt und wird
 nicht durch x86-Werte ersetzt.
+
+## Kontrolle nach WorldModel-Durchleitung (2026-09-04)
+
+Der Gruppen-Kompatibilitätsparser verwendet nun die bereits pro Turn
+materialisierten Area-/Floor-Snapshots und Entity-Indizes. Die freie Query
+führt den linearen Registry-Namensscan erst aus, wenn nach Auflösung einer
+typisierten Ortsangabe tatsächlich bedeutungstragende Tokens übrig bleiben.
+Das unveränderte blockierende `understand`-Kommando mit 20 Messwerten nach
+drei Warmups war
+auf der virtualisierten x86_64-Entwicklungsumgebung grün:
+
+| Fall | Mittel | p95 |
+|---|---:|---:|
+| Licht an | 17,12 ms | 25,13 ms |
+| Licht aus | 18,19 ms | 36,35 ms |
+| Heizung auf Temperatur | 12,41 ms | 21,25 ms |
+| Sensorabfrage | 6,68 ms | 9,14 ms |
+| Bereichsgruppe | 37,54 ms | 52,72 ms |
+| Cover-Prozentwert | 20,45 ms | 31,90 ms |
+| freie semantische Query | 22,38 ms | 37,70 ms |
+
+Damit ist das lokale 100-ms-Gate bei 5.000 Entities ohne Änderung am Budget
+grün. Die Messung ist weiterhin kein behaupteter Raspberry-Pi-Wert; ein Lauf
+auf realer Zielhardware bleibt separat offen.

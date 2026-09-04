@@ -37,7 +37,7 @@ jobs:
         if: matrix.python-version == '3.12'
         run: >-
           python scripts/v7_shadow_report.py
-          --check docs/perf/v7-shadow-baseline-4.65.0.json
+          --check docs/perf/v7-shadow-baseline-4.67.0.json
           --quiet
       - name: V7-Latenzbudget bei großer Registry prüfen
         if: matrix.python-version == '3.12'
@@ -115,6 +115,10 @@ jobs:
           custom_components/ha_nlu/comfort_intent.py
           custom_components/ha_nlu/automation_scenarios.py
           custom_components/ha_nlu/agent_config_validation.py
+          custom_components/ha_nlu/routine_intent.py
+          custom_components/ha_nlu/procedure_intent.py
+          custom_components/ha_nlu/effect_monitor.py
+          custom_components/ha_nlu/management_understanding.py
       - name: Statische Importprüfung
         run: python -m pyflakes custom_components tests scripts
 
