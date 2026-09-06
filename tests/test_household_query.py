@@ -113,3 +113,60 @@ def test_explicit_outdoor_sensor_question_is_not_claimed_as_general_weather():
     )
 
     assert result is None
+
+
+def test_appliance_completion_time_uses_exposed_timestamp_without_action():
+    entities = ENTITIES + [
+        EntitySnapshot(
+            "sensor.waschmaschine_fertigstellungszeit",
+            "Waschmaschine Fertigstellungszeit",
+            "sensor",
+            "2026-08-26T15:54:22+00:00",
+            device_class="timestamp",
+        )
+    ]
+
+    result = match_household_query("Wann ist die Waschmaschine fertig?", entities, NOW)
+
+    assert result is not None
+    assert result.plan is None
+    assert result.is_query
+    assert result.response_text == (
+        "Laut Waschmaschine Fertigstellungszeit ist die Fertigstellung heute um 15:54 Uhr."
+    )
+
+
+def test_appliance_completion_time_never_first_matches_ambiguous_sensors():
+    entities = ENTITIES + [
+        EntitySnapshot(
+            f"sensor.waschmaschine_{suffix}_fertigstellungszeit",
+            f"Waschmaschine {name} Fertigstellungszeit",
+            "sensor",
+            "2026-08-26T15:54:22+00:00",
+            device_class="timestamp",
+        )
+        for suffix, name in (("keller", "Keller"), ("bad", "Bad"))
+    ]
+
+    result = match_household_query("Wann ist die Waschmaschine fertig?", entities, NOW)
+
+    assert result is not None
+    assert result.plan is None
+    assert result.response_text == "Welche Maschine meinst du? Ich habe nichts ausgeführt."
+
+
+def test_appliance_completion_time_rejects_non_timestamp_sensor():
+    entities = ENTITIES + [
+        EntitySnapshot(
+            "sensor.waschmaschine_fertigstellungszeit",
+            "Waschmaschine Fertigstellungszeit",
+            "sensor",
+            "15:54",
+        )
+    ]
+
+    result = match_household_query("Wann ist die Waschmaschine fertig?", entities, NOW)
+
+    assert result is not None
+    assert result.plan is None
+    assert "keine eindeutig" in result.response_text

@@ -1042,7 +1042,11 @@ class NluConversationEntity(
             )
             if device_control is None:
                 device_control = match_household_query(
-                    user_input.text, entities, dt_util.now(), language_document
+                    user_input.text,
+                    entities,
+                    dt_util.now(),
+                    language_document,
+                    self._world_model,
                 )
             if device_control is None:
                 device_control = match_extended_device_query(
@@ -3267,6 +3271,11 @@ class NluConversationEntity(
                 response.async_set_speech(
                     render_candidate_question(request.candidates)
                 )
+            elif isinstance(request, TimerRequest) and self._runtime_data.native_timer is not None:
+                self._context_store.clear(user_input.conversation_id)
+                return await self._async_execute_productivity(
+                    user_input, response, request, entities
+                )
             else:
                 noun = "keine für HomeIntent freigegebene Liste" if isinstance(request, TodoRequest) else "keinen für HomeIntent freigegebenen Timer"
                 response.async_set_speech(f"Ich finde {noun}.")
@@ -3304,7 +3313,7 @@ class NluConversationEntity(
             if isinstance(request, TodoRequest):
                 speech = await self._async_execute_todo(request)
             else:
-                speech = await self._async_execute_timer(request, entities)
+                speech = await self._async_execute_timer(request, entities, user_input)
         except Exception as err:  # noqa: BLE001 - HA service errors are heterogeneous
             _LOGGER.error("Productivity command failed: %s", err)
             response.async_set_error(
@@ -3325,7 +3334,11 @@ class NluConversationEntity(
                     user_input,
                     ServiceCallPlan("todo", todo_service, request.entity_id, {}),
                 )
-            elif isinstance(request, TimerRequest) and request.operation is not TimerOperation.STATUS:
+            elif (
+                isinstance(request, TimerRequest)
+                and request.entity_id is not None
+                and request.operation is not TimerOperation.STATUS
+            ):
                 timer_service = {
                     TimerOperation.START: "start",
                     TimerOperation.CHANGE: "change",
@@ -3515,8 +3528,16 @@ class NluConversationEntity(
         )
 
     async def _async_execute_timer(
-        self, request: TimerRequest, entities: list[EntitySnapshot]
+        self,
+        request: TimerRequest,
+        entities: list[EntitySnapshot],
+        user_input: conversation.ConversationInput,
     ) -> str:
+        if request.entity_id is None:
+            native_timer = self._runtime_data.native_timer
+            if native_timer is None:
+                raise ValueError("Home Assistants native Timerverwaltung ist nicht verfügbar.")
+            return await native_timer.async_execute(request, user_input)
         assert request.entity_id is not None
         entity = next((item for item in entities if item.entity_id == request.entity_id), None)
         if request.operation is TimerOperation.STATUS:

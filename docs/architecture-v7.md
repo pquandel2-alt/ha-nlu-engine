@@ -52,6 +52,22 @@ Produktivität liefern gemeinsam ein typisiertes `UnderstandingOutcome`;
 gleichzeitige vollständige Treffer werden anhand expliziter Domänenevidenz
 aufgelöst oder ohne Payload als `AMBIGUOUS` zurückgegeben.
 
+Geräte-Fertigstellungsfragen sind ein strikt lesender Spezialfall dieser
+Grenze. Sie verwenden nur im aktuellen Assist-Snapshot enthaltene
+`sensor.*`-Entitäten mit `device_class: timestamp`, eine semantisch passende
+Fertigstellungsbezeichnung und – sofern vorhanden – die Gerätebeziehung des
+gemeinsamen World Models. Kein Treffer wird erraten; mehrere Treffer ergeben
+eine Rückfrage. Der Ergebnisvertrag enthält grundsätzlich keinen Serviceplan.
+
+Timer ohne `timer.*`-Helper werden nicht durch einen eigenen Scheduler
+implementiert. `NativeTimerRuntime` übersetzt das typisierte `TimerRequest` in
+Home Assistants registrierte Timer-Intents und übergibt Dauer, Namen und das
+aufrufende Assist-Gerät an dessen `TimerManager`. Native Sprachsatelliten
+erhalten das HA-Ablaufereignis. Für nicht timerfähige Clients registriert
+HomeIntent genau einen synthetischen Timer-Endpunkt, dessen `FINISHED`-Ereignis
+über die konfigurierte TTS-Engine und Medienplayer realisiert wird. Der
+Endpunkt wird beim Config-Entry-Unload abgemeldet.
+
 Direkte Live-Turns werden in `understand()` semantisch zuerst interpretiert.
 Der aktive Schnitt umfasst Ein/Aus für Licht, Schalter, Ventilator, Heizung,
 Luftbefeuchter und Input-Boolean, Öffnen/Schließen für Cover und Ventile,

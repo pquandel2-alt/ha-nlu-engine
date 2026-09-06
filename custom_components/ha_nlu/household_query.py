@@ -13,6 +13,7 @@ from .nlu.language_frontend import LanguageDocument
 from .nlu.normalize import normalize
 from .nlu.semantic_utterance import SpeechAct
 from .query_target import list_attribute_values, mentioned_entities, resolve_query_targets
+from .world_model import WorldModel
 
 
 _WEEKDAYS_DE = (
@@ -89,17 +90,89 @@ def _numeric_state(entity: EntitySnapshot) -> float | None:
         return None
 
 
+_COMPLETION_SENSOR_RE = re.compile(
+    r"(?:fertigstellungs?zeit|fertig(?:\s*um)?|programmende|programm\s*ende|"
+    r"endzeit|completion(?:\s*time)?)"
+)
+_COMPLETION_QUESTION_RE = re.compile(
+    r"\bwann\s+(?:ist|wird|waere|wäre)\s+(?:die|der|das|mein(?:e|er|es)?)?\s*"
+    r"(?P<target>.+?)\s+(?:fertig|beendet|durch)\s*[?.!]*$"
+)
+
+
+def _completion_time_query(
+    key: str,
+    entities: list[EntitySnapshot],
+    now: datetime,
+    world_model: WorldModel | None,
+) -> DeviceControlResult | None:
+    """Resolve an appliance completion timestamp without inferring an action."""
+    match = _COMPLETION_QUESTION_RE.search(key)
+    if match is None:
+        return None
+    target = match.group("target").strip()
+    candidates = [
+        entity
+        for entity in entities
+        if entity.domain == "sensor"
+        and entity.device_class == "timestamp"
+        and _COMPLETION_SENSOR_RE.search(normalize_for_compare(entity.friendly_name))
+    ]
+
+    def target_names(entity: EntitySnapshot) -> tuple[str, ...]:
+        names = [entity.friendly_name, *entity.aliases]
+        if world_model is not None:
+            device = world_model.device_for_entity(entity.entity_id)
+            if device is not None:
+                names.append(device.name)
+        return tuple(normalize_for_compare(name) for name in names)
+
+    matched = [
+        entity for entity in candidates
+        if any(
+            target == name
+            or name.startswith(f"{target} ")
+            or target.startswith(f"{name} ")
+            for name in target_names(entity)
+        )
+    ]
+    if not matched:
+        return _read_only(
+            "Ich finde keine eindeutig zur genannten Maschine gehörende, "
+            "für Assist freigegebene Fertigstellungszeit."
+        )
+    if len(matched) != 1:
+        return _read_only("Welche Maschine meinst du? Ich habe nichts ausgeführt.")
+    entity = matched[0]
+    if normalize_for_compare(entity.state) in {"unknown", "unavailable", "none", ""}:
+        return _read_only(
+            f"Die Fertigstellungszeit von {target} ist derzeit nicht verfügbar."
+        )
+    rendered = _format_datetime(entity.state, now)
+    if rendered is None:
+        return _read_only(
+            f"{entity.friendly_name} liefert derzeit keine gültige Fertigstellungszeit."
+        )
+    return _read_only(
+        f"Laut {entity.friendly_name} ist die Fertigstellung {rendered}."
+    )
+
+
 def match_household_query(
     text: str,
     entities: list[EntitySnapshot],
     now: datetime,
     document: LanguageDocument | None = None,
+    world_model: WorldModel | None = None,
 ) -> DeviceControlResult | None:
     """Answer deterministic household questions without creating a plan."""
     if document is not None and document.utterance.speech_act is not SpeechAct.QUERY:
         return None
     value = document.normalized_text if document is not None else normalize(text)
     key = normalize_for_compare(value)
+
+    if (completion := _completion_time_query(key, entities, now, world_model)) is not None:
+        return completion
 
     if re.search(r"\b(?:wie\s+spaet|wieviel\s+uhr|welche\s+uhrzeit)\b", key):
         return _read_only(f"Es ist {now:%H:%M} Uhr.")

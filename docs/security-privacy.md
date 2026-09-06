@@ -28,3 +28,13 @@ Zustände, Transkripte oder Erinnerungsinhalte. Sie zeigen ausschließlich
 Schema-, Herkunfts- und Typzähler sowie die Anzahl statistischer Serien und
 Beobachtungen, damit erlernte Daten sichtbar bleiben, ohne private Inhalte zu
 exportieren.
+
+Fertigstellungszeit-Abfragen lesen ausschließlich den frischen, für Assist
+freigegebenen Entity-Snapshot und erzeugen niemals eine Aktion. Der Name eines
+Timers ist begrenzte Nutzlast (maximal 80 Zeichen), keine auszuführende
+Anweisung und wird nicht als Sprachtranskript persistiert. HomeIntent betreibt
+keinen eigenen Timer-Thread oder persistenten Zeitplan: Start, Änderung und
+Ablauf liegen beim nativen Home-Assistant-`TimerManager`. Ein Client ohne
+native Timer-Audioausgabe erhält nur dann einen Timer, wenn TTS-Engine und
+Medienplayer explizit konfiguriert sind; andernfalls wird der Start abgelehnt,
+damit kein unhörbarer Alarm vorgetäuscht wird.

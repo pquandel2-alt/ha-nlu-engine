@@ -55,6 +55,7 @@ class TimerRequest:
     change_seconds: int | None = None
     entity_id: str | None = None
     candidates: tuple[EntitySnapshot, ...] = ()
+    name: str | None = None
 
 
 ProductivityRequest = TodoRequest | TimerRequest
@@ -173,6 +174,12 @@ def _select_target(
             return shopping[0].entity_id, ()
         if shopping:
             return None, shopping
+    # A generic "Timer" means an Assist timer, even when exactly one
+    # unrelated timer.* helper exists. Helpers are selected only by their
+    # explicit friendly name/alias; this prevents a silent first-match from
+    # stealing a native timer that has an audible completion path.
+    if domain == "timer":
+        return None, ()
     if len(available) == 1:
         return available[0].entity_id, ()
     return None, available
@@ -340,6 +347,35 @@ def parse_duration_seconds(text: str) -> int | None:
     return None
 
 
+def _timer_name(text: str) -> str | None:
+    """Extract bounded user data used only as the native timer label."""
+    explicit = re.search(
+        r"\bmit\s+(?:(?:dem|der)\s+)?(?:hinweis|namen|info(?:rmation)?)\s+"
+        r"(?P<name>.+?)(?:[.!?]+)?$",
+        text,
+        re.IGNORECASE,
+    )
+    if explicit is not None:
+        raw = explicit.group("name")
+    else:
+        duration_parts = list(_DURATION_PART_RE.finditer(text))
+        if not duration_parts:
+            return None
+        suffix = text[duration_parts[-1].end():]
+        trailing = re.match(
+            r"\s+(?:für|fuer)\s+(?P<name>.+?)(?:[.!?]+)?$",
+            suffix,
+            re.IGNORECASE,
+        )
+        if trailing is None:
+            return None
+        raw = trailing.group("name")
+    name = re.sub(r"\s+", " ", raw).strip(" ,.;:!?\t\r\n")
+    if not name or len(name) > 80 or any(ord(char) < 32 for char in name):
+        return None
+    return name
+
+
 def parse_timer_request(text: str, entities: list[EntitySnapshot]) -> TimerRequest | None:
     if not _TIMER_NOUN_RE.search(text):
         return None
@@ -361,12 +397,12 @@ def parse_timer_request(text: str, entities: list[EntitySnapshot]) -> TimerReque
             return None
         sign = -1 if re.search(r"\b(?:verkürz|verkuerz|weniger|abziehen)", lowered) else 1
         operation = TimerOperation.CHANGE
-        return TimerRequest(operation, change_seconds=sign * duration, entity_id=entity_id, candidates=candidates)
+        return TimerRequest(operation, change_seconds=sign * duration, entity_id=entity_id, candidates=candidates, name=_timer_name(text))
     elif duration is not None and re.search(r"\b(?:stell(?:e|en|t)?|setz(?:e|en|t)?|start(?:e|en|et)?|mach(?:e|en|t)?|[a-zäöüß]*timer)\b", lowered):
         operation = TimerOperation.START
     else:
         return None
-    return TimerRequest(operation, duration_seconds=duration, entity_id=entity_id, candidates=candidates)
+    return TimerRequest(operation, duration_seconds=duration, entity_id=entity_id, candidates=candidates, name=_timer_name(text))
 
 
 def parse_productivity_request(

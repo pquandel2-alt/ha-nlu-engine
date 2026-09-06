@@ -126,6 +126,12 @@ class AgentDelivery:
     async def _async_tts(
         self, event: AgentEvent, options: Mapping[str, object]
     ) -> None:
+        await self.async_speak(event.message, options)
+
+    async def async_speak(
+        self, message: str, options: Mapping[str, object]
+    ) -> None:
+        """Speak a pre-rendered local message through configured HA TTS targets."""
         tts_entity = options.get(CONF_AGENT_TTS_ENTITY)
         raw_players = options.get(CONF_AGENT_MEDIA_PLAYERS, ())
         players = (
@@ -141,7 +147,7 @@ class AgentDelivery:
             {
                 "entity_id": tts_entity,
                 "media_player_entity_id": players,
-                "message": event.message,
+                "message": message,
             },
             blocking=True,
         )

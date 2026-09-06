@@ -37,3 +37,4 @@ class HaNluRuntimeData:
         default_factory=lambda: deque(maxlen=512)
     )
     adapter_runtime: Any | None = None
+    native_timer: Any | None = None

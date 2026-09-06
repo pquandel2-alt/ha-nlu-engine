@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.69.0**
+- Aktuelle Version: **4.70.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -468,6 +468,9 @@ sichtbare Prioritätspräfixe verwalten. Bei mehreren Listen wird nachgefragt.
 ### Timer
 
 ```text
+Stelle einen Timer für 20 Minuten.
+Stelle einen Timer für fünf Minuten mit dem Hinweis Nudeln.
+Stelle einen Timer für fünf Minuten für die Waschmaschine.
 Starte den Küchentimer für 20 Minuten.
 Verlängere den Küchentimer um fünf Minuten.
 Pausiere den Küchentimer.
@@ -475,6 +478,28 @@ Setze den Küchentimer fort.
 Wie lange läuft der Küchentimer noch?
 Brich den Küchentimer ab.
 ```
+
+Timer ohne benannten `timer.*`-Helper laufen über Home Assistants native
+Assist-Timerverwaltung. Unterstützt der aufrufende Sprachsatellit Timer,
+erhält er das native Ablaufereignis einschließlich Timername. Für andere
+Assist-Clients verwendet HomeIntent die unter den Agentenoptionen konfigurierte
+TTS-Engine und die ausgewählten Medienplayer; dabei wird beispielsweise
+„Nudeln: Der Timer ist abgelaufen.“ gesprochen. Fehlt sowohl native
+Timerunterstützung als auch ein vollständiges TTS-Ziel, lehnt HomeIntent den
+Start ab, statt einen unhörbaren Timer anzulegen. Vorhandene `timer.*`-Helper
+bleiben für benannte Haushalts-Timer kompatibel.
+
+### Fertigstellungszeiten von Geräten
+
+```text
+Wann ist die Waschmaschine fertig?
+```
+
+HomeIntent beantwortet diese Frage ausschließlich aus einem für Assist
+freigegebenen `sensor.*` mit `device_class: timestamp` und semantisch passender
+Fertigstellungszeit. Der aktuelle Sensorwert wird lokal formatiert. Mehrere
+passende Maschinen führen zu einer Rückfrage; fehlende oder ungültige Werte
+werden nicht geschätzt. Dieser Lesepfad kann keinen Serviceplan erzeugen.
 
 ## Automationen erstellen
 
@@ -819,7 +844,7 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/ha_nlu --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 4.69.0:
+Geprüfter Release-Stand von Version 4.70.0:
 
 ```text
 2629 passed, 12 skipped
@@ -849,7 +874,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-4.69.0.json --quiet
+  --check docs/perf/v7-shadow-baseline-4.70.0.json --quiet
 ```
 
 Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die

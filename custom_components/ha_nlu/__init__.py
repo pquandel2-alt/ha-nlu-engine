@@ -111,6 +111,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry.async_on_unload(indexing_task.cancel)
     from .agent_runtime import ProactiveAgentRuntime
 
+    from .native_timer import NativeTimerRuntime
+
+    native_timer = NativeTimerRuntime(hass, entry)
+    entry.runtime_data.native_timer = native_timer
+    entry.async_on_unload(native_timer.async_start())
+
     proactive_agent = ProactiveAgentRuntime(hass, entry, entry.runtime_data)
     entry.runtime_data.proactive_agent = proactive_agent
     entry.async_on_unload(proactive_agent.async_start())

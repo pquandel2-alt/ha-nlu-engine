@@ -164,6 +164,65 @@ def test_timer_start_and_change_are_compositional(monkeypatch):
     assert change.change_seconds == -120
 
 
+def test_generic_named_timer_keeps_label_as_bounded_data():
+    result = parse_productivity_request(
+        "Stelle einen Timer für fünf Minuten für die Nudeln", []
+    )
+
+    assert result is not None
+    assert result.operation is TimerOperation.START
+    assert result.duration_seconds == 300
+    assert result.entity_id is None
+    assert result.name == "die Nudeln"
+
+
+def test_generic_timer_uses_native_runtime_without_timer_helper(monkeypatch):
+    agent = _entity(monkeypatch, [])
+    runtime = type("NativeTimer", (), {"async_execute": AsyncMock(return_value="Timer für die Nudeln gestartet.")})()
+    agent._runtime_data.native_timer = runtime
+
+    result = _run(
+        agent,
+        "Stelle einen Timer für fünf Minuten mit dem Hinweis Nudeln",
+        "native-timer",
+    )
+
+    assert result.response.speech == "Timer für die Nudeln gestartet."
+    runtime.async_execute.assert_awaited_once()
+    request = runtime.async_execute.await_args.args[0]
+    assert request.name == "Nudeln"
+    agent.hass.services.async_call.assert_not_awaited()
+
+
+def test_generic_timer_does_not_first_match_only_timer_helper(monkeypatch):
+    agent = _entity(monkeypatch, [TIMER])
+    runtime = type("NativeTimer", (), {"async_execute": AsyncMock(return_value="Nativer Timer gestartet.")})()
+    agent._runtime_data.native_timer = runtime
+
+    result = _run(agent, "Stelle einen Timer für zwei Minuten", "native-not-helper")
+
+    assert result.response.speech == "Nativer Timer gestartet."
+    runtime.async_execute.assert_awaited_once()
+    agent.hass.services.async_call.assert_not_awaited()
+
+
+def test_washing_machine_completion_question_reaches_read_only_live_route(monkeypatch):
+    completion = EntitySnapshot(
+        "sensor.waschmaschine_fertigstellungszeit",
+        "Waschmaschine Fertigstellungszeit",
+        "sensor",
+        "2026-09-06T15:54:22+00:00",
+        device_class="timestamp",
+    )
+    agent = _entity(monkeypatch, [completion])
+
+    result = _run(agent, "Wann ist die Waschmaschine fertig?", "washer-query")
+
+    assert "Waschmaschine Fertigstellungszeit" in result.response.speech
+    assert "15:54 Uhr" in result.response.speech
+    agent.hass.services.async_call.assert_not_awaited()
+
+
 def test_timer_service_and_status(monkeypatch):
     agent = _entity(monkeypatch, [TIMER])
     started = _run(agent, "Stelle den Küchentimer auf 5 Minuten", "timer-start")
