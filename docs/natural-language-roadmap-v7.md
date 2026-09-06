@@ -132,7 +132,7 @@ Die wesentlichen Architekturbremsen sind:
 
 `scripts/v7_shadow_report.py` vergleicht Legacy und vollständig kompiliertes
 V7 ohne Serviceausführung. Der versionierte Bericht
-`docs/perf/v7-shadow-baseline-4.68.0.json` umfasst 3.772 Turns:
+`docs/perf/v7-shadow-baseline-4.69.0.json` umfasst 3.772 Turns:
 
 - 3.752 semantisch identische Ergebnisse,
 - 0 Treffer nur im Legacy-Pfad,
