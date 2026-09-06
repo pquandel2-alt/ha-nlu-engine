@@ -1,7 +1,7 @@
 """Constraint Resolver (V6 architecture plan, V6.9): finds every entity that
 satisfies ALL given constraints, before any Quantity is applied - "search
 first, then take N" rather than "take N, then check" (see
-docs/architecture-v6.md section 6 and Brain node
+docs/architecture-v7.md and the shared world-model layer
 755ef579-e0ba-43b7-bba9-1596c11854cd's V6.9 worked description: "Resolver
 sucht zuerst Entities, die ALLE Constraints erfuellen - erst danach wird
 Quantity angewendet").
@@ -18,7 +18,7 @@ function doesn't have. Capability Reasoning (V6.8): the required
 Deliberately out of scope here (owned elsewhere, not duplicated - Regel 6
 again): name-based candidate scoring/ambiguity detection stays
 ``resolve_entity_scored()``'s job (V6.10, already the most mature reasoning
-piece in this codebase - see docs/architecture-v6.md section 4); state
+piece in this codebase - see docs/architecture-v7.md); state
 filtering stays ``nlu/semantic_state.py``/``StateQueryParser``'s job (later
 Query Semantics work, V6.18); Quantity application (ALL/EXACTLY(n)/SOME/
 EXCLUDE) is a caller's job on this function's result, not this resolver's.

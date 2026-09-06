@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Mapping, cast
 
-from .device_control import DeviceControlResult
+from .device_result import DeviceControlResult
 from .entities import EntitySnapshot, normalize_for_compare
 from .nlu.domain_operations import DOMAIN_WORDS
 from .nlu.language_frontend import LanguageDocument

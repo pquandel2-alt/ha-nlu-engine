@@ -97,9 +97,12 @@ Die wesentlichen Architekturbremsen sind:
    28. August laufen direkte Turns in `NluEngine.understand()` semantisch
    zuerst. Die explizite autoritative Matrix umfasst die vermessenen Core-
    Commands, Prozent-/Temperaturwerte sowie Zustands-, Verb- und
-   Messwertqueries. Nur nicht migrierte Fachcapabilities behalten Legacy als
-   Kompatibilitätsfallback. `_select_parser()` bleibt für diese Restmenge eine
-   offene Architekturbremse.
+   Messwertqueries. Seit dem 5. September ist zusätzlich `match()` selbst
+   V7-first; auch Orts-/Eigenschaftsabfragen erreichen ihren Altresolver erst
+   nach einem semantischen Fehlschlag. Nur nicht migrierte Fachcapabilities
+   behalten Legacy als Kompatibilitätsfallback. `_select_parser()` bleibt für
+   diese Restmenge und den unabhängigen Shadow-Audit eine offene
+   Architekturbremse.
 2. **Routing ist noch teilweise reihenfolgeabhängig.** Kalender und
    Produktivität werden inzwischen gemeinsam ausgewertet; ein Doppelmatch
    wird anhand expliziter Domänenevidenz entschieden oder sicher als
@@ -108,7 +111,7 @@ Die wesentlichen Architekturbremsen sind:
    nacheinander probiert und bleiben offene Migrationsarbeit.
 3. **Vokabular und Operationen sind verteilt.** Trotz
    `nlu/domain_operations.py` besitzen unter anderem `engine.py`,
-   `group_semantics.py`, `device_control.py`, Kalender-, Produktivitäts- und
+   `group_semantics.py`, Kalender-, Produktivitäts- und
    Automationsmodule eigene überlappende Wort- und Regexbestände.
 4. **Normalisierung verändert teilweise Satzstruktur.** Einige natürliche
    Hüllen werden vor der Analyse in kanonische Befehle umgeschrieben. Das
@@ -129,7 +132,7 @@ Die wesentlichen Architekturbremsen sind:
 
 `scripts/v7_shadow_report.py` vergleicht Legacy und vollständig kompiliertes
 V7 ohne Serviceausführung. Der versionierte Bericht
-`docs/perf/v7-shadow-baseline-4.62.0.json` umfasst 3.772 Turns:
+`docs/perf/v7-shadow-baseline-4.68.0.json` umfasst 3.772 Turns:
 
 - 3.752 semantisch identische Ergebnisse,
 - 0 Treffer nur im Legacy-Pfad,

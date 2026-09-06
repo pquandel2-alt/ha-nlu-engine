@@ -57,13 +57,13 @@ def test_no_match_returns_none_not_a_frame(engine, entities):
     assert engine.match("Das ergibt keinen Sinn", entities) is None
 
 
-def test_v6_primitive_fields_default_to_none_for_existing_parsers(engine, entities):
-    """V6.2 ("Semantic Frame erweitern"): action/property/direction/degree/
-    quantity are additive-only - every existing parser still leaves them at
-    their None default, nothing regresses."""
+def test_v7_first_match_populates_typed_action_for_migrated_commands(engine, entities):
+    """Migrated commands expose their typed semantics through ``match``."""
+    from ha_nlu.nlu.primitives import SemanticAction
+
     result = engine.match("Mach Treppenlicht an", entities)
     assert result is not None
-    assert result.frame.action is None
+    assert result.frame.action is SemanticAction.TURN_ON
     assert result.frame.property is None
     assert result.frame.direction is None
     assert result.frame.degree is None

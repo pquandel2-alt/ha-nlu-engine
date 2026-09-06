@@ -2,7 +2,7 @@
 independently-recognized linguistic building blocks captured in
 nlu/lexicon.py's candidate dicts into one semantic structure, instead of
 adding one parser rule per full sentence pattern - see
-docs/architecture-v6.md section 1 (Leitprinzip) and section 3
+docs/architecture-v7.md (Leitprinzip und Schichtenmodell)
 (Zielarchitektur). Worked example from the plan (Brain node
 755ef579-e0ba-43b7-bba9-1596c11854cd): "die beiden Lampen" composes the
 domain word "Lampen" (-> TARGET=LIGHT, already handled by

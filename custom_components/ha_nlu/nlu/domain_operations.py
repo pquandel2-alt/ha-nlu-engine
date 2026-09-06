@@ -28,6 +28,7 @@ DOMAIN_EXPRESSIONS: dict[str, tuple[str, ...]] = {
     "valve": (r"ventil(?:e)?",),
     "lawn_mower": (r"mähroboter", r"maehroboter", r"rasenmäher", r"rasenmaeher"),
     "scene": (r"szene(?:n)?",),
+    "lock": (r"schl[oö]ss(?:er)?", r"t[üu]rschl[oö]ss(?:er)?"),
     "camera": (r"kamera(?:s)?",),
 }
 
@@ -53,6 +54,7 @@ DOMAIN_WORDS: dict[str, tuple[str, ...]] = {
     "valve": ("ventil", "ventile"),
     "lawn_mower": ("mähroboter", "maehroboter", "mäher", "maeher", "rasenmäher", "rasenmaeher"),
     "scene": ("szene", "szenen"),
+    "lock": ("schloss", "schlösser", "türschloss", "türschlösser"),
     "camera": ("kamera", "kameras"),
 }
 
@@ -80,6 +82,8 @@ COMMAND_MARKER_EXPRESSIONS: tuple[str, ...] = (
     r"senk(?:e|en|st|t)?", r"reduzier(?:e|en|st|t)?",
     r"dimm(?:e|en|st|t)?", r"änder(?:e|n|st|t)?",
     r"anheb(?:e|en|st|t)?",
+    r"verriegel(?:e|n|st|t)?", r"entriegel(?:e|n|st|t)?",
+    r"(?:auf|ab)schließ(?:e|en|est|t)?",
 )
 
 
@@ -102,14 +106,32 @@ ACTION_EXPRESSIONS: dict[str, tuple[str, ...]] = {
         r"aus", r"ausmach(?:e|en|st|t)?", r"ausschalt(?:e|en|st|t)?",
         r"ausgeschaltet", r"deaktivier(?:e|en|st|t)?",
     ),
-    "toggle": (r"umschalt(?:e|en)?", r"toggle"),
-    "start": (r"start(?:e|en|est|et)?", r"gestartet"),
+    "toggle": (
+        r"umschalt(?:e|en)?", r"toggle",
+        r"schalt(?:e|en|st|t)?(?:\s+\w+){1,8}\s+um",
+    ),
+    "start": (
+        r"start(?:e|en|est|et)?", r"gestartet",
+        r"(?:aus)?führ(?:e|en|st|t)?",
+        r"führ(?:e|en|st|t)?(?:\s+\w+){1,8}\s+aus",
+    ),
     "play": (
         r"spiel(?:e|en|st|t)?", r"weiter", r"weiter(?:zu)?spiel(?:e|en|st|t)?",
         r"wiedergabe\s+gestartet",
     ),
     "pause": (r"pausier(?:e|en|st|t)?", r"pausiert", r"halt(?:e|en|st|t)?\s+.*?\s+an"),
     "stop": (r"stopp(?:e|en|st|t)?", r"gestoppt"),
+    "mute": (r"stumm", r"mute"),
+    "locate": (r"find(?:e|en|est|et)?", r"ort(?:e|en|est|et)?", r"lokalisier(?:e|en|st|t)?"),
+    "press": (r"drück(?:e|en|st|t)?", r"drueck(?:e|en|st|t)?", r"betätig(?:e|en|st|t)?", r"betaetig(?:e|en|st|t)?"),
+    "lock": (
+        r"verriegel(?:e|n|st|t)?", r"abschließ(?:e|en|est|t)?",
+        r"schließ(?:e|en|est|t)?(?:\s+\w+){1,8}\s+ab",
+    ),
+    "unlock": (
+        r"entriegel(?:e|n|st|t)?", r"aufschließ(?:e|en|est|t)?",
+        r"schließ(?:e|en|est|t)?(?:\s+\w+){1,8}\s+auf",
+    ),
 }
 
 
@@ -122,16 +144,22 @@ INTENT_BY_DOMAIN_ACTION: dict[tuple[str, str], str] = {
     ("cover", "open"): "HassOpenCover",
     ("cover", "close"): "HassCloseCover",
     ("script", "start"): "HassRunScript",
+    ("script", "turn_on"): "HassRunScript",
     ("scene", "start"): "HassActivateScene",
     ("scene", "turn_on"): "HassActivateScene",
     ("media_player", "start"): "HassMediaPlay",
     ("media_player", "play"): "HassMediaPlay",
     ("media_player", "pause"): "HassMediaPause",
     ("media_player", "stop"): "HassMediaStop",
+    ("media_player", "mute"): "HassMediaMute",
     ("vacuum", "start"): "HassVacuumStart",
     ("vacuum", "stop"): "HassVacuumStop",
+    ("vacuum", "locate"): "HassVacuumLocate",
+    ("button", "press"): "HassPressButton",
     ("valve", "open"): "HassOpenValve",
     ("valve", "close"): "HassCloseValve",
+    ("lock", "lock"): "HassLock",
+    ("lock", "unlock"): "HassUnlock",
 }
 
 

@@ -17,7 +17,7 @@ Sentence-matching and entity/area resolution live in ``parsers.py`` (one
 grammars stay separately compiled). This module only routes text to the
 right parser and turns its ``ParseResult`` into a ``ServiceCallPlan`` -
 see the v2 plan, Phase 2 ("Intent-System vereinheitlichen"):
-``docs/architecture-v2-phase2.md``.
+``docs/architecture-v7.md``.
 """
 
 from __future__ import annotations
@@ -70,6 +70,7 @@ from .nlu.semantic_compiler import (
     has_exclusion_clause,
 )
 from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
+from .nlu.registered_operation_compiler import has_registered_operation_cue
 from .nlu.semantic_interpreter import InterpreterResult, SemanticInterpreter
 from .nlu.semantic_catalog import (
     V7_AUTHORITATIVE_DIRECT_CAPABILITIES,
@@ -137,8 +138,10 @@ from .service_call import (
     LIGHT_EXTENDED_INTENTS,
     PERCENT_INTENTS,
     QUERY_INTENTS,
+    REGISTERED_OPERATION_INTENT,
     ServiceCallPlan,
 )
+from .nlu.automation_operations import describe_registered_operation
 from .world_model import WorldModel
 
 _RESPONSE_GENERATOR = ResponseGenerator()
@@ -788,6 +791,8 @@ class NluEngine:
         text: str,
         entities: list[EntitySnapshot],
         world_model: WorldModel | None = None,
+        *,
+        _compatibility_first: bool = False,
     ) -> MatchResult | CommandPlan | None:
         turn = analyse_turn(text)
         utterance = turn.utterance
@@ -888,50 +893,74 @@ class NluEngine:
             and _UNSAFE_DIRECT_COMMAND_MODIFIER_RE.search(text)
         ):
             return None
-        location_query = self._location_property_query_parser.parse(
-            text, entities, semantic_analysis
+        semantic_query = (
+            SemanticQueryCompiler.compile(
+                text, entities, world_model, semantic_analysis
+            )
+            if utterance.speech_act is SpeechAct.QUERY
+            and not _compatibility_first
+            else None
         )
-        if isinstance(location_query, LocationQueryFeedback):
-            return None
-        if location_query is not None:
-            return self._build_match_result(location_query, entities)
-        parse_context = create_parse_context(entities, world_model=world_model)
-        # Location/property phrases are the explicit cross-router fallback
-        # above. Once a grammar is selected here, a semantic rejection must
-        # not fall through to a broader wildcard parser (for example,
-        # "beide" must never degrade into a singular command).
-        result = self._select_parser(text).parse(text, parse_context)
-        if (
-            utterance.speech_act is SpeechAct.QUERY
-            and isinstance(result, ParseResult)
-            and result.frame.intent not in QUERY_INTENTS
-        ):
-            result = None
-        if isinstance(result, ClarificationRequest):
-            # Legacy wildcard grammars may include politeness words in the
-            # target or detect duplicate names before applying an explicitly
-            # spoken area.  Let the constraint-based semantic compiler prove
-            # a unique interpretation before asking an unnecessary question.
-            if utterance.speech_act is SpeechAct.QUERY:
+        if semantic_query is None:
+            location_query = self._location_property_query_parser.parse(
+                text, entities, semantic_analysis
+            )
+            if isinstance(location_query, LocationQueryFeedback):
+                return None
+            if location_query is not None:
+                return self._build_match_result(location_query, entities)
+        if _compatibility_first:
+            parse_context = create_parse_context(entities, world_model=world_model)
+            result = self._select_parser(text).parse(text, parse_context)
+            if (
+                utterance.speech_act is SpeechAct.QUERY
+                and isinstance(result, ParseResult)
+                and result.frame.intent not in QUERY_INTENTS
+            ):
                 result = None
-            else:
-                semantic_result = SemanticCommandCompiler.compile(
-                    text, entities, world_model, semantic_analysis
+            if isinstance(result, ClarificationRequest):
+                if utterance.speech_act is SpeechAct.QUERY:
+                    result = None
+                else:
+                    semantic_result = SemanticCommandCompiler.compile(
+                        text, entities, world_model, semantic_analysis
+                    )
+                    if isinstance(semantic_result, ParseResult):
+                        result = semantic_result
+            if result is None:
+                result = (
+                    SemanticQueryCompiler.compile(
+                        text, entities, world_model, semantic_analysis
+                    )
+                    if utterance.speech_act is SpeechAct.QUERY
+                    else SemanticCommandCompiler.compile(
+                        text, entities, world_model, semantic_analysis
+                    )
                 )
-                if isinstance(semantic_result, ParseResult):
-                    result = semantic_result
-        if result is None:
+        else:
+            # V7 owns every meaning it can prove. The regex-selected parser
+            # is a compatibility fallback for capabilities that have not yet
+            # been migrated and cannot pre-empt a complete semantic result.
             result = (
-                SemanticQueryCompiler.compile(
+                semantic_query
+                if semantic_query is not None
+                else SemanticQueryCompiler.compile(
                     text, entities, world_model, semantic_analysis
                 )
                 if utterance.speech_act is SpeechAct.QUERY
-                else None
-            )
-            if result is None and utterance.speech_act is not SpeechAct.QUERY:
-                result = SemanticCommandCompiler.compile(
+                else SemanticCommandCompiler.compile(
                     text, entities, world_model, semantic_analysis
                 )
+            )
+            if result is None:
+                parse_context = create_parse_context(entities, world_model=world_model)
+                result = self._select_parser(text).parse(text, parse_context)
+                if (
+                    utterance.speech_act is SpeechAct.QUERY
+                    and isinstance(result, ParseResult)
+                    and result.frame.intent not in QUERY_INTENTS
+                ):
+                    result = None
         if result is None:
             return None
         if isinstance(result, ClarificationRequest):
@@ -969,18 +998,49 @@ class NluEngine:
             resolve_registry=False,
         )
         v7_result = self._interpreted_match_result(interpreted, entities)
-        if self._is_v7_authoritative(v7_result, interpreted):
-            result: MatchResult | CommandPlan | None = v7_result
-            authority = UnderstandingAuthority.V7_MIGRATED
-        else:
-            result = self.match(text, entities, world_model)
-            if result is not None:
-                authority = UnderstandingAuthority.LEGACY
-            elif v7_result is not None:
-                result = v7_result
-                authority = UnderstandingAuthority.V7_FALLBACK
-            else:
-                authority = UnderstandingAuthority.NONE
+        multi_result = self._v7_multi_result(text, entities, world_model)
+        segments = tuple(
+            segment.strip() for segment in _AND_SPLIT_RE.split(text) if segment.strip()
+        )
+        if multi_result is not None:
+            v7_result = multi_result
+        elif len(segments) > 1 and any(
+            analyse_language(segment, entities).utterance.speech_act
+            in {SpeechAct.COMMAND, SpeechAct.QUERY}
+            for segment in segments[1:]
+        ):
+            # Never execute only the first half of an independently shaped
+            # conjunction when another clause failed compilation.
+            v7_result = None
+        # V7 is authoritative whenever it has a complete meaning. Remaining
+        # capability families stay on the measured compatibility path until
+        # their semantic replacement passes the same regression corpus.
+        exact_mentions = ()
+        v7_claims_command = False
+        if (
+            v7_result is None
+            and document.utterance.speech_act is SpeechAct.COMMAND
+            and document.utterance.safe_to_execute_directly
+            and (
+                document.semantics.values(SemanticKind.PROPERTY)
+                or has_registered_operation_cue(text)
+            )
+        ):
+            exact_mentions = all_mentioned_entities(text, entities)
+            v7_claims_command = bool(exact_mentions)
+        legacy_result = (
+            None
+            if v7_result is not None or v7_claims_command
+            else self.match(text, entities, world_model)
+        )
+        result: MatchResult | CommandPlan | None = v7_result or legacy_result
+        authority = (
+            UnderstandingAuthority.V7_MIGRATED
+            if v7_result is not None
+            else UnderstandingAuthority.LEGACY
+            if legacy_result is not None
+            else UnderstandingAuthority.NONE
+        )
         # The loss-aware frontend recognizes bounded safety-critical spelling
         # variants (especially a mistyped negation) that legacy grammars may
         # otherwise absorb into a wildcard entity name.  The canonical V7
@@ -994,6 +1054,54 @@ class NluEngine:
         return self._direct_understanding_outcome(
             text, document, interpreted, result, entities, authority
         )
+
+    def _v7_multi_result(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None,
+    ) -> CommandPlan | None:
+        """Compile independent conjunction clauses without legacy parsers."""
+        segments = tuple(
+            segment.strip()
+            for segment in _AND_SPLIT_RE.split(text)
+            if segment.strip()
+        )
+        if len(segments) < 2:
+            return None
+        results: list[MatchResult] = []
+        for segment in segments:
+            document = analyse_language(segment, entities)
+            if document.utterance.speech_act not in {SpeechAct.COMMAND, SpeechAct.QUERY}:
+                return None
+            if (
+                document.utterance.speech_act is SpeechAct.COMMAND
+                and not document.utterance.safe_to_execute_directly
+            ):
+                return None
+            interpreted = SemanticInterpreter.interpret(
+                document,
+                entities,
+                world_model,
+                compile_result=True,
+                resolve_registry=False,
+            )
+            result = self._interpreted_match_result(interpreted, entities)
+            if not isinstance(result, MatchResult) or result.command is None or result.clarification is not None:
+                return None
+            if result.plan is None and document.utterance.speech_act is not SpeechAct.QUERY:
+                return None
+            if result.plan is not None and document.utterance.speech_act is SpeechAct.QUERY:
+                return None
+            results.append(result)
+        changed_ids: set[str] = set()
+        for result in results:
+            ids = {entity.entity_id for entity in result.command.entities}
+            if result.plan is None and changed_ids & ids:
+                return None
+            if result.plan is not None:
+                changed_ids.update(ids)
+        return CommandPlan(tuple(results))
 
     def compare_understanding_pipelines(
         self,
@@ -1018,7 +1126,9 @@ class NluEngine:
             compile_result=True,
             resolve_registry=True,
         )
-        legacy_result = self.match(text, entities, world_model)
+        legacy_result = self.match(
+            text, entities, world_model, _compatibility_first=True
+        )
         v7_result = self._interpreted_match_result(interpreted, entities)
         if (
             document.utterance.speech_act is SpeechAct.COMMAND
@@ -2013,19 +2123,21 @@ class NluEngine:
         commands. Automation-only actions remain available through the
         established dedicated parser as the fallback.
         """
-        direct = self.match(text, context.entities, context.world_model)
+        document = analyse_language(text, context.entities)
+        interpreted = SemanticInterpreter.interpret(
+            document,
+            context.entities,
+            context.world_model,
+            compile_result=True,
+            resolve_registry=False,
+        )
+        direct = self._interpreted_match_result(interpreted, context.entities)
         action = self._action_from_direct_match(direct, context.entities)
         if action is not None:
             return (action,)
-        # The live conversation router also supports capability-driven
-        # device operations that have not yet migrated to MatchResult. Lift
-        # those only through the closed automation operation allow-list.
-        from .device_control import match_device_control
-
-        legacy = match_device_control(text, context.entities)
-        action = self._action_from_service_plan(
-            legacy.plan if legacy is not None else None,
-            context.entities,
+        compatibility = self.match(text, context.entities, context.world_model)
+        action = self._action_from_direct_match(
+            compatibility, context.entities
         )
         if action is not None:
             return (action,)
@@ -2788,42 +2900,6 @@ class NluEngine:
             return ActionModel(type=ActionType.TURN_OFF, target=target)
         return None
 
-    @staticmethod
-    def _action_from_service_plan(
-        plan: ServiceCallPlan | None,
-        available_entities: list[EntitySnapshot],
-    ) -> ActionModel | None:
-        """Lift one legacy direct plan through the same closed allow-list."""
-        if plan is None:
-            return None
-        entity_ids = (
-            tuple(plan.entity_id)
-            if isinstance(plan.entity_id, list)
-            else (plan.entity_id,)
-        )
-        selected = [
-            entity for entity in available_entities if entity.entity_id in entity_ids
-        ]
-        if len(selected) != len(entity_ids):
-            return None
-        target_domains = frozenset(entity.domain for entity in selected)
-        if not validate_registered_operation(
-            plan.domain, plan.service, plan.data, target_domains
-        ):
-            return None
-        target = TriggerTarget(
-            domain=selected[0].domain,
-            entity_id=(entity_ids[0] if len(entity_ids) == 1 else None),
-            entity_ids=(entity_ids if len(entity_ids) > 1 else ()),
-        )
-        return ActionModel(
-            type=ActionType.REGISTERED_SERVICE,
-            target=target,
-            service_domain=plan.domain,
-            service_name=plan.service,
-            service_data=dict(plan.data),
-        )
-
     def match_calendar_event_automation(
         self,
         text: str,
@@ -3279,6 +3355,21 @@ class NluEngine:
             return MatchResult(
                 plan=climate_plan,
                 response_text=climate_extended_spec.response(matched, frame.parameters),
+                frame=frame,
+                command=command,
+                resolved_intent=resolved_intent,
+            )
+
+        if frame.intent == REGISTERED_OPERATION_INTENT:
+            registered_plan = map_to_service_call(command)
+            if registered_plan is None:
+                return None
+            return MatchResult(
+                plan=registered_plan,
+                response_text=(
+                    f"{matched[0].friendly_name}: "
+                    f"{describe_registered_operation(registered_plan.domain, registered_plan.service, registered_plan.data)}."
+                ),
                 frame=frame,
                 command=command,
                 resolved_intent=resolved_intent,

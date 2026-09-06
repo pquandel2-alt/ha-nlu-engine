@@ -126,7 +126,7 @@ class SemanticFrame:
 
     # V6.2 ("Semantic Frame erweitern"): additive-only primitive fields
     # composed by the Semantic Composer (V6.4) from nlu/lexicon.py candidates
-    # - see docs/architecture-v6.md section 6. None of the fields above are
+    # - see docs/architecture-v7.md. None of the fields above are
     # touched or renamed; every existing SemanticFrame(...) call site keeps
     # working unchanged with these left at their None default (R7, "bestehende
     # Funktionalitaet bleibt erhalten"). action/property/direction/degree

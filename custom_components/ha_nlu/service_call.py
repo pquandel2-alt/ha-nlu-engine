@@ -13,6 +13,7 @@ from typing import Any, Callable, Mapping
 
 from .entities import EntitySnapshot
 from .nlu.capabilities import Capability
+from .nlu.automation_operations import validate_registered_operation
 from .nlu.query import QueryType, derive_query_type
 
 
@@ -44,6 +45,7 @@ _DOMAIN_PLURAL_DE = {
     "script": "Skripte", "media_player": "Medienplayer", "vacuum": "Saugroboter",
     "humidifier": "Luftbefeuchter", "input_boolean": "Helfer", "valve": "Ventile",
     "scene": "Szenen",
+    "lock": "Schlösser",
 }
 
 
@@ -114,6 +116,14 @@ INTENTS: dict[str, IntentSpec] = {
         build=lambda es: ServiceCallPlan("media_player", "media_stop", _entity_id_field(es)),
         response=lambda es: _plural_response(es, "gestoppt.", "gestoppt."),
     ),
+    "HassMediaMute": IntentSpec(
+        allowed_domains=frozenset({"media_player"}),
+        build=lambda es: ServiceCallPlan(
+            "media_player", "volume_mute", _entity_id_field(es),
+            {"is_volume_muted": True},
+        ),
+        response=lambda es: _plural_response(es, "stummgeschaltet.", "stummgeschaltet."),
+    ),
     "HassVacuumStart": IntentSpec(
         allowed_domains=frozenset({"vacuum"}),
         build=lambda es: ServiceCallPlan("vacuum", "start", _entity_id_field(es)),
@@ -123,6 +133,16 @@ INTENTS: dict[str, IntentSpec] = {
         allowed_domains=frozenset({"vacuum"}),
         build=lambda es: ServiceCallPlan("vacuum", "stop", _entity_id_field(es)),
         response=lambda es: _plural_response(es, "gestoppt.", "gestoppt."),
+    ),
+    "HassVacuumLocate": IntentSpec(
+        allowed_domains=frozenset({"vacuum"}),
+        build=lambda es: ServiceCallPlan("vacuum", "locate", _entity_id_field(es)),
+        response=lambda es: _plural_response(es, "wird geortet.", "werden geortet."),
+    ),
+    "HassPressButton": IntentSpec(
+        allowed_domains=frozenset({"button"}),
+        build=lambda es: ServiceCallPlan("button", "press", _entity_id_field(es)),
+        response=lambda es: _plural_response(es, "drücken.", "gedrückt."),
     ),
     "HassOpenValve": IntentSpec(
         allowed_domains=frozenset({"valve"}),
@@ -136,7 +156,36 @@ INTENTS: dict[str, IntentSpec] = {
         response=lambda es: _plural_response(es, "wird geschlossen.", "geschlossen."),
         required_capability="CLOSE",
     ),
+    "HassLock": IntentSpec(
+        allowed_domains=frozenset({"lock"}),
+        build=lambda es: ServiceCallPlan("lock", "lock", _entity_id_field(es)),
+        response=lambda es: _plural_response(es, "abschließen.", "abgeschlossen."),
+    ),
+    "HassUnlock": IntentSpec(
+        allowed_domains=frozenset({"lock"}),
+        build=lambda es: ServiceCallPlan("lock", "unlock", _entity_id_field(es)),
+        response=lambda es: _plural_response(es, "aufschließen.", "aufgeschlossen."),
+    ),
 }
+
+
+REGISTERED_OPERATION_INTENT = "HassRegisteredOperation"
+
+
+def build_registered_operation(
+    entities: list[EntitySnapshot], parameters: Mapping[str, Any]
+) -> ServiceCallPlan | None:
+    """Materialize one typed operation from the closed local allow-list."""
+    domain = parameters.get("service_domain")
+    service = parameters.get("service_name")
+    data = parameters.get("service_data", {})
+    if not isinstance(domain, str) or not isinstance(service, str) or not isinstance(data, Mapping):
+        return None
+    normalized_data = dict(data)
+    target_domains = frozenset(entity.domain for entity in entities)
+    if not validate_registered_operation(domain, service, normalized_data, target_domains):
+        return None
+    return ServiceCallPlan(domain, service, _entity_id_field(entities), normalized_data)
 
 
 # Central, deterministic action-inversion table (live conversation-context
@@ -160,6 +209,8 @@ ACTION_OPPOSITES: dict[str, str] = {
     "HassVacuumStop": "HassVacuumStart",
     "HassOpenValve": "HassCloseValve",
     "HassCloseValve": "HassOpenValve",
+    "HassLock": "HassUnlock",
+    "HassUnlock": "HassLock",
 }
 
 

@@ -1,9 +1,8 @@
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.entity_scope import resolve_entity_scope
-from ha_nlu.extended_device_control import match_extended_device_control
 from ha_nlu.extended_device_query import match_extended_device_query
-from ha_nlu.device_control import _mentioned_entity, _result
 from ha_nlu.nlu.language_frontend import analyse_language
+from _v7_device import understand_device
 
 
 ENTITIES = [
@@ -20,11 +19,9 @@ def test_scope_resolves_floor_independent_of_word_order():
 
 
 def test_extended_group_control_uses_one_multi_target_plan():
-    result = match_extended_device_control(
+    result = understand_device(
         "Schalte im Obergeschoss sämtliche Luftbefeuchter aus",
         ENTITIES,
-        _mentioned_entity,
-        _result,
     )
     assert result is not None and result.plan is not None
     assert result.plan.service == "turn_off"
@@ -55,11 +52,9 @@ def test_extended_query_honours_shared_speech_act():
 
 
 def test_extended_group_value_is_checked_for_every_target():
-    result = match_extended_device_control(
+    result = understand_device(
         "Stelle alle Luftbefeuchter im Obergeschoss auf 55 Prozent Luftfeuchtigkeit",
         ENTITIES,
-        _mentioned_entity,
-        _result,
     )
     assert result is not None and result.plan is not None
     assert result.plan.service == "set_humidity"

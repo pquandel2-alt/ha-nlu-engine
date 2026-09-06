@@ -526,18 +526,21 @@ def test_dialog_manager_priority_user_binding_correction_and_replacement():
     assert manager.replace_with_complete_command("conv").replaced
 
 
-def test_dialog_manager_mirrors_and_expires_legacy_state_centrally():
+def test_dialog_manager_synchronizes_typed_context_payload_centrally():
     manager = DialogManager()
-    task = manager.mirror_legacy(
+    payload = {"confirmation_id": "confirm-1"}
+    task = manager.synchronize_context_task(
         "conv",
         kind=DialogTaskKind.SAFETY_CONFIRMATION,
         priority=DialogPriority.SAFETY,
-        slots={"legacy_kind": "SERVICE_CONFIRMATION"},
+        slots={"context_kind": "SERVICE_CONFIRMATION"},
         requested_by_user_id="owner",
+        payload=payload,
     )
     assert task is not None
     assert manager.active("conv") is task
-    assert manager.mirror_legacy("conv", kind=None) is None
+    assert task.payload is payload
+    assert manager.synchronize_context_task("conv", kind=None) is None
     assert manager.active("conv") is None
 
 

@@ -3,7 +3,7 @@ type-safe shared vocabulary of semantic building blocks. Meaning is meant to
 be composed from these reusable pieces ("mach...an" / "schalte...ein" /
 "lass...an" -> a shared ``SemanticAction.TURN_ON``; "Licht" / "Lampe" /
 "Beleuchtung" -> a shared LIGHT target) instead of one rule per sentence -
-see ``docs/architecture-v6.md`` section 1 for the full rationale.
+see ``docs/architecture-v7.md`` for the current rationale.
 
 Kept free of Home Assistant and hassil imports, same boundary as
 ``nlu/frame.py`` and ``nlu/capabilities.py`` - this is pure vocabulary/typing,
@@ -91,6 +91,11 @@ class SemanticAction(Enum):
     TOGGLE = auto()
     OPEN = auto()
     CLOSE = auto()
+    LOCK = auto()
+    UNLOCK = auto()
+    MUTE = auto()
+    LOCATE = auto()
+    PRESS = auto()
     SET = auto()
     ADJUST = auto()
     QUERY = auto()
@@ -137,6 +142,7 @@ class SemanticProperty(Enum):
     HUMIDITY = auto()
     FAN_SPEED = auto()
     BATTERY = auto()
+    VOLUME = auto()
 
 
 class SemanticDirection(Enum):

@@ -26,6 +26,11 @@ def test_semantic_action_has_expected_members():
         "TOGGLE",
         "OPEN",
         "CLOSE",
+        "LOCK",
+        "UNLOCK",
+        "MUTE",
+        "LOCATE",
+        "PRESS",
         "SET",
         "ADJUST",
         "QUERY",
@@ -47,6 +52,7 @@ def test_semantic_property_has_expected_members():
         "HUMIDITY",
         "FAN_SPEED",
         "BATTERY",
+        "VOLUME",
     }
 
 

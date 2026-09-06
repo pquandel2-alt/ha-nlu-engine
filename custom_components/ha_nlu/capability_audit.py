@@ -6,7 +6,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
-from .device_control import DeviceControlResult
+from .device_result import DeviceControlResult
 from .entities import EntitySnapshot, normalize_for_compare
 from .nlu.language_frontend import LanguageDocument
 from .nlu.semantic_utterance import SpeechAct

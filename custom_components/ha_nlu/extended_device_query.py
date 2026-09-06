@@ -6,7 +6,7 @@ import re
 
 from .entities import EntitySnapshot
 from .entity_scope import DOMAIN_WORDS, resolve_entity_scope
-from .device_control import DeviceControlResult
+from .device_result import DeviceControlResult
 from .nlu.language_frontend import LanguageDocument
 from .nlu.normalize import normalize
 from .nlu.semantic_utterance import SpeechAct

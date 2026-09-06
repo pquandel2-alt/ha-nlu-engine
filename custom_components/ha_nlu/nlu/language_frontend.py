@@ -184,6 +184,12 @@ def _has_near_negation(
     text: str, entities: tuple[EntitySnapshot, ...] = ()
 ) -> bool:
     """Treat a one-edit negation typo as negative, never as ignorable noise."""
+    text = re.sub(
+        r"\bnicht\s+(?:höher|hoeher|niedriger|mehr|weniger)\s+als\b",
+        "",
+        text,
+        flags=re.I,
+    )
     for raw in re.findall(r"[A-Za-zÄÖÜäöüß]{4,}", text):
         word = normalize_for_compare(raw)
         if word in _NEGATION_TYPO_PROTECTED:
@@ -293,7 +299,10 @@ def analyse_language(
         and _has_registry_mention(utterance.normalized_text, entity_tuple)
     ):
         utterance = replace(utterance, speech_act=SpeechAct.COMMAND)
-    if _has_near_negation(text, entity_tuple):
+    explicit_unmute = re.search(r"\bnicht\s+mehr\s+stumm\b", text, re.I) is not None
+    if explicit_unmute:
+        utterance = replace(utterance, polarity=Polarity.POSITIVE)
+    if _has_near_negation(text, entity_tuple) and not explicit_unmute:
         utterance = replace(utterance, polarity=Polarity.NEGATIVE)
     return LanguageDocument(
         source_text=text,

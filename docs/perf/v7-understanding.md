@@ -169,3 +169,27 @@ auf der virtualisierten x86_64-Entwicklungsumgebung grün:
 Damit ist das lokale 100-ms-Gate bei 5.000 Entities ohne Änderung am Budget
 grün. Die Messung ist weiterhin kein behaupteter Raspberry-Pi-Wert; ein Lauf
 auf realer Zielhardware bleibt separat offen.
+
+## Kontrolle nach Entfernung der Geräte-Fachparser (2026-09-05)
+
+Die typisierten registrierten Operationen ersetzen die früheren direkten
+Geräte-Fachparser. Zwei dabei sichtbare lineare Arbeiten wurden entfernt:
+Eine namentliche Sensorauflösung startet erst nach passender Query-Satzform;
+bei quantifizierten Bereichsbefehlen werden nicht mehr die Namen sämtlicher
+bereits typisiert ausgewählter Entities erneut als Token-Evidenz zerlegt.
+
+Das unveränderte CI-Kommando mit 20 Messwerten nach drei Warmups war auf der
+virtualisierten x86_64-Entwicklungsumgebung grün:
+
+| Fall | Mittel | p95 |
+|---|---:|---:|
+| Licht an | 13,75 ms | 23,62 ms |
+| Licht aus | 12,15 ms | 26,38 ms |
+| Heizung auf Temperatur | 18,82 ms | 25,38 ms |
+| Sensorabfrage | 8,70 ms | 16,68 ms |
+| Bereichsgruppe | 34,84 ms | 45,11 ms |
+| Cover-Prozentwert | 26,80 ms | 49,87 ms |
+| freie semantische Query | 46,42 ms | 69,40 ms |
+
+Damit bleibt jeder 5.000-Entity-p95 unter 100 ms. Die Messung ist weiterhin
+kein behaupteter Raspberry-Pi-Wert; die Zielhardwareprüfung bleibt separat.

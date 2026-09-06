@@ -41,7 +41,7 @@ def test_does_not_touch_entity_names_semantically():
 
 def test_engine_still_matches_percent_symbol_end_to_end(engine, entities):
     # Regression: normalize() replaces the ad-hoc _normalize_percent_symbol
-    # that used to live in engine.py directly (see architecture-v2-phase3.md).
+    # that used to live in engine.py directly (see architecture-v7.md).
     result = engine.match("Stelle den Rollladen Wohnzimmer auf 30%", entities)
     assert result is not None
     assert result.plan.data == {"position": 30}

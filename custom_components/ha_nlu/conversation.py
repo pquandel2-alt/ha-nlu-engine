@@ -86,7 +86,7 @@ from .const import (
 )
 from .dialog_manager import DialogPriority, DialogTaskKind
 from .document_intent import interpret_document_search
-from .device_control import DeviceControlResult, match_device_control, match_device_control_followup
+from .device_result import DeviceControlResult
 from .engine import (
     AutomationDraftMatchResult,
     AutomationDeletionMatchResult,
@@ -149,7 +149,9 @@ from .nlu.context import (
     PendingAutomationManagement,
     PendingAutomationStructureEdit,
     PendingAutomationWizard,
+    PendingAliasLearning,
     PendingCalendarEvent,
+    PendingCalendarMutation,
     PendingServiceConfirmation,
     PendingSemanticCommand,
     PendingProductivityCommand,
@@ -284,7 +286,7 @@ def _is_complete_actionable_understanding(
     return False
 
 
-def _legacy_manager_kind(
+def _dialog_manager_kind(
     kind: PendingDialogKind,
 ) -> tuple[DialogTaskKind, DialogPriority]:
     """Map every historical pending state onto the central coordinator."""
@@ -408,7 +410,7 @@ class NluConversationEntity(
         # fetched and bundled alongside it (World Model Wave, 2026-08-14) so
         # a real WorldModel is now built every live turn, not just in tests.
         # Threaded into match() below (WorldModelQuery wave) so query parsers
-        # can resolve device-/area-level data - see docs/architecture-v6.md 6d.
+        # can resolve device-/area-level data - see docs/architecture-v7.md.
         entities = build_entity_snapshots(self.hass, self.entry)
         devices = build_device_snapshots(self.hass, self.entry)
         self._world_model = assemble_world_model(entities, devices)
@@ -460,9 +462,9 @@ class NluConversationEntity(
         direct_understanding = None
         manager = self._runtime_data.dialog_manager
         if active_dialog is None:
-            manager.mirror_legacy(user_input.conversation_id, kind=None)
+            manager.synchronize_context_task(user_input.conversation_id, kind=None)
         else:
-            manager_kind, manager_priority = _legacy_manager_kind(active_dialog.kind)
+            manager_kind, manager_priority = _dialog_manager_kind(active_dialog.kind)
             raw_candidates = (
                 getattr(active_dialog.payload, "candidates", ())
                 if active_dialog.kind is PendingDialogKind.CLARIFICATION
@@ -473,19 +475,20 @@ class NluConversationEntity(
                 for item in raw_candidates
                 if isinstance(item, EntitySnapshot)
             )
-            legacy_owner = getattr(
+            dialog_owner = getattr(
                 active_dialog.payload, "requested_by_user_id", None
             )
-            manager.mirror_legacy(
+            manager.synchronize_context_task(
                 user_input.conversation_id,
                 kind=manager_kind,
                 priority=manager_priority,
-                slots={"legacy_kind": active_dialog.kind.name},
+                slots={"context_kind": active_dialog.kind.name},
                 candidates=candidates,
                 reason="Ein bestehender Dialog benötigt eine eindeutige Fortsetzung.",
                 requested_by_user_id=(
-                    legacy_owner if isinstance(legacy_owner, str) else None
+                    dialog_owner if isinstance(dialog_owner, str) else None
                 ),
+                payload=active_dialog.payload,
             )
             if (
                 language_document.utterance.speech_act is SpeechAct.COMMAND
@@ -683,11 +686,11 @@ class NluConversationEntity(
         if (
             active_dialog is not None
             and active_dialog.kind is PendingDialogKind.ALIAS_LEARNING
-            and pending is not None
-            and pending.pending_alias_learning is not None
+            and active_task is not None
+            and isinstance(active_task.payload, PendingAliasLearning)
         ):
             reply = classify_confirmation_reply(user_input.text)
-            draft = pending.pending_alias_learning.draft
+            draft = active_task.payload.draft
             if reply is ConfirmationReply.NO:
                 self._context_store.clear(user_input.conversation_id)
                 response.async_set_speech("Abgebrochen. Der Alias wurde nicht gespeichert.")
@@ -729,139 +732,140 @@ class NluConversationEntity(
         if (
             active_dialog is not None
             and active_dialog.kind is PendingDialogKind.AUTOMATION_WIZARD
-            and pending is not None
-            and pending.pending_automation_wizard is not None
+            and active_task is not None
+            and isinstance(active_task.payload, PendingAutomationWizard)
         ):
             return await self._async_handle_automation_wizard(
                 user_input,
                 response,
-                pending.pending_automation_wizard.state,
+                active_task.payload.state,
                 entities,
             )
         if (
             active_dialog is not None
             and active_dialog.kind is PendingDialogKind.PRODUCTIVITY
-            and pending is not None
-            and pending.pending_productivity_command is not None
+            and active_task is not None
+            and isinstance(active_task.payload, PendingProductivityCommand)
         ):
             return await self._async_handle_pending_productivity(
                 user_input,
                 response,
-                pending.pending_productivity_command,
+                active_task.payload,
                 entities,
             )
         if (
             active_dialog is not None
             and active_dialog.kind is PendingDialogKind.CALENDAR_EVENT
-            and pending is not None
-            and pending.pending_calendar_event is not None
+            and active_task is not None
+            and isinstance(active_task.payload, PendingCalendarEvent)
         ):
             return await self._async_handle_calendar_event_turn(
-                user_input, response, pending.pending_calendar_event, calendars
+                user_input, response, active_task.payload, calendars
             )
 
         if (
             active_dialog is not None
             and active_dialog.kind is PendingDialogKind.CALENDAR_MUTATION
-            and pending is not None
-            and pending.pending_calendar_mutation is not None
+            and active_task is not None
+            and isinstance(active_task.payload, PendingCalendarMutation)
         ):
             return await async_handle_calendar_mutation_confirmation(
-                self, user_input, response, pending.pending_calendar_mutation
+                self, user_input, response, active_task.payload
             )
 
         if (
             active_dialog is not None
             and active_dialog.kind is PendingDialogKind.AUTOMATION_CONFIRMATION
-            and pending is not None
-            and pending.pending_automation_confirmation is not None
+            and active_task is not None
+            and isinstance(active_task.payload, PendingAutomationConfirmation)
         ):
             return await self._async_handle_pending_automation_confirmation_turn(
                 user_input,
                 response,
-                pending.pending_automation_confirmation,
+                active_task.payload,
                 entities,
             )
 
         if (
             active_dialog is not None
             and active_dialog.kind is PendingDialogKind.AUTOMATION_ACTION_EDIT
-            and pending is not None
-            and pending.pending_automation_action_edit is not None
+            and active_task is not None
+            and isinstance(active_task.payload, PendingAutomationActionEdit)
         ):
             return await async_handle_automation_action_edit_turn(
                 self,
                 user_input,
                 response,
-                pending.pending_automation_action_edit,
+                active_task.payload,
                 entities,
             )
 
         if (
             active_dialog is not None
             and active_dialog.kind is PendingDialogKind.AUTOMATION_STRUCTURE_EDIT
-            and pending is not None
-            and pending.pending_automation_structure_edit is not None
+            and active_task is not None
+            and isinstance(active_task.payload, PendingAutomationStructureEdit)
         ):
             return await async_handle_automation_structure_edit_turn(
                 self,
                 user_input,
                 response,
-                pending.pending_automation_structure_edit,
+                active_task.payload,
                 entities,
             )
 
         if (
             active_dialog is not None
             and active_dialog.kind is PendingDialogKind.AUTOMATION_MANAGEMENT
-            and pending is not None
-            and pending.pending_automation_management is not None
+            and active_task is not None
+            and isinstance(active_task.payload, PendingAutomationManagement)
         ):
             return await self._async_handle_automation_management_confirmation(
-                user_input, response, pending.pending_automation_management
+                user_input, response, active_task.payload
             )
 
         if (
             active_dialog is not None
             and active_dialog.kind is PendingDialogKind.AUTOMATION_DELETION
-            and pending is not None
-            and pending.pending_automation_deletion is not None
+            and active_task is not None
+            and isinstance(active_task.payload, PendingAutomationDeletion)
         ):
             return await self._async_handle_automation_deletion_confirmation_reply(
-                user_input, response, pending.pending_automation_deletion
+                user_input, response, active_task.payload
             )
 
         if (
             active_dialog is not None
             and active_dialog.kind is PendingDialogKind.SERVICE_CONFIRMATION
-            and pending is not None
-            and pending.pending_service_confirmation is not None
+            and active_task is not None
+            and isinstance(active_task.payload, PendingServiceConfirmation)
         ):
             return await self._async_handle_service_confirmation_reply(
                 user_input,
                 response,
-                pending.pending_service_confirmation,
+                active_task.payload,
                 entities,
             )
 
         if (
             active_dialog is not None
             and active_dialog.kind is PendingDialogKind.SEMANTIC_COMMAND
-            and pending is not None
-            and pending.pending_semantic_command is not None
+            and active_task is not None
+            and isinstance(active_task.payload, PendingSemanticCommand)
         ):
             return await self._async_handle_pending_semantic_command(
-                user_input, response, pending.pending_semantic_command, entities
+                user_input, response, active_task.payload, entities
             )
 
         if (
             active_dialog is not None
             and active_dialog.kind is PendingDialogKind.AUTOMATION_DRAFT
+            and active_task is not None
+            and isinstance(active_task.payload, PendingAutomationDraft)
             and pending is not None
-            and pending.pending_automation_draft is not None
         ):
             return await self._async_handle_pending_automation_draft(
-                user_input, response, pending, entities
+                user_input, response, active_task.payload, pending, entities
             )
 
         # One language/safety gate now protects every fresh domain router,
@@ -1043,14 +1047,6 @@ class NluConversationEntity(
             if device_control is None:
                 device_control = match_extended_device_query(
                     user_input.text, entities, language_document
-                )
-            if device_control is None:
-                device_control = match_device_control(
-                    user_input.text, entities, language_document
-                )
-            if device_control is None:
-                device_control = match_device_control_followup(
-                    user_input.text, pending, entities
                 )
             if device_control is not None:
                 return await self._async_handle_device_control_result(
@@ -2479,12 +2475,11 @@ class NluConversationEntity(
         self,
         user_input: conversation.ConversationInput,
         response: intent.IntentResponse,
+        draft: PendingAutomationDraft,
         pending: ConversationContext,
         entities: list[EntitySnapshot],
     ) -> conversation.ConversationResult:
         """Complete the action missing from a pending automation draft."""
-        draft = pending.pending_automation_draft
-        assert draft is not None
         completed = self._engine.complete_automation_draft(
             user_input.text,
             draft.trigger,
@@ -2831,10 +2826,6 @@ class NluConversationEntity(
             ).payload
             plan = getattr(corrected, "plan", None)
             success = getattr(corrected, "response_text", None)
-            if plan is None:
-                device = match_device_control(suggestion.corrected_text, entities)
-                plan = device.plan if device is not None else None
-                success = device.response_text if device is not None else None
             if plan is None or not success:
                 continue
             entity_ids = (

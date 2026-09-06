@@ -5,9 +5,14 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .device_control import DeviceControlResult, _mentioned_entity
+from .device_result import DeviceControlResult
 from .entities import EntitySnapshot, normalize_for_compare
-from .nlu.entity_resolution import ResolveStatus, resolve_entity
+from .nlu.entity_resolution import (
+    ResolutionStatus,
+    ResolveStatus,
+    resolve_entity,
+    resolve_mentioned_target,
+)
 from .nlu.context import PendingSemanticCommand
 from .nlu.domain_operations import DOMAIN_WORDS
 from .service_call import ServiceCallPlan
@@ -23,6 +28,13 @@ class SemanticDialogOutcome:
 _COMMAND_RE = re.compile(r"\b(?:stell\w*|setz\w*|regel\w*|mach\w*|schalt\w*|fahr\w*|öffn\w*|schließ\w*)\b", re.I)
 _SOME_RE = re.compile(r"\b(?:ein\s+paar|einige\w*|mehrere\w*)\b", re.I)
 _NUMBER_RE = re.compile(r"\b(-?\d+(?:[,.]\d+)?)\s*(grad|prozent|%)?\b", re.I)
+
+
+def _mentioned_entity(
+    text: str, entities: list[EntitySnapshot], domains: frozenset[str]
+) -> EntitySnapshot | None:
+    result = resolve_mentioned_target(text, entities, domains)
+    return result.entity if result.status is ResolutionStatus.RESOLVED else None
 
 def _spoken_domain(text: str) -> str | None:
     normalized = normalize_for_compare(text)

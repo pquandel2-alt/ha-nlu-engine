@@ -14,7 +14,6 @@ from itertools import product
 
 import pytest
 
-from ha_nlu.device_control import match_device_control
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.understanding import UnderstandingAuthority
 
@@ -183,10 +182,7 @@ def _assert_domain_matrix(engine, spec: DomainSpec, *, live_route: bool) -> None
                 particle=particle, nom=spec.nominative, acc=spec.accusative, target=target,
             ).replace("  ", " ")
             semantic_result = engine.match(sentence, entities)
-            result = (
-                match_device_control(sentence, entities) or semantic_result
-                if live_route else semantic_result
-            )
+            result = semantic_result
             plan = getattr(result, "plan", None)
             expected_id = f"{spec.domain}.matrix_{_NAMES.index(name)}"
             if result is None:

@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.67.0**
+- Aktuelle Version: **4.68.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -42,7 +42,7 @@ Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
 
-## Was ist in Version 4.66 neu?
+## Was ist in Version 4.68 neu?
 
 Der Produktivcode enthält jetzt einen lokalen Agentenkern mit typisiertem
 Hausgraph, opt-in SQLite-Gedächtnis, zentralen Dialogaufgaben,
@@ -58,28 +58,21 @@ Schritte kontrolliert und gespeicherte beziehungsweise vorgeschlagene
 Aktionen werden unmittelbar vor Ausführung erneut gegen frische Zustände,
 Capabilities und Policy geprüft.
 
-Die laufende Härtung nach dem 4.66-Release ergänzt robuste saisonale
-Routinefenster, natürlichsprachliches Routinefeedback und benannte lokale
-Prozeduren. Erfolgreiche Geräteaktionen besitzen eine beobachtbare
-Wirkungsfrist; eine ausbleibende Wirkung kann nur informieren und löst keinen
-Retry aus. Frigate-/MQTT-Metadaten und vorhandene HA-Zustandsquellen sind als
-standardmäßig deaktivierte, read-only Evidenzadapter verdrahtet.
+Version 4.68 entfernt die früheren Geräte-Fachparser. Direkte Klima-, Medien-,
+Saugroboter-, Befeuchter-, Warmwasser-, Select-, Number-, Lamellen-, Ventil-,
+Mähroboter-, Kamera-, Notify-, Lock- und Button-Operationen werden als
+typisierte V7-Bedeutungen kompiliert. Erst Validator, Execution Policy und
+zentraler Executor dürfen daraus eine Home-Assistant-Aktion erzeugen.
 
-## Was war in Version 4.64 neu?
+Der öffentliche `match()`-Einstieg und Orts-/Eigenschaftsabfragen arbeiten
+jetzt ebenfalls V7-first. Ein Altparser kann eine vollständige semantische
+Interpretation nicht mehr durch einen früheren Regex-Treffer verdrängen. Der
+unabhängige Legacy/V7-Shadow-Audit bleibt read-only erhalten. Der zentrale
+Dialogmanager dispatcht migrierte Dialoge über ihre typisierten Payloads.
 
-Version 4.64 härtet den proaktiven Agenten und sämtliche zentralen
-HA-Schreibpfade ab:
-
-- Kritische Push-Aktionen benötigen eine authentifizierte HA-Identität und
-  sind für Nicht-Administratoren standardmäßig gesperrt.
-- Persistierte Agentenpläne werden beim Laden und unmittelbar vor der
-  Ausführung erneut gegen eine geschlossene Aktions-Allowlist geprüft.
-- Conversation, Mehrfachbefehle, Undo und der Agent verwenden denselben
-  policy-gesteuerten Executor mit frischem Ziel-Snapshot.
-- Aktionsdaten können validierte Ziele nicht mehr ersetzen oder erweitern;
-  parallele Push-Taps führen eine Aktion höchstens einmal aus.
-- Ablehnungen und Servicefehler werden nachvollziehbar gespeichert und über
-  die konfigurierten Kanäle sichtbar zurückgemeldet.
+Die 5.000-Entity-Messung bleibt ohne aufgeweichtes Budget unter 100 ms p95.
+Hassfest, HACS und das stabile Home-Assistant-Containerimage wurden lokal
+gegen den Release-Stand geprüft.
 
 Ältere Änderungen stehen in den
 [GitHub-Releases](https://github.com/pquandel2-alt/ha-nlu-engine/releases).
@@ -815,8 +808,6 @@ Weitere Dokumentation:
 - [`docs/proactive-agent.md`](docs/proactive-agent.md)
 - [`docs/architecture-v7.md`](docs/architecture-v7.md)
 - [`docs/natural-language-roadmap-v7.md`](docs/natural-language-roadmap-v7.md)
-- [`docs/architecture-v6.md`](docs/architecture-v6.md)
-- [`docs/language-understanding-v2.md`](docs/language-understanding-v2.md)
 - [`docs/quality-checklist.md`](docs/quality-checklist.md)
 - [`docs/troubleshooting.md`](docs/troubleshooting.md)
 
@@ -828,12 +819,12 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/ha_nlu --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 4.67.0:
+Geprüfter Release-Stand von Version 4.68.0:
 
 ```text
-2612 passed, 12 skipped
+2603 passed, 12 skipped
 87 % Gesamt-Coverage
-80 % Coverage für conversation.py
+77 % Coverage für conversation.py
 ```
 
 Zusätzlich wurden ausgeführt:
@@ -858,8 +849,16 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-4.67.0.json --quiet
+  --check docs/perf/v7-shadow-baseline-4.68.0.json --quiet
 ```
+
+Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die
+V7-Grenze. Sie werden als typisierte, registrierte Operation kompiliert und
+erst nach Validator, Execution Policy und zentralem Service Mapper
+materialisiert. Die früheren Fachparser `device_control.py` und
+`extended_device_control.py` sind entfernt. `match()` ist V7-first; nur noch
+nicht kompilierte Restcapabilities erreichen den Kompatibilitätsfallback. Der
+unabhängige read-only Shadow-Vergleich kann die Altseite weiterhin prüfen.
 
 Zusätzlich erzeugt die Test-Suite weiterhin 1.024 intensive Lichtparaphrasen.
 Die neue domänenübergreifende Matrix kombiniert außerdem 2.688 fachlich
@@ -870,14 +869,9 @@ domänenübergreifende Routingprüfungen. Die Matrizen sind ausschließlich
 Regressionstests und werden niemals von der Produktivlogik eingelesen.
 Dadurch können sie dem Parser keine Antworten „beibringen“.
 
-### Benchmark-Momentaufnahme
+### Reproduzierbarer Benchmark
 
-![Historisches Ergebnis des HA Conversation Benchmark DE](docs/benchmark-result.svg)
-
-Die Grafik ist eine versionierte Momentaufnahme eines älteren
-Entwicklungsstands und kein aktueller Nachweis für Version 4.65.0. Für echte
-Zielhardware lässt sich seit 4.49 ein reproduzierbarer JSON-Bericht samt
-P95-Budget erzeugen:
+Für echte Zielhardware lässt sich ein JSON-Bericht samt P95-Budget erzeugen:
 
 ```bash
 python scripts/benchmark_v6_baseline.py \

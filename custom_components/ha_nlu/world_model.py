@@ -1,6 +1,6 @@
 """World Model: a single per-turn object bundling Entities, Devices, Areas,
 Floors and their relationships (V6 architecture plan, World Model Wave,
-2026-08-13 - see docs/architecture-v6.md).
+2026-08-13 - see docs/architecture-v7.md).
 
 HA stays the sole source of truth; ``WorldModel`` is a semantic view computed
 fresh per conversation turn from already-fetched snapshots, never a persisted

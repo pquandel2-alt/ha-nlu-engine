@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ha_nlu.device_control import match_device_control
+from _v7_device import understand_device as match_device_control
 from ha_nlu.entities import EntitySnapshot
 
 

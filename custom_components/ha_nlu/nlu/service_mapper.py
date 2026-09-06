@@ -25,13 +25,17 @@ from ..service_call import (
     INTENTS,
     LIGHT_EXTENDED_INTENTS,
     PERCENT_INTENTS,
+    REGISTERED_OPERATION_INTENT,
     ServiceCallPlan,
+    build_registered_operation,
 )
 from .command import SemanticCommand
 
 
 def map_to_service_call(command: SemanticCommand) -> ServiceCallPlan | None:
     entities = list(command.entities)
+    if command.intent == REGISTERED_OPERATION_INTENT:
+        return build_registered_operation(entities, command.parameters)
     percent = command.parameters.get("percent")
     if percent is not None:
         spec = PERCENT_INTENTS.get(entities[0].domain)

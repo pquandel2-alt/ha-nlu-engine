@@ -1,6 +1,6 @@
 # HomeIntent V7 – aktive Understanding-Architektur
 
-Stand: 28. August 2026
+Stand: 5. September 2026
 
 ## Produktgrenze
 
@@ -52,17 +52,17 @@ Produktivität liefern gemeinsam ein typisiertes `UnderstandingOutcome`;
 gleichzeitige vollständige Treffer werden anhand expliziter Domänenevidenz
 aufgelöst oder ohne Payload als `AMBIGUOUS` zurückgegeben.
 
-Direkte Turns werden in `understand()` semantisch zuerst interpretiert. Eine
-explizite Capability-Liste in `semantic_catalog.py` entscheidet, für welche
-bereits vermessenen Paare aus HA-Domäne und Intent V7 autoritativ ist. Der
-aktive Schnitt umfasst Ein/Aus für Licht, Schalter, Ventilator, Heizung,
+Direkte Live-Turns werden in `understand()` semantisch zuerst interpretiert.
+Der aktive Schnitt umfasst Ein/Aus für Licht, Schalter, Ventilator, Heizung,
 Luftbefeuchter und Input-Boolean, Öffnen/Schließen für Cover und Ventile,
 Media Play/Pause, Saugroboter Start/Stopp, Szenenaktivierung, Cover-/Licht-
-Prozentwerte, Heizungs-Solltemperatur sowie typisierte Zustands-, Verb- und
-Messwertabfragen. Nicht migrierte Fachcapabilities bleiben kontrollierter
-Kompatibilitätsfallback. `UnderstandingOutcome.authority` macht diese
-Entscheidung beobachtbar; der Live-Router lässt einen autoritativen V7-Treffer
-vor dem historischen Device-Router passieren. Ausführbare V7-Autorität setzt
+Prozentwerte, Heizungs-Solltemperatur, Lock/Unlock, Button-Press sowie
+registrierte Klima-, Medien-, Befeuchter-, Warmwasser-, Select-, Number-,
+Lamellen-, Fan-, Ventil-, Mähroboter-, Kamera- und Notify-Operationen. Der
+frühere `device_control`-Fachparser und sein Erweiterungsparser wurden
+gelöscht. Nicht migrierte Core- und Managementcapabilities bleiben im zentral
+beobachteten Parser-Registry-Kompatibilitätsfallback. `UnderstandingOutcome.authority` macht diese
+Entscheidung beobachtbar. Ausführbare V7-Autorität setzt
 einen vollständigen Kandidaten und bei konkurrierenden vollständigen Lesarten
 mindestens zehn Scorepunkte Abstand voraus; echte Target-Mehrdeutigkeit bleibt
 unabhängig davon eine nicht ausführbare Klärung.
@@ -102,12 +102,26 @@ nutzen denselben Resolver und dürfen ein mehrdeutiges Ziel nicht in ein
 
 ## Migration und Kompatibilität
 
-Die öffentliche V7-Grenze und der erste autoritative Capability-Schnitt sind
-live. Bereits bewährte Hassil- und Spezialparser erzeugen während der
-Migration weiterhin den größeren Teil der validierten Payloads hinter dieser
-Grenze. Sie dürfen das gemeinsame Frontend und dessen Sicherheitsentscheidung
-nicht umgehen. Redundante Gruppen-Semantik wurde entfernt und auf den
-Semantic Compiler delegiert.
+Die öffentliche V7-Grenze ist für migrierte direkte Capabilities autoritativ.
+Der frühere generische Geräte-, Erweiterungs- und Geräte-Folgeparser ist aus
+der Conversation-Route und dem Quellbaum entfernt. Seine sicheren Operationen
+werden als `HassRegisteredOperation` in einem typisierten Frame dargestellt;
+Validator und Service Mapper prüfen Domain, Service und Daten erneut gegen die
+geschlossene lokale Allowlist. Auch `match()` ist V7-first: Semantic Query und
+Command Compiler erhalten die Autorität vor jedem Regex-gewählten Altparser;
+Orts-/Eigenschaftsabfragen folgen derselben Reihenfolge. Nur noch nicht nativ
+abgedeckte Capabilities erreichen den zentral beobachteten
+Kompatibilitätsfallback. Der explizite read-only Shadow-Audit verwendet intern
+weiterhin `compatibility_first`, damit seine unabhängige Altseite erhalten
+bleibt. Redundante Gruppen-Semantik wurde auf den Semantic Compiler delegiert.
+
+Der Dialogmanager übernimmt bei allen in `ConversationContext` gespeicherten
+Dialogarten den vollständigen typisierten Payload, Besitzer, Priorität,
+Kandidaten und die Begründung in die zentrale Task-Queue. Sämtliche
+Dialoghandler dispatchen auf dieser Manager-Payload und lesen nicht erneut das
+jeweilige `pending_*`-Feld. `ConversationContext` bleibt als kompatibler
+TTL-/Diskursspeicher bestehen; eine spätere Schema-Migration kann die alten
+benannten Felder entfernen, ohne laufende Config Entries zu verlieren.
 
 Der read-only Shadow-Vergleich ist über
 `NluEngine.compare_understanding_pipelines()` reproduzierbar. Das Skript
@@ -128,11 +142,10 @@ Parser, liegen am Hauptrouter aber hinter derselben `LanguageDocument`- und
 werden noch schrittweise auf diesen Vertrag migriert; die zentrale
 Sicherheitsklassifikation schützt sie bereits heute.
 
-Dialogzustände werden während der Migration im zentralen `DialogManager`
-priorisiert und benutzergebunden. Alias-Lernbestätigungen besitzen dort
-bereits ihren alleinigen typisierten Payload; historische Automation-,
-Kalender-, Produktivitäts- und Entity-Auswahldialoge werden bis zur jeweiligen
-Payload-Migration als Kompatibilitäts-Tasks gespiegelt.
+Dialogzustände werden im zentralen `DialogManager` priorisiert,
+benutzergebunden und über ihren typisierten Payload an den zuständigen Handler
+gegeben. Das gilt für Alias-, Automations-, Kalender-, Produktivitäts-,
+Servicebestätigungs-, semantische Ergänzungs- und Entity-Auswahldialoge.
 
 ## Qualitätsgates
 
@@ -151,7 +164,8 @@ Pyright-Strict-Scope bleiben zusätzlich verpflichtend. CI prüft auf Python
 Messung auf echter Pi-Hardware stehen in
 [`perf/v7-understanding.md`](perf/v7-understanding.md).
 
-`conversation.py` erreicht 80 % Coverage. Der Ausbau konzentriert sich auf
+`conversation.py` erreicht im vollständigen Lauf vom 5. September 2026 77 %
+Coverage; das Gesamtpaket erreicht 87 %. Der Ausbau konzentriert sich auf
 offene Dialogzustände und risikoreiche Übergänge: Entity-Auswahl,
 Bestätigung/Abbruch, Wizard-Retries, Todo-Mutationen, Mehrfachbefehle mit
 Undo, Automationsauswahl sowie Laufzeitfehler. Ein End-to-End-Test schlägt

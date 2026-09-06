@@ -27,6 +27,7 @@ from .primitives import SemanticAction
 from .verb_state_query import match_verb_state_query
 from .composition import CompositionalPlan, build_compositional_plan, project_target
 from .meaning import analyse_turn
+from .registered_operation_compiler import compile_registered_operation
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,29 @@ def _resolved_conflicts(
     ``Licht an und aus`` remain conflicts.
     """
     conflicts = list(_conflicts(document))
+    if (
+        "domain" in conflicts
+        and isinstance(parse_result, ParseResult)
+        and parse_result.frame.target is not None
+        and parse_result.frame.target.entity_id is not None
+        and len(parse_result.resolved_entities) == 1
+    ):
+        # An exact registry identity is typed data. Generic nouns occurring
+        # inside that user-controlled name cannot introduce a second domain.
+        conflicts.remove("domain")
+    if (
+        "state" in conflicts
+        and isinstance(parse_result, ParseResult)
+        and document.utterance.speech_act is SpeechAct.QUERY
+        and "exists" in document.semantics.values(SemanticKind.QUERY_SCOPE)
+    ):
+        substantive_states = {
+            span.value
+            for span in document.semantics.matching(SemanticKind.STATE)
+            if span.text.casefold() not in {"ein", "eine"}
+        }
+        if len(substantive_states) <= 1:
+            conflicts.remove("state")
     if "action" not in conflicts or not isinstance(parse_result, ParseResult):
         return tuple(conflicts)
     domains = {
@@ -237,6 +261,7 @@ class SemanticInterpreter:
             # pass the existing confirm-before-action correction flow.
             may_compile = (
                 compile_result
+                and best_parse is None
                 and not variant.source.startswith("phonetic:")
                 and variant.source != "orthographic"
             )
@@ -276,12 +301,16 @@ class SemanticInterpreter:
                     if compositional_plan is not None
                     else variant.text
                 )
-                parse_result = SemanticCommandCompiler.compile(
-                    compile_text,
-                    entities,
-                    world_model,
-                    analyse_semantics(compile_text),
+                parse_result = compile_registered_operation(
+                    compile_text, entities
                 )
+                if parse_result is None:
+                    parse_result = SemanticCommandCompiler.compile(
+                        compile_text,
+                        entities,
+                        world_model,
+                        analyse_semantics(compile_text),
+                    )
 
             resolved_mentions = mentions
             if isinstance(parse_result, ParseResult):

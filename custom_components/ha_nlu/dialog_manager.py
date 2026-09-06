@@ -187,7 +187,7 @@ class DialogManager:
         self.add(conversation_id, updated)
         return DialogDecision(updated, None, completed=not updated.missing_slots)
 
-    def mirror_legacy(
+    def synchronize_context_task(
         self,
         conversation_id: str,
         *,
@@ -197,14 +197,15 @@ class DialogManager:
         candidates: tuple[str, ...] = (),
         reason: str = "",
         requested_by_user_id: str | None = None,
+        payload: object | None = None,
     ) -> DialogTask | None:
-        """Project one compatibility dialog into the central task queue.
+        """Synchronize one typed context payload into the central task queue.
 
-        The historical payload remains in ``ConversationContext`` during its
-        incremental migration, but selection, ownership, priority and
-        replacement become visible at the single coordinator immediately.
+        ``ConversationContext`` remains the storage envelope, while typed
+        payload, selection, ownership, priority and replacement live in the
+        central coordinator.
         """
-        task_id = "legacy-context"
+        task_id = "context-payload"
         if kind is None:
             self.cancel(conversation_id, task_id)
             return None
@@ -217,6 +218,7 @@ class DialogManager:
             and existing.slots == desired_slots
             and existing.candidates == candidates
             and existing.requested_by_user_id == requested_by_user_id
+            and existing.payload == payload
         ):
             return existing
         self.cancel(conversation_id, task_id)
@@ -229,6 +231,7 @@ class DialogManager:
             candidates=candidates,
             reason=reason,
             requested_by_user_id=requested_by_user_id,
+            payload=payload,
         )
 
 

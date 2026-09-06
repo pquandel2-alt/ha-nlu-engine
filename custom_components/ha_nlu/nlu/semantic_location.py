@@ -180,6 +180,8 @@ def resolve_coordinated_locations(
     an intersection into a union, and ``oder`` remains ambiguous instead of
     being interpreted as "both".
     """
+    if re.search(r"\bund\b", text, re.I) is None:
+        return None
     names = (
         {
             name

@@ -186,13 +186,10 @@ def test_turn_on_command_calls_service_and_responds_action_done(monkeypatch):
     assert result.response.speech
 
 
-def test_v7_light_authority_bypasses_legacy_device_router(monkeypatch):
+def test_conversation_has_no_legacy_device_router(monkeypatch):
     entity = _make_entity(monkeypatch, [FLUR_LICHT_OFF])
 
-    def fail_legacy_router(*args, **kwargs):
-        raise AssertionError("migrated light command reached legacy device router")
-
-    monkeypatch.setattr(ha_conversation, "match_device_control", fail_legacy_router)
+    assert not hasattr(ha_conversation, "match_device_control")
 
     result = _run(entity, "Schalte das Flurlicht ein")
 

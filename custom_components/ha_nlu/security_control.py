@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from .device_control import DeviceControlResult
+from .device_result import DeviceControlResult
 from .entities import EntitySnapshot, normalize_for_compare
 from .service_call import ServiceCallPlan
 

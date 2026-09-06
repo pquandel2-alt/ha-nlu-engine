@@ -33,7 +33,9 @@ from ..service_call import (
     LIGHT_EXTENDED_INTENTS,
     PERCENT_INTENTS,
     QUERY_INTENTS,
+    REGISTERED_OPERATION_INTENT,
 )
+from .automation_operations import validate_registered_operation
 from .capabilities import Capability
 from .command import SemanticCommand
 
@@ -75,6 +77,7 @@ def validate_command(command: SemanticCommand) -> ValidationError | None:
     is_light_extended_intent = command.intent in LIGHT_EXTENDED_INTENTS
     is_fan_extended_intent = command.intent in FAN_EXTENDED_INTENTS
     is_climate_extended_intent = command.intent in CLIMATE_EXTENDED_INTENTS
+    is_registered_operation = command.intent == REGISTERED_OPERATION_INTENT
 
     # 1. Intent vorhanden?
     if (
@@ -82,6 +85,7 @@ def validate_command(command: SemanticCommand) -> ValidationError | None:
         and not is_light_extended_intent
         and not is_fan_extended_intent
         and not is_climate_extended_intent
+        and not is_registered_operation
         and command.intent not in QUERY_INTENTS
         and command.intent not in INTENTS
     ):
@@ -116,12 +120,31 @@ def validate_command(command: SemanticCommand) -> ValidationError | None:
         allowed_domains = frozenset({"fan"})
     elif is_climate_extended_intent:
         allowed_domains = frozenset({"climate"})
+    elif is_registered_operation:
+        allowed_domains = frozenset(entity.domain for entity in command.entities)
     elif command.intent in QUERY_INTENTS:
         allowed_domains = QUERY_INTENTS[command.intent].allowed_domains
     else:
         allowed_domains = INTENTS[command.intent].allowed_domains
     if any(entity.domain not in allowed_domains for entity in command.entities):
         return ValidationError.INVALID_DOMAIN
+
+    if is_registered_operation:
+        service_domain = command.parameters.get("service_domain")
+        service_name = command.parameters.get("service_name")
+        service_data = command.parameters.get("service_data")
+        if (
+            not isinstance(service_domain, str)
+            or not isinstance(service_name, str)
+            or not isinstance(service_data, dict)
+            or not validate_registered_operation(
+                service_domain,
+                service_name,
+                service_data,
+                frozenset(entity.domain for entity in command.entities),
+            )
+        ):
+            return ValidationError.INVALID_PARAMETER
 
     # 6. Capability vorhanden?
     if is_percent_intent:
@@ -170,7 +193,13 @@ def validate_command(command: SemanticCommand) -> ValidationError | None:
             return ValidationError.INVALID_PARAMETER
     if command.intent == "HassClimateSetTemperature":
         temperature = command.parameters["temperature"]
-        if not isinstance(temperature, int) or not _CLIMATE_TEMPERATURE_MIN <= temperature <= _CLIMATE_TEMPERATURE_MAX:
+        if (
+            isinstance(temperature, bool)
+            or not isinstance(temperature, (int, float))
+            or not _CLIMATE_TEMPERATURE_MIN
+            <= temperature
+            <= _CLIMATE_TEMPERATURE_MAX
+        ):
             return ValidationError.INVALID_PARAMETER
 
     # 9. Quantifier gültig?

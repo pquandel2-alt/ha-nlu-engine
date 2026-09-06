@@ -106,3 +106,23 @@ konfiguriert sein; alternativ werden strukturierte `frigate_events`
 verarbeitet. HomeIntent liest keine Bilder. HA-Quellenevidenz entsteht nur aus
 Zustandsänderungen unterstützter vorhandener Entitäten und wird ausschließlich
 im begrenzten RAM-Puffer gehalten.
+
+## Lokale Integrations-Smokes
+
+Die CI-Kommandos lassen sich ohne Host-Installation in einem isolierten
+Docker-Kontext wiederholen:
+
+```bash
+docker run --rm --entrypoint python3 \
+  -v "$PWD:/workspace:ro" \
+  -e PYTHONPATH=/workspace/custom_components \
+  ghcr.io/home-assistant/home-assistant:stable \
+  /workspace/scripts/validate_generated_automation_schema.py
+
+docker run --rm -v "$PWD:/github/workspace" \
+  ghcr.io/home-assistant/hassfest:latest
+```
+
+Der HACS-Validator benötigt zusätzlich ein GitHub-Token und prüft das
+konfigurierte Repository/Ref über GitHub. Tokens dürfen weder in Diagnosen
+noch in Shell-Historien oder Testausgaben geschrieben werden.

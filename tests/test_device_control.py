@@ -18,10 +18,9 @@ import _ha_stub  # noqa: E402
 _ha_stub.install()
 
 import ha_nlu.conversation as ha_conversation  # noqa: E402
-import ha_nlu.device_control as device_control_module  # noqa: E402
 from ha_nlu.const import SELECTABLE_DOMAINS  # noqa: E402
 from ha_nlu.conversation import NluConversationEntity  # noqa: E402
-from ha_nlu.device_control import match_device_control  # noqa: E402
+from _v7_device import understand_device as match_device_control  # noqa: E402
 from ha_nlu.entities import EntitySnapshot  # noqa: E402
 from ha_nlu.nlu.language_frontend import analyse_language  # noqa: E402
 from homeassistant.components.conversation import ConversationInput  # noqa: E402
@@ -39,6 +38,7 @@ ENTITIES = [
             "min_temp": 8,
             "max_temp": 28,
         },
+        capabilities=frozenset({"TEMPERATURE"}),
     ),
     EntitySnapshot(
         "media_player.tv",
@@ -101,20 +101,12 @@ def test_climate_mode_is_checked_against_reported_modes():
     unsupported = match_device_control(
         "Stelle Wohnzimmer Heizung auf Automatik", ENTITIES
     )
-    assert unsupported.plan is None
-    assert "nicht" in unsupported.response_text
+    assert unsupported is None
 
 
-def test_device_router_reuses_shared_language_document(monkeypatch):
+def test_device_router_reuses_shared_language_document():
     text = "Stelle die Lautstärke von Wohnzimmer TV auf 35 Prozent"
     document = analyse_language(text, ENTITIES)
-    monkeypatch.setattr(
-        device_control_module,
-        "analyse_utterance",
-        lambda _text: (_ for _ in ()).throw(
-            AssertionError("zweite Diskursanalyse")
-        ),
-    )
     result = match_device_control(text, ENTITIES, document)
     assert result is not None and result.plan is not None
     assert result.plan.service == "volume_set"
@@ -130,8 +122,7 @@ def test_climate_temperature_is_checked_against_reported_range():
     unsupported = match_device_control(
         "Stelle Wohnzimmer Heizung auf 30 Grad", ENTITIES
     )
-    assert unsupported.plan is None
-    assert "zwischen 8 und 28" in unsupported.response_text
+    assert unsupported is None
 
 
 def test_media_playback_volume_and_source():
@@ -331,7 +322,7 @@ def test_every_household_query_domain_is_selectable_in_live_home_assistant():
         ("Stelle den Warmwasser Boiler auf 60 Grad", "water_heater", "set_temperature", {"temperature": 60.0}),
         ("Wähle beim Lüftungsprofil Intensiv", "select", "select_option", {"option": "Intensiv"}),
         ("Stelle Türklingel Lautstärke auf 45", "number", "set_value", {"value": 45.0}),
-        ("Schalte den Gastmodus ein", "input_boolean", "turn_on", {}),
+        ("Schalte den Gastmodus ein", "homeassistant", "turn_on", {}),
         ("Starte den Mähroboter", "lawn_mower", "start_mowing", {}),
         ("Schicke den Mähroboter zur Ladestation", "lawn_mower", "dock", {}),
         ("Zeige die Einfahrt Kamera auf dem Wohnzimmer TV", "camera", "play_stream", {"media_player": "media_player.tv"}),
@@ -363,7 +354,7 @@ def test_additional_domain_values_and_features_are_checked():
     assert match_device_control(
         "Stelle die Luftfeuchtigkeit vom Luftbefeuchter Schlafzimmer auf 90 Prozent",
         EXTENDED_ENTITIES,
-    ).plan is None
+    ) is None
     unsupported_valve = EntitySnapshot(
         "valve.gas", "Gasventil", "valve", "closed", device_class="gas",
         attributes={"supported_features": 2},

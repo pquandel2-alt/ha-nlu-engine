@@ -217,7 +217,7 @@ def build_world_model(hass: HomeAssistant, entry: ConfigEntry) -> WorldModel:
     bundles ``build_entity_snapshots()`` + ``build_device_snapshots()`` via
     ``world_model.build_world_model()``.
 
-    Not called from ``conversation.py`` yet - see docs/architecture-v6.md's
+    Not called from ``conversation.py`` yet - see docs/architecture-v7.md's
     World Model Wave section for why (mirrors ``nlu/reasoning.py``'s
     ``ReasoningEngine`` sitting built-and-tested before being wired into the
     live pipeline, to avoid a second parallel entity list flowing through

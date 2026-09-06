@@ -24,6 +24,7 @@ from ..entities import (
 )
 from ..name_similarity import bounded_name_similarity
 from ..world_model import WorldModel
+from .degree_semantics import extract_degree
 from .constraint_resolver import Constraints, resolve_candidates
 from .entity_resolution import (
     ResolutionStatus,
@@ -33,9 +34,14 @@ from .entity_resolution import (
     resolve_entity,
     resolve_entity_scored,
 )
-from .frame import AreaReference, Quantifier, SemanticFrame, TargetReference
+from .frame import AreaReference, Comparison, Quantifier, SemanticFrame, TargetReference
 from .parser import ClarificationRequest, ParseResult
-from .primitives import SemanticAction, SemanticProperty, SemanticQuantity
+from .primitives import (
+    SemanticAction,
+    SemanticDirection,
+    SemanticProperty,
+    SemanticQuantity,
+)
 from .query_command import QueryCommand, QueryFilter, QueryScope, QueryTarget
 from .query_executor import QueryExecutor
 from .semantic_lexicon import SemanticAnalysis, SemanticKind, analyse_semantics
@@ -81,7 +87,7 @@ class SemanticFacts:
     intents: frozenset[str]
     domains: frozenset[str]
     percent: int | None
-    temperature: int | None
+    temperature: float | None
     quantity: Quantifier | None
     location_text: str | None
     area_id: str | None
@@ -139,7 +145,8 @@ _PERCENT_RE = re.compile(
 _ANY_PERCENT_RE = re.compile(r"\b(?P<value>\d+)\s*(?:prozent|%)\b", re.I)
 _FIFTY_PERCENT_RE = re.compile(r"\bfünfzig\s+prozent\b", re.I)
 _TEMPERATURE_RE = re.compile(
-    r"\bauf\s+(?P<value>-?\d{1,2})\s*(?:grad|°\s*c|°c)\b",
+    r"\bauf\s+(?:(?:mindestens|höchstens|nicht\s+höher\s+als|über|unter)\s+)?"
+    r"(?P<value>-?\d{1,2}(?:[,.]\d)?)\s*(?:grad|°\s*c|°c)\b",
     re.I,
 )
 _DIRECTIVE_RE = re.compile(
@@ -156,6 +163,12 @@ _STOP_WORDS = {
     "bitte", "kannst", "du", "mir", "mal", "doch", "jetzt", "vorhandenen",
     "im", "in", "am", "auf", "aus", "an", "zu", "und", "sind", "ist",
     "alle", "sämtliche", "sämtlichen", "jede", "jeden", "jedes", "beide",
+    "zeigt", "zeigen", "welche", "welcher", "welches",
+    "ganz", "um",
+    "hoch", "noch", "vorhanden", "vorhandene", "vorhandenes", "stehen",
+    "steht", "sag", "sage", "ob",
+    "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun",
+    "zehn", "nur",
 }
 _QUERY_MARKER_RE = re.compile(
     r"\b(?:ist|sind|welch\w*|wie\s+viele|wo|gibt\s+es|haben\s+wir|irgendein\w*|keine?\w*)\b",
@@ -190,26 +203,61 @@ def _compile_measurement_query(
     spec = MEASUREMENT_PROPERTY_SPECS.get(canonical)
     if spec is None:
         return None
+    domain, device_class, label, property_name = spec
     location = resolve_semantic_location(text, entities, world_model)
+    named_entity: EntitySnapshot | None = None
     if location is None:
-        return None
-    if _has_unexplained_meaning(analysis, (location[0],)):
-        return None
-
+        # A property word alone is not an entity mention.  Require at least
+        # one residual registry token before name ranking so a conjunction
+        # such as "Temperatur und Luftfeuchtigkeit?" cannot turn its second
+        # property into an accidental single-sensor lookup.
+        if not {
+            normalize_for_compare(token)
+            for token in analysis.unexplained_tokens
+            if normalize_for_compare(token) not in _STOP_WORDS
+        }:
+            return None
+        ranked = rank_semantic_targets(
+            text,
+            entities,
+            domains=frozenset({domain}),
+            ignored_tokens=frozenset(_STOP_WORDS),
+            index=(world_model.entity_index if world_model is not None else None),
+        )
+        compatible = tuple(
+            candidate
+            for candidate in ranked
+            if device_class is None or candidate.entity.device_class == device_class
+        )
+        if not compatible:
+            return None
+        best_score = compatible[0].score
+        best = tuple(item for item in compatible if item.score == best_score)
+        if len(best) != 1:
+            return None
+        named_entity = best[0].entity
+        if _has_unexplained_meaning(
+            analysis, (named_entity.friendly_name, *named_entity.aliases)
+        ):
+            return None
+        area_id = floor_id = None
+        matched = [named_entity]
+    else:
+        if _has_unexplained_meaning(analysis, (location[0],)):
+            return None
+        area_id, floor_id = location[1], location[2]
+        matched = [
+            entity
+            for entity in entities
+            if entity.domain == domain
+            and (device_class is None or entity.device_class == device_class)
+            and (area_id is None or entity.area_id == area_id)
+            and (floor_id is None or entity.floor_id == floor_id)
+        ]
     comparator = next(iter(comparators), None)
     threshold_match = re.search(r"\b\d+(?:[,.]\d+)?\b", text)
     if comparator is not None and threshold_match is None:
         return None
-    domain, device_class, label, property_name = spec
-    area_id, floor_id = location[1], location[2]
-    matched = [
-        entity
-        for entity in entities
-        if entity.domain == domain
-        and (device_class is None or entity.device_class == device_class)
-        and (area_id is None or entity.area_id == area_id)
-        and (floor_id is None or entity.floor_id == floor_id)
-    ]
     if comparator is not None and threshold_match is not None:
         threshold = float(threshold_match.group(0).replace(",", "."))
         predicates = {
@@ -238,15 +286,23 @@ def _compile_measurement_query(
         if len(matched) > 1 or average
         else "HassGetState"
     )
+    target_text = (
+        named_entity.friendly_name
+        if named_entity is not None
+        else location[0] if location is not None else ""
+    )
     return ParseResult(
         frame=SemanticFrame(
             intent=intent,
             target=TargetReference(
-                text=location[0], domain=domain, device_class=device_class
+                text=target_text,
+                entity_id=(named_entity.entity_id if named_entity else None),
+                domain=domain,
+                device_class=device_class,
             ),
             area=(
                 AreaReference(
-                    text=location[0], area_id=area_id, area_name=matched[0].area_name
+                    text=target_text, area_id=area_id, area_name=matched[0].area_name
                 )
                 if area_id is not None
                 else None
@@ -256,13 +312,119 @@ def _compile_measurement_query(
                 "property": property_name,
                 "property_label": label,
                 "average": average,
-                "location_kind": "area" if area_id is not None else "floor",
-                "location_id": area_id if area_id is not None else floor_id,
+                "location_kind": (
+                    "entity" if named_entity is not None
+                    else "area" if area_id is not None else "floor"
+                ),
+                "location_id": (
+                    named_entity.entity_id if named_entity is not None
+                    else area_id if area_id is not None else floor_id
+                ),
             },
             source_text=text,
             action=SemanticAction.QUERY,
         ),
         resolved_entities=matched,
+    )
+
+
+def _compile_comparison_query(
+    text: str,
+    entities: list[EntitySnapshot],
+    analysis: SemanticAnalysis,
+    world_model: WorldModel | None = None,
+) -> ParseResult | None:
+    """Compile a typed current-value comparison without a grammar parser."""
+    comparators = analysis.values(SemanticKind.COMPARATOR)
+    domains = {
+        value for value in analysis.values(SemanticKind.DOMAIN)
+        if isinstance(value, str)
+    }
+    properties = analysis.values(SemanticKind.PROPERTY)
+    if not domains and "battery" in properties:
+        domains = {"sensor"}
+    if not domains and re.search(r"\b(?:räume?|heizungen?|thermostate?)\b", text, re.I):
+        domains = {"climate"}
+    threshold_match = re.search(r"\b\d+(?:[,.]\d+)?\b", text)
+    if len(comparators) != 1 or len(domains) != 1 or threshold_match is None:
+        return None
+    comparator = str(next(iter(comparators)))
+    domain = next(iter(domains))
+    threshold = float(threshold_match.group(0).replace(",", "."))
+    has_percent = re.search(r"(?:prozent|%)", text, re.I) is not None
+    has_temperature = "temperature" in properties
+    has_battery = "battery" in properties
+    if not (
+        (has_percent and not has_temperature and domain in {"light", "cover"})
+        or (has_temperature and not has_percent and domain == "climate")
+        or (has_percent and has_battery and domain == "sensor")
+    ):
+        return None
+    location = resolve_semantic_location(text, entities, world_model)
+    if _LOCATION_CUE_RE.search(text) is not None and location is None:
+        return None
+    area_id = location[1] if location else None
+    floor_id = location[2] if location else None
+    candidates = _scoped_candidates(
+        entities, domain, ((location,) if location else ()), world_model
+    )
+    if has_battery:
+        candidates = [
+            entity for entity in candidates if entity.device_class == "battery"
+        ]
+    predicates = {
+        "lt": lambda value: value < threshold,
+        "gt": lambda value: value > threshold,
+        "lte": lambda value: value <= threshold,
+        "gte": lambda value: value >= threshold,
+    }
+    predicate = predicates.get(comparator)
+    if predicate is None:
+        return None
+
+    def current_value(entity: EntitySnapshot) -> float | None:
+        raw = (
+            entity.state
+            if domain == "sensor"
+            else
+            entity.attributes.get("current_temperature")
+            if domain == "climate"
+            else entity.attributes.get("current_position")
+            if domain == "cover"
+            else entity.attributes.get("brightness")
+        )
+        if raw is None:
+            return None
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return value / 255 * 100 if domain == "light" else value
+
+    matches = [
+        entity for entity in candidates
+        if (value := current_value(entity)) is not None and predicate(value)
+    ]
+    if not matches:
+        return None
+    return ParseResult(
+        frame=SemanticFrame(
+            intent="HassGetState" if domain == "sensor" else "HassQueryComparison",
+            target=TargetReference(text=domain, domain=domain),
+            area=(
+                AreaReference(text=location[0], area_id=area_id)
+                if location is not None and area_id is not None else None
+            ),
+            quantifier=Quantifier(kind="all"),
+            parameters={
+                "comparison": Comparison(operator=comparator, value=threshold),
+                **({"floor_id": floor_id} if floor_id is not None else {}),
+            },
+            source_text=text,
+            action=SemanticAction.QUERY,
+            quantity=SemanticQuantity.all(),
+        ),
+        resolved_entities=matches,
     )
 
 
@@ -285,6 +447,7 @@ def _has_unexplained_meaning(analysis, dynamic_texts=()) -> bool:
     return bool({
         normalize_for_compare(token)
         for token in analysis.unexplained_tokens
+        if normalize_for_compare(token) not in _STOP_WORDS
     } - dynamic_tokens)
 
 
@@ -322,7 +485,13 @@ def _quantity(text: str) -> Quantifier | None:
         return None
     if _BOTH_RE.search(text):
         return Quantifier("both")
-    count = _COUNT_RE.search(text)
+    count_text = re.sub(
+        r"\b-?\d+(?:[,.]\d+)?\s*(?:grad|°\s*c|°c|prozent|%)\b",
+        "",
+        text,
+        flags=re.I,
+    )
+    count = _COUNT_RE.search(count_text)
     if count:
         raw = count.group(1).casefold()
         return Quantifier("count", _COUNT_WORDS.get(raw, int(raw) if raw.isdigit() else None))
@@ -344,11 +513,11 @@ def _percent(text: str) -> int | None:
     return int(match.group("after") or match.group("unit")) if match else None
 
 
-def _temperature(text: str) -> int | None:
+def _temperature(text: str) -> float | None:
     match = _TEMPERATURE_RE.search(text)
     if match is None:
         return None
-    value = int(match.group("value"))
+    value = float(match.group("value").replace(",", "."))
     return value if 5 <= value <= 30 else None
 
 
@@ -434,11 +603,55 @@ def _scoped_candidates(
     return selected
 
 
+def _compile_relative_climate(
+    text: str,
+    entities: list[EntitySnapshot],
+    world_model: WorldModel | None,
+) -> ParseResult | None:
+    increase = re.search(r"\b(?:wärmer|waermer|erhöh\w*)\b", text, re.I)
+    decrease = re.search(r"\b(?:kälter|kaelter|senk\w*|reduzier\w*)\b", text, re.I)
+    if bool(increase) == bool(decrease):
+        return None
+    named = mentioned_entities(
+        text,
+        entities,
+        index=world_model.entity_index if world_model is not None else None,
+    )
+    candidates = [entity for entity in named if entity.domain == "climate"]
+    if len(candidates) != 1:
+        return None
+    entity = candidates[0]
+    adjustment = extract_degree(text)
+    intent = (
+        "HassClimateIncreaseTemperature"
+        if increase else "HassClimateDecreaseTemperature"
+    )
+    return ParseResult(
+        frame=SemanticFrame(
+            intent=intent,
+            target=TargetReference(
+                entity.friendly_name, entity.entity_id, entity.domain
+            ),
+            area=None,
+            parameters={"step": adjustment.climate_degrees},
+            source_text=text,
+            action=SemanticAction.ADJUST,
+            property=SemanticProperty.TEMPERATURE,
+            direction=(
+                SemanticDirection.INCREASE
+                if increase else SemanticDirection.DECREASE
+            ),
+            degree=adjustment.degree,
+        ),
+        resolved_entities=[entity],
+    )
+
+
 def _intents(
     text: str,
     domains: frozenset[str],
     percent: int | None,
-    temperature: int | None,
+    temperature: float | None,
     analysis=None,
     *,
     location_text: str | None = None,
@@ -459,6 +672,14 @@ def _intents(
             and span.text.casefold() == location_text.casefold()
         )
     )
+    # A separated German particle carries the decisive lock operation:
+    # ``schließe die Tür auf/ab``.  The generic stem ``schließe`` is also a
+    # CLOSE token, so retain only the explicit lock operation in that domain.
+    if "lock" in domains:
+        if "unlock" in actions:
+            actions = frozenset({"unlock"})
+        elif "lock" in actions:
+            actions = frozenset({"lock"})
     elliptical_request = (
         bool(actions)
         and (
@@ -495,6 +716,14 @@ def _intents(
         )
     for domain in domains:
         for action in actions:
+            if percent is not None and action in {"open", "close"}:
+                continue
+            if (
+                domain == "script"
+                and action == "turn_on"
+                and re.search(r"\baktivier", text, re.I) is None
+            ):
+                continue
             intent = INTENT_BY_DOMAIN_ACTION.get((domain, str(action)))
             if intent is not None:
                 found.add(intent)
@@ -542,6 +771,9 @@ class SemanticCommandCompiler:
     ) -> ParseResult | ClarificationRequest | None:
         if _QUESTION_RE.search(text):
             return None
+        relative_climate = _compile_relative_climate(text, entities, world_model)
+        if relative_climate is not None:
+            return relative_climate
         if _ORDERED_SUBSET_RE.search(text):
             return None
         positive_text, exclusion_names = _split_exclusion(text)
@@ -556,13 +788,31 @@ class SemanticCommandCompiler:
             return None
         spoken_temperature = _TEMPERATURE_RE.search(positive_text)
         if spoken_temperature is not None and not (
-            5 <= int(spoken_temperature.group("value")) <= 30
+            5
+            <= float(spoken_temperature.group("value").replace(",", "."))
+            <= 30
         ):
             return None
 
         domains = frozenset(
             value for value in analysis.values(SemanticKind.DOMAIN)
             if isinstance(value, str)
+        )
+        resolution_text = re.sub(
+            r"\b(?:im|in\s+der|in\s+dem)\s+", "", positive_text, flags=re.I
+        )
+        quantity = _quantity(positive_text)
+        # A quantified target (``alle Lichter im Wohnzimmer``) is resolved
+        # by typed domain and location. Scanning thousands of registry names
+        # cannot strengthen that meaning and used to dominate the 5k gate.
+        explicit = (
+            ()
+            if quantity is not None
+            else mentioned_entities(
+                resolution_text,
+                entities,
+                index=world_model.entity_index if world_model is not None else None,
+            )
         )
         coordinated_locations = resolve_coordinated_locations(
             positive_text, entities, world_model
@@ -576,19 +826,32 @@ class SemanticCommandCompiler:
         # A spoken scope is a hard constraint.  If HA does not know it (or
         # two floors make "oben" ambiguous), never silently widen the
         # request to every device in the house.
-        if not locations and has_explicit_location_cue(positive_text, entities):
+        if (
+            not locations
+            and len(explicit) != 1
+            and has_explicit_location_cue(positive_text, entities)
+        ):
             return None
-        quantity = _quantity(positive_text)
         temperature = _temperature(positive_text)
         # ``auf 22 Grad`` and ``auf 22 Prozent`` share the same numeric
         # preposition.  The explicit temperature unit owns the value and
         # prevents the bare-percentage shorthand from creating a second
         # intent.
         percent = None if temperature is not None else _percent(positive_text)
+        if spoken_percent is None and (
+            _ZERO_RE.search(positive_text) or _HUNDRED_RE.search(positive_text)
+        ):
+            # ``ganz auf/zu`` is the ordinary endpoint operation, not a
+            # competing set-position interpretation.
+            percent = None
 
-        # If the user named an entity but omitted a generic device noun, infer
-        # only the domain(s) of registry names that are actually present.
-        if not domains:
+        # An explicit complete registry name owns its real HA domain even if
+        # the name itself contains another generic noun (for example a switch
+        # named ``Licht Sportraum``). This prevents lexical words inside user
+        # data from overriding the registry's typed identity.
+        if len(explicit) == 1:
+            domains = frozenset({explicit[0].domain})
+        elif not domains:
             preliminary = _entity_candidates(
                 positive_text,
                 entities,
@@ -653,7 +916,7 @@ class SemanticCommandCompiler:
             if exclusion_names or len(locations) > 1:
                 return None
             ranked_candidates = rank_semantic_targets(
-                text,
+                resolution_text,
                 entities,
                 domains=facts.domains,
                 area_id=facts.area_id,
@@ -695,14 +958,34 @@ class SemanticCommandCompiler:
             target = TargetReference(entity.friendly_name, entity.entity_id, entity.domain)
             area = None
 
+        if intent == "HassClimateSetTemperature" and temperature is not None:
+            try:
+                if any(
+                    not float(entity.attributes.get("min_temp", 7))
+                    <= temperature
+                    <= float(entity.attributes.get("max_temp", 35))
+                    for entity in matches
+                ):
+                    return None
+            except (TypeError, ValueError):
+                return None
+
         registry_texts = [facts.location_text or ""]
-        for entity in matches:
-            registry_texts.extend((
-                entity.friendly_name,
-                entity.area_name or "",
-                entity.floor_name or "",
-                *(alias.text for alias in generate_aliases(entity)),
-            ))
+        if quantity is None:
+            for entity in matches:
+                registry_texts.extend((
+                    entity.friendly_name,
+                    entity.area_name or "",
+                    entity.floor_name or "",
+                    *(alias.text for alias in generate_aliases(entity)),
+                ))
+        else:
+            # Quantified commands are grounded by domain and location rather
+            # than by every individual registry name.  Tokenizing hundreds of
+            # matched entity names adds no evidence and makes the safety check
+            # scale with the result size.  Explicit exclusions remain valid
+            # dynamic vocabulary and therefore stay part of the check.
+            registry_texts.extend(exclusion_names)
         if _has_unexplained_meaning(analysis, registry_texts):
             fuzzy = resolve_entity_scored(
                 " ".join(analysis.unexplained_tokens),
@@ -755,10 +1038,15 @@ class SemanticCommandCompiler:
             "HassMediaPlay": SemanticAction.START,
             "HassMediaPause": SemanticAction.PAUSE,
             "HassMediaStop": SemanticAction.STOP,
+            "HassMediaMute": SemanticAction.MUTE,
             "HassVacuumStart": SemanticAction.START,
             "HassVacuumStop": SemanticAction.STOP,
+            "HassVacuumLocate": SemanticAction.LOCATE,
+            "HassPressButton": SemanticAction.PRESS,
             "HassOpenValve": SemanticAction.OPEN,
             "HassCloseValve": SemanticAction.CLOSE,
+            "HassLock": SemanticAction.LOCK,
+            "HassUnlock": SemanticAction.UNLOCK,
             "HassSetPercentage": SemanticAction.SET,
             "HassClimateSetTemperature": SemanticAction.SET,
         }[intent]
@@ -776,6 +1064,7 @@ class SemanticCommandCompiler:
             )
             if exclusion_names:
                 semantic_quantity = SemanticQuantity.exclude(*excluded_names)
+        comparison_value = percent if percent is not None else temperature
         return ParseResult(
             frame=SemanticFrame(
                 intent=intent,
@@ -785,6 +1074,13 @@ class SemanticCommandCompiler:
                 parameters={
                     **({"percent": percent} if percent is not None else {}),
                     **({"temperature": temperature} if temperature is not None else {}),
+                    **({
+                        "comparison": Comparison(
+                            operator=str(next(iter(analysis.values(SemanticKind.COMPARATOR)))),
+                            value=float(comparison_value),
+                        )
+                    } if analysis.values(SemanticKind.COMPARATOR)
+                    and comparison_value is not None else {}),
                     **({"excluded": excluded_names} if exclusion_names else {}),
                     **({
                         "locations": tuple(
@@ -816,10 +1112,44 @@ class SemanticQueryCompiler:
         # as "Offene Fenster im Erdgeschoss?".  An imperative verb always
         # wins the command interpretation and is never converted to a query.
         analysis = analysis or analyse_semantics(text)
+        if analysis.values(SemanticKind.COMPARATOR):
+            return _compile_comparison_query(text, entities, analysis, world_model)
         if analysis.values(SemanticKind.PROPERTY):
             return _compile_measurement_query(
                 text, entities, analysis, world_model
             )
+        # A uniquely named sensor/light may be queried without repeating a
+        # generic property noun (``Wie hoch ist Außentemperatur?``). Registry
+        # identity is the complete target; this path is read-only by type.
+        named_query = re.search(
+            r"^\s*(?:wie\s+(?:hoch|warm|ist)|was\s+zeigt|"
+            r"welchen\s+(?:status|zustand)|(?:der\s+)?status\s+von)\b",
+            text,
+            re.I,
+        )
+        if (
+            named_query is not None
+            and not analysis.values(SemanticKind.COMMAND_MARKER)
+        ):
+            named = mentioned_entities(
+                text,
+                entities,
+                index=world_model.entity_index if world_model is not None else None,
+            )
+            if len(named) == 1 and named[0].domain in {"sensor", "light"}:
+                entity = named[0]
+                return ParseResult(
+                    frame=SemanticFrame(
+                        intent="HassGetState",
+                        target=TargetReference(
+                            entity.friendly_name, entity.entity_id, entity.domain
+                        ),
+                        area=None,
+                        source_text=text,
+                        action=SemanticAction.QUERY,
+                    ),
+                    resolved_entities=[entity],
+                )
         if (
             not (_QUERY_MARKER_RE.search(text) or text.rstrip().endswith("?"))
             or analysis.values(SemanticKind.COMMAND_MARKER)
@@ -860,10 +1190,12 @@ class SemanticQueryCompiler:
                             next(iter(named_device_classes)),
                         )
                     )
+        exists_question = "exists" in analysis.values(SemanticKind.QUERY_SCOPE)
         states = [
-            value
-            for value in analysis.values(SemanticKind.STATE)
-            if isinstance(value, SemanticState)
+            span.value
+            for span in analysis.matching(SemanticKind.STATE)
+            if isinstance(span.value, SemanticState)
+            and not (exists_question and span.text.casefold() in {"ein", "eine"})
         ]
         if len(targets) != 1 or len(states) > 1:
             return None
