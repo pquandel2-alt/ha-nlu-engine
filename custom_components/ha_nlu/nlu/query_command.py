@@ -124,6 +124,10 @@ class QueryResultStatus(Enum):
 class QueryResult:
     status: QueryResultStatus
     entities: tuple[EntitySnapshot, ...] = ()
+    # Complete registry-backed set examined before state filtering. This is
+    # deliberately separate from ``entities`` so surface realization can say
+    # "all" or "only" only when completeness is actually proven.
+    considered_entities: tuple[EntitySnapshot, ...] = ()
     devices: tuple[DeviceSnapshot, ...] = ()
     automations: tuple[AutomationSummary, ...] = ()
     command: QueryCommand | None = None

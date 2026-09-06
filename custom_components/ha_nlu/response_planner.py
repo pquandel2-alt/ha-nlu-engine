@@ -49,6 +49,9 @@ class QueryAnswerKind(StrEnum):
     SINGLE = "single"
     UNKNOWN_SINGLE = "unknown_single"
     UNDETERMINED_SINGLE = "undetermined_single"
+    COMPLETE_GROUP = "complete_group"
+    ONLY_MATCH = "only_match"
+    ALL_BUT = "all_but"
 
 
 @dataclass(frozen=True)
@@ -70,6 +73,9 @@ class QueryResponsePlan:
     current_state: str | None = None
     pronoun: str | None = None
     deictic_location: bool = False
+    considered_count: int = 0
+    exception_names: tuple[str, ...] = ()
+    subject_name: str | None = None
 
 
 CRITICAL_CATEGORIES = frozenset(
@@ -103,6 +109,25 @@ def _join_names(names: tuple[str, ...]) -> str:
     if len(names) == 2:
         return f"{names[0]} und {names[1]}"
     return ", ".join(names[:-1]) + f" und {names[-1]}"
+
+
+_COUNT_WORDS = {
+    2: "zwei",
+    3: "drei",
+    4: "vier",
+    5: "fünf",
+    6: "sechs",
+    7: "sieben",
+    8: "acht",
+    9: "neun",
+    10: "zehn",
+    11: "elf",
+    12: "zwölf",
+}
+
+
+def _spoken_count(count: int) -> str:
+    return _COUNT_WORDS.get(count, str(count))
 
 
 class GermanResponseRealizer:
@@ -169,8 +194,23 @@ class GermanResponseRealizer:
                 return f"Es sind keine {noun} {state}."
             if query.pronoun is not None and query.deictic_location:
                 return f"Da ist {query.pronoun} {state}."
+            if len(names) > 4:
+                return (
+                    f"{len(names)} {noun} sind {state}. "
+                    "Weitere Details sind in Home Assistant sichtbar."
+                )
             verb = "ist" if len(names) == 1 else "sind"
             return f"{_join_names(names)} {verb} {state}."
+        if kind is QueryAnswerKind.COMPLETE_GROUP:
+            return f"Alle {_spoken_count(query.considered_count)} {noun} sind {state}."
+        if kind is QueryAnswerKind.ONLY_MATCH:
+            return f"Nur {names[0]} ist {state}."
+        if kind is QueryAnswerKind.ALL_BUT:
+            exceptions = _join_names(query.exception_names)
+            return (
+                f"Bis auf {exceptions} sind alle "
+                f"{_spoken_count(query.considered_count)} {noun} {state}."
+            )
         if kind is QueryAnswerKind.COUNT:
             count = len(names)
             count_noun = query.noun_singular if count == 1 else noun
@@ -192,6 +232,11 @@ class GermanResponseRealizer:
                 suffix = f" {state}" if state is not None else " bekannt"
                 return f"{sentence_initial(location)} sind keine Geräte{suffix}."
             if state is not None:
+                if len(names) > 4:
+                    return (
+                        f"{len(names)} Geräte sind {state}. "
+                        "Weitere Details sind in Home Assistant sichtbar."
+                    )
                 verb = "ist" if len(names) == 1 else "sind"
                 return f"{_join_names(names)} {verb} {state}."
             verb = "ist" if len(names) == 1 else "sind"
@@ -201,7 +246,9 @@ class GermanResponseRealizer:
                 return "Es sind keine Automationen vorhanden."
             return f"Es gibt folgende Automationen: {_join_names(names)}."
         if kind is QueryAnswerKind.AUTOMATION_RELATION:
-            entity_name = query.area_names[0]
+            if query.subject_name is None:
+                raise ValueError("Eine Automationsantwort benötigt ein Subjekt")
+            entity_name = query.subject_name
             if not names:
                 relation = "beeinflussen könnte" if query.causal else "steuert"
                 return f"Ich habe keine Automation gefunden, die {entity_name} {relation}."

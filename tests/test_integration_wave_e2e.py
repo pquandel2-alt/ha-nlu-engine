@@ -148,8 +148,9 @@ def test_case_3_welche_fenster_sind_offen(monkeypatch):
 
     entity.hass.services.async_call.assert_not_awaited()
     assert result.response.response_type == intent.IntentResponseType.QUERY_ANSWER
-    assert "Esszimmer Fenster" in result.response.speech
-    assert "Wohnzimmer Fenster" in result.response.speech
+    assert result.response.speech == (
+        "Bis auf Küchenfenster sind alle drei Fenster offen."
+    )
 
 
 def test_case_4_und_im_esszimmer_area_filtered_followup(monkeypatch):

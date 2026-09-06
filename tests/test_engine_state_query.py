@@ -79,7 +79,7 @@ def test_state_query_list_single_match(engine):
     assert result is not None
     assert result.plan is None  # query, never calls a service (Regel 3)
     assert result.command.entities == (FENSTER_KELLER,)
-    assert result.response_text == "Fenster Keller ist geöffnet."
+    assert result.response_text == "Nur Fenster Keller ist offen."
 
 
 def test_compound_area_window_question_does_not_require_exact_entity_name(engine):
@@ -191,7 +191,7 @@ def test_negative_existence_query(engine):
 def test_singular_interrogative_lists_matching_entity(engine):
     result = engine.match("Welches Fenster ist offen?", WINDOWS)
     assert result is not None
-    assert result.response_text == "Fenster Keller ist geöffnet."
+    assert result.response_text == "Nur Fenster Keller ist offen."
 
 
 def test_floor_scoped_state_question(engine):
@@ -628,7 +628,7 @@ def test_mach_das_licht_noch_heller_remains_a_command(engine):
 def test_state_query_end_to_end_response_comes_from_response_generator(engine):
     result = engine.match("welche Fenster sind offen", WINDOWS)
     assert result is not None
-    assert result.response_text == "Fenster Keller ist geöffnet."
+    assert result.response_text == "Nur Fenster Keller ist offen."
 
 
 def test_check_state_end_to_end_response_comes_from_response_generator(engine):
@@ -778,7 +778,7 @@ WINDOW_DOOR_ENTITIES = [WOHNZIMMER_FENSTER_OFFEN, KUECHE_FENSTER_ZU, HAUSTUER]
 def test_live_incident_sind_fenster_offen(engine):
     result = engine.match("sind Fenster offen", WINDOW_DOOR_ENTITIES)
     assert result is not None
-    assert result.response_text == "Wohnzimmer Fenster ist geöffnet."
+    assert result.response_text == "Nur Wohnzimmer Fenster ist offen."
 
 
 def test_live_incident_welche_fenster_sind_im_wohnzimmer_offen(engine):
@@ -790,7 +790,7 @@ def test_live_incident_welche_fenster_sind_im_wohnzimmer_offen(engine):
 def test_live_incident_welche_fenster_sind_geschlossen(engine):
     result = engine.match("welche Fenster sind geschlossen", WINDOW_DOOR_ENTITIES)
     assert result is not None
-    assert result.response_text == "Küche Fenster ist geschlossen."
+    assert result.response_text == "Nur Küche Fenster ist geschlossen."
 
 
 def test_live_incident_gibt_es_fenster(engine):

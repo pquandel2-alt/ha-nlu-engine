@@ -160,9 +160,10 @@ def test_state_followup_without_und_keeps_floor_and_device_class(monkeypatch):
     first = _run(entity, "Sind im Erdgeschoss Fenster geöffnet?", "window-turn")
     followup = _run(entity, "Welche sind geschlossen?", "window-turn")
 
-    assert "Gäste WC Fenster" in first.response.speech
-    assert "Schlafzimmer Fenster" in first.response.speech
-    assert "Küchenfenster" in followup.response.speech
+    assert first.response.speech == (
+        "Bis auf Küchenfenster sind alle drei Fenster offen."
+    )
+    assert followup.response.speech == "Nur Küchenfenster ist geschlossen."
     assert followup.response.response_type == intent.IntentResponseType.QUERY_ANSWER
 
 

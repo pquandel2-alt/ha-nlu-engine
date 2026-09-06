@@ -266,6 +266,7 @@ class ResponseGenerator:
         state_word = _SEMANTIC_STATE_SPOKEN_DE[state]
         noun = self._noun(result)
         entities = result.entities
+        considered = result.considered_entities
         if not entities:
             return self._wrap(
                 QueryResponsePlan(
@@ -284,6 +285,44 @@ class ResponseGenerator:
                     state=state_word,
                 )
             )
+        if len(considered) > 1:
+            matched_ids = {entity.entity_id for entity in entities}
+            exception_names = tuple(
+                entity.friendly_name
+                for entity in considered
+                if entity.entity_id not in matched_ids
+            )
+            if len(entities) == len(considered):
+                return self._wrap(
+                    QueryResponsePlan(
+                        QueryAnswerKind.COMPLETE_GROUP,
+                        noun_plural=noun,
+                        names=tuple(e.friendly_name for e in entities),
+                        state=_SEMANTIC_STATE_SHORT_DE[state],
+                        considered_count=len(considered),
+                    )
+                )
+            if len(entities) == 1:
+                return self._wrap(
+                    QueryResponsePlan(
+                        QueryAnswerKind.ONLY_MATCH,
+                        noun_plural=noun,
+                        names=(entities[0].friendly_name,),
+                        state=_SEMANTIC_STATE_SHORT_DE[state],
+                        considered_count=len(considered),
+                    )
+                )
+            if len(entities) == len(considered) - 1 and len(considered) >= 3:
+                return self._wrap(
+                    QueryResponsePlan(
+                        QueryAnswerKind.ALL_BUT,
+                        noun_plural=noun,
+                        names=tuple(e.friendly_name for e in entities),
+                        exception_names=exception_names,
+                        state=_SEMANTIC_STATE_SHORT_DE[state],
+                        considered_count=len(considered),
+                    )
+                )
         return self._wrap(
             QueryResponsePlan(
                 QueryAnswerKind.FILTERED_LIST,
@@ -360,7 +399,7 @@ class ResponseGenerator:
             QueryResponsePlan(
                 QueryAnswerKind.AUTOMATION_RELATION,
                 names=labels,
-                area_names=(entity_name,),
+                subject_name=entity_name,
                 causal=causal,
             )
         )

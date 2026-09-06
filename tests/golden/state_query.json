@@ -3,13 +3,13 @@
     "text": "welche Fenster sind offen",
     "expect_match": true,
     "plan": null,
-    "response_text": "Fenster Schlafzimmer und Fenster Wohnzimmer sind geöffnet."
+    "response_text": "Bis auf Fenster Küche sind alle drei Fenster offen."
   },
   {
     "text": "welche Fenster sind geschlossen",
     "expect_match": true,
     "plan": null,
-    "response_text": "Fenster Küche ist geschlossen."
+    "response_text": "Nur Fenster Küche ist geschlossen."
   },
   {
     "text": "welche Fenster sind im Wohnzimmer offen",

@@ -103,6 +103,89 @@ def test_list_multiple_matches_lists_names():
     assert respond(result) == "Küchenfenster und Badfenster sind geöffnet."
 
 
+def test_complete_candidate_set_is_aggregated_without_listing_names():
+    command = QueryCommand(
+        intent="HassStateQuery",
+        scope=QueryScope.LIST,
+        target=QueryTarget(domain="light"),
+        filter=QueryFilter(state=SemanticState.ON),
+    )
+    lights = tuple(
+        EntitySnapshot(f"light.{index}", name, "light", "on")
+        for index, name in enumerate(("Küchenlicht", "Flurlicht", "Badlicht"))
+    )
+    result = QueryResult(
+        status=QueryResultStatus.MATCHED,
+        entities=lights,
+        considered_entities=lights,
+        command=command,
+    )
+
+    assert respond(result) == "Alle drei Lichter sind an."
+
+
+def test_single_match_in_complete_candidate_set_is_contrasted():
+    command = QueryCommand(
+        intent="HassStateQuery",
+        scope=QueryScope.LIST,
+        target=QueryTarget(domain="light"),
+        filter=QueryFilter(state=SemanticState.ON),
+    )
+    on = EntitySnapshot("light.bad", "Badlicht", "light", "on")
+    off = (
+        EntitySnapshot("light.kueche", "Küchenlicht", "light", "off"),
+        EntitySnapshot("light.flur", "Flurlicht", "light", "off"),
+    )
+    result = QueryResult(
+        status=QueryResultStatus.MATCHED,
+        entities=(on,),
+        considered_entities=(on, *off),
+        command=command,
+    )
+
+    assert respond(result) == "Nur Badlicht ist an."
+
+
+def test_single_exception_in_complete_candidate_set_is_named():
+    command = QueryCommand(
+        intent="HassStateQuery",
+        scope=QueryScope.LIST,
+        target=QueryTarget(domain="light"),
+        filter=QueryFilter(state=SemanticState.OFF),
+    )
+    off = (
+        EntitySnapshot("light.kueche", "Küchenlicht", "light", "off"),
+        EntitySnapshot("light.flur", "Flurlicht", "light", "off"),
+    )
+    on = EntitySnapshot("light.bad", "Badlicht", "light", "on")
+    result = QueryResult(
+        status=QueryResultStatus.MATCHED,
+        entities=off,
+        considered_entities=(*off, on),
+        command=command,
+    )
+
+    assert respond(result) == "Bis auf Badlicht sind alle drei Lichter aus."
+
+
+def test_long_list_is_capped_for_tts():
+    command = _list_command(QueryScope.LIST)
+    windows = tuple(
+        _window(f"binary_sensor.{index}", f"Fenster {index}", "on")
+        for index in range(5)
+    )
+    result = QueryResult(
+        status=QueryResultStatus.MATCHED,
+        entities=windows,
+        command=command,
+    )
+
+    assert respond(result) == (
+        "5 Fenster sind geöffnet. "
+        "Weitere Details sind in Home Assistant sichtbar."
+    )
+
+
 # --- COUNT ------------------------------------------------------------------
 
 
@@ -223,6 +306,29 @@ def test_device_list_multiple_devices():
     b = DeviceSnapshot(device_id="device.b", name="Drucker")
     result = QueryResult(status=QueryResultStatus.MATCHED, devices=(a, b), command=command)
     assert respond(result) == "Schreibtischlampe und Drucker sind im Büro."
+
+
+def test_long_state_filtered_device_list_is_capped_for_tts():
+    command = QueryCommand(
+        intent="HassDeviceQuery",
+        scope=QueryScope.LIST,
+        target=QueryTarget(kind=QueryTargetKind.DEVICE, area=_BUERO),
+        filter=QueryFilter(state=SemanticState.ON),
+    )
+    devices = tuple(
+        DeviceSnapshot(device_id=f"device.{index}", name=f"Gerät {index}")
+        for index in range(5)
+    )
+    result = QueryResult(
+        status=QueryResultStatus.MATCHED,
+        devices=devices,
+        command=command,
+    )
+
+    assert respond(result) == (
+        "5 Geräte sind eingeschaltet. "
+        "Weitere Details sind in Home Assistant sichtbar."
+    )
 
 
 def test_device_list_uses_feminine_area_preposition():
@@ -477,3 +583,39 @@ def test_location_answer_uses_feminine_area_preposition():
 
     assert response == "In der Küche sind Fenster geöffnet."
     assert "im Küche" not in response
+
+
+def test_location_answer_realizes_each_area_with_its_own_article():
+    command = QueryCommand(
+        intent="HassStateQuery",
+        scope=QueryScope.LOCATIONS,
+        target=QueryTarget(domain="binary_sensor", device_class="window"),
+        filter=QueryFilter(state=SemanticState.OPEN),
+    )
+    entities = (
+        EntitySnapshot(
+            "binary_sensor.bad",
+            "Badfenster",
+            "binary_sensor",
+            "on",
+            area_id="area.bad",
+            area_name="Bad",
+            device_class="window",
+        ),
+        EntitySnapshot(
+            "binary_sensor.kueche",
+            "Küchenfenster",
+            "binary_sensor",
+            "on",
+            area_id="area.kueche",
+            area_name="Küche",
+            device_class="window",
+        ),
+    )
+    result = QueryResult(
+        status=QueryResultStatus.MATCHED,
+        entities=entities,
+        command=command,
+    )
+
+    assert respond(result) == "Im Bad und in der Küche sind Fenster geöffnet."

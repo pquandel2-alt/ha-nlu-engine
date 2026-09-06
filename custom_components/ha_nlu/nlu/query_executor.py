@@ -160,6 +160,7 @@ class QueryExecutor:
                     else QueryResultStatus.EMPTY
                 ),
                 entities=tuple(candidates),
+                considered_entities=tuple(candidates),
                 command=command,
             )
         if command.scope is QueryScope.NONE:
@@ -169,6 +170,7 @@ class QueryExecutor:
             return QueryResult(
                 status=QueryResultStatus.MATCHED if none_match else QueryResultStatus.EMPTY,
                 entities=tuple(candidates),
+                considered_entities=tuple(candidates),
                 command=command,
             )
         matched = (
@@ -177,4 +179,9 @@ class QueryExecutor:
             else [e for e in candidates if matches_semantic_state(e, state)]
         )
         status = QueryResultStatus.MATCHED if matched else QueryResultStatus.EMPTY
-        return QueryResult(status=status, entities=tuple(matched), command=command)
+        return QueryResult(
+            status=status,
+            entities=tuple(matched),
+            considered_entities=tuple(candidates),
+            command=command,
+        )

@@ -41,6 +41,7 @@ def test_list_filters_candidates_by_requested_state():
     result = executor.execute(command, [open_window, closed_window])
     assert result.status is QueryResultStatus.MATCHED
     assert result.entities == (open_window,)
+    assert result.considered_entities == (open_window, closed_window)
     assert result.command is command
 
 
