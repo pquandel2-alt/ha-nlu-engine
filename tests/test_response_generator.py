@@ -25,9 +25,28 @@ from ha_nlu.nlu.query_command import (
     QueryTargetKind,
 )
 from ha_nlu.nlu.response_generator import ResponseGenerator
+from ha_nlu.response_planner import QueryAnswerKind
 from ha_nlu.nlu.semantic_state import SemanticState
 
 respond = ResponseGenerator().respond
+
+
+def test_generator_builds_a_structured_plan_before_realization():
+    command = _list_command(QueryScope.LIST)
+    entity = _window("binary_sensor.a", "Küchenfenster", "on")
+    result = QueryResult(
+        status=QueryResultStatus.MATCHED,
+        entities=(entity,),
+        command=command,
+    )
+
+    plan = ResponseGenerator().plan(result)
+
+    assert plan.result is None
+    assert plan.query is not None
+    assert plan.query.kind is QueryAnswerKind.FILTERED_LIST
+    assert plan.query.names == ("Küchenfenster",)
+    assert plan.query.state == "geöffnet"
 
 
 def _window(entity_id: str, name: str, state: str) -> EntitySnapshot:

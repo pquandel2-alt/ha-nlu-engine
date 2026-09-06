@@ -30,7 +30,13 @@ Never touches Home Assistant - it doesn't even see a ``hass`` object, only a
 
 from __future__ import annotations
 
-from .german_morphology import dative_location_phrase, sentence_initial
+from ..response_planner import (
+    DialogAct,
+    GermanResponseRealizer,
+    QueryAnswerKind,
+    QueryResponsePlan,
+    ResponsePlan,
+)
 from .query_command import QueryResult, QueryResultStatus, QueryScope, QueryTargetKind
 from .semantic_state import (
     SemanticState,
@@ -80,34 +86,32 @@ def _automation_label(automation) -> str:
     return automation.source_text or automation.alias
 
 
-def _join_names(names: list[str]) -> str:
-    """Natural German list-joining ("A und B" for 2, "A, B und C" for 3+)
-    instead of a pure comma-join - shared by every multi-result branch below
-    (Regel 6: one helper, several call sites)."""
-    if not names:
-        return ""
-    if len(names) == 1:
-        return names[0]
-    if len(names) == 2:
-        return f"{names[0]} und {names[1]}"
-    return ", ".join(names[:-1]) + f" und {names[-1]}"
-
-
 class ResponseGenerator:
     """Stateless, same as ``QueryExecutor`` - one shared instance is enough."""
 
     def respond(self, result: QueryResult) -> str:
+        """Plan and realize one deterministic query response."""
+
+        return GermanResponseRealizer().realize(self.plan(result))
+
+    def plan(self, result: QueryResult) -> ResponsePlan:
+        """Convert a query result into structured, grounded response data."""
+
         command = result.command
         if command is None:
             # Defensive only - every QueryExecutor result carries its
             # originating command; a bare status without one can't be spoken
             # (nothing constructs QueryResult that way).
-            return "Das habe ich nicht verstanden."
+            return self._wrap(QueryResponsePlan(QueryAnswerKind.NOT_UNDERSTOOD))
 
         if result.status is QueryResultStatus.TARGET_NOT_FOUND:
-            return f"Ich konnte keine passenden {self._noun(result)} finden."
+            return self._wrap(
+                QueryResponsePlan(QueryAnswerKind.NOT_FOUND, noun_plural=self._noun(result))
+            )
         if result.status is QueryResultStatus.AMBIGUOUS:
-            return f"Ich habe mehrere passende {self._noun(result)} gefunden."
+            return self._wrap(
+                QueryResponsePlan(QueryAnswerKind.AMBIGUOUS, noun_plural=self._noun(result))
+            )
 
         if command.target.kind is QueryTargetKind.DEVICE:
             return self._respond_device_list(result)
@@ -126,20 +130,27 @@ class ResponseGenerator:
         return self._respond_list_or_count(result)
 
     @staticmethod
+    def _wrap(query: QueryResponsePlan) -> ResponsePlan:
+        return ResponsePlan(dialog_act=DialogAct.INFORM, query=query)
+
+    @staticmethod
     def _noun(result: QueryResult) -> str:
+        assert result.command is not None
         target = result.command.target
         if target.device_class is not None:
             return _DEVICE_CLASS_PLURAL_DE.get(target.device_class, "Geräte")
-        return _DOMAIN_PLURAL_DE.get(target.domain, "Geräte")
+        return _DOMAIN_PLURAL_DE.get(target.domain or "", "Geräte")
 
     @staticmethod
     def _noun_singular(result: QueryResult) -> str:
+        assert result.command is not None
         target = result.command.target
         if target.device_class is not None:
             return _DEVICE_CLASS_SINGULAR_DE.get(target.device_class, "Gerät")
-        return _DOMAIN_SINGULAR_DE.get(target.domain, "Gerät")
+        return _DOMAIN_SINGULAR_DE.get(target.domain or "", "Gerät")
 
-    def _respond_list_or_count(self, result: QueryResult) -> str:
+    def _respond_list_or_count(self, result: QueryResult) -> ResponsePlan:
+        assert result.command is not None
         state = result.command.filter.state
         if state is None:
             return self._respond_list_no_state(result)
@@ -147,31 +158,51 @@ class ResponseGenerator:
         noun = self._noun(result)
         entities = result.entities
         if not entities:
-            return f"Es sind keine {noun} {state_word}."
+            return self._wrap(
+                QueryResponsePlan(
+                    QueryAnswerKind.FILTERED_LIST,
+                    noun_plural=noun,
+                    state=state_word,
+                )
+            )
         if result.command.scope is QueryScope.COUNT:
-            verb = "ist" if len(entities) == 1 else "sind"
-            count_noun = self._noun_singular(result) if len(entities) == 1 else noun
-            return f"{len(entities)} {count_noun} {verb} {state_word}."
-        if len(entities) == 1:
-            return f"{entities[0].friendly_name} ist {state_word}."
-        return _join_names([e.friendly_name for e in entities]) + f" sind {state_word}."
+            return self._wrap(
+                QueryResponsePlan(
+                    QueryAnswerKind.COUNT,
+                    noun_plural=noun,
+                    noun_singular=self._noun_singular(result),
+                    names=tuple(e.friendly_name for e in entities),
+                    state=state_word,
+                )
+            )
+        return self._wrap(
+            QueryResponsePlan(
+                QueryAnswerKind.FILTERED_LIST,
+                noun_plural=noun,
+                names=tuple(e.friendly_name for e in entities),
+                state=state_word,
+            )
+        )
 
-    def _respond_list_no_state(self, result: QueryResult) -> str:
+    def _respond_list_no_state(self, result: QueryResult) -> ResponsePlan:
         """Stateless listing ("Welche Lampen sind im Wohnzimmer?",
         ``QueryFilter.state=None`` - the user-notation's "state=ANY") - area-
         based phrasing instead of state-based, since there is no state word
         to speak."""
+        assert result.command is not None
         noun = self._noun(result)
         area = result.command.target.area
-        where = f" {dative_location_phrase(area.name)}" if area is not None else ""
         entities = result.entities
-        if not entities:
-            return f"Keine {noun} gefunden{where}."
-        if len(entities) == 1:
-            return f"{entities[0].friendly_name} ist{where}."
-        return _join_names([e.friendly_name for e in entities]) + f" sind{where}."
+        return self._wrap(
+            QueryResponsePlan(
+                QueryAnswerKind.AREA_LIST,
+                noun_plural=noun,
+                names=tuple(e.friendly_name for e in entities),
+                area_names=(area.name,) if area is not None else (),
+            )
+        )
 
-    def _respond_device_list(self, result: QueryResult) -> str:
+    def _respond_device_list(self, result: QueryResult) -> ResponsePlan:
         """DEVICE-scope queries (HassDeviceQuery, "welche Geräte sind im
         Büro?") - always has a resolved area (``_parse_device_query`` refuses
         without one before ever building a ``QueryCommand``).
@@ -180,25 +211,21 @@ class ResponseGenerator:
         sind eingeschaltet im Büro?") switches to state-based phrasing,
         mirroring ``_respond_list_or_count``'s state-word branch exactly -
         same wording pattern, just for devices instead of entities."""
+        assert result.command is not None
+        assert result.command.target.area is not None
         area_name = result.command.target.area.name
-        location = dative_location_phrase(area_name)
-        initial_location = sentence_initial(location)
         devices = result.devices
         state = result.command.filter.state
-        if state is not None:
-            state_word = _SEMANTIC_STATE_SPOKEN_DE[state]
-            if not devices:
-                return f"{initial_location} sind keine Geräte {state_word}."
-            if len(devices) == 1:
-                return f"{devices[0].name} ist {state_word}."
-            return _join_names([d.name for d in devices]) + f" sind {state_word}."
-        if not devices:
-            return f"{initial_location} sind keine Geräte bekannt."
-        if len(devices) == 1:
-            return f"{devices[0].name} ist {location}."
-        return _join_names([d.name for d in devices]) + f" sind {location}."
+        return self._wrap(
+            QueryResponsePlan(
+                QueryAnswerKind.DEVICE_LIST,
+                names=tuple(device.name for device in devices),
+                area_names=(area_name,),
+                state=_SEMANTIC_STATE_SPOKEN_DE[state] if state is not None else None,
+            )
+        )
 
-    def _respond_automation(self, result: QueryResult) -> str:
+    def _respond_automation(self, result: QueryResult) -> ResponsePlan:
         """AUTOMATION-scope queries (HassAutomationQuery/HassAutomationWhyQuery,
         V5.29). Three shapes: a bare "welche Automationen gibt es?" listing
         (no ``target.entity_id``), and two entity-filtered phrasings sharing
@@ -209,91 +236,121 @@ class ResponseGenerator:
         *mention* the entity somewhere, see ``AutomationSummary``'s
         docstring - it is not a causation proof).
         """
+        assert result.command is not None
         command = result.command
-        labels = [_automation_label(a) for a in result.automations]
+        labels = tuple(_automation_label(a) for a in result.automations)
 
         if command.target.entity_id is None:
-            if not labels:
-                return "Es sind keine Automationen vorhanden."
-            return f"Es gibt folgende Automationen: {_join_names(labels)}."
+            return self._wrap(
+                QueryResponsePlan(QueryAnswerKind.AUTOMATION_LIST, names=labels)
+            )
 
         entity_name = result.entities[0].friendly_name if result.entities else "das"
         causal = command.intent == "HassAutomationWhyQuery"
-        if not labels:
-            if causal:
-                return f"Ich habe keine Automation gefunden, die {entity_name} beeinflussen könnte."
-            return f"Ich habe keine Automation gefunden, die {entity_name} steuert."
+        return self._wrap(
+            QueryResponsePlan(
+                QueryAnswerKind.AUTOMATION_RELATION,
+                names=labels,
+                area_names=(entity_name,),
+                causal=causal,
+            )
+        )
 
-        joined = _join_names(labels)
-        plural = len(labels) > 1
-        if causal:
-            noun = "Automationen" if plural else "Automation"
-            return f"{entity_name} könnte durch folgende {noun} beeinflusst werden: {joined}."
-        if plural:
-            return f"{entity_name} wird von folgenden Automationen gesteuert: {joined}."
-        return f"{entity_name} wird von folgender Automation gesteuert: {joined}."
+    def _respond_exists(self, result: QueryResult) -> ResponsePlan:
+        return self._wrap(
+            QueryResponsePlan(
+                QueryAnswerKind.EXISTS,
+                noun_plural=self._noun(result),
+                names=tuple(entity.friendly_name for entity in result.entities),
+            )
+        )
 
-    def _respond_exists(self, result: QueryResult) -> str:
+    def _respond_all(self, result: QueryResult) -> ResponsePlan:
+        assert result.command is not None
         noun = self._noun(result)
-        if not result.entities:
-            return f"Nein, es gibt keine {noun}."
-        return f"Ja, es gibt {len(result.entities)} {noun}."
-
-    def _respond_all(self, result: QueryResult) -> str:
-        noun = self._noun(result)
-        if not result.entities:
-            return f"Ich habe keine {noun} gefunden."
         state = result.command.filter.state
+        assert state is not None
         state_word = _SEMANTIC_STATE_SPOKEN_DE[state]
-        if result.status is QueryResultStatus.MATCHED:
-            return f"Ja, alle {noun} sind {state_word}."
-        return f"Nein, nicht alle {noun} sind {state_word}."
+        return self._wrap(
+            QueryResponsePlan(
+                QueryAnswerKind.ALL,
+                noun_plural=noun,
+                names=tuple(entity.friendly_name for entity in result.entities),
+                state=state_word,
+                matched=result.status is QueryResultStatus.MATCHED,
+            )
+        )
 
-    def _respond_none(self, result: QueryResult) -> str:
+    def _respond_none(self, result: QueryResult) -> ResponsePlan:
+        assert result.command is not None
         noun = self._noun(result)
-        if not result.entities:
-            return f"Ich habe keine {noun} gefunden."
-        state_word = _SEMANTIC_STATE_SPOKEN_DE[result.command.filter.state]
-        if result.status is QueryResultStatus.MATCHED:
-            return f"Ja, es sind keine {noun} {state_word}."
-        return f"Nein, mindestens eines der {noun} ist {state_word}."
+        state = result.command.filter.state
+        assert state is not None
+        return self._wrap(
+            QueryResponsePlan(
+                QueryAnswerKind.NONE,
+                noun_plural=noun,
+                names=tuple(entity.friendly_name for entity in result.entities),
+                state=_SEMANTIC_STATE_SPOKEN_DE[state],
+                matched=result.status is QueryResultStatus.MATCHED,
+            )
+        )
 
-    def _respond_locations(self, result: QueryResult) -> str:
+    def _respond_locations(self, result: QueryResult) -> ResponsePlan:
+        assert result.command is not None
         noun = self._noun(result)
         areas = sorted({entity.area_name for entity in result.entities if entity.area_name})
         requested = result.command.filter.state
-        if requested is None:
-            if not areas:
-                return f"Ich kenne für {noun} keinen Raum."
-            if len(areas) == 1:
-                return f"{noun} befinden sich {dative_location_phrase(areas[0])}."
-            locations = [dative_location_phrase(area) for area in areas]
-            return f"{noun} befinden sich {_join_names(locations)}."
-        state_word = _SEMANTIC_STATE_SPOKEN_DE[requested]
-        if not areas:
-            return f"In keinem bekannten Raum sind {noun} {state_word}."
-        if len(areas) == 1:
-            location = sentence_initial(dative_location_phrase(areas[0]))
-            return f"{location} sind {noun} {state_word}."
-        locations = [dative_location_phrase(area) for area in areas]
-        return f"{sentence_initial(_join_names(locations))} sind {noun} {state_word}."
+        return self._wrap(
+            QueryResponsePlan(
+                QueryAnswerKind.LOCATIONS,
+                noun_plural=noun,
+                area_names=tuple(areas),
+                state=(
+                    _SEMANTIC_STATE_SPOKEN_DE[requested]
+                    if requested is not None
+                    else None
+                ),
+            )
+        )
 
     @staticmethod
-    def _respond_single(result: QueryResult) -> str:
+    def _respond_single(result: QueryResult) -> ResponsePlan:
+        assert result.command is not None
         entity = result.entities[0]
         requested = result.command.filter.state
         if requested is None:
             current = derive_semantic_state(entity)
             if current is SemanticState.UNKNOWN:
-                return f"Der Zustand von {entity.friendly_name} ist unbekannt."
-            return f"{entity.friendly_name} ist {_SEMANTIC_STATE_SPOKEN_DE[current]}."
+                return ResponseGenerator._wrap(
+                    QueryResponsePlan(
+                        QueryAnswerKind.UNKNOWN_SINGLE,
+                        names=(entity.friendly_name,),
+                    )
+                )
+            return ResponseGenerator._wrap(
+                QueryResponsePlan(
+                    QueryAnswerKind.SINGLE,
+                    names=(entity.friendly_name,),
+                    current_state=_SEMANTIC_STATE_SPOKEN_DE[current],
+                )
+            )
         state_word = _SEMANTIC_STATE_SPOKEN_DE[requested]
         evaluation = evaluate_semantic_state(entity, requested)
         if evaluation is None:
-            return (
-                f"Ob {entity.friendly_name} {state_word} ist, kann ich aus dem "
-                f"aktuellen Zustand „{entity.state}“ nicht sicher ableiten."
+            return ResponseGenerator._wrap(
+                QueryResponsePlan(
+                    QueryAnswerKind.UNDETERMINED_SINGLE,
+                    names=(entity.friendly_name,),
+                    state=state_word,
+                    current_state=entity.state,
+                )
             )
-        if evaluation:
-            return f"Ja, {entity.friendly_name} ist {state_word}."
-        return f"Nein, {entity.friendly_name} ist nicht {state_word}."
+        return ResponseGenerator._wrap(
+            QueryResponsePlan(
+                QueryAnswerKind.SINGLE,
+                names=(entity.friendly_name,),
+                state=state_word,
+                matched=evaluation,
+            )
+        )
