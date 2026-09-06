@@ -43,6 +43,7 @@
     ,"custom_components/ha_nlu/procedure_intent.py"
     ,"custom_components/ha_nlu/effect_monitor.py"
     ,"custom_components/ha_nlu/management_understanding.py"
+    ,"custom_components/ha_nlu/nlu/german_morphology.py"
   ],
   "reportMissingImports": false
 }

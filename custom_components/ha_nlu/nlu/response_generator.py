@@ -30,6 +30,7 @@ Never touches Home Assistant - it doesn't even see a ``hass`` object, only a
 
 from __future__ import annotations
 
+from .german_morphology import dative_location_phrase, sentence_initial
 from .query_command import QueryResult, QueryResultStatus, QueryScope, QueryTargetKind
 from .semantic_state import (
     SemanticState,
@@ -162,7 +163,7 @@ class ResponseGenerator:
         to speak."""
         noun = self._noun(result)
         area = result.command.target.area
-        where = f" im {area.name}" if area is not None else ""
+        where = f" {dative_location_phrase(area.name)}" if area is not None else ""
         entities = result.entities
         if not entities:
             return f"Keine {noun} gefunden{where}."
@@ -180,20 +181,22 @@ class ResponseGenerator:
         mirroring ``_respond_list_or_count``'s state-word branch exactly -
         same wording pattern, just for devices instead of entities."""
         area_name = result.command.target.area.name
+        location = dative_location_phrase(area_name)
+        initial_location = sentence_initial(location)
         devices = result.devices
         state = result.command.filter.state
         if state is not None:
             state_word = _SEMANTIC_STATE_SPOKEN_DE[state]
             if not devices:
-                return f"Im {area_name} sind keine Geräte {state_word}."
+                return f"{initial_location} sind keine Geräte {state_word}."
             if len(devices) == 1:
                 return f"{devices[0].name} ist {state_word}."
             return _join_names([d.name for d in devices]) + f" sind {state_word}."
         if not devices:
-            return f"Im {area_name} sind keine Geräte bekannt."
+            return f"{initial_location} sind keine Geräte bekannt."
         if len(devices) == 1:
-            return f"{devices[0].name} ist im {area_name}."
-        return _join_names([d.name for d in devices]) + f" sind im {area_name}."
+            return f"{devices[0].name} ist {location}."
+        return _join_names([d.name for d in devices]) + f" sind {location}."
 
     def _respond_automation(self, result: QueryResult) -> str:
         """AUTOMATION-scope queries (HassAutomationQuery/HassAutomationWhyQuery,
@@ -263,14 +266,17 @@ class ResponseGenerator:
             if not areas:
                 return f"Ich kenne für {noun} keinen Raum."
             if len(areas) == 1:
-                return f"{noun} befinden sich im Raum {areas[0]}."
-            return f"{noun} befinden sich in {_join_names(areas)}."
+                return f"{noun} befinden sich {dative_location_phrase(areas[0])}."
+            locations = [dative_location_phrase(area) for area in areas]
+            return f"{noun} befinden sich {_join_names(locations)}."
         state_word = _SEMANTIC_STATE_SPOKEN_DE[requested]
         if not areas:
             return f"In keinem bekannten Raum sind {noun} {state_word}."
         if len(areas) == 1:
-            return f"Im Raum {areas[0]} sind {noun} {state_word}."
-        return f"In {_join_names(areas)} sind {noun} {state_word}."
+            location = sentence_initial(dative_location_phrase(areas[0]))
+            return f"{location} sind {noun} {state_word}."
+        locations = [dative_location_phrase(area) for area in areas]
+        return f"{sentence_initial(_join_names(locations))} sind {noun} {state_word}."
 
     @staticmethod
     def _respond_single(result: QueryResult) -> str:

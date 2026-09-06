@@ -226,7 +226,7 @@ def test_location_question_wordings_group_matches_by_room(engine):
         result = engine.match(question, WINDOWS)
         assert result is not None, question
         assert result.plan is None
-        assert result.response_text == "Im Raum Keller sind Fenster geöffnet."
+        assert result.response_text == "Im Keller sind Fenster geöffnet."
 
 
 def test_cross_domain_room_state_question(engine):

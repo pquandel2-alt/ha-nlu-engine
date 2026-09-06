@@ -206,6 +206,29 @@ def test_device_list_multiple_devices():
     assert respond(result) == "Schreibtischlampe und Drucker sind im Büro."
 
 
+def test_device_list_uses_feminine_area_preposition():
+    command = QueryCommand(
+        intent="HassDeviceQuery",
+        scope=QueryScope.LIST,
+        target=QueryTarget(
+            kind=QueryTargetKind.DEVICE,
+            area=AreaSnapshot(area_id="area.kueche", name="Küche"),
+        ),
+        filter=QueryFilter(),
+    )
+    device = DeviceSnapshot(device_id="device.a", name="Küchenlicht")
+    result = QueryResult(
+        status=QueryResultStatus.MATCHED,
+        devices=(device,),
+        command=command,
+    )
+
+    response = respond(result)
+
+    assert response == "Küchenlicht ist in der Küche."
+    assert "im Küche" not in response
+
+
 # --- stateless listing (HassStateQuery without a {state} slot) -----------
 
 
@@ -384,3 +407,54 @@ def test_list_no_state_multiple_matches_with_area():
     b = EntitySnapshot("light.b", "Deckenlampe", "light", "off")
     result = QueryResult(status=QueryResultStatus.MATCHED, entities=(a, b), command=command)
     assert respond(result) == "Stehlampe und Deckenlampe sind im Wohnzimmer."
+
+
+def test_list_no_state_uses_feminine_area_preposition():
+    command = QueryCommand(
+        intent="HassStateQuery",
+        scope=QueryScope.LIST,
+        target=QueryTarget(
+            domain="light",
+            area=AreaSnapshot(area_id="area.kueche", name="Küche"),
+        ),
+        filter=QueryFilter(state=None),
+    )
+    entity = EntitySnapshot("light.a", "Küchenlicht", "light", "on")
+    result = QueryResult(
+        status=QueryResultStatus.MATCHED,
+        entities=(entity,),
+        command=command,
+    )
+
+    response = respond(result)
+
+    assert response == "Küchenlicht ist in der Küche."
+    assert "im Küche" not in response
+
+
+def test_location_answer_uses_feminine_area_preposition():
+    command = QueryCommand(
+        intent="HassStateQuery",
+        scope=QueryScope.LOCATIONS,
+        target=QueryTarget(domain="binary_sensor", device_class="window"),
+        filter=QueryFilter(state=SemanticState.OPEN),
+    )
+    entity = EntitySnapshot(
+        "binary_sensor.a",
+        "Küchenfenster",
+        "binary_sensor",
+        "on",
+        area_id="area.kueche",
+        area_name="Küche",
+        device_class="window",
+    )
+    result = QueryResult(
+        status=QueryResultStatus.MATCHED,
+        entities=(entity,),
+        command=command,
+    )
+
+    response = respond(result)
+
+    assert response == "In der Küche sind Fenster geöffnet."
+    assert "im Küche" not in response
