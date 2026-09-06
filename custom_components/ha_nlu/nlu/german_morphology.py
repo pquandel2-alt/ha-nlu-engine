@@ -65,6 +65,27 @@ _COMPOUND_HEADS: tuple[tuple[str, GrammaticalGender], ...] = (
     ("hof", GrammaticalGender.MASCULINE),
 )
 
+_ENTITY_HEADS: tuple[tuple[str, GrammaticalGender], ...] = (
+    ("bewegungsmelder", GrammaticalGender.MASCULINE),
+    ("luftbefeuchter", GrammaticalGender.MASCULINE),
+    ("medienplayer", GrammaticalGender.MASCULINE),
+    ("saugroboter", GrammaticalGender.MASCULINE),
+    ("ventilator", GrammaticalGender.MASCULINE),
+    ("heizung", GrammaticalGender.FEMININE),
+    ("jalousie", GrammaticalGender.FEMININE),
+    ("steckdose", GrammaticalGender.FEMININE),
+    ("rollladen", GrammaticalGender.MASCULINE),
+    ("schalter", GrammaticalGender.MASCULINE),
+    ("garagentor", GrammaticalGender.NEUTER),
+    ("thermostat", GrammaticalGender.NEUTER),
+    ("fenster", GrammaticalGender.NEUTER),
+    ("lampe", GrammaticalGender.FEMININE),
+    ("licht", GrammaticalGender.NEUTER),
+    ("tür", GrammaticalGender.FEMININE),
+    ("tor", GrammaticalGender.NEUTER),
+    ("ventil", GrammaticalGender.NEUTER),
+)
+
 
 def area_gender(name: str) -> GrammaticalGender | None:
     """Return a proven gender for an area name, or ``None`` if unknown.
@@ -98,6 +119,31 @@ def dative_location_phrase(name: str) -> str:
     if gender in {GrammaticalGender.MASCULINE, GrammaticalGender.NEUTER}:
         return f"im {clean_name}"
     return f"im Bereich {clean_name}"
+
+
+def entity_name_gender(name: str) -> GrammaticalGender | None:
+    """Infer gender only when a friendly name has a known lexical head."""
+
+    normalized = name.strip().casefold()
+    if not normalized:
+        return None
+    for head, gender in _ENTITY_HEADS:
+        if normalized.endswith(head):
+            return gender
+    return None
+
+
+def nominative_pronoun_for_entity(name: str) -> str | None:
+    """Return a safe singular pronoun for a known entity-name head."""
+
+    gender = entity_name_gender(name)
+    if gender is GrammaticalGender.MASCULINE:
+        return "er"
+    if gender is GrammaticalGender.FEMININE:
+        return "sie"
+    if gender is GrammaticalGender.NEUTER:
+        return "es"
+    return None
 
 
 def sentence_initial(text: str) -> str:

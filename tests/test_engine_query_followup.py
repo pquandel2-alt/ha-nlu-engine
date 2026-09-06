@@ -16,6 +16,7 @@ from __future__ import annotations
 from ha_nlu.devices import DeviceSnapshot
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.context import ConversationContext
+from ha_nlu.nlu.dialog_focus import derive_dialog_focus
 from ha_nlu.world_model import build_world_model
 
 WOHNZIMMER_TEMP = EntitySnapshot(
@@ -312,6 +313,76 @@ def test_query_followup_continues_check_state(engine):
     assert result.command.intent == "HassCheckState"
     assert result.command.entities == (FENSTER_BAD,)
     assert result.response_text == "Nein, Fenster Bad ist nicht geöffnet."
+
+
+def test_query_followup_pronominalizes_only_one_proven_entity(engine):
+    entities = [
+        EntitySnapshot(
+            "light.kueche",
+            "Küchenlicht",
+            "light",
+            "on",
+            area_id="kueche",
+            area_name="Küche",
+        ),
+        EntitySnapshot(
+            "light.bad",
+            "Badlicht",
+            "light",
+            "off",
+            area_id="bad",
+            area_name="Bad",
+        ),
+    ]
+    first = engine.match("Ist das Küchenlicht eingeschaltet?", entities)
+    assert first is not None
+    context = ConversationContext(
+        last_command=first.command,
+        last_entities=tuple(first.command.entities),
+        last_area=first.command.area,
+        pending_clarification=None,
+        focus=derive_dialog_focus(first.command),
+    )
+
+    result = engine.match_query_followup("Und im Bad?", entities, context)
+
+    assert result is not None
+    assert result.response_text == "Da ist es aus."
+
+
+def test_query_followup_keeps_name_when_entity_gender_is_unknown(engine):
+    entities = [
+        EntitySnapshot(
+            "light.kueche",
+            "Küchenlicht",
+            "light",
+            "on",
+            area_id="kueche",
+            area_name="Küche",
+        ),
+        EntitySnapshot(
+            "light.bad",
+            "Gerät links",
+            "light",
+            "off",
+            area_id="bad",
+            area_name="Bad",
+        ),
+    ]
+    first = engine.match("Ist das Küchenlicht eingeschaltet?", entities)
+    assert first is not None
+    context = ConversationContext(
+        last_command=first.command,
+        last_entities=tuple(first.command.entities),
+        last_area=first.command.area,
+        pending_clarification=None,
+        focus=derive_dialog_focus(first.command),
+    )
+
+    result = engine.match_query_followup("Und im Bad?", entities, context)
+
+    assert result is not None
+    assert result.response_text == "Nein, Gerät links ist nicht eingeschaltet."
 
 
 def test_query_followup_check_state_returns_none_for_ambiguous_new_area(engine):

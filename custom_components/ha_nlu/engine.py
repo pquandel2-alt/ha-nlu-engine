@@ -3384,7 +3384,14 @@ class NluEngine:
         if query_result is not None:
             return MatchResult(
                 plan=None,
-                response_text=_RESPONSE_GENERATOR.respond(query_result),
+                response_text=_RESPONSE_GENERATOR.respond(
+                    query_result,
+                    context=context,
+                    allow_reference=(
+                        context is not None
+                        and frame.source_text.lstrip().casefold().startswith("und ")
+                    ),
+                ),
                 frame=frame,
                 command=command,
                 resolved_intent=resolved_intent,

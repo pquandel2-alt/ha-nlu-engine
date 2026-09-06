@@ -68,6 +68,8 @@ class QueryResponsePlan:
     matched: bool = False
     causal: bool = False
     current_state: str | None = None
+    pronoun: str | None = None
+    deictic_location: bool = False
 
 
 CRITICAL_CATEGORIES = frozenset(
@@ -165,6 +167,8 @@ class GermanResponseRealizer:
         if kind is QueryAnswerKind.FILTERED_LIST:
             if not names:
                 return f"Es sind keine {noun} {state}."
+            if query.pronoun is not None and query.deictic_location:
+                return f"Da ist {query.pronoun} {state}."
             verb = "ist" if len(names) == 1 else "sind"
             return f"{_join_names(names)} {verb} {state}."
         if kind is QueryAnswerKind.COUNT:
@@ -247,6 +251,9 @@ class GermanResponseRealizer:
         if kind is QueryAnswerKind.SINGLE:
             if state is None:
                 return f"{names[0]} ist {query.current_state}."
+            if query.pronoun is not None and query.deictic_location:
+                negation = "" if query.matched else "nicht "
+                return f"Da ist {query.pronoun} {negation}{state}."
             negation = "" if query.matched else "nicht "
             prefix = "Ja" if query.matched else "Nein"
             return f"{prefix}, {names[0]} ist {negation}{state}."

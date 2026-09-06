@@ -30,6 +30,9 @@ Never touches Home Assistant - it doesn't even see a ``hass`` object, only a
 
 from __future__ import annotations
 
+from dataclasses import replace
+from typing import TYPE_CHECKING
+
 from ..response_planner import (
     DialogAct,
     GermanResponseRealizer,
@@ -37,18 +40,37 @@ from ..response_planner import (
     QueryResponsePlan,
     ResponsePlan,
 )
-from .query_command import QueryResult, QueryResultStatus, QueryScope, QueryTargetKind
+from .german_morphology import nominative_pronoun_for_entity
+from .query_command import (
+    QueryCommand,
+    QueryResult,
+    QueryResultStatus,
+    QueryScope,
+    QueryTargetKind,
+)
 from .semantic_state import (
     SemanticState,
     derive_semantic_state,
     evaluate_semantic_state,
 )
 
+if TYPE_CHECKING:
+    from .context import ConversationContext
+
 _SEMANTIC_STATE_SPOKEN_DE = {
     SemanticState.OPEN: "geöffnet",
     SemanticState.CLOSED: "geschlossen",
     SemanticState.ON: "eingeschaltet",
     SemanticState.OFF: "ausgeschaltet",
+    SemanticState.ACTIVE: "aktiv",
+    SemanticState.INACTIVE: "inaktiv",
+}
+
+_SEMANTIC_STATE_SHORT_DE = {
+    SemanticState.OPEN: "offen",
+    SemanticState.CLOSED: "geschlossen",
+    SemanticState.ON: "an",
+    SemanticState.OFF: "aus",
     SemanticState.ACTIVE: "aktiv",
     SemanticState.INACTIVE: "inaktiv",
 }
@@ -89,12 +111,26 @@ def _automation_label(automation) -> str:
 class ResponseGenerator:
     """Stateless, same as ``QueryExecutor`` - one shared instance is enough."""
 
-    def respond(self, result: QueryResult) -> str:
+    def respond(
+        self,
+        result: QueryResult,
+        *,
+        context: ConversationContext | None = None,
+        allow_reference: bool = False,
+    ) -> str:
         """Plan and realize one deterministic query response."""
 
-        return GermanResponseRealizer().realize(self.plan(result))
+        return GermanResponseRealizer().realize(
+            self.plan(result, context=context, allow_reference=allow_reference)
+        )
 
-    def plan(self, result: QueryResult) -> ResponsePlan:
+    def plan(
+        self,
+        result: QueryResult,
+        *,
+        context: ConversationContext | None = None,
+        allow_reference: bool = False,
+    ) -> ResponsePlan:
         """Convert a query result into structured, grounded response data."""
 
         command = result.command
@@ -114,24 +150,97 @@ class ResponseGenerator:
             )
 
         if command.target.kind is QueryTargetKind.DEVICE:
-            return self._respond_device_list(result)
-        if command.target.kind is QueryTargetKind.AUTOMATION:
-            return self._respond_automation(result)
-        if command.scope is QueryScope.SINGLE:
-            return self._respond_single(result)
-        if command.scope is QueryScope.EXISTS:
-            return self._respond_exists(result)
-        if command.scope is QueryScope.ALL:
-            return self._respond_all(result)
-        if command.scope is QueryScope.NONE:
-            return self._respond_none(result)
-        if command.scope is QueryScope.LOCATIONS:
-            return self._respond_locations(result)
-        return self._respond_list_or_count(result)
+            plan = self._respond_device_list(result)
+        elif command.target.kind is QueryTargetKind.AUTOMATION:
+            plan = self._respond_automation(result)
+        elif command.scope is QueryScope.SINGLE:
+            plan = self._respond_single(result)
+        elif command.scope is QueryScope.EXISTS:
+            plan = self._respond_exists(result)
+        elif command.scope is QueryScope.ALL:
+            plan = self._respond_all(result)
+        elif command.scope is QueryScope.NONE:
+            plan = self._respond_none(result)
+        elif command.scope is QueryScope.LOCATIONS:
+            plan = self._respond_locations(result)
+        else:
+            plan = self._respond_list_or_count(result)
+        return self._with_contextual_reference(
+            plan,
+            result,
+            context=context,
+            allow_reference=allow_reference,
+        )
 
     @staticmethod
     def _wrap(query: QueryResponsePlan) -> ResponsePlan:
         return ResponsePlan(dialog_act=DialogAct.INFORM, query=query)
+
+    @staticmethod
+    def _with_contextual_reference(
+        plan: ResponsePlan,
+        result: QueryResult,
+        *,
+        context: ConversationContext | None,
+        allow_reference: bool,
+    ) -> ResponsePlan:
+        """Use a pronoun only for a proven one-to-one typed follow-up."""
+
+        if not allow_reference or context is None or context.focus is None:
+            return plan
+        if len(context.focus.candidate_entity_ids) != 1:
+            return plan
+        if len(context.last_entities) != 1 or len(result.entities) != 1:
+            return plan
+        if result.command is None or result.command.target.area is None:
+            return plan
+        previous_command = context.last_command
+        if previous_command is None:
+            return plan
+        previous_query = previous_command.parameters.get("query_command")
+        if not isinstance(previous_query, QueryCommand):
+            return plan
+        current_target = result.command.target
+        previous_target = previous_query.target
+        if (
+            current_target.kind is not previous_target.kind
+            or current_target.domain != previous_target.domain
+            or current_target.device_class != previous_target.device_class
+        ):
+            return plan
+        previous_pronoun = nominative_pronoun_for_entity(
+            context.last_entities[0].friendly_name
+        )
+        current_pronoun = nominative_pronoun_for_entity(
+            result.entities[0].friendly_name
+        )
+        if current_pronoun is None or current_pronoun != previous_pronoun:
+            return plan
+        query = plan.query
+        state = result.command.filter.state
+        if (
+            query is None
+            or query.kind not in {QueryAnswerKind.FILTERED_LIST, QueryAnswerKind.SINGLE}
+            or state is None
+        ):
+            return plan
+        realized_state = _SEMANTIC_STATE_SHORT_DE[state]
+        realized_match = query.matched
+        if query.kind is QueryAnswerKind.SINGLE:
+            current_state = derive_semantic_state(result.entities[0])
+            if current_state is not SemanticState.UNKNOWN:
+                realized_state = _SEMANTIC_STATE_SHORT_DE[current_state]
+                realized_match = True
+        return replace(
+            plan,
+            query=replace(
+                query,
+                state=realized_state,
+                matched=realized_match,
+                pronoun=current_pronoun,
+                deictic_location=True,
+            ),
+        )
 
     @staticmethod
     def _noun(result: QueryResult) -> str:
