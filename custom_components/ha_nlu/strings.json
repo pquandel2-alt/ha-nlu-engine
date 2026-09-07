@@ -32,6 +32,7 @@
           "agent_notify_targets": "Push-Ziele",
           "agent_tts_entity": "TTS-Engine",
           "agent_media_players": "TTS-Lautsprecher oder Sprachsatelliten",
+          "timer_chime_media_id": "Timer-Signalton (lokale media-source:// ID)",
           "agent_cooldown_seconds": "Standard-Cooldown in Sekunden",
           "memory_enabled": "Lokales dauerhaftes Gedächtnis aktivieren",
           "memory_retention_days": "Aufbewahrung erlernter Daten in Tagen",

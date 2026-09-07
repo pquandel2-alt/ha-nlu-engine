@@ -21,6 +21,8 @@ class GoalKind(StrEnum):
     PREPARE_AWAY = "prepare_away"
     IMPROVE_COMFORT = "improve_comfort"
     INVESTIGATE_STATE = "investigate_state"
+    SECURE_HOME = "secure_home"
+    QUIET_MEDIA = "quiet_media"
 
 
 class StepKind(StrEnum):
@@ -132,6 +134,25 @@ def materialize_goal(
             and "TURN_OFF" in entity.capabilities
             and entity.state in {"on", "playing", "heating", "cooling"}
         )
+    if not entity_ids and goal.kind is GoalKind.SECURE_HOME:
+        entity_ids = tuple(
+            entity.entity_id
+            for entity in snapshots
+            if (
+                entity.domain == "lock" and entity.state in {"unlocked", "unlocking"}
+            ) or (
+                entity.domain == "cover"
+                and entity.state in {"open", "opening"}
+                and "POSITION" in entity.capabilities
+            )
+        )
+    if not entity_ids and goal.kind is GoalKind.QUIET_MEDIA:
+        entity_ids = tuple(
+            entity.entity_id
+            for entity in snapshots
+            if entity.domain == "media_player"
+            and entity.state in {"playing", "buffering"}
+        )
     if any(item not in by_id for item in entity_ids):
         raise ValueError("Das Ziel enthält unbekannte oder veraltete Entitäten")
     steps: list[PlanStep] = []
@@ -155,7 +176,7 @@ def materialize_goal(
         )
     if not entity_ids:
         raise ValueError("Für dieses Ziel wurden keine eindeutigen Geräte festgelegt")
-    service = "turn_off" if goal.kind in {
+    default_service = "turn_off" if goal.kind in {
         GoalKind.PREPARE_NIGHT,
         GoalKind.SAVE_UNOCCUPIED,
         GoalKind.PREPARE_AWAY,
@@ -163,8 +184,24 @@ def materialize_goal(
     dependency_id = check_id
     for index, entity_id in enumerate(entity_ids, start=1):
         entity = by_id[entity_id]
-        capability = "TURN_OFF" if service == "turn_off" else "TURN_ON"
-        if capability not in entity.capabilities:
+        if goal.kind is GoalKind.SECURE_HOME and entity.domain == "lock":
+            action_domain, service, capability, expected = (
+                "lock", "lock", None, "locked"
+            )
+        elif goal.kind is GoalKind.SECURE_HOME and entity.domain == "cover":
+            action_domain, service, capability, expected = (
+                "cover", "close_cover", "POSITION", "closed"
+            )
+        elif goal.kind is GoalKind.QUIET_MEDIA and entity.domain == "media_player":
+            action_domain, service, capability, expected = (
+                "media_player", "media_pause", None, "paused"
+            )
+        else:
+            service = default_service
+            capability = "TURN_OFF" if service == "turn_off" else "TURN_ON"
+            expected = "off" if service == "turn_off" else "on"
+            action_domain = "homeassistant"
+        if capability is not None and capability not in entity.capabilities:
             raise ValueError(f"{entity.friendly_name} unterstützt {capability} nicht")
         action_data: dict[str, object] = {}
         brightness = goal.parameters.get("brightness_percent")
@@ -178,7 +215,8 @@ def materialize_goal(
                     f"{entity.friendly_name} unterstützt die gewünschte Helligkeit nicht"
                 )
             action_data["brightness_pct"] = brightness
-        action_domain = "light" if action_data else "homeassistant"
+        if action_data:
+            action_domain = "light"
         action = ServiceCallPlan(action_domain, service, entity_id, action_data)
         if error := validate_agent_service_plan(action):
             raise ValueError(error)
@@ -188,7 +226,12 @@ def materialize_goal(
         if policy.outcome is PolicyOutcome.DENY:
             raise PermissionError(policy.reason or "Aktion ist nicht erlaubt")
         inverse: ServiceCallPlan | None
-        if service == "turn_off":
+        if goal.kind in {GoalKind.SECURE_HOME, GoalKind.QUIET_MEDIA}:
+            # Security closing and media state are deliberately not rolled
+            # back automatically: reopening/unlocking is unsafe, and the
+            # previous media item is not part of this plan's typed state.
+            inverse = None
+        elif service == "turn_off":
             inverse = ServiceCallPlan("homeassistant", "turn_on", entity_id, {})
         elif entity.state == "off":
             inverse = ServiceCallPlan("homeassistant", "turn_off", entity_id, {})
@@ -203,13 +246,15 @@ def materialize_goal(
                 )
             else:
                 inverse = None
-        expected = "off" if service == "turn_off" else "on"
         steps.append(
             PlanStep(
                 f"action-{index}",
                 StepKind.ACTION,
                 f"{entity.friendly_name} {expected}",
-                preconditions=("entity_available", capability.casefold()),
+                preconditions=(
+                    "entity_available",
+                    (capability.casefold() if capability is not None else "domain_service_available"),
+                ),
                 effects=(f"state={expected}",),
                 invariants=("same_stable_entity_id", "policy_allow_or_confirmed"),
                 dependencies=(dependency_id,),

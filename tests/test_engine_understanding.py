@@ -118,6 +118,23 @@ def test_understand_returns_explicit_unsupported_reason(engine, entities):
     assert outcome.payload is None
 
 
+def test_understand_never_enters_legacy_matcher(engine, entities, monkeypatch):
+    """The historical parser may only run through the shadow API."""
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("production understand() called the legacy matcher")
+
+    monkeypatch.setattr(engine, "match", fail_if_called)
+
+    supported = engine.understand("Mach das Flurlicht an", entities)
+    unsupported = engine.understand("Erzähle mir eine Geschichte", entities)
+
+    assert supported.authority is UnderstandingAuthority.V7_MIGRATED
+    assert supported.actionable
+    assert unsupported.authority is UnderstandingAuthority.NONE
+    assert not unsupported.actionable
+
+
 def test_understand_marks_negated_command_unsafe(engine, entities):
     outcome = engine.understand("Mach das Flurlicht nicht an", entities)
 

@@ -686,6 +686,8 @@ def test_movie_brightness_compensation_restores_observed_level():
         ("Schalte unbesetzte Bereiche energiesparend", GoalKind.SAVE_UNOCCUPIED),
         ("Untersuche die Ursache des Zustands", GoalKind.INVESTIGATE_STATE),
         ("Mach diesen Raum komfortabler", GoalKind.IMPROVE_COMFORT),
+        ("Sichere das Haus", GoalKind.SECURE_HOME),
+        ("Pausiere alle Medien", GoalKind.QUIET_MEDIA),
     ],
 )
 def test_closed_goal_interpreter(text: str, kind: GoalKind):

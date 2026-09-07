@@ -32,6 +32,7 @@
           "agent_notify_targets": "Push targets",
           "agent_tts_entity": "TTS engine",
           "agent_media_players": "TTS speakers or voice satellites",
+          "timer_chime_media_id": "Timer chime (local media-source:// ID)",
           "agent_cooldown_seconds": "Default cooldown in seconds",
           "memory_enabled": "Enable local persistent memory",
           "memory_retention_days": "Learned-data retention in days",

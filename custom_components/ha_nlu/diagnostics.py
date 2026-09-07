@@ -14,6 +14,7 @@ from .const import (
     CONF_AGENT_MEDIA_PLAYERS,
     CONF_AGENT_NOTIFY_TARGETS,
     CONF_AGENT_TTS_ENTITY,
+    CONF_TIMER_CHIME_MEDIA_ID,
     CONF_AGENT_AUTO_ENABLED,
     CONF_ANOMALY_THRESHOLD_PERCENT,
     CONF_BANTER_LEVEL,
@@ -62,10 +63,16 @@ async def async_get_config_entry_diagnostics(
         )
     except ValueError:
         alias_count = "invalid"
+    relation_kinds: dict[str, int] = {}
     try:
-        relation_count: int | str = len(
-            parse_relation_specs(entry.options.get(CONF_HOUSE_RELATIONS))
+        configured_relations = parse_relation_specs(
+            entry.options.get(CONF_HOUSE_RELATIONS)
         )
+        relation_count: int | str = len(configured_relations)
+        for relation in configured_relations:
+            relation_kinds[relation.kind.value] = (
+                relation_kinds.get(relation.kind.value, 0) + 1
+            )
     except ValueError:
         relation_count = "invalid"
     runtime_data = getattr(entry, "runtime_data", None)
@@ -124,6 +131,9 @@ async def async_get_config_entry_diagnostics(
         "agent_media_player_count": len(
             entry.options.get(CONF_AGENT_MEDIA_PLAYERS, [])
         ),
+        "timer_chime_configured": bool(
+            entry.options.get(CONF_TIMER_CHIME_MEDIA_ID)
+        ),
         "agent_cooldown_seconds": entry.options.get(
             CONF_AGENT_COOLDOWN_SECONDS, 1800
         ),
@@ -143,6 +153,7 @@ async def async_get_config_entry_diagnostics(
         "agent_auto_enabled": entry.options.get(CONF_AGENT_AUTO_ENABLED, False),
         "documents_enabled": entry.options.get(CONF_DOCUMENTS_ENABLED, False),
         "house_relation_count": relation_count,
+        "house_relation_kind_counts": relation_kinds,
         "learned_memory": memory_summary,
         "routine_series_count": routine_series_count,
         "routine_observation_count": routine_observation_count,

@@ -14,6 +14,7 @@ from .nlu.normalize import normalize
 from .nlu.semantic_utterance import SpeechAct
 from .query_target import list_attribute_values, mentioned_entities, resolve_query_targets
 from .world_model import WorldModel
+from .appliance_lifecycle import match_appliance_lifecycle_query
 
 
 _WEEKDAYS_DE = (
@@ -173,6 +174,11 @@ def match_household_query(
 
     if (completion := _completion_time_query(key, entities, now, world_model)) is not None:
         return completion
+
+    if (lifecycle := match_appliance_lifecycle_query(
+        value, entities, now, world_model
+    )) is not None:
+        return _read_only(lifecycle.text)
 
     if re.search(r"\b(?:wie\s+spaet|wieviel\s+uhr|welche\s+uhrzeit)\b", key):
         return _read_only(f"Es ist {now:%H:%M} Uhr.")

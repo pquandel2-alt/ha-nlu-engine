@@ -59,5 +59,5 @@ def project_target(plan: CompositionalPlan, selected: EntitySnapshot) -> str:
             candidate = re.sub(
                 rf"(?<!\w){re.escape(name)}(?!\w)", " ", candidate, flags=re.I
             )
-    candidate = re.sub(r"\b(?:und|sowie)\b", " ", candidate, flags=re.I)
+    candidate = re.sub(r"\b(?:und|sowie|außerdem)\b", " ", candidate, flags=re.I)
     return re.sub(r"\s+", " ", candidate).strip(" ,")

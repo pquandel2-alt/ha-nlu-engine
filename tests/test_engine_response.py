@@ -46,12 +46,10 @@ def test_respond_no_template_match_is_no_match_error(engine, entities):
 
 
 def test_respond_unknown_entity_is_no_match_error(engine, entities):
-    # The parser itself rejects an unresolvable {name} before a
-    # SemanticCommand exists - never reaches the validator, so this is
-    # NO_MATCH, not ENTITY_NOT_FOUND (see nlu/response.py's docstring).
+    # The canonical outcome preserves the more useful resolution reason.
     result = engine.respond("Mach Kellerdingsbums an", entities)
     assert result.success is False
-    assert result.error is NluError.NO_MATCH
+    assert result.error is NluError.ENTITY_NOT_FOUND
 
 
 def test_respond_unsupported_capability_maps_validator_error(engine):

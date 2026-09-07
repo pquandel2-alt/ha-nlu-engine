@@ -157,12 +157,19 @@ class GermanResponseRealizer:
             return result[:350]
         prefix = ""
         if plan.address:
-            prefix = f"{plan.address}, "
+            address = plan.address.strip()
+            if (
+                len(address) <= 80
+                and address
+                and not any(ord(character) < 32 for character in address)
+            ):
+                prefix = f"{address}, "
         if style is PersonaStyle.PRECISE:
             text = f"{prefix}{result}"
-        elif style is PersonaStyle.JARVIS and plan.banter_level > 0:
+        elif style is PersonaStyle.JARVIS:
             # Fixed variants add tone but never a fact or a safety judgment.
-            text = f"{prefix}{result} Wie gewünscht."
+            suffix = self._jarvis_suffix(plan)
+            text = f"{prefix}{result}{suffix}"
         else:
             text = f"{prefix}{result}"
         if plan.dialog_act is DialogAct.EXPLAIN and plan.facts:
@@ -173,7 +180,24 @@ class GermanResponseRealizer:
                     grounded = grounded[:3]
                     grounded.append("Weitere Details sind in Home Assistant sichtbar.")
                 text += " Grundlage: " + "; ".join(grounded)
+        if plan.tts_suitable and len(text) > 350:
+            shortened = text[:330].rsplit(";", 1)[0].rsplit(".", 1)[0].strip(" ,")
+            text = shortened + ". Weitere Details sind in Home Assistant sichtbar."
         return text
+
+    @staticmethod
+    def _jarvis_suffix(plan: ResponsePlan) -> str:
+        """Select a deterministic, non-factual suffix for non-critical turns."""
+        level = max(0, min(3, plan.banter_level))
+        if level == 0 or plan.dialog_act in {DialogAct.ASK, DialogAct.WARN, DialogAct.REJECT}:
+            return ""
+        if plan.dialog_act is DialogAct.CONFIRM:
+            return " Wie gewünscht."
+        if plan.dialog_act is DialogAct.INFORM and level >= 2:
+            return " Zu Ihrer Information."
+        if plan.dialog_act is DialogAct.EXPLAIN and level >= 3:
+            return " Präzision ist schließlich Ehrensache."
+        return ""
 
     @staticmethod
     def _realize_query(query: QueryResponsePlan) -> str:

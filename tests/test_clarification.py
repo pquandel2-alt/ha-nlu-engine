@@ -93,7 +93,7 @@ def test_respond_returns_ambiguous_entity_error(engine):
 
 def test_debug_trace_for_ambiguous_match(engine):
     trace = engine.debug("Mach das Bürolicht an", TIED_LIGHTS)
-    assert trace.parser == "SingleTargetParser"
+    assert trace.parser == "SemanticInterpreter"
     assert trace.intent == "HassTurnOn"
     assert trace.target == "Bürolicht"
     assert set(trace.candidates) == {"light.buerolicht_1", "light.buerolicht_2"}

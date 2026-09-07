@@ -31,6 +31,13 @@ def test_diagnostics_expose_policy_facts_but_no_entity_ids_or_text():
             "allow_non_admin_critical": False,
             "allow_non_admin_automations": False,
             "context_ttl_seconds": 90,
+            "house_relations": (
+                "area:kueche | adjacent_to | area:flur\n"
+                "device:heizung | influences | entity:temperatur"
+            ),
+            "timer_chime_media_id": (
+                "media-source://media_source/local/private-timer.wav"
+            ),
         }
     )
     entry.version = 1
@@ -47,11 +54,18 @@ def test_diagnostics_expose_policy_facts_but_no_entity_ids_or_text():
     assert diagnostics["confirmation_level"] == "medium"
     assert diagnostics["max_action_targets"] == 12
     assert diagnostics["context_ttl_seconds"] == 90
+    assert diagnostics["timer_chime_configured"] is True
+    assert diagnostics["house_relation_kind_counts"] == {
+        "adjacent_to": 1,
+        "influences": 1,
+    }
     serialized = repr(diagnostics)
     assert "light.secret" not in serialized
     assert "sensor.private" not in serialized
     assert "private-user-id" not in serialized
     assert "Geheimlicht" not in serialized
+    assert "private-timer" not in serialized
+    assert "area:kueche" not in serialized
 
 
 def test_diagnostics_show_only_redacted_learned_counts(tmp_path):

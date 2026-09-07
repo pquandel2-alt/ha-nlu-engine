@@ -158,3 +158,52 @@ def test_frigate_nested_event_remains_uncertain_metadata():
     assert evidence[0].kind == "package"
     assert evidence[0].quality.value == "estimate"
     assert evidence[0].content["confidence"] == 0.72
+
+
+def test_frigate_keeps_only_bounded_structured_zones_and_deduplicates():
+    hass = HomeAssistant()
+    evidence = []
+    runtime = StructuredAdapterRuntime(hass, ConfigEntry(), evidence.append)
+    payload = {
+        "type": "update",
+        "after": {
+            "id": "person-1",
+            "label": "person",
+            "camera": "front",
+            "score": 0.8,
+            "entered_zones": ["door", "driveway"],
+            "sub_label": "resident",
+        },
+    }
+
+    runtime._store_frigate(payload)
+    runtime._store_frigate(payload)
+
+    assert len(evidence) == 1
+    assert evidence[0].content["zones"] == ("door", "driveway")
+    assert evidence[0].content["event_type"] == "update"
+    assert "image" not in evidence[0].content
+
+
+def test_energy_sensor_is_wrapped_as_direct_ha_source():
+    hass = HomeAssistant()
+    evidence = []
+    runtime = StructuredAdapterRuntime(hass, ConfigEntry(), evidence.append)
+    runtime._handle_state_changed(SimpleNamespace(
+        data={
+            "entity_id": "sensor.grid_energy",
+            "new_state": SimpleNamespace(
+                state="12.4",
+                attributes={
+                    "device_class": "energy",
+                    "unit_of_measurement": "kWh",
+                    "private": "discarded",
+                },
+            ),
+        },
+        time_fired=datetime(2026, 9, 2, tzinfo=timezone.utc),
+    ))
+
+    assert len(evidence) == 1
+    assert evidence[0].source == "energy"
+    assert evidence[0].content == {"state": "12.4"}

@@ -604,7 +604,7 @@ CLIMATE_EXTENDED_INTENTS: dict[str, ClimateExtendedIntentSpec] = {
         build=lambda es, params: ServiceCallPlan(
             "climate", "set_temperature", _entity_id_field(es), {"temperature": params["temperature"]}
         ),
-        response=lambda es, params: f"{es[0].friendly_name} auf {params['temperature']} Grad gestellt.",
+        response=lambda es, params: f"{es[0].friendly_name} auf {float(params['temperature']):g} Grad gestellt.",
     ),
     "HassClimateIncreaseTemperature": ClimateExtendedIntentSpec(
         capability=Capability.TEMPERATURE,

@@ -1,0 +1,23 @@
+[run]
+source = custom_components/ha_nlu
+
+[report]
+# Historical direct-language implementations are not part of the production
+# coverage denominator. The separate blocking shadow report executes their
+# pinned 3,772-turn contract; product coverage measures the V7 authority and
+# the still-active automation parsers in the same module.
+exclude_also =
+    class SingleTargetParser:
+    class ContextFollowupParser:
+    class QuantifierParser:
+    class PercentageParser:
+    class FanExtendedParser:
+    class ClimateExtendedParser:
+    class LightExtendedParser:
+    class ComparisonQueryParser:
+    class TemporalParser:
+    class AreaQueryParser:
+    class QueryFollowupParser:
+    class CommandFollowupParser:
+    class ReferenceParser:
+    class StateQueryParser:

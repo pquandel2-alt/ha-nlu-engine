@@ -9,6 +9,7 @@ queries and automations migrate to the common candidate model.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import cast
 
 from ..entities import EntitySnapshot, normalize_for_compare
 from ..world_model import WorldModel
@@ -112,7 +113,10 @@ def _resolved_conflicts(
         "state" in conflicts
         and isinstance(parse_result, ParseResult)
         and document.utterance.speech_act is SpeechAct.QUERY
-        and "exists" in document.semantics.values(SemanticKind.QUERY_SCOPE)
+        and (
+            "exists" in document.semantics.values(SemanticKind.QUERY_SCOPE)
+            or parse_result.frame.intent == "HassExistsQuery"
+        )
     ):
         substantive_states = {
             span.value
@@ -121,6 +125,25 @@ def _resolved_conflicts(
         }
         if len(substantive_states) <= 1:
             conflicts.remove("state")
+    if (
+        "action" in conflicts
+        and isinstance(parse_result, ParseResult)
+        and document.utterance.speech_act is SpeechAct.QUERY
+        and parse_result.frame.action is SemanticAction.QUERY
+    ):
+        # State adjectives share lexemes with executable actions in German
+        # (``Fenster offen``, ``Licht eingeschaltet``). A successfully typed
+        # query is read-only and therefore resolves this lexical action
+        # conflict without weakening command validation.
+        conflicts.remove("action")
+    if (
+        "state" in conflicts
+        and "action" not in conflicts
+        and isinstance(parse_result, ParseResult)
+        and document.utterance.speech_act is SpeechAct.COMMAND
+        and parse_result.frame.action not in {None, SemanticAction.QUERY}
+    ):
+        conflicts.remove("state")
     if "action" not in conflicts or not isinstance(parse_result, ParseResult):
         return tuple(conflicts)
     domains = {
@@ -137,6 +160,15 @@ def _resolved_conflicts(
     }
     if intents == {parse_result.frame.intent}:
         conflicts.remove("action")
+    if (
+        "state" in conflicts
+        and "action" not in conflicts
+        and document.utterance.speech_act is SpeechAct.COMMAND
+        and parse_result.frame.action not in {None, SemanticAction.QUERY}
+    ):
+        # The command compiler has already collapsed separable particles,
+        # floor words and registry-name tokens into one validated intent.
+        conflicts.remove("state")
     return tuple(conflicts)
 
 
@@ -302,7 +334,9 @@ class SemanticInterpreter:
                     else variant.text
                 )
                 parse_result = compile_registered_operation(
-                    compile_text, entities
+                    compile_text,
+                    entities,
+                    index=(world_model.entity_index if world_model is not None else None),
                 )
                 if parse_result is None:
                     parse_result = SemanticCommandCompiler.compile(
@@ -328,22 +362,52 @@ class SemanticInterpreter:
 
             conflicts = _resolved_conflicts(candidate_document, parse_result)
             missing = _missing_slots(candidate_document, slots, parse_result)
-            complete = (
-                isinstance(parse_result, ParseResult)
-                and not conflicts
-                and not missing
-            )
             coverage = len(analysis.spans) * 5.0
             registry_tokens = {
                 normalize_for_compare(token)
                 for entity in resolved_mentions
-                for name in (entity.friendly_name, *entity.aliases)
+                for name in (
+                    entity.friendly_name,
+                    *entity.aliases,
+                    entity.area_name or "",
+                    *entity.area_aliases,
+                    entity.floor_name or "",
+                )
                 for token in name.split()
             }
+            if compositional_plan is not None:
+                registry_tokens.update(
+                    normalize_for_compare(token)
+                    for entity in compositional_plan.targets
+                    for name in (entity.friendly_name, *entity.aliases)
+                    for token in name.split()
+                )
+            if isinstance(parse_result, ParseResult) and parse_result.frame.area:
+                registry_tokens.update(
+                    normalize_for_compare(token)
+                    for token in parse_result.frame.area.text.split()
+                )
+            if isinstance(parse_result, ParseResult):
+                excluded = parse_result.frame.parameters.get("excluded", ())
+                if isinstance(excluded, (tuple, list)):
+                    excluded_items = cast(tuple[object, ...] | list[object], excluded)
+                    excluded_names: tuple[str, ...] = tuple(
+                        name for name in excluded_items if isinstance(name, str)
+                    )
+                    registry_tokens.update(
+                        normalize_for_compare(token)
+                        for name in excluded_names
+                        for token in name.split()
+                    )
             unexplained = tuple(
                 token
                 for token in analysis.unexplained_tokens
                 if normalize_for_compare(token) not in registry_tokens
+            )
+            complete = (
+                isinstance(parse_result, ParseResult)
+                and not conflicts
+                and not missing
             )
             penalty = (
                 len(unexplained) * 3.0

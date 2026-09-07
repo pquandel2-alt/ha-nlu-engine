@@ -76,9 +76,12 @@ Prozentwerte, Heizungs-Solltemperatur, Lock/Unlock, Button-Press sowie
 registrierte Klima-, Medien-, Befeuchter-, Warmwasser-, Select-, Number-,
 Lamellen-, Fan-, Ventil-, Mähroboter-, Kamera- und Notify-Operationen. Der
 frühere `device_control`-Fachparser und sein Erweiterungsparser wurden
-gelöscht. Nicht migrierte Core- und Managementcapabilities bleiben im zentral
-beobachteten Parser-Registry-Kompatibilitätsfallback. `UnderstandingOutcome.authority` macht diese
-Entscheidung beobachtbar. Ausführbare V7-Autorität setzt
+gelöscht. Direkte Core-Sprache besitzt keinen produktiven Parser-Registry-
+Fallback mehr; historische Grammatiken sind nur über den expliziten
+read-only Shadow-Audit erreichbar. Management-, Kalender-, Produktivitäts-
+und Automationsparser bleiben begrenzte Fachkomponenten hinter derselben
+Verständnis- und Sicherheitsgrenze. `UnderstandingOutcome.authority` macht
+die getroffene Entscheidung beobachtbar. Ausführbare V7-Autorität setzt
 einen vollständigen Kandidaten und bei konkurrierenden vollständigen Lesarten
 mindestens zehn Scorepunkte Abstand voraus; echte Target-Mehrdeutigkeit bleibt
 unabhängig davon eine nicht ausführbare Klärung.
@@ -118,18 +121,18 @@ nutzen denselben Resolver und dürfen ein mehrdeutiges Ziel nicht in ein
 
 ## Migration und Kompatibilität
 
-Die öffentliche V7-Grenze ist für migrierte direkte Capabilities autoritativ.
+Die öffentliche V7-Grenze ist für direkte Capabilities autoritativ.
 Der frühere generische Geräte-, Erweiterungs- und Geräte-Folgeparser ist aus
 der Conversation-Route und dem Quellbaum entfernt. Seine sicheren Operationen
 werden als `HassRegisteredOperation` in einem typisierten Frame dargestellt;
 Validator und Service Mapper prüfen Domain, Service und Daten erneut gegen die
-geschlossene lokale Allowlist. Auch `match()` ist V7-first: Semantic Query und
-Command Compiler erhalten die Autorität vor jedem Regex-gewählten Altparser;
-Orts-/Eigenschaftsabfragen folgen derselben Reihenfolge. Nur noch nicht nativ
-abgedeckte Capabilities erreichen den zentral beobachteten
-Kompatibilitätsfallback. Der explizite read-only Shadow-Audit verwendet intern
-weiterhin `compatibility_first`, damit seine unabhängige Altseite erhalten
-bleibt. Redundante Gruppen-Semantik wurde auf den Semantic Compiler delegiert.
+geschlossene lokale Allowlist. Auch `match()` delegiert ausschließlich an
+`understand()`; ein Regex-gewählter Altparser kann keinen produktiven Plan mehr
+erzeugen. Der explizite read-only Shadow-Audit verwendet intern weiterhin
+`compatibility_first`, damit seine unabhängige Altseite messbar bleibt. Die
+zugehörigen historischen Grammatiken werden erst bei einem solchen Audit lazy
+geladen und erhöhen weder produktive Startzeit noch Autorität. Redundante
+Gruppen-Semantik wurde auf den Semantic Compiler delegiert.
 
 Der Dialogmanager übernimmt bei allen in `ConversationContext` gespeicherten
 Dialogarten den vollständigen typisierten Payload, Besitzer, Priorität,

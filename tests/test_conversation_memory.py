@@ -102,6 +102,84 @@ def test_complete_new_command_replaces_memory_confirmation(monkeypatch, tmp_path
     assert asyncio.run(entity._runtime_data.memory.async_list()) == ()
 
 
+def test_personal_preference_can_be_corrected_and_forgotten_naturally(
+    monkeypatch, tmp_path
+):
+    entity = NluConversationEntity(ConfigEntry())
+    entity.hass = HomeAssistant()
+    store = MemoryStore(tmp_path / "memory.sqlite", enabled=True)
+    entity._runtime_data.memory = store
+    asyncio.run(store.async_remember(
+        MemoryKind.PREFERENCE,
+        {
+            "activity": "television",
+            "brightness_percent": 30,
+            "entity_id": LAMP.entity_id,
+        },
+        provenance=FactProvenance.CONFIRMED_MEMORY,
+        confirmed=True,
+        person_id="owner",
+    ))
+    monkeypatch.setattr(ha_conversation, "build_entity_snapshots", lambda *_: [LAMP])
+
+    async def turn(text: str):
+        return await entity._async_handle_message(
+            ConversationInput(
+                text=text,
+                conversation_id="memory-change",
+                context=SimpleNamespace(user_id="owner"),
+            ),
+            None,
+        )
+
+    proposed = asyncio.run(turn("Ändere meine Präferenz für die Stehlampe auf 40 Prozent"))
+    corrected = asyncio.run(turn("Ja"))
+    records = asyncio.run(store.async_list(person_id="owner"))
+    forget_proposed = asyncio.run(turn("Vergiss meine Präferenz für die Stehlampe"))
+    forgotten = asyncio.run(turn("Ja"))
+
+    assert "korrigieren" in proposed.response.speech
+    assert "korrigiert" in corrected.response.speech
+    assert records[0].content["brightness_percent"] == 40
+    assert "löschen" in forget_proposed.response.speech
+    assert "gelöscht" in forgotten.response.speech
+    assert asyncio.run(store.async_list(person_id="owner")) == ()
+
+
+def test_forget_all_personal_data_requires_confirmation(monkeypatch, tmp_path):
+    entity = NluConversationEntity(ConfigEntry())
+    entity.hass = HomeAssistant()
+    store = MemoryStore(tmp_path / "memory.sqlite", enabled=True)
+    entity._runtime_data.memory = store
+    asyncio.run(store.async_remember(
+        MemoryKind.PREFERENCE,
+        {"entity_id": LAMP.entity_id, "brightness_percent": 30},
+        provenance=FactProvenance.CONFIRMED_MEMORY,
+        confirmed=True,
+        person_id="owner",
+    ))
+    monkeypatch.setattr(ha_conversation, "build_entity_snapshots", lambda *_: [LAMP])
+
+    async def turn(text: str):
+        return await entity._async_handle_message(
+            ConversationInput(
+                text=text,
+                conversation_id="forget-person",
+                context=SimpleNamespace(user_id="owner"),
+            ),
+            None,
+        )
+
+    proposed = asyncio.run(turn("Lösche alle Daten über mich"))
+    before = asyncio.run(store.async_list(person_id="owner"))
+    confirmed = asyncio.run(turn("Ja"))
+
+    assert "wirklich" in proposed.response.speech
+    assert len(before) == 1
+    assert "kontrolliert gelöscht" in confirmed.response.speech
+    assert asyncio.run(store.async_list(person_id="owner")) == ()
+
+
 def test_comfort_request_asks_from_confirmed_preference_before_action(monkeypatch, tmp_path):
     entity = NluConversationEntity(ConfigEntry())
     entity.hass = HomeAssistant()

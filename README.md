@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.70.0**
+- Aktuelle Version: **4.71.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -42,37 +42,32 @@ Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
 
-## Was ist in Version 4.68 neu?
+## Was ist in Version 4.71 neu?
 
-Der Produktivcode enthält jetzt einen lokalen Agentenkern mit typisiertem
-Hausgraph, opt-in SQLite-Gedächtnis, zentralen Dialogaufgaben,
-Ereignisnormalisierung, klassischen Routine-/Anomaliestatistiken,
-regelbasierter Persona und einem policygebundenen Mehrschrittplaner. Neue
-datenschutz- oder risikorelevante Funktionen wie Gedächtnis,
-Routineerkennung, Ereigniskategorien und AUTO-Allowlist sind bei neuen
-Config Entries deaktiviert beziehungsweise leer.
+Direkte Befehle und Abfragen laufen jetzt ausschließlich über die
+verlustarme V7-Verständnisgrenze. Historische Geräte- und Query-Grammatiken
+werden im Produktivbetrieb weder geladen noch als Fallback verwendet; der
+explizite Shadow-Audit lädt sie nur zum read-only Vergleich. Freie
+Wortstellung, koordinierte Ziele und Orte, Referenzen, Korrekturen sowie
+Query- und Command-Folgeäußerungen werden nativ semantisch kompiliert.
 
-Zusätzlich nutzt die exakte Entity-Auflösung jetzt den gemeinsamen
-Turn-Index, Dialogkorrekturen kompensieren bereits ausgeführte reversible
-Schritte kontrolliert und gespeicherte beziehungsweise vorgeschlagene
-Aktionen werden unmittelbar vor Ausführung erneut gegen frische Zustände,
-Capabilities und Policy geprüft.
+HomeIntent beantwortet nun auch Lebenszyklusfragen zu Waschmaschine,
+Trockner und Geschirrspüler aus freigegebenen Zustands- und
+Timestamp-Entitäten. Timer können vor der gesprochenen Ablaufmeldung einen
+konfigurierten lokalen Hinweiston abspielen. Mehrdeutige Gerätenamen und
+ungeklärte bedeutungstragende Wörter bleiben strikt nicht ausführbar.
 
-Version 4.68 entfernt die früheren Geräte-Fachparser. Direkte Klima-, Medien-,
-Saugroboter-, Befeuchter-, Warmwasser-, Select-, Number-, Lamellen-, Ventil-,
-Mähroboter-, Kamera-, Notify-, Lock- und Button-Operationen werden als
-typisierte V7-Bedeutungen kompiliert. Erst Validator, Execution Policy und
-zentraler Executor dürfen daraus eine Home-Assistant-Aktion erzeugen.
+Der lokale Agentenkern wurde um robuste Routine- und Anomaliestatistik,
+weitere policygebundene HTN-Ziele, strukturierte Adapter-Evidenz,
+Gedächtniskorrektur und -löschung sowie situationsgerechte Antwortplanung
+erweitert. Dialogaufgaben verwenden typisierte Manager-Payloads. Persistierte
+oder verzögerte Aktionen werden weiterhin mit frischem Snapshot erneut durch
+Capability-Prüfung, Execution Policy und den zentralen Executor geführt.
 
-Der öffentliche `match()`-Einstieg und Orts-/Eigenschaftsabfragen arbeiten
-jetzt ebenfalls V7-first. Ein Altparser kann eine vollständige semantische
-Interpretation nicht mehr durch einen früheren Regex-Treffer verdrängen. Der
-unabhängige Legacy/V7-Shadow-Audit bleibt read-only erhalten. Der zentrale
-Dialogmanager dispatcht migrierte Dialoge über ihre typisierten Payloads.
-
-Die 5.000-Entity-Messung bleibt ohne aufgeweichtes Budget unter 100 ms p95.
-Hassfest, HACS und das stabile Home-Assistant-Containerimage wurden lokal
-gegen den Release-Stand geprüft.
+Die lokale 5.000-Entity-Messung bleibt ohne aufgeweichtes Budget unter
+100 ms p95. Hassfest, HACS und das stabile Home-Assistant-Containerimage
+werden zusätzlich in den vorhandenen CI-Jobs geprüft; die dafür benötigten
+Werkzeuge sind in der lokalen Entwicklungsumgebung nicht installiert.
 
 Ältere Änderungen stehen in den
 [GitHub-Releases](https://github.com/pquandel2-alt/ha-nlu-engine/releases).
@@ -844,12 +839,12 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/ha_nlu --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 4.70.0:
+Geprüfter Release-Stand von Version 4.71.0:
 
 ```text
-2629 passed, 12 skipped
+2893 passed, 12 skipped
 87 % Gesamt-Coverage
-77 % Coverage für conversation.py
+78 % Coverage für conversation.py
 ```
 
 Zusätzlich wurden ausgeführt:
@@ -881,9 +876,10 @@ Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die
 V7-Grenze. Sie werden als typisierte, registrierte Operation kompiliert und
 erst nach Validator, Execution Policy und zentralem Service Mapper
 materialisiert. Die früheren Fachparser `device_control.py` und
-`extended_device_control.py` sind entfernt. `match()` ist V7-first; nur noch
-nicht kompilierte Restcapabilities erreichen den Kompatibilitätsfallback. Der
-unabhängige read-only Shadow-Vergleich kann die Altseite weiterhin prüfen.
+`extended_device_control.py` sind entfernt. `match()` besitzt keinen
+produktiven Kompatibilitätsfallback mehr. Der unabhängige read-only
+Shadow-Vergleich kann die historische Altseite weiterhin prüfen; deren
+Grammatiken werden ausschließlich für diesen Audit lazy geladen.
 
 Zusätzlich erzeugt die Test-Suite weiterhin 1.024 intensive Lichtparaphrasen.
 Die neue domänenübergreifende Matrix kombiniert außerdem 2.688 fachlich
@@ -900,7 +896,7 @@ Für echte Zielhardware lässt sich ein JSON-Bericht samt P95-Budget erzeugen:
 
 ```bash
 python scripts/benchmark_v6_baseline.py \
-  --scales 100,500,1000 --iterations 50 --warmup 10 \
+  --pipeline understand --scales 5000 --iterations 50 --warmup 10 \
   --json --max-p95-ms 100
 ```
 

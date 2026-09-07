@@ -55,10 +55,13 @@ def resolve_location_name(
         # An exact floor and exact area with the same spoken name denotes the
         # broader floor scope. This is the useful and least surprising
         # interpretation for queries and group commands.
+        assert floor.floor is not None
         return None, floor.floor.floor_id
     if floor_score is not None and (area_score is None or floor_score > area_score):
+        assert floor.floor is not None
         return None, floor.floor.floor_id
     if area_score is not None and (floor_score is None or area_score > floor_score):
+        assert area.area is not None
         return area.area.area_id, None
     return None
 
@@ -97,21 +100,6 @@ def resolve_semantic_location(
     )
     if whole_home is not None:
         return whole_home.group(0), None, None
-    level = next(
-        (
-            match for match in _LEVEL_CUE_RE.finditer(text)
-            if not _inside_entity_name(text, match.start(), match.end(), entities)
-        ),
-        None,
-    )
-    if level is not None:
-        resolved_level = resolve_floor_by_level_keyword(
-            "up" if level.group(0).casefold() == "oben" else "down", entities
-        )
-        if resolved_level.status is not FloorResolveStatus.OK:
-            return None
-        return level.group(0), None, resolved_level.floor_id
-
     names = (
         {
             name
@@ -131,6 +119,29 @@ def resolve_semantic_location(
             if name
         }
     )
+    explicit_named_location = any(
+        re.search(
+            rf"\b(?:im|in\s+der|in\s+dem|am|beim)\s+{re.escape(name)}\b",
+            text,
+            re.I,
+        )
+        for name in names
+    )
+    level = next(
+        (
+            match for match in _LEVEL_CUE_RE.finditer(text)
+            if not _inside_entity_name(text, match.start(), match.end(), entities)
+        ),
+        None,
+    )
+    if level is not None and not explicit_named_location:
+        resolved_level = resolve_floor_by_level_keyword(
+            "up" if level.group(0).casefold() == "oben" else "down", entities
+        )
+        if resolved_level.status is not FloorResolveStatus.OK:
+            return None
+        return level.group(0), None, resolved_level.floor_id
+
     # HA registry names may contain orthographic word boundaries that spoken
     # compounds naturally omit ("Pole Raum" -> "Poleraum").  Treat only the
     # whitespace-free form of the *same registered location* as equivalent;
@@ -156,10 +167,10 @@ def resolve_semantic_location(
     longest = len(mentioned[0][0])
     selected = [item for item in mentioned if len(item[0]) == longest]
     resolved = {
-        resolve_location_name(canonical, entities, world_model)
+        item
         for _, canonical in selected
+        if (item := resolve_location_name(canonical, entities, world_model)) is not None
     }
-    resolved.discard(None)
     if len(resolved) != 1:
         return None
     area_id, floor_id = resolved.pop()

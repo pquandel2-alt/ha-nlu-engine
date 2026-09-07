@@ -16,6 +16,10 @@ def interpret_goal(document: LanguageDocument) -> Goal | None:
         return Goal(GoalKind.PREPARE_MOVIE)
     if re.search(r"\b(?:bereite|schalte)\b.*\babwesenheit", text):
         return Goal(GoalKind.PREPARE_AWAY)
+    if re.search(r"\b(?:sichere|verschliesse)\b.*\b(?:haus|wohnung|tueren|fenster)\b", text):
+        return Goal(GoalKind.SECURE_HOME)
+    if re.search(r"\b(?:pausiere|stoppe|mach)\b.*\b(?:alle\s+)?(?:medien|wiedergaben|musik)\b", text):
+        return Goal(GoalKind.QUIET_MEDIA)
     if re.search(r"\bunbesetzte\b.*\b(?:bereiche|räume)\b.*\benergiespar", text):
         return Goal(GoalKind.SAVE_UNOCCUPIED)
     if re.search(r"\buntersuch(?:e|en)\b.*\b(?:zustand|ursache)\b", text):

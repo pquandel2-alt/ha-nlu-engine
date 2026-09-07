@@ -234,6 +234,60 @@ class DialogManager:
             payload=payload,
         )
 
+    def synchronize_pending_payload(
+        self,
+        conversation_id: str,
+        kind_name: str | None,
+        payload: object | None,
+    ) -> DialogTask | None:
+        """Mirror one historical typed payload at the state-store boundary.
+
+        This is the only compatibility adapter for old ``pending_*`` fields.
+        Priority, ownership, selection and expiry immediately become manager
+        state; conversation routing no longer has to wait one turn to see an
+        updated payload.
+        """
+        if kind_name is None or payload is None:
+            return self.synchronize_context_task(conversation_id, kind=None)
+        if kind_name == "CLARIFICATION":
+            kind, priority = DialogTaskKind.ENTITY_SELECTION, DialogPriority.SELECTION
+        elif kind_name == "SERVICE_CONFIRMATION":
+            kind, priority = DialogTaskKind.SAFETY_CONFIRMATION, DialogPriority.SAFETY
+        elif kind_name in {
+            "AUTOMATION_CONFIRMATION",
+            "AUTOMATION_DELETION",
+            "CALENDAR_MUTATION",
+            "AUTOMATION_MANAGEMENT",
+            "ALIAS_LEARNING",
+        }:
+            kind, priority = DialogTaskKind.SAFETY_CONFIRMATION, DialogPriority.CONFIRMATION
+        elif kind_name in {
+            "AUTOMATION_DRAFT",
+            "AUTOMATION_ACTION_EDIT",
+            "AUTOMATION_STRUCTURE_EDIT",
+            "AUTOMATION_WIZARD",
+        }:
+            kind, priority = DialogTaskKind.AUTOMATION, DialogPriority.FOLLOWUP
+        else:
+            kind, priority = DialogTaskKind.MISSING_SLOT, DialogPriority.FOLLOWUP
+        raw_candidates = getattr(payload, "candidates", ())
+        candidates = tuple(
+            value
+            for item in raw_candidates
+            if isinstance((value := getattr(item, "entity_id", None)), str)
+        )
+        owner = getattr(payload, "requested_by_user_id", None)
+        return self.synchronize_context_task(
+            conversation_id,
+            kind=kind,
+            priority=priority,
+            slots={"context_kind": kind_name},
+            candidates=candidates,
+            reason="Ein bestehender Dialog benötigt eine eindeutige Fortsetzung.",
+            requested_by_user_id=owner if isinstance(owner, str) else None,
+            payload=payload,
+        )
+
 
 def _empty_mapping() -> dict[str, object]:
     return {}

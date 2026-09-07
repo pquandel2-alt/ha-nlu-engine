@@ -38,3 +38,15 @@ class HaNluRuntimeData:
     )
     adapter_runtime: Any | None = None
     native_timer: Any | None = None
+
+    def __post_init__(self) -> None:
+        self.context_store.bind_dialog_listener(self._synchronize_dialog)
+
+    def _synchronize_dialog(self, conversation_id: str, pending: object | None) -> None:
+        kind = getattr(pending, "kind", None)
+        payload = getattr(pending, "payload", None)
+        self.dialog_manager.synchronize_pending_payload(
+            conversation_id,
+            getattr(kind, "name", None),
+            payload,
+        )

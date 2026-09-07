@@ -12,7 +12,11 @@ import pytest
 
 _ha_stub.install()
 
-from ha_nlu.const import CONF_AGENT_MEDIA_PLAYERS, CONF_AGENT_TTS_ENTITY
+from ha_nlu.const import (
+    CONF_AGENT_MEDIA_PLAYERS,
+    CONF_AGENT_TTS_ENTITY,
+    CONF_TIMER_CHIME_MEDIA_ID,
+)
 from ha_nlu.native_timer import NativeTimerRuntime, NativeTimerUnavailableError
 from ha_nlu.productivity import TimerOperation, TimerRequest
 from homeassistant.components.conversation import ConversationInput
@@ -78,6 +82,37 @@ def test_finished_fallback_speaks_timer_information_once():
         },
         blocking=True,
     )
+
+
+def test_finished_fallback_plays_configured_local_chime_before_information():
+    runtime, hass = _runtime({
+        CONF_AGENT_TTS_ENTITY: "tts.piper",
+        CONF_AGENT_MEDIA_PLAYERS: ["media_player.assist"],
+        CONF_TIMER_CHIME_MEDIA_ID: "media-source://media_source/local/timer.wav",
+    })
+
+    asyncio.run(runtime._async_announce("Nudeln: Der Timer ist abgelaufen."))
+
+    assert hass.services.async_call.await_args_list[0].args[:2] == (
+        "media_player", "play_media"
+    )
+    assert hass.services.async_call.await_args_list[0].args[2]["media_content_id"] == (
+        "media-source://media_source/local/timer.wav"
+    )
+    assert hass.services.async_call.await_args_list[1].args[:2] == ("tts", "speak")
+
+
+def test_timer_chime_rejects_arbitrary_remote_url_but_still_speaks():
+    runtime, hass = _runtime({
+        CONF_AGENT_TTS_ENTITY: "tts.piper",
+        CONF_AGENT_MEDIA_PLAYERS: ["media_player.assist"],
+        CONF_TIMER_CHIME_MEDIA_ID: "https://example.invalid/chime.mp3",
+    })
+
+    asyncio.run(runtime._async_announce("Timer abgelaufen."))
+
+    hass.services.async_call.assert_awaited_once()
+    assert hass.services.async_call.await_args.args[:2] == ("tts", "speak")
 
 
 def test_silent_fallback_is_rejected(monkeypatch):

@@ -91,12 +91,22 @@ AUTOMATION_CUE_ENTRIES = (
 )
 
 PROPERTY_ENTRIES = (
-    CatalogueEntry("temperature", (r"temperatur", r"wärme", r"warm", r"kalt", r"grad")),
+    CatalogueEntry(
+        "temperature",
+        (r"temperatur", r"wärme", r"warm", r"kalt", r"wärm\w*", r"waerm\w*", r"kält\w*", r"kaelt\w*", r"grad"),
+    ),
     CatalogueEntry("humidity", (r"luftfeuchtigkeit", r"feuchtigkeit", r"feucht")),
     CatalogueEntry("battery", (r"batteriestand", r"batterie", r"batterien")),
-    CatalogueEntry("power", (r"leistung",)),
-    CatalogueEntry("energy", (r"stromverbrauch", r"energieverbrauch")),
-    CatalogueEntry("brightness", (r"helligkeit", r"hell")),
+    CatalogueEntry("power", (r"leistung", r"strom(?:aufnahme)?")),
+    CatalogueEntry(
+        "energy", (r"stromverbrauch", r"energieverbrauch", r"energie")
+    ),
+    CatalogueEntry("brightness", (r"helligkeit", r"hell", r"heller", r"dunkler")),
+    CatalogueEntry("speed", (r"stufe", r"geschwindigkeit", r"schneller", r"langsamer")),
+    CatalogueEntry(
+        "color",
+        (r"rot", r"grün", r"blau", r"gelb", r"orange", r"lila", r"violett", r"weiß", r"pink", r"rosa", r"türkis", r"cyan", r"warmweiß", r"kaltweiß"),
+    ),
     CatalogueEntry("position", (r"position", r"höhe", r"oeffnung", r"öffnung")),
     CatalogueEntry("volume", (r"lautstärke", r"lautstaerke", r"laut", r"leise")),
 )

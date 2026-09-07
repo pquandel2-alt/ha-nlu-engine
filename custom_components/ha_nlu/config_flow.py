@@ -54,6 +54,7 @@ from .const import (
     CONF_AGENT_MEDIA_PLAYERS,
     CONF_AGENT_NOTIFY_TARGETS,
     CONF_AGENT_TTS_ENTITY,
+    CONF_TIMER_CHIME_MEDIA_ID,
     CONF_AGENT_AUTO_ENABLED,
     CONF_AGENT_AUTO_ENTITY_IDS,
     CONF_AGENT_EVENT_CATEGORIES,
@@ -288,6 +289,10 @@ class HaNluOptionsFlow(OptionsFlow):
                     ): EntitySelector(
                         EntitySelectorConfig(domain="media_player", multiple=True)
                     ),
+                    vol.Optional(
+                        CONF_TIMER_CHIME_MEDIA_ID,
+                        default=defaults.get(CONF_TIMER_CHIME_MEDIA_ID, ""),
+                    ): TextSelector(TextSelectorConfig()),
                     vol.Optional(
                         CONF_AGENT_COOLDOWN_SECONDS,
                         default=defaults.get(CONF_AGENT_COOLDOWN_SECONDS, 1800),

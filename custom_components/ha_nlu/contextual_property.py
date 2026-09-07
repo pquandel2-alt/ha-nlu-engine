@@ -10,22 +10,53 @@ from __future__ import annotations
 
 import re
 
-from .entities import EntitySnapshot, build_entity_index
+from .entities import EntitySnapshot
 from .nlu.context import ConversationContext
 from .nlu.frame import AreaReference, SemanticFrame, TargetReference
 from .nlu.normalize import normalize
 from .nlu.parse_outcome import ParseFailureReason, UnderstandingFeedback
-from .nlu.parser import ClarificationRequest, ParseContext, ParseResult
+from .nlu.parser import ClarificationRequest, ParseResult
 from .nlu.primitives import SemanticProperty
 
 
 class ContextualPropertyResolver:
     """Resolve omitted actuator targets using the previous semantic focus."""
 
-    def __init__(self, climate_parser, percentage_parser, fan_parser) -> None:
-        self._climate_parser = climate_parser
-        self._percentage_parser = percentage_parser
-        self._fan_parser = fan_parser
+    _NUMBERS = {
+        "null": 0,
+        "ein": 1,
+        "eine": 1,
+        "einen": 1,
+        "eins": 1,
+        "zwei": 2,
+        "drei": 3,
+        "vier": 4,
+        "fünf": 5,
+        "sechs": 6,
+        "sieben": 7,
+        "acht": 8,
+        "neun": 9,
+        "zehn": 10,
+        "zwanzig": 20,
+        "dreißig": 30,
+        "vierzig": 40,
+        "fünfzig": 50,
+        "sechzig": 60,
+        "siebzig": 70,
+        "achtzig": 80,
+        "neunzig": 90,
+        "hundert": 100,
+    }
+
+    @classmethod
+    def _number(cls, raw: str) -> float | None:
+        normalized = raw.casefold().strip()
+        if normalized in cls._NUMBERS:
+            return float(cls._NUMBERS[normalized])
+        try:
+            return float(normalized.replace(",", "."))
+        except ValueError:
+            return None
 
     def resolve(
         self,
@@ -175,25 +206,7 @@ class ContextualPropertyResolver:
             raw_value = next(value for value in absolute.groups() if value is not None)
         else:
             raw_amount = relative.group("amount")
-            probe = candidates[0]
-            parsed_amount = self._climate_parser.parse(
-                f"stelle {probe.friendly_name} auf {raw_amount} Grad",
-                ParseContext(entities=[probe], index=build_entity_index([probe])),
-            )
-            # The climate grammar accepts only 5..30, while a relative delta
-            # commonly is 1..4. Parse number words by using 10 + amount.
-            if parsed_amount is None:
-                parsed_amount = self._climate_parser.parse(
-                    f"stelle {probe.friendly_name} auf zehn Grad",
-                    ParseContext(entities=[probe], index=build_entity_index([probe])),
-                )
-                try:
-                    amount = float(raw_amount.replace(",", "."))
-                except ValueError:
-                    word_amounts = {"ein": 1, "eine": 1, "einen": 1, "zwei": 2, "drei": 3, "vier": 4, "fünf": 5}
-                    amount = word_amounts.get(raw_amount.casefold(), 0)
-            else:
-                amount = float(parsed_amount.frame.parameters["temperature"])
+            amount = self._number(raw_amount) or 0
             current = candidates[0].attributes.get("temperature")
             if current is None or amount <= 0:
                 return UnderstandingFeedback(
@@ -207,17 +220,12 @@ class ContextualPropertyResolver:
             # mathematically integral target.
             raw_value = f"{target:g}" if isinstance(target, float) else str(target)
 
-        probe = candidates[0]
-        parsed = self._climate_parser.parse(
-            f"stelle {probe.friendly_name} auf {raw_value} Grad",
-            ParseContext(entities=[probe], index=build_entity_index([probe])),
-        )
-        if parsed is None:
+        temperature = self._number(raw_value)
+        if temperature is None or not 5 <= temperature <= 30:
             return UnderstandingFeedback(
                 ParseFailureReason.INVALID_VALUE,
                 "Die gewünschte Temperatur muss zwischen 5 und 30 Grad liegen.",
             )
-        temperature = parsed.frame.parameters["temperature"]
         return self._setpoint_result(
             source, "HassClimateSetTemperature", "Temperatur", "climate",
             {"temperature": temperature}, candidates,
@@ -262,19 +270,15 @@ class ContextualPropertyResolver:
                 ParseFailureReason.UNSUPPORTED_CAPABILITY,
                 f"Dort ist kein steuerbares {label} für Assist freigegeben.",
             )
-        probe = candidates[0]
-        parsed = self._percentage_parser.parse(
-            f"stelle {probe.friendly_name} auf {raw} Prozent",
-            ParseContext(entities=[probe], index=build_entity_index([probe])),
-        )
-        if parsed is None:
+        percent = self._number(raw)
+        if percent is None or not percent.is_integer() or not 0 <= percent <= 100:
             return UnderstandingFeedback(
                 ParseFailureReason.INVALID_VALUE,
                 "Der Prozentwert muss zwischen 0 und 100 liegen.",
             )
         return self._setpoint_result(
             source, "HassSetPercentage", label, domain,
-            {"percent": parsed.frame.parameters["percent"]}, candidates,
+            {"percent": int(percent)}, candidates,
         )
 
     def _fan_level(self, normalized, source, entities, context):
@@ -297,19 +301,15 @@ class ContextualPropertyResolver:
                 ParseFailureReason.UNSUPPORTED_CAPABILITY,
                 "Dort ist kein Ventilator für Assist freigegeben.",
             )
-        probe = candidates[0]
-        parsed = self._fan_parser.parse(
-            f"stelle {probe.friendly_name} auf Stufe {raw}",
-            ParseContext(entities=[probe], index=build_entity_index([probe])),
-        )
-        if parsed is None:
+        level = self._number(raw)
+        if level is None or not level.is_integer() or not 1 <= level <= 10:
             return UnderstandingFeedback(
                 ParseFailureReason.INVALID_VALUE,
                 "Die Ventilatorstufe muss zwischen 1 und 10 liegen.",
             )
         return self._setpoint_result(
             source, "HassFanSetSpeed", "Ventilator", "fan",
-            {"level": parsed.frame.parameters["level"]}, candidates,
+            {"level": int(level)}, candidates,
         )
 
     @staticmethod

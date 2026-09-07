@@ -87,6 +87,7 @@ jobs:
           custom_components/ha_nlu/query_target.py
           custom_components/ha_nlu/capability_audit.py
           custom_components/ha_nlu/household_query.py
+          custom_components/ha_nlu/appliance_lifecycle.py
           custom_components/ha_nlu/automation_simulation.py
           custom_components/ha_nlu/nlu/automation_operations.py
           custom_components/ha_nlu/alias_learning.py
@@ -101,6 +102,7 @@ jobs:
           custom_components/ha_nlu/nlu/semantic_catalog.py
           custom_components/ha_nlu/nlu/semantic_compiler.py
           custom_components/ha_nlu/nlu/semantic_interpreter.py
+          custom_components/ha_nlu/nlu/query_followup_compiler.py
           custom_components/ha_nlu/name_similarity.py
           custom_components/ha_nlu/nlu/entity_clarification.py
           custom_components/ha_nlu/house_graph.py

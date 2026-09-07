@@ -19,6 +19,7 @@ from ha_nlu.nlu.context import (
     PendingDialogKind,
 )
 from ha_nlu.nlu.automation_model import AutomationModel, TriggerModel, TriggerType
+from ha_nlu.dialog_manager import DialogManager, DialogTaskKind
 
 LIGHT_WOHNZIMMER = EntitySnapshot("light.wohnzimmer", "Wohnzimmerlicht", "light", "on")
 LIGHT_KUECHE = EntitySnapshot("light.kueche", "Küchenlicht", "light", "on")
@@ -73,6 +74,35 @@ def test_store_expires_entries_older_than_ttl():
 
     fake_time[0] = 31.0
     assert store.get("conv-1") is None
+
+
+def test_store_mutations_immediately_update_central_dialog_manager():
+    fake_time = [0.0]
+    store = ConversationContextStore(ttl_seconds=30.0, clock=lambda: fake_time[0])
+    manager = DialogManager()
+    store.bind_dialog_listener(
+        lambda conversation_id, pending: manager.synchronize_pending_payload(
+            conversation_id,
+            pending.kind.name if pending is not None else None,
+            pending.payload if pending is not None else None,
+        )
+    )
+    context = ConversationContext(
+        last_command=None,
+        last_entities=(),
+        last_area=None,
+        pending_clarification=_clarification(),
+    )
+
+    store.set("central", context)
+    active = manager.active("central")
+
+    assert active is not None
+    assert active.kind is DialogTaskKind.ENTITY_SELECTION
+    assert active.payload is context.pending_clarification
+    fake_time[0] = 31.0
+    assert store.get("central") is None
+    assert manager.active("central") is None
 
 
 def test_store_keeps_separate_conversation_ids_independent():

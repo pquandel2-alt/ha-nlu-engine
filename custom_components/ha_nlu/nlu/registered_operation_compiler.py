@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-from ..entities import EntitySnapshot, normalize_for_compare
+from ..entities import EntityIndex, EntitySnapshot, normalize_for_compare
 from ..entity_scope import resolve_entity_scope
 from ..service_call import REGISTERED_OPERATION_INTENT
 from .entity_resolution import ResolutionStatus, resolve_mentioned_target
@@ -42,9 +42,14 @@ def has_registered_operation_cue(text: str) -> bool:
 
 
 def _entity(
-    text: str, entities: list[EntitySnapshot], domains: Iterable[str]
+    text: str,
+    entities: list[EntitySnapshot],
+    domains: Iterable[str],
+    index: EntityIndex | None,
 ) -> EntitySnapshot | None:
-    resolution = resolve_mentioned_target(text, entities, frozenset(domains))
+    resolution = resolve_mentioned_target(
+        text, entities, frozenset(domains), index=index
+    )
     return (
         resolution.entity
         if resolution.status is ResolutionStatus.RESOLVED
@@ -128,7 +133,10 @@ def _multi_result(
 
 
 def compile_registered_operation(
-    text: str, entities: list[EntitySnapshot]
+    text: str,
+    entities: list[EntitySnapshot],
+    *,
+    index: EntityIndex | None = None,
 ) -> ParseResult | None:
     """Return one fully typed, allow-listed extended operation."""
     if not has_registered_operation_cue(text):
@@ -153,7 +161,7 @@ def compile_registered_operation(
                     text, scope.entities, "humidifier", "set_humidity", {"humidity": value}
                 )
 
-    climate = _entity(text, entities, {"climate"})
+    climate = _entity(text, entities, {"climate"}, index)
     if climate is not None:
         mode_words = {
             "heizbetrieb": "heat", "kühlbetrieb": "cool", "kuehlbetrieb": "cool",
@@ -172,8 +180,13 @@ def compile_registered_operation(
         ):
             if (choice := _option(text, climate.attributes.get(attribute))) is not None and _SET_CUE.search(text):
                 return _result(text, climate, "climate", service, {key: choice})
+        # A named climate entity is authoritative for this utterance.  If no
+        # allow-listed mode/preset matched, the standard semantic compiler
+        # may still handle temperature/on/off, but scanning every unrelated
+        # registered-operation domain cannot produce a sound alternative.
+        return None
 
-    player = _entity(text, entities, {"media_player"})
+    player = _entity(text, entities, {"media_player"}, index)
     if player is not None:
         unmute = re.search(
             r"\b(?:unmute|nicht\s+mehr\s+stumm|wieder\s+laut|laut\s+schalt\w*)\b|"
@@ -198,7 +211,7 @@ def compile_registered_operation(
             if (source := _option(text, player.attributes.get("source_list"))) is not None:
                 return _result(text, player, "media_player", "select_source", {"source": source})
 
-    vacuum = _entity(text, entities, {"vacuum"})
+    vacuum = _entity(text, entities, {"vacuum"}, index)
     if vacuum is not None:
         if re.search(r"\b(?:piep\w*|suchsignal)\b", text, re.I):
             return _result(
@@ -215,7 +228,7 @@ def compile_registered_operation(
         if (speed := _option(text, vacuum.attributes.get("fan_speed_list"))) is not None and _SET_CUE.search(text):
             return _result(text, vacuum, "vacuum", "set_fan_speed", {"fan_speed": speed})
 
-    fan = _entity(text, entities, {"fan"})
+    fan = _entity(text, entities, {"fan"}, index)
     if fan is not None:
         if (preset := _option(text, fan.attributes.get("preset_modes"))) is not None and re.search(
             r"\b(?:preset|modus|stell\w*|wähl\w*|waehl\w*)\b", text, re.I
@@ -232,7 +245,7 @@ def compile_registered_operation(
             forward = normalize_for_compare(direction.group(0)) in {"vorwaerts", "forward"}
             return _result(text, fan, "fan", "set_direction", {"direction": "forward" if forward else "reverse"})
 
-    humidifier = _entity(text, entities, {"humidifier"})
+    humidifier = _entity(text, entities, {"humidifier"}, index)
     if humidifier is not None:
         percent = _PERCENT.search(text)
         if percent is not None and re.search(r"\b(?:luftfeuchtigkeit|feuchtigkeit)\b", text, re.I):
@@ -243,7 +256,7 @@ def compile_registered_operation(
         if (mode := _option(text, humidifier.attributes.get("available_modes"))) is not None and _SET_CUE.search(text):
             return _result(text, humidifier, "humidifier", "set_mode", {"mode": mode})
 
-    heater = _entity(text, entities, {"water_heater"})
+    heater = _entity(text, entities, {"water_heater"}, index)
     if heater is not None:
         number = _NUMBER.search(text)
         if number is not None and re.search(r"\b(?:grad|temperatur|warmwasser)\b", text, re.I):
@@ -254,19 +267,19 @@ def compile_registered_operation(
         if (mode := _option(text, heater.attributes.get("operation_list"))) is not None and _SET_CUE.search(text):
             return _result(text, heater, "water_heater", "set_operation_mode", {"operation_mode": mode})
 
-    numeric = _entity(text, entities, {"number", "input_number"})
+    numeric = _entity(text, entities, {"number", "input_number"}, index)
     if numeric is not None and (number := _NUMBER.search(text)) is not None and _SET_CUE.search(text):
         value = float(number.group(1).replace(",", "."))
         if not _bounded(numeric, value, "min", "max", (float("-inf"), float("inf"))):
             return None
         return _result(text, numeric, numeric.domain, "set_value", {"value": value})
 
-    select = _entity(text, entities, {"select"})
+    select = _entity(text, entities, {"select"}, index)
     if select is not None and _SET_CUE.search(text):
         if (option := _option(text, select.attributes.get("options"))) is not None:
             return _result(text, select, "select", "select_option", {"option": option})
 
-    cover = _entity(text, entities, {"cover"})
+    cover = _entity(text, entities, {"cover"}, index)
     if cover is not None and (percent := _PERCENT.search(text)) is not None and re.search(
         r"\b(?:lamellen|neigung|winkel|kippposition)\b", text, re.I
     ):
@@ -278,7 +291,7 @@ def compile_registered_operation(
             {"tilt_position": int(percent.group(1))},
         )
 
-    valve = _entity(text, entities, {"valve"})
+    valve = _entity(text, entities, {"valve"}, index)
     if valve is not None:
         percent = _PERCENT.search(text)
         if percent is not None and re.search(r"\b(?:position|stell\w*|setz\w*|öffn\w*|oeffn\w*)\b", text, re.I):
@@ -295,7 +308,7 @@ def compile_registered_operation(
                 return None
             return _result(text, valve, "valve", "open_valve" if opening else "close_valve", action=SemanticAction.OPEN if opening else SemanticAction.CLOSE)
 
-    mower = _entity(text, entities, {"lawn_mower"})
+    mower = _entity(text, entities, {"lawn_mower"}, index)
     if mower is not None:
         operations = [
             (service, feature, action)
@@ -315,11 +328,11 @@ def compile_registered_operation(
             if supported & feature:
                 return _result(text, mower, "lawn_mower", service, action=action)
 
-    camera = _entity(text, entities, {"camera"})
+    camera = _entity(text, entities, {"camera"}, index)
     if camera is not None and player is not None and re.search(r"\b(?:zeig\w*|stream\w*|übertrag\w*|uebertrag\w*)\b", text, re.I):
         return _result(text, camera, "camera", "play_stream", {"media_player": player.entity_id}, action=SemanticAction.START)
 
-    notify = _entity(text, entities, {"notify"})
+    notify = _entity(text, entities, {"notify"}, index)
     if notify is not None and re.search(r"\b(?:send\w*|schick\w*)\b", text, re.I):
         message = re.search(r"\b(?:nachricht|meldung)\s+(.+)$", text, re.I)
         if message is not None and (body := message.group(1).strip(" .!?")):

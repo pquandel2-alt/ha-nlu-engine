@@ -407,6 +407,16 @@ class ConversationContextStore:
         self._automation_confirmation_ttl_seconds = automation_confirmation_ttl_seconds
         self._clock = clock
         self._entries: dict[str, tuple[float, float, ConversationContext]] = {}
+        self._dialog_listener: Callable[[str, ActivePendingDialog | None], None] | None = None
+
+    def bind_dialog_listener(
+        self, listener: Callable[[str, ActivePendingDialog | None], None] | None
+    ) -> None:
+        """Bind the central dialog owner to every pending-state mutation."""
+        self._dialog_listener = listener
+        if listener is not None:
+            for conversation_id, (_, _, context) in self._entries.items():
+                listener(conversation_id, active_pending_dialog(context))
 
     def get(self, conversation_id: str) -> ConversationContext | None:
         entry = self._entries.get(conversation_id)
@@ -415,6 +425,8 @@ class ConversationContextStore:
         stored_at, ttl_seconds, context = entry
         if self._clock() - stored_at > ttl_seconds:
             del self._entries[conversation_id]
+            if self._dialog_listener is not None:
+                self._dialog_listener(conversation_id, None)
             return None
         return context
 
@@ -437,6 +449,10 @@ class ConversationContextStore:
             else self._ttl_seconds
         )
         self._entries[conversation_id] = (self._clock(), ttl_seconds, context)
+        if self._dialog_listener is not None:
+            self._dialog_listener(conversation_id, active_pending_dialog(context))
 
     def clear(self, conversation_id: str) -> None:
         self._entries.pop(conversation_id, None)
+        if self._dialog_listener is not None:
+            self._dialog_listener(conversation_id, None)

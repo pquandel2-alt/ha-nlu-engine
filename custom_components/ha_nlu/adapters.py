@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
-from typing import Awaitable, Callable, Iterable, Mapping, Protocol, cast
+from typing import Awaitable, Callable, Iterable, Mapping, Protocol, Sequence, cast
 
 from .const import (
     CONF_FRIGATE_ENABLED,
@@ -102,12 +102,29 @@ class FrigateMetadataAdapter:
             if isinstance(started, (int, float))
             else datetime.now(timezone.utc)
         )
+        content: dict[str, object] = {
+            "camera_id": camera[:200],
+            "confidence": max(0.0, min(1.0, confidence)),
+        }
+        zones = values.get("entered_zones", values.get("current_zones"))
+        if isinstance(zones, (list, tuple)):
+            zone_values = cast(Sequence[object], zones)
+            content["zones"] = tuple(
+                item[:100] for item in zone_values[:20]
+                if isinstance(item, str) and item
+            )
+        sub_label = values.get("sub_label")
+        if isinstance(sub_label, str) and sub_label.strip():
+            content["sub_label"] = sub_label.strip()[:100]
+        event_type = payload.get("type")
+        if isinstance(event_type, str) and event_type in {"new", "update", "end"}:
+            content["event_type"] = event_type
         return AdapterEvidence(
             f"frigate:{event_id}",
             "frigate_metadata",
             label.casefold(),
             observed_at,
-            {"camera_id": camera, "confidence": max(0.0, min(1.0, confidence))},
+            content,
             EvidenceQuality.ESTIMATE,
         )
 
@@ -238,8 +255,9 @@ class HomeAssistantSourceAdapter:
             raise ValueError("Nicht freigegebene Home-Assistant-Quelle")
         if observed_at.tzinfo is None:
             raise ValueError("Quellzeit benötigt eine Zeitzone")
+        observation_id = int(observed_at.timestamp() * 1_000_000)
         return AdapterEvidence(
-            f"ha:{source}:{stable_id}",
+            f"ha:{source}:{stable_id}:{observation_id}",
             source,
             "structured_record",
             observed_at,
@@ -259,6 +277,14 @@ class StructuredAdapterRuntime:
         "todo": "todo",
         "timer": "timer",
     }
+    _SOURCE_ATTRIBUTES = {
+        "calendar": ("message", "start_time", "end_time", "location", "all_day"),
+        "weather": ("temperature", "humidity", "pressure", "wind_speed"),
+        "presence": ("source", "latitude", "longitude", "gps_accuracy"),
+        "todo": (),
+        "timer": ("remaining", "duration", "finishes_at"),
+        "energy": ("last_reset",),
+    }
 
     def __init__(
         self,
@@ -271,6 +297,16 @@ class StructuredAdapterRuntime:
         self._sink = sink
         self._frigate = FrigateMetadataAdapter()
         self._ha_source = HomeAssistantSourceAdapter()
+        self._seen_evidence: set[str] = set()
+
+    def _store(self, evidence: AdapterEvidence) -> None:
+        """Deduplicate one adapter record before it reaches bounded storage."""
+        if evidence.evidence_id in self._seen_evidence:
+            return
+        self._seen_evidence.add(evidence.evidence_id)
+        if len(self._seen_evidence) > 4096:
+            self._seen_evidence = {evidence.evidence_id}
+        self._sink(evidence)
 
     async def async_start(self) -> Callable[[], None]:
         unsubscribers: list[Callable[[], None]] = []
@@ -302,20 +338,30 @@ class StructuredAdapterRuntime:
             return
         source = self._DOMAIN_SOURCES.get(entity_id.partition(".")[0])
         state = getattr(new_state, "state", None)
+        attributes = getattr(new_state, "attributes", {})
+        attribute_values: Mapping[str, object] = (
+            cast(Mapping[str, object], attributes)
+            if isinstance(attributes, Mapping)
+            else cast(Mapping[str, object], {})
+        )
+        if (
+            source is None
+            and entity_id.startswith("sensor.")
+            and attribute_values.get("device_class") in {"energy", "power"}
+        ):
+            source = "energy"
         if source is None or not isinstance(state, str):
             return
-        attributes = getattr(new_state, "attributes", {})
         content: dict[str, object] = {"state": state}
-        if source in {"weather", "timer"} and isinstance(attributes, Mapping):
-            attribute_values = cast(Mapping[str, object], attributes)
-            for key in ("temperature", "humidity", "remaining", "finishes_at"):
+        if attribute_values:
+            for key in self._SOURCE_ATTRIBUTES[source]:
                 value = attribute_values.get(key)
                 if isinstance(value, (str, int, float, bool)):
                     content[key] = value
         observed_at = event.time_fired
         if observed_at.tzinfo is None:
             observed_at = datetime.now(timezone.utc)
-        self._sink(
+        self._store(
             self._ha_source.wrap(
                 source, entity_id, content, observed_at=observed_at
             )
@@ -340,7 +386,7 @@ class StructuredAdapterRuntime:
     def _store_frigate(self, payload: Mapping[str, object]) -> None:
         evidence = self._frigate.normalize(payload)
         if evidence is not None:
-            self._sink(evidence)
+            self._store(evidence)
 
     async def _async_subscribe_mqtt(self) -> Callable[[], None] | None:
         try:

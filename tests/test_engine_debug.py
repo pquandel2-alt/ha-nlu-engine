@@ -24,7 +24,7 @@ def test_debug_success_action_populates_every_field(engine, entities):
     trace = engine.debug("Mach Treppenlicht an", entities)
     assert trace.input == "Mach Treppenlicht an"
     assert trace.normalized == "Mach Treppenlicht an"
-    assert trace.parser == "SingleTargetParser"
+    assert trace.parser == "SemanticInterpreter"
     assert trace.intent == "HassTurnOn"
     assert trace.target == "Treppenlicht"
     assert trace.area is None
@@ -63,7 +63,7 @@ def test_debug_no_template_match_is_mostly_empty(engine, entities):
 
 def test_debug_validation_rejection_has_no_service_call(engine):
     trace = engine.debug("stelle die Einfache Heizung auf 21 Grad", CLIMATE_ENTITIES)
-    assert trace.intent is not None
+    assert trace.parser == "SemanticInterpreter"
     assert trace.validation == "UNSUPPORTED_CAPABILITY"
     assert trace.service is None
     assert trace.data is None

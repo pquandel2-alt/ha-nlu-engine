@@ -8,7 +8,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .agent_delivery import AgentDelivery
-from .const import CONF_AGENT_MEDIA_PLAYERS, CONF_AGENT_TTS_ENTITY, DOMAIN
+from .const import (
+    CONF_AGENT_MEDIA_PLAYERS,
+    CONF_AGENT_TTS_ENTITY,
+    CONF_TIMER_CHIME_MEDIA_ID,
+    DOMAIN,
+)
 from .productivity import TimerOperation, TimerRequest, format_duration
 
 _LOGGER = logging.getLogger(__name__)
@@ -72,10 +77,45 @@ class NativeTimerRuntime:
         )
 
     async def _async_announce(self, message: str) -> None:
+        await self._async_play_chime()
         try:
             await self._delivery.async_speak(message, self._entry.options)
         except Exception as err:  # noqa: BLE001 - HA service errors vary by provider
             _LOGGER.error("HomeIntent timer announcement failed: %s", err)
+
+    async def _async_play_chime(self) -> None:
+        """Play an explicitly configured local/HA media-source cue.
+
+        The cue is optional and bounded to Home Assistant's own media-source
+        identifiers; HomeIntent never fetches an arbitrary URL.  A cue
+        failure must not suppress the spoken timer information.
+        """
+        media_id = self._entry.options.get(CONF_TIMER_CHIME_MEDIA_ID)
+        raw_players = self._entry.options.get(CONF_AGENT_MEDIA_PLAYERS, ())
+        players = (
+            [str(item) for item in raw_players if isinstance(item, str) and item]
+            if isinstance(raw_players, (list, tuple))
+            else []
+        )
+        if not isinstance(media_id, str) or not media_id.strip() or not players:
+            return
+        media_id = media_id.strip()
+        if not media_id.startswith("media-source://"):
+            _LOGGER.warning("Ignoring non-local timer chime media identifier")
+            return
+        try:
+            await self._hass.services.async_call(
+                "media_player",
+                "play_media",
+                {
+                    "entity_id": players,
+                    "media_content_id": media_id,
+                    "media_content_type": "music",
+                },
+                blocking=True,
+            )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("HomeIntent timer chime failed: %s", err)
 
     async def _route_device(self, source_device_id: str | None) -> str:
         from homeassistant.components.intent import async_device_supports_timers

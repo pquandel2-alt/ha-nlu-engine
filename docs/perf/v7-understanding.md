@@ -1,6 +1,6 @@
 # V7 Understanding Pipeline – Performance Check
 
-Stand: 28. August 2026, HomeIntent V7-Release-Stand 4.62.0.
+Stand: 7. September 2026, HomeIntent V7-Release-Stand 4.71.0.
 
 Gemessen wurde `NluEngine.understand()` einschließlich verlustarmem
 Sprach-Frontend, Kandidatenmodell, zentralem Sicherheitsgate und bestehender
@@ -193,3 +193,59 @@ virtualisierten x86_64-Entwicklungsumgebung grün:
 
 Damit bleibt jeder 5.000-Entity-p95 unter 100 ms. Die Messung ist weiterhin
 kein behaupteter Raspberry-Pi-Wert; die Zielhardwareprüfung bleibt separat.
+
+## Kontrolle nach lazy Shadow-Grammatiken (2026-09-07)
+
+Historische direkte Geräte-/Query-Grammatiken werden beim produktiven
+Engine-Start nicht mehr kompiliert. Außerdem überspringt der erste
+Sprach-Frontend-Durchlauf den linearen Scan nach zusammengeschriebenen
+dynamischen Bereichsnamen. Nur wenn die normale Interpretation scheitert und
+eine Ortspräposition vorliegt, wird dieser verlustfreie Variantenlauf
+nachgeholt.
+
+Das unveränderte 100-ms-Gate mit 5.000 synthetischen Entities, 50 Messwerten
+und zehn Warmups ergab auf der virtualisierten x86_64-Entwicklungsumgebung:
+
+| Fall | Mittel | p95 |
+|---|---:|---:|
+| Licht an | 18,04 ms | 29,15 ms |
+| Licht aus | 28,64 ms | 53,77 ms |
+| Heizung auf Temperatur | 38,29 ms | 81,31 ms |
+| Sensorabfrage | 10,69 ms | 26,43 ms |
+| Bereichsgruppe | 19,96 ms | 31,21 ms |
+| Cover-Prozentwert | 18,45 ms | 29,04 ms |
+| freie semantische Query | 36,91 ms | 77,36 ms |
+
+Der p95 bleibt in allen Fällen unter 100 ms, ohne das Budget zu verändern.
+Der langsamere Registry-Compound-Fallback und der Shadow-Audit behalten ihre
+vollständigen Tests. Diese Messung ersetzt weiterhin keinen Lauf auf realer
+Raspberry-Pi-Zielhardware.
+
+## Kontrolle nach Hotpath-Trennung (2026-09-07)
+
+Ein gewöhnlicher Einzelbefehl führt keine Suche nach koordinierten Orten mehr
+aus. Bei einer eindeutig benannten Heizung beendet der Compiler registrierter
+Spezialoperationen seine Suche nach der Prüfung ihrer Live-Modi und -Presets:
+Temperaturbefehle gehen danach unmittelbar an den semantischen
+Standard-Compiler; Betriebsarten und dynamische Presets bleiben registrierte,
+allowlist-geprüfte Operationen. Dadurch entfallen beim Klima-Standardfall
+Registry-Scans über alle anderen Gerätedomänen. Exakte Zielnamen werden dabei
+über den bereits materialisierten World-Model-Index aufgelöst. Die begrenzte
+Rechtschreibprüfung merkt sich ausschließlich Ergebnisse ihres statischen
+Lexikons (keine Entity- oder Haushaltsdaten), sodass wiederholte Befehle keine
+identischen Edit-Distance-Matrizen neu aufbauen.
+
+Zwei aufeinanderfolgende Läufe des unveränderten CI-Gates mit 5.000 Entities,
+20 Messwerten und drei Warmups waren grün. Der zweite Lauf ergab:
+
+| Fall | Mittel | p95 |
+|---|---:|---:|
+| Licht an | 12,61 ms | 19,93 ms |
+| Licht aus | 31,27 ms | 64,32 ms |
+| Heizung auf Temperatur | 13,33 ms | 25,43 ms |
+| Sensorabfrage | 7,12 ms | 17,95 ms |
+| Bereichsgruppe | 6,43 ms | 9,04 ms |
+| Cover-Prozentwert | 24,39 ms | 54,81 ms |
+| freie semantische Query | 17,48 ms | 25,04 ms |
+
+Das Budget wurde nicht verändert; die Zielhardwareprüfung bleibt separat.

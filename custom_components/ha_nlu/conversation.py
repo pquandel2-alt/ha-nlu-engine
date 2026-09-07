@@ -1034,6 +1034,12 @@ class NluConversationEntity(
             if direct_understanding is not None
             and direct_understanding.authority
             is UnderstandingAuthority.V7_MIGRATED
+            and not _AUTOMATION_QUERY_RE.search(user_input.text)
+            and not (
+                isinstance(direct_understanding.payload, MatchResult)
+                and direct_understanding.payload.frame is not None
+                and "temporal" in direct_understanding.payload.frame.parameters
+            )
             else None
         )
         if result is None:
@@ -1948,6 +1954,43 @@ class NluConversationEntity(
                     if operation == MemoryOperation.RESET.value:
                         deleted = await store.async_reset() if store is not None else 0
                         response.async_set_speech(f"{deleted} gespeicherte Einträge wurden kontrolliert gelöscht.")
+                    elif operation == MemoryOperation.FORGET_PERSON.value:
+                        person_id = active.slots.get("person_id")
+                        deleted = (
+                            await store.async_forget_person(person_id)
+                            if store is not None and isinstance(person_id, str)
+                            else 0
+                        )
+                        response.async_set_speech(
+                            f"{deleted} dir zugeordnete Einträge wurden kontrolliert gelöscht."
+                        )
+                    elif operation == MemoryOperation.FORGET_PREFERENCE.value:
+                        memory_id = active.slots.get("memory_id")
+                        deleted = (
+                            await store.async_forget(memory_id)
+                            if store is not None and isinstance(memory_id, str)
+                            else False
+                        )
+                        response.async_set_speech(
+                            "Die Präferenz wurde kontrolliert gelöscht."
+                            if deleted
+                            else "Die Präferenz war nicht mehr vorhanden."
+                        )
+                    elif operation == MemoryOperation.CORRECT_PREFERENCE.value:
+                        memory_id = active.slots.get("memory_id")
+                        content = active.slots.get("content")
+                        corrected = (
+                            await store.async_correct(memory_id, content, confirmed=True)
+                            if store is not None
+                            and isinstance(memory_id, str)
+                            and isinstance(content, dict)
+                            else None
+                        )
+                        response.async_set_speech(
+                            "Die Präferenz wurde korrigiert."
+                            if corrected is not None
+                            else "Die Präferenz war nicht mehr vorhanden."
+                        )
                     elif store is None or not store.enabled:
                         response.async_set_speech("Das lokale dauerhafte Gedächtnis ist deaktiviert.")
                     else:
@@ -2005,6 +2048,16 @@ class NluConversationEntity(
             response.async_set_speech(
                 f"Gespeichert sind {summary}." if summary else "Für dich sind keine dauerhaften Erinnerungen gespeichert."
             )
+        elif request.operation is MemoryOperation.EXPORT_REDACTED:
+            exported = await store.async_redacted_export()
+            counts = exported.get("record_counts", {})
+            summary = ", ".join(
+                f"{count} {kind}" for kind, count in sorted(counts.items())
+            ) if isinstance(counts, dict) else ""
+            response.async_set_speech(
+                "Der redigierte Export enthält nur Zähler und Herkunftsklassen"
+                + (f": {summary}." if summary else ". Es sind keine aktiven Einträge vorhanden.")
+            )
         elif request.operation is MemoryOperation.FORGET_ROUTINES:
             person_id = conversation_user_id(user_input)
             if person_id is None:
@@ -2015,6 +2068,28 @@ class NluConversationEntity(
                     kinds=(MemoryKind.ROUTINE_GRANT, MemoryKind.DECISION),
                 )
                 response.async_set_speech(f"{deleted} persönliche Routinen und Routineentscheidungen wurden gelöscht.")
+        elif request.operation is MemoryOperation.FORGET_PERSON:
+            person_id = conversation_user_id(user_input)
+            if person_id is None:
+                response.async_set_speech(
+                    "Persönliche Daten kann ich nur einem authentifizierten Benutzer zuordnen."
+                )
+            else:
+                manager.create(
+                    conversation_id,
+                    "memory-forget-person",
+                    DialogTaskKind.MEMORY_CONFIRMATION,
+                    DialogPriority.SAFETY,
+                    slots={
+                        "operation": MemoryOperation.FORGET_PERSON.value,
+                        "person_id": person_id,
+                    },
+                    reason="Alle diesem Benutzer zugeordneten Erinnerungen sollen gelöscht werden.",
+                    requested_by_user_id=person_id,
+                )
+                response.async_set_speech(
+                    "Soll ich wirklich alle dir zugeordneten HomeIntent-Erinnerungen löschen?"
+                )
         elif request.operation is MemoryOperation.RESET:
             reset_user_id = conversation_user_id(user_input)
             if reset_user_id is None or not await user_is_admin(self.hass, user_input):
@@ -2037,6 +2112,52 @@ class NluConversationEntity(
                 response.async_set_speech("Mehrere Geräte passen zur genannten Präferenz. Bitte nenne eines eindeutig.")
             else:
                 response.async_set_speech("Welches eindeutige Gerät soll Teil dieser Präferenz sein?")
+        elif request.operation in {
+            MemoryOperation.CORRECT_PREFERENCE,
+            MemoryOperation.FORGET_PREFERENCE,
+        }:
+            person_id = conversation_user_id(user_input)
+            records = (
+                await store.async_list(
+                    person_id=person_id, kinds=(MemoryKind.PREFERENCE,)
+                )
+                if person_id is not None
+                else ()
+            )
+            matches = [
+                record for record in records
+                if record.content.get("entity_id") == request.target_entity_id
+            ]
+            if len(matches) != 1:
+                response.async_set_speech(
+                    "Zu diesem Gerät ist keine eindeutige persönliche Präferenz gespeichert."
+                )
+            else:
+                record = matches[0]
+                corrected_content = {
+                    **record.content,
+                    **request.content,
+                    "entity_id": request.target_entity_id,
+                }
+                manager.create(
+                    conversation_id,
+                    "memory-preference-change",
+                    DialogTaskKind.MEMORY_CONFIRMATION,
+                    DialogPriority.CONFIRMATION,
+                    slots={
+                        "operation": request.operation.value,
+                        "memory_id": record.memory_id,
+                        "content": corrected_content,
+                        "person_id": person_id,
+                    },
+                    reason="Eine dauerhafte persönliche Präferenz soll geändert werden.",
+                    requested_by_user_id=person_id,
+                )
+                response.async_set_speech(
+                    "Soll ich diese Präferenz dauerhaft korrigieren?"
+                    if request.operation is MemoryOperation.CORRECT_PREFERENCE
+                    else "Soll ich diese Präferenz kontrolliert löschen?"
+                )
         else:
             person_id = conversation_user_id(user_input)
             if person_id is None:

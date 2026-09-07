@@ -180,7 +180,7 @@ _COMPARATOR_CUE_RE = re.compile(
     re.I,
 )
 _COPULAR_STATE_QUESTION_RE = re.compile(
-    r"^\s*(?:ist|sind|war|waren|welch\w*|was\s+(?:ist|macht)|wie\s+ist)\b",
+    r"^\s*(?:ist|sind|war|waren|welch\w*|was\s+(?:ist|macht|zeigt)|wie\s+ist)\b",
     re.I,
 )
 _DEVICE_NOUN_EXPRESSION = regex_union([
@@ -191,6 +191,15 @@ _DEVICE_NOUN_EXPRESSION = regex_union([
 _DOMAIN_CUE_RE = re.compile(r"\b" + _DEVICE_NOUN_EXPRESSION + r"\b", re.I)
 _NUMERIC_ASSIGNMENT_RE = re.compile(
     r"\bauf\s+-?\d{1,3}\s*(?:prozent|%|grad|°\s*c|°c)\b",
+    re.I,
+)
+_POSITION_ASSIGNMENT_RE = re.compile(
+    r"\bauf\s+(?:halb\w*|halbe\w*|fünfzig\s+prozent|\d+\s*(?:prozent|%))\b",
+    re.I,
+)
+_PROPERTY_NOUN_QUERY_RE = re.compile(
+    r"^\s*(?:temperatur|luftfeuchtigkeit|feuchtigkeit|batteriestand|batterie|"
+    r"leistung|strom|energie|helligkeit)\b.*\b(?:im|in\s+der|in\s+dem)\b",
     re.I,
 )
 _VERB_FIRST_DEVICE_RE = re.compile(
@@ -291,6 +300,14 @@ def analyse_utterance(text: str) -> SemanticUtterance:
         # identical transitive form ``Zeige die Kamera auf dem TV`` is a
         # device-to-device command and continues into the command branch.
         speech_act = SpeechAct.QUERY
+    elif re.search(
+        r"^\s*(?:wer|was|wie|welch\w*|wo|wann|warum|wieso|gibt\s+es|haben\s+wir)\b",
+        normalized,
+        re.I,
+    ):
+        # Explicit interrogatives own their clause even when a state word
+        # such as "eingeschaltet" is also an operation lexeme.
+        speech_act = SpeechAct.QUERY
     # A polite question that contains an executable operation is still a
     # command ("Kannst du das Licht einschalten?").  The generic question
     # shape is evaluated afterwards.  "Kann man ...?" remains an
@@ -303,7 +320,10 @@ def analyse_utterance(text: str) -> SemanticUtterance:
             or (
                 _POLITE_RE.search(normalized)
                 and _DOMAIN_CUE_RE.search(normalized)
-                and _NUMERIC_ASSIGNMENT_RE.search(normalized)
+                and (
+                    _NUMERIC_ASSIGNMENT_RE.search(normalized)
+                    or _POSITION_ASSIGNMENT_RE.search(normalized)
+                )
             )
         )
         and not _INFORMATIONAL_CAN_RE.search(normalized)
@@ -317,6 +337,8 @@ def analyse_utterance(text: str) -> SemanticUtterance:
     elif _PROPERTY_CUE_RE.search(normalized) and (
         normalized.rstrip().endswith("?") or _COMPARATOR_CUE_RE.search(normalized)
     ):
+        speech_act = SpeechAct.QUERY
+    elif _PROPERTY_NOUN_QUERY_RE.search(normalized):
         speech_act = SpeechAct.QUERY
     elif _QUERY_REQUEST_RE.search(normalized):
         speech_act = SpeechAct.QUERY

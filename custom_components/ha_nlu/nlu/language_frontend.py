@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
+from functools import lru_cache
 from typing import Iterable
 
 from ..entities import EntitySnapshot, normalize_for_compare
@@ -42,7 +43,8 @@ _SPELLING_PROTECTED = frozenset(
 )
 _NEGATION_FORMS = frozenset({"nicht", "kein", "keine", "keinen", "niemals"})
 _NEGATION_TYPO_PROTECTED = frozenset({
-    "sein", "fein", "klein", "einen", "meine", "deine", "keinerlei",
+    "sein", "fein", "klein", "eine", "einen", "einer", "einem", "eines",
+    "meine", "deine", "keinerlei",
     # Frequent command/temporal vocabulary one edit away from "nicht".
     # These are real words, while a transposition such as "nciht" remains
     # safety-critical below.
@@ -142,6 +144,26 @@ def _has_registry_mention(text: str, entities: tuple[EntitySnapshot, ...]) -> bo
     )
 
 
+@lru_cache(maxsize=2048)
+def _unique_spelling_correction(spoken: str) -> str | None:
+    """Return the sole one-edit vocabulary match for a normalized token.
+
+    The closed semantic vocabulary is process-stable. Caching this bounded
+    calculation avoids rebuilding the same edit-distance matrices on every
+    repeated voice command without caching any entity or household data.
+    """
+    scored = sorted(
+        (edit_distance(spoken, candidate), candidate)
+        for candidate in _SPELLING_FORMS
+        if abs(len(spoken) - len(candidate)) <= 1
+    )
+    if not scored or scored[0][0] > 1:
+        return None
+    best_distance = scored[0][0]
+    best = [candidate for distance, candidate in scored if distance == best_distance]
+    return best[0] if len(best) == 1 else None
+
+
 def _lexical_spelling_variants(
     text: str, entities: tuple[EntitySnapshot, ...]
 ) -> tuple[str, ...]:
@@ -156,17 +178,8 @@ def _lexical_spelling_variants(
             or spoken in _SPELLING_PROTECTED
         ):
             continue
-        scored = sorted(
-            (edit_distance(spoken, candidate), candidate)
-            for candidate in _SPELLING_FORMS
-            if abs(len(spoken) - len(candidate)) <= 1
-        )
-        if not scored:
-            continue
-        best_distance = scored[0][0]
-        limit = 1
-        best = [candidate for distance, candidate in scored if distance == best_distance]
-        if best_distance > limit or len(best) != 1:
+        correction = _unique_spelling_correction(spoken)
+        if correction is None:
             continue
         if any(
             spoken in normalize_for_compare(name).split()
@@ -175,7 +188,7 @@ def _lexical_spelling_variants(
         ):
             continue
         variants.add(
-            text[:match.start()] + _SPELLING_FORMS[best[0]] + text[match.end():]
+            text[:match.start()] + _SPELLING_FORMS[correction] + text[match.end():]
         )
     return tuple(sorted(variants))[:8]
 
@@ -235,6 +248,7 @@ def analyse_language(
     entities: Iterable[EntitySnapshot] = (),
     *,
     include_phonetic: bool = False,
+    include_registry_compounds: bool = True,
 ) -> LanguageDocument:
     """Build one immutable language document without discarding input."""
     normalized = normalize(text)
@@ -245,7 +259,7 @@ def analyse_language(
     if canonical not in {variant.text for variant in variants}:
         variants.append(TextVariant(canonical, "orthographic", 0.2))
     entity_tuple = tuple(entities)
-    if _LOCATION_CUE_RE.search(text):
+    if include_registry_compounds and _LOCATION_CUE_RE.search(text):
         for candidate in _registry_compound_variants(text, entity_tuple):
             if candidate not in {variant.text for variant in variants}:
                 variants.append(TextVariant(candidate, "registry_compound", 0.15))
@@ -264,6 +278,16 @@ def analyse_language(
     # document keeps the original and every applied alternative.
     utterance = analyse_utterance(text)
     semantics = analyse_semantics(utterance.normalized_text)
+    if (
+        utterance.speech_act is SpeechAct.STATEMENT
+        and semantics.values(SemanticKind.PROPERTY)
+        and not semantics.values(SemanticKind.COMMAND_MARKER)
+    ):
+        # Compact dashboard/voice noun phrases such as ``Temperatur Küche``
+        # are read requests. The query compiler still requires one typed
+        # property and a resolvable registry target/location, so a bare
+        # descriptive statement cannot turn into an invented answer.
+        utterance = replace(utterance, speech_act=SpeechAct.QUERY)
     # A unique one-edit operation correction may reveal an otherwise hidden
     # imperative. It changes only the discourse classification; compilation
     # still has to succeed on that recorded variant below the frontend.

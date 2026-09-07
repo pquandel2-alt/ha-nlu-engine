@@ -275,6 +275,24 @@ class PatternAssessment:
 
 
 @dataclass(frozen=True)
+class RoutineDriftAssessment:
+    drifted: bool
+    score: float
+    recent_observations: int
+    baseline_observations: int
+    explanation: str
+
+
+@dataclass(frozen=True)
+class RoutineCorrelationAssessment:
+    paired_observations: int
+    source_observations: int
+    support: float
+    confidence: float
+    explanation: str
+
+
+@dataclass(frozen=True)
 class RoutineObservation:
     """One bounded statistical sample without transcript or authority data."""
 
@@ -428,6 +446,74 @@ class RoutineStatistics:
         """Return content-free decision-history counters for diagnostics."""
         return {feedback.value: count for feedback, count in self._feedback.items()}
 
+    def drift_assessment(
+        self, *, recent_window: int = 20, threshold: float = 0.35
+    ) -> RoutineDriftAssessment:
+        """Compare recent and older hour distributions without claiming causality."""
+        observations = tuple(self._observations)
+        window = max(3, recent_window)
+        if len(observations) < window * 2:
+            return RoutineDriftAssessment(
+                False,
+                0.0,
+                min(len(observations), window),
+                max(0, len(observations) - window),
+                "Für eine Driftbewertung sind zwei ausreichend große Zeitfenster nötig.",
+            )
+        recent = observations[-window:]
+        baseline = observations[:-window]
+        recent_hours = Counter(item.hour for item in recent)
+        baseline_hours = Counter(item.hour for item in baseline)
+        hours = set(recent_hours) | set(baseline_hours)
+        score = 0.5 * sum(
+            abs(recent_hours[hour] / len(recent) - baseline_hours[hour] / len(baseline))
+            for hour in hours
+        )
+        return RoutineDriftAssessment(
+            score >= max(0.0, min(1.0, threshold)),
+            score,
+            len(recent),
+            len(baseline),
+            (
+                f"Verteilungsabstand {score:.1%} zwischen den letzten "
+                f"{len(recent)} und den vorherigen {len(baseline)} Beobachtungen; "
+                "statistische Vermutung, keine Verhaltensbehauptung."
+            ),
+        )
+
+    def correlation_with(
+        self,
+        other: "RoutineStatistics",
+        *,
+        maximum_gap: timedelta = timedelta(minutes=10),
+    ) -> RoutineCorrelationAssessment:
+        """Measure temporal co-occurrence; never infer cause or authority."""
+        left = tuple(self._observations)
+        right = tuple(other._observations)
+        paired = sum(
+            1
+            for item in left
+            if any(
+                abs((candidate.occurred_at - item.occurred_at).total_seconds())
+                <= maximum_gap.total_seconds()
+                for candidate in right
+            )
+        )
+        support = paired / len(left) if left else 0.0
+        sample = min(len(left), len(right))
+        confidence = min(0.99, sample / (sample + max(1, self.minimum_observations)))
+        return RoutineCorrelationAssessment(
+            paired,
+            len(left),
+            support,
+            confidence,
+            (
+                f"{paired} von {len(left)} Ereignissen lagen höchstens "
+                f"{int(maximum_gap.total_seconds() // 60)} Minuten auseinander; "
+                "zeitliche Korrelation beweist keine Ursache."
+            ),
+        )
+
     @property
     def last_alert_at(self) -> datetime | None:
         """Timestamp used only to bind explicit feedback to a recent signal."""
@@ -439,6 +525,7 @@ class RoutineStatistics:
         *,
         cooldown: timedelta = timedelta(hours=1),
         hysteresis: float = 0.02,
+        commit: bool = True,
     ) -> PatternAssessment:
         self._prune(event.occurred_at)
         window = self._context_window(event)
@@ -490,9 +577,10 @@ class RoutineStatistics:
         if self._last_alert_at is not None and event.occurred_at - self._last_alert_at < cooldown:
             unusual = False
         confidence = min(0.99, count / (count + self.minimum_observations))
-        if unusual:
+        if unusual and commit:
             self._last_alert_at = event.occurred_at
-        self._anomaly_active = unusual
+        if commit:
+            self._anomaly_active = unusual
         relevant_durations = tuple(
             item for item in window if (item.weekday, item.hour) == key
         )
@@ -513,3 +601,7 @@ class RoutineStatistics:
             confidence,
             "statistische Vermutung, kein sicherer Fakt",
         )
+
+    def simulate(self, event: NormalizedEvent) -> PatternAssessment:
+        """Preview an assessment without changing cooldown or hysteresis state."""
+        return self.assess(event, commit=False)

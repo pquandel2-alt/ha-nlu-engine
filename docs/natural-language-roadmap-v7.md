@@ -1,7 +1,7 @@
 # HomeIntent V7 – Roadmap für belastbares natürliches Sprachverständnis
 
-Stand: 28. August 2026
-Analysierter Stand: `b808844` / HomeIntent 4.59.0
+Stand: 7. September 2026
+Analysierter Stand: HomeIntent 4.71.0
 
 ## Umsetzungsstand
 
@@ -12,13 +12,12 @@ Target-Auflösung, ein Live-Einstieg für direkte und Automations-Turns,
 zentrale Dialogpriorität sowie CI-, Contract- und Performance-Gates.
 
 Die aktive Architektur ist in
-[`architecture-v7.md`](architecture-v7.md) beschrieben. Historische
-Fachparser bleiben vorerst als Payload-Erzeuger **hinter** der neuen Grenze,
-wo ihre bewährte Capability-Abdeckung noch nicht vollständig semantisch
-ersetzt ist. Sie umgehen weder das einmalige Frontend noch dessen globales
-Sicherheitsgate. „Phase umgesetzt“ bedeutet daher nicht, dass schon jeder
-Kompatibilitätsparser gelöscht wurde; dieser Abbau erfolgt capabilityweise,
-damit breite Funktionalität nicht durch einen Big-Bang-Umbau verloren geht.
+[`architecture-v7.md`](architecture-v7.md) beschrieben. Historische direkte
+Geräte- und Query-Fachparser sind keine produktiven Payload-Erzeuger mehr.
+`match()` delegiert an `understand()`; die alten Grammatiken werden nur noch
+für den ausdrücklich read-only Shadow-Audit lazy geladen. Automation,
+Kalender und Produktivität behalten begrenzte deterministische Fachparser
+hinter derselben `LanguageDocument`-/`UnderstandingOutcome`-Grenze.
 
 Der nachgelagerte Mehrdeutigkeitsausbau ist ebenfalls umgesetzt: ein
 gemeinsames `EntityCandidateSet`, bounded Schreib-/ASR-Ähnlichkeit,
@@ -68,11 +67,11 @@ liefern“, sondern diese Reihenfolge:
 
 Der aktuelle Stand ist funktional und sicherheitsbewusst:
 
-- 2.484 Tests bestehen, 12 sind übersprungen;
+- 2.893 Tests bestehen, 12 sind übersprungen;
 - die zuletzt gemessene Gesamt-Coverage liegt bei 87 %; die zentralen
   Sprachmodule liegen überwiegend deutlich höher, `conversation.py` erreicht
-  nach dem risikobasierten Dialogtestausbau 82 %;
-- 152 Python-Testdateien sind vorhanden;
+  nach dem risikobasierten Dialogtestausbau 78 %;
+- 170 Python-Testdateien sind vorhanden;
 - `SemanticUtterance`, `SemanticAnalysis`, `SemanticFrame`, `WorldModel`,
   Constraint Resolver, Capability-Prüfung und strukturierte Dialogzustände
   existieren bereits;
@@ -93,16 +92,12 @@ Generalisierung:
 
 Die wesentlichen Architekturbremsen sind:
 
-1. **Semantik ist capabilityweise Autorität.** Seit dem Audit vom
-   28. August laufen direkte Turns in `NluEngine.understand()` semantisch
-   zuerst. Die explizite autoritative Matrix umfasst die vermessenen Core-
-   Commands, Prozent-/Temperaturwerte sowie Zustands-, Verb- und
-   Messwertqueries. Seit dem 5. September ist zusätzlich `match()` selbst
-   V7-first; auch Orts-/Eigenschaftsabfragen erreichen ihren Altresolver erst
-   nach einem semantischen Fehlschlag. Nur nicht migrierte Fachcapabilities
-   behalten Legacy als Kompatibilitätsfallback. `_select_parser()` bleibt für
-   diese Restmenge und den unabhängigen Shadow-Audit eine offene
-   Architekturbremse.
+1. **Semantik ist die direkte Sprachautorität.** Core-Commands,
+   Prozent-/Temperaturwerte sowie Zustands-, Verb- und Messwertqueries laufen
+   durch `NluEngine.understand()`. `match()` besitzt keinen produktiven
+   Altresolver mehr. `_select_shadow_parser()` existiert ausschließlich für
+   den unabhängigen Audit und lädt historische Grammatiken erst auf dessen
+   expliziten Aufruf.
 2. **Routing ist noch teilweise reihenfolgeabhängig.** Kalender und
    Produktivität werden inzwischen gemeinsam ausgewertet; ein Doppelmatch
    wird anhand expliziter Domänenevidenz entschieden oder sicher als
@@ -118,7 +113,7 @@ Die wesentlichen Architekturbremsen sind:
    hilft bekannten Fällen, kann aber Modalität, Negationsbezug oder
    Klauselrollen verdecken.
 5. **Mehrere parallele Sprachpfade erzeugen Drift.** Der Core umfasst derzeit
-   108 Python-Dateien, rund 31.000 Zeilen, 259 `re.compile()`-Aufrufe, 50
+   144 Python-Dateien, rund 43.000 Zeilen, 290 `re.compile()`-Aufrufe, 50
    Intent-YAML-Dateien und etwa 450 Hassil-Satzeinträge. Eine Verbesserung in
    einem Pfad gilt deshalb nicht automatisch für die anderen.
 6. **Der Dialogzustand ist explizit klassifiziert, die Handler bleiben aber

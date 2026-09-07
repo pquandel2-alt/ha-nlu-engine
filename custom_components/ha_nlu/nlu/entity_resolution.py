@@ -319,11 +319,33 @@ def resolve_mentioned_target(
     text: str,
     entities: list[EntitySnapshot],
     allowed_domains: frozenset[str],
+    *,
+    index: EntityIndex | None = None,
 ) -> ResolutionResult:
     """Resolve one registry name embedded anywhere in a larger utterance."""
-    matches = mentioned_entities(
-        text, [entity for entity in entities if entity.domain in allowed_domains]
-    )
+    if index is not None:
+        ranked = _indexed_exact_targets(
+            text, index, allowed_domains, None, None
+        )
+        if ranked:
+            best_score = ranked[0].score
+            matches = tuple(
+                candidate.entity
+                for candidate in ranked
+                if candidate.score == best_score
+            )
+        else:
+            pool = [
+                entity
+                for domain in allowed_domains
+                for entity in index.by_domain.get(domain, ())
+            ]
+            matches = mentioned_entities(text, pool)
+    else:
+        matches = mentioned_entities(
+            text,
+            [entity for entity in entities if entity.domain in allowed_domains],
+        )
     if not matches:
         return ResolutionResult(status=ResolutionStatus.NOT_FOUND)
     if len(matches) > 1:
