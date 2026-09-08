@@ -22,6 +22,7 @@ from .primitives import (
     SemanticProperty,
     SemanticQuantity,
 )
+from .semantic_graph import SemanticGraph
 
 
 @dataclass(frozen=True)
@@ -141,6 +142,9 @@ class SemanticFrame:
     degree: SemanticDegree | None = None
     quantity: SemanticQuantity | None = None
     numeric_value: NumericValue | None = None
+    # V8: the frame remains the execution-facing compatibility projection;
+    # the graph retains relations that cannot be represented by flat slots.
+    semantic_graph: SemanticGraph | None = None
 
     def __post_init__(self) -> None:
         """Bridge legacy parameter keys into one typed numeric value."""

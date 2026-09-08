@@ -86,4 +86,7 @@ def explain_command(command: SemanticCommand) -> str:
     excluded = command.parameters.get("excluded")
     if isinstance(excluded, tuple) and excluded:
         parts.append("Ausgenommen: " + ", ".join(str(item) for item in excluded))
+    state_filter = command.parameters.get("state_filter")
+    if isinstance(state_filter, str):
+        parts.append(f"Filter: Zustand {state_filter}")
     return "Ich habe Folgendes verstanden: " + "; ".join(parts) + "."

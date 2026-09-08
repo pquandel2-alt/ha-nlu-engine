@@ -48,6 +48,7 @@ from .nlu.entity_clarification import render_candidate_question
 from .nlu.composition import build_compositional_plan, project_target
 from .nlu.command import SemanticCommand, build_semantic_command
 from .nlu.context import ConversationContext
+from .nlu.discourse import ReferenceStatus, resolve_reference
 from .nlu.debug import DebugTrace, format_command
 from .nlu.degree_semantics import extract_degree
 from .nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
@@ -77,6 +78,7 @@ from .nlu.semantic_utterance import ClauseRole, SpeechAct, analyse_utterance
 from .nlu.understanding import (
     ShadowComparison,
     UnderstandingAuthority,
+    UnderstandingEvidence,
     UnderstandingKind,
     UnderstandingOutcome,
     compare_outcomes,
@@ -987,7 +989,15 @@ class NluEngine:
                     resolve_registry=False,
                 )
                 v7_result = self._interpreted_match_result(interpreted, entities)
-        multi_result = self._v7_multi_result(text, entities, world_model)
+        # A shared-predicate compositional plan already proves that ``und``
+        # joins targets. Re-running the independent-clause compiler would
+        # rescan the registry for every segment and can become quadratic at
+        # large registry sizes without changing the selected meaning.
+        multi_result = (
+            None
+            if interpreted.compositional_plan is not None
+            else self._v7_multi_result(text, entities, world_model)
+        )
         segments = tuple(
             segment.strip() for segment in _AND_SPLIT_RE.split(text) if segment.strip()
         )
@@ -1152,18 +1162,29 @@ class NluEngine:
     ) -> MatchResult | CommandPlan | None:
         """Turn the interpreter parse into the same validated payload shape."""
         if interpreted.compositional_plan is not None:
+            if not isinstance(interpreted.parse_result, ParseResult):
+                return None
+            template = interpreted.parse_result
             rendered: list[MatchResult] = []
             for selected in interpreted.compositional_plan.targets:
-                candidate_text = project_target(
-                    interpreted.compositional_plan, selected
+                # The interpreter already compiled the shared predicate and
+                # all targets were resolved by the canonical compositional
+                # matcher. Project the validated frame mechanically instead
+                # of rescanning the complete registry once per target.
+                parsed = replace(
+                    template,
+                    frame=replace(
+                        template.frame,
+                        target=TargetReference(
+                            selected.friendly_name,
+                            selected.entity_id,
+                            selected.domain,
+                            selected.device_class,
+                        ),
+                        source_text=interpreted.compositional_plan.source_text,
+                    ),
+                    resolved_entities=[selected],
                 )
-                parsed = SemanticCommandCompiler.compile(
-                    candidate_text,
-                    entities,
-                    analysis=analyse_semantics(candidate_text),
-                )
-                if not isinstance(parsed, ParseResult):
-                    return None
                 result = self._build_match_result(parsed, entities)
                 if result is None or result.plan is None:
                     return None
@@ -1196,6 +1217,17 @@ class NluEngine:
             return None
         return complete[0].score - complete[1].score
 
+    @staticmethod
+    def _selected_evidence(
+        interpreted: InterpreterResult,
+    ) -> tuple[UnderstandingEvidence, ...]:
+        """Evidence for the best complete hypothesis, or best failed one."""
+        selected = next(
+            (candidate for candidate in interpreted.candidates if candidate.complete),
+            interpreted.candidates[0] if interpreted.candidates else None,
+        )
+        return selected.evidence if selected is not None else ()
+
     def _direct_understanding_outcome(
         self,
         text: str,
@@ -1214,6 +1246,7 @@ class NluEngine:
             and interpreted.selected_variant.source != "original"
             else ()
         )
+        evidence = self._selected_evidence(interpreted)
 
         if isinstance(result, CommandPlan):
             has_action = any(command.plan is not None for command in result.commands)
@@ -1224,6 +1257,7 @@ class NluEngine:
                 speech_act=document.utterance.speech_act,
                 payload=result,
                 candidates=interpreted.candidates,
+                evidence=evidence,
                 unexplained_tokens=document.semantics.unexplained_tokens,
                 corrections=corrections,
                 route=route,
@@ -1244,6 +1278,7 @@ class NluEngine:
                     speech_act=document.utterance.speech_act,
                     payload=result,
                     candidates=interpreted.candidates,
+                    evidence=evidence,
                     reason=ParseFailureReason.AMBIGUOUS_TARGET,
                     speech=result.response_text,
                     unexplained_tokens=document.semantics.unexplained_tokens,
@@ -1263,6 +1298,7 @@ class NluEngine:
                 speech_act=document.utterance.speech_act,
                 payload=result,
                 candidates=interpreted.candidates,
+                evidence=evidence,
                 speech=result.response_text,
                 unexplained_tokens=document.semantics.unexplained_tokens,
                 corrections=corrections,
@@ -1277,18 +1313,27 @@ class NluEngine:
             and not document.utterance.safe_to_execute_directly
         )
         return UnderstandingOutcome(
-            kind=(UnderstandingKind.UNSAFE if unsafe else UnderstandingKind.UNSUPPORTED),
+            kind=(
+                UnderstandingKind.UNSAFE
+                if unsafe
+                else UnderstandingKind.AMBIGUOUS
+                if interpreted.semantic_ambiguity
+                else UnderstandingKind.UNSUPPORTED
+            ),
             source_text=text,
             normalized_text=document.utterance.normalized_text,
             speech_act=document.utterance.speech_act,
             reason=(
                 ParseFailureReason.UNSAFE_INFERENCE
                 if unsafe
+                else ParseFailureReason.AMBIGUOUS_MEANING
+                if interpreted.semantic_ambiguity
                 else feedback.reason if feedback is not None
                 else ParseFailureReason.NO_GRAMMAR
             ),
             speech=feedback.speech if feedback is not None else None,
             candidates=interpreted.candidates,
+            evidence=evidence,
             unexplained_tokens=document.semantics.unexplained_tokens,
             corrections=corrections,
             route=route,
@@ -1350,7 +1395,11 @@ class NluEngine:
         turn: SemanticTurn,
     ) -> CommandPlan | None:
         """Distribute one direct action over explicitly coordinated names."""
-        plan = build_compositional_plan(turn, entities)
+        plan = build_compositional_plan(
+            turn,
+            entities,
+            index=(world_model.entity_index if world_model is not None else None),
+        )
         if plan is None:
             return None
         rendered: list[MatchResult] = []
@@ -1624,6 +1673,19 @@ class NluEngine:
         if not (is_others or is_area_reference or is_pronoun):
             return None
 
+        discourse_resolution = (
+            resolve_reference(normalized, context.discourse, entities)
+            if is_pronoun and context.discourse is not None
+            else None
+        )
+        if (
+            discourse_resolution is not None
+            and discourse_resolution.status in {
+                ReferenceStatus.RESOLVED,
+                ReferenceStatus.AMBIGUOUS,
+            }
+        ):
+            remembered_entities = discourse_resolution.entities
         remembered_ids = {entity.entity_id for entity in remembered_entities}
         fresh_remembered = [
             entity for entity in entities if entity.entity_id in remembered_ids
@@ -1707,6 +1769,21 @@ class NluEngine:
             quantifier=(Quantifier("all") if len(candidates) > 1 else None),
             source_text=text,
         )
+        if (
+            discourse_resolution is not None
+            and discourse_resolution.status is ReferenceStatus.AMBIGUOUS
+        ):
+            clarification = ClarificationRequest(
+                pending_intent=frame.intent,
+                pending_target=text,
+                candidates=tuple(candidates),
+                pending_parameters=frame.parameters,
+            )
+            return MatchResult(
+                plan=None,
+                response_text=_clarification_question(clarification),
+                clarification=clarification,
+            )
         return self._build_match_result(
             ParseResult(frame=frame, resolved_entities=candidates), entities, context
         )

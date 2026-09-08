@@ -1,0 +1,52 @@
+[
+  {
+    "id": "relative_colloquial",
+    "text": "Also, die Lampen, die sowieso noch an sind, bitte ausmachen.",
+    "relations": ["modifies"]
+  },
+  {
+    "id": "exclusion_fronted_area",
+    "text": "Im Wohnzimmer alles an Licht aus, außer der kleinen Lampe.",
+    "relations": ["except"]
+  },
+  {
+    "id": "nested_after",
+    "text": "Falls keiner mehr da ist, nachdem die Tür ins Schloss gefallen ist, Licht aus.",
+    "relations": ["if", "after"]
+  },
+  {
+    "id": "temporal_before",
+    "text": "Bevor du die Rollläden schließt, lass die Terrassentür offen.",
+    "relations": ["before"]
+  },
+  {
+    "id": "temporal_until",
+    "text": "Lass das Flurlicht an, bis ich wieder da bin.",
+    "relations": ["until"]
+  },
+  {
+    "id": "temporal_while",
+    "text": "Während im Bad jemand duscht, soll dort das Licht anbleiben.",
+    "relations": ["while"]
+  },
+  {
+    "id": "coordinated_conditions",
+    "text": "Wenn es draußen friert und drinnen niemand ist, dann Heizung runter.",
+    "relations": ["if", "and"]
+  },
+  {
+    "id": "alternative_targets",
+    "text": "Mach entweder die Leselampe oder das Licht am Sofa an.",
+    "relations": ["or"]
+  },
+  {
+    "id": "spoken_repair_value",
+    "text": "Heizung auf zweiundzwanzig, äh nein, einundzwanzig Grad.",
+    "relations": ["replaces"]
+  },
+  {
+    "id": "spoken_repair_target",
+    "text": "Küchenlicht an, nein, ich mein das im Wohnzimmer.",
+    "relations": ["replaces"]
+  }
+]

@@ -95,15 +95,17 @@ class WorldModel:
         All supplied constraints are hard filters.  The method never widens
         an unknown area/floor/device class to the whole house.
         """
-        pools = [
-            pool for value, pool in (
-                (domain, self.entities_by_domain.get(domain, ())),
-                (device_class, self.entities_by_device_class.get(device_class, ())),
-                (area_id, self.entities_by_area_id.get(area_id, ())),
-                (floor_id, self.entities_by_floor_id.get(floor_id, ())),
-                (capability, self.entities_by_capability.get(capability, ())),
-            ) if value is not None
-        ]
+        pools: list[tuple[EntitySnapshot, ...]] = []
+        if domain is not None:
+            pools.append(self.entities_by_domain.get(domain, ()))
+        if device_class is not None:
+            pools.append(self.entities_by_device_class.get(device_class, ()))
+        if area_id is not None:
+            pools.append(self.entities_by_area_id.get(area_id, ()))
+        if floor_id is not None:
+            pools.append(self.entities_by_floor_id.get(floor_id, ()))
+        if capability is not None:
+            pools.append(self.entities_by_capability.get(capability, ()))
         candidates = min(pools, key=len) if pools else self.entities
         return tuple(
             entity for entity in candidates

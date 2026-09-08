@@ -2,7 +2,8 @@ from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.language_frontend import analyse_language
 from ha_nlu.nlu.parser import ClarificationRequest, ParseResult
 from ha_nlu.nlu.semantic_interpreter import SemanticInterpreter
-from ha_nlu.nlu.understanding import EvidenceKind
+from ha_nlu.nlu.understanding import EvidenceKind, EvidencePolarity
+from ha_nlu.nlu.semantic_graph import SemanticNodeKind
 
 
 ENTITIES = [
@@ -119,6 +120,12 @@ def test_conflicting_actions_produce_no_complete_candidate():
 
     assert all(not candidate.complete for candidate in result.candidates)
     assert any("action" in candidate.conflicts for candidate in result.candidates)
+    assert any(
+        evidence.polarity is EvidencePolarity.NEGATIVE
+        and evidence.claim == "unique_action"
+        for candidate in result.candidates
+        for evidence in candidate.evidence
+    )
 
 
 def test_domain_invalid_particle_does_not_create_action_conflict():
@@ -221,3 +228,10 @@ def test_shared_predicate_named_targets_form_one_atomic_compositional_plan():
         "light.kueche",
         "light.flur",
     }
+    candidate = next(item for item in result.candidates if item.complete)
+    assert set(candidate.slots["entities"]) == {"light.flur", "light.kueche"}
+    assert candidate.graph is not None
+    assert {
+        node.value
+        for node in candidate.graph.nodes_of_kind(SemanticNodeKind.ENTITY)
+    } == {"light.kueche", "light.flur"}

@@ -21,6 +21,7 @@ class ParseFailureReason(Enum):
     UNKNOWN_ENTITY = auto()
     UNKNOWN_LOCATION = auto()
     AMBIGUOUS_TARGET = auto()
+    AMBIGUOUS_MEANING = auto()
     UNSUPPORTED_PROPERTY = auto()
     UNSUPPORTED_CAPABILITY = auto()
     INVALID_VALUE = auto()

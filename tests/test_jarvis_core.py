@@ -146,6 +146,32 @@ def test_statistical_graph_relation_is_not_a_fact():
     ) == ()
 
 
+def test_house_graph_projects_only_observed_floor_measurement_and_capability():
+    entities = _entities() + [
+        EntitySnapshot(
+            "sensor.living_temperature",
+            "Wohnzimmer Temperatur",
+            "sensor",
+            "21.5",
+            area_id="living",
+            area_name="Wohnzimmer",
+            floor_id="ground",
+            floor_name="Erdgeschoss",
+            device_class="temperature",
+            unit="°C",
+            capabilities=frozenset({"READ_TEMPERATURE"}),
+        )
+    ]
+    graph = build_house_graph(build_world_model(entities, []))
+
+    entity_id = "entity:sensor.living_temperature"
+    assert graph.related(entity_id, RelationKind.ON_FLOOR)[0].node_id == "floor:ground"
+    assert graph.related(entity_id, RelationKind.MEASURES)[0].node_id == "property:temperature"
+    assert graph.related(entity_id, RelationKind.HAS_CAPABILITY)[0].node_id == (
+        "capability:READ_TEMPERATURE"
+    )
+
+
 def test_house_relation_configuration_is_typed_and_bounded():
     specs = parse_relation_specs(
         "area:living | adjacent_to | area:cellar\n"

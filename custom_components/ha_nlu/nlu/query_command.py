@@ -31,6 +31,7 @@ from ..automation_summary import AutomationSummary
 from ..devices import DeviceSnapshot
 from ..entities import EntitySnapshot
 from .semantic_state import SemanticState
+from .primitives import SemanticProperty
 
 
 class QueryScope(Enum):
@@ -61,6 +62,29 @@ class QueryTargetKind(Enum):
     ENTITY = auto()
     DEVICE = auto()
     AUTOMATION = auto()
+
+
+class RelationalOperator(Enum):
+    LT = auto()
+    LTE = auto()
+    EQ = auto()
+    GTE = auto()
+    GT = auto()
+
+
+@dataclass(frozen=True)
+class PropertyOperand:
+    """One fully grounded side of an entity-to-entity comparison."""
+
+    entity_id: str
+    property: SemanticProperty
+
+
+@dataclass(frozen=True)
+class RelationalComparison:
+    left: PropertyOperand
+    operator: RelationalOperator
+    right: PropertyOperand
 
 
 @dataclass(frozen=True)
@@ -96,6 +120,7 @@ class QueryFilter:
     """
 
     state: SemanticState | None = None
+    relational: RelationalComparison | None = None
 
 
 @dataclass(frozen=True)

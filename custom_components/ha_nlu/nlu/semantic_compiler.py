@@ -18,6 +18,7 @@ from dataclasses import dataclass, replace
 
 from ..areas import AreaSnapshot
 from ..entities import (
+    EntityIndex,
     EntitySnapshot,
     generate_aliases,
     normalize_for_compare,
@@ -727,13 +728,14 @@ def _resolve_exclusions(
     names: tuple[str, ...],
     entities: list[EntitySnapshot],
     candidates: list[EntitySnapshot],
-) -> tuple[list[EntitySnapshot], tuple[str, ...]] | None:
+    index: EntityIndex | None = None,
+) -> tuple[list[EntitySnapshot], tuple[str, ...], tuple[str, ...]] | None:
     """Resolve every exclusion exactly and ensure it belongs to the scope."""
     if not names:
-        return candidates, ()
+        return candidates, (), ()
     excluded: list[EntitySnapshot] = []
     for name in names:
-        result = resolve_entity(name, entities)
+        result = resolve_entity(name, entities, index=index)
         if result.status is not ResolveStatus.OK or result.entity is None:
             return None
         if result.entity not in candidates or result.entity in excluded:
@@ -743,7 +745,11 @@ def _resolve_exclusions(
     remaining = [entity for entity in candidates if entity.entity_id not in excluded_ids]
     if not remaining:
         return None
-    return remaining, tuple(entity.friendly_name for entity in excluded)
+    return (
+        remaining,
+        tuple(entity.friendly_name for entity in excluded),
+        tuple(entity.entity_id for entity in excluded),
+    )
 
 
 def _scoped_candidates(
@@ -1352,10 +1358,15 @@ class SemanticCommandCompiler:
                 return None
             if quantity.kind == "count" and len(matches) != quantity.value:
                 return None
-            exclusion_result = _resolve_exclusions(exclusion_names, entities, matches)
+            exclusion_result = _resolve_exclusions(
+                exclusion_names,
+                entities,
+                matches,
+                world_model.entity_index if world_model is not None else None,
+            )
             if exclusion_result is None:
                 return None
-            matches, excluded_names = exclusion_result
+            matches, excluded_names, excluded_entity_ids = exclusion_result
             target = TargetReference(text=domain, domain=domain)
             area = (
                 AreaReference(text=facts.location_text or "", area_id=facts.area_id)
@@ -1531,6 +1542,11 @@ class SemanticCommandCompiler:
                     } if analysis.values(SemanticKind.COMPARATOR)
                     and comparison_value is not None else {}),
                     **({"excluded": excluded_names} if exclusion_names else {}),
+                    **(
+                        {"excluded_entity_ids": excluded_entity_ids}
+                        if exclusion_names
+                        else {}
+                    ),
                     **({
                         "locations": tuple(
                             {"text": spoken, "area_id": area_id, "floor_id": floor_id}

@@ -14,6 +14,7 @@ from typing import Generic, Mapping, Sequence, TypeVar, cast
 
 from .parse_outcome import ParseFailureReason
 from .semantic_utterance import SpeechAct
+from .semantic_graph import SemanticGraph
 
 
 class UnderstandingKind(Enum):
@@ -50,6 +51,14 @@ class EvidenceKind(Enum):
     SPELLING = auto()
     PHONETIC = auto()
     LEGACY = auto()
+    STRUCTURE = auto()
+
+
+class EvidencePolarity(Enum):
+    """Whether evidence supports or contradicts a semantic claim."""
+
+    POSITIVE = auto()
+    NEGATIVE = auto()
 
 
 @dataclass(frozen=True)
@@ -62,6 +71,9 @@ class UnderstandingEvidence:
     end: int | None = None
     score: float = 0.0
     detail: str | None = None
+    polarity: EvidencePolarity = EvidencePolarity.POSITIVE
+    claim: str | None = None
+    source_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -75,6 +87,8 @@ class MeaningCandidate:
     missing_slots: tuple[str, ...] = ()
     conflicts: tuple[str, ...] = ()
     evidence: tuple[UnderstandingEvidence, ...] = ()
+    graph: SemanticGraph | None = None
+    rejection_reason: str | None = None
 
 
 T = TypeVar("T")
@@ -133,6 +147,7 @@ class ShadowComparison:
     candidate: UnderstandingOutcome[object]
     equivalent: bool
     differences: tuple[str, ...] = ()
+    stage_differences: tuple[str, ...] = ()
 
 
 def compare_outcomes(
@@ -162,13 +177,45 @@ def compare_outcomes(
         candidate.payload
     ):
         differences.append("payload")
+    stage_differences: list[str] = []
+    if _candidate_signature(authoritative.candidates) != _candidate_signature(
+        candidate.candidates
+    ):
+        stage_differences.append("meaning_candidates")
+    if _graph_signature(authoritative) != _graph_signature(candidate):
+        stage_differences.append("semantic_graph")
     return ShadowComparison(
         source_text=authoritative.source_text,
         authoritative=authoritative,
         candidate=candidate,
         equivalent=not differences,
         differences=tuple(differences),
+        stage_differences=tuple(stage_differences),
     )
+
+
+def _candidate_signature(candidates: tuple[MeaningCandidate, ...]) -> object:
+    return tuple(
+        (
+            item.key,
+            round(item.score, 6),
+            item.complete,
+            _freeze(item.slots),
+            item.missing_slots,
+            item.conflicts,
+            item.rejection_reason,
+        )
+        for item in candidates
+    )
+
+
+def _graph_signature(outcome: UnderstandingOutcome[object]) -> object | None:
+    graphs = tuple(
+        _freeze(candidate.graph.canonical_snapshot())
+        for candidate in outcome.candidates
+        if candidate.graph is not None
+    )
+    return graphs or None
 
 
 def _freeze(value: object) -> object:

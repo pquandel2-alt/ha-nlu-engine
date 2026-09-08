@@ -267,9 +267,16 @@ def _rank_mentions(
 
 
 def all_mentioned_entities(
-    text: str, entities: list[EntitySnapshot]
+    text: str,
+    entities: list[EntitySnapshot],
+    *,
+    index: EntityIndex | None = None,
 ) -> tuple[EntitySnapshot, ...]:
     """Return every explicitly named entity, longest names first."""
+    if index is not None:
+        indexed = _indexed_exact_targets(text, index, frozenset(), None, None)
+        if indexed:
+            return tuple(candidate.entity for candidate in indexed)
     found = _rank_mentions(text, entities)
     found.sort(key=lambda item: (-item[0], item[1].entity_id))
     return tuple(entity for _, entity in found)

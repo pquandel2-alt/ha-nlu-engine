@@ -9,15 +9,20 @@ from __future__ import annotations
 from ha_nlu.automation_summary import AutomationSummary
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.query_command import (
+    PropertyOperand,
     QueryCommand,
     QueryFilter,
     QueryResultStatus,
     QueryScope,
     QueryTarget,
     QueryTargetKind,
+    RelationalComparison,
+    RelationalOperator,
 )
 from ha_nlu.nlu.query_executor import QueryExecutor
+from ha_nlu.nlu.primitives import SemanticProperty
 from ha_nlu.nlu.semantic_state import SemanticState
+from ha_nlu.world_model import build_world_model
 
 executor = QueryExecutor()
 
@@ -108,6 +113,86 @@ def test_unknown_semantic_state_never_matches_a_requested_filter():
     )
     result = executor.execute(command, [unavailable])
     assert result.status is QueryResultStatus.EMPTY
+
+
+def test_relational_query_compares_two_grounded_live_properties():
+    outside = EntitySnapshot(
+        "sensor.outside", "Außentemperatur", "sensor", "8.0",
+        device_class="temperature", unit="°C",
+    )
+    inside = EntitySnapshot(
+        "sensor.inside", "Innentemperatur", "sensor", "21.0",
+        device_class="temperature", unit="°C",
+    )
+    world = build_world_model([outside, inside], [])
+    command = QueryCommand(
+        intent="HassRelationalComparison",
+        scope=QueryScope.SINGLE,
+        target=QueryTarget(domain="sensor", entity_id=outside.entity_id),
+        filter=QueryFilter(relational=RelationalComparison(
+            PropertyOperand(outside.entity_id, SemanticProperty.TEMPERATURE),
+            RelationalOperator.LT,
+            PropertyOperand(inside.entity_id, SemanticProperty.TEMPERATURE),
+        )),
+    )
+
+    result = executor.execute(command, [outside, inside], world)
+
+    assert result.status is QueryResultStatus.MATCHED
+    assert result.entities == (outside,)
+    assert result.considered_entities == (outside, inside)
+
+
+def test_relational_query_refuses_unknown_or_unavailable_operand():
+    outside = EntitySnapshot(
+        "sensor.outside", "Außentemperatur", "sensor", "unknown",
+        device_class="temperature", unit="°C",
+    )
+    inside = EntitySnapshot(
+        "sensor.inside", "Innentemperatur", "sensor", "21.0",
+        device_class="temperature", unit="°C",
+    )
+    world = build_world_model([outside, inside], [])
+    command = QueryCommand(
+        intent="HassRelationalComparison",
+        scope=QueryScope.SINGLE,
+        target=QueryTarget(domain="sensor", entity_id=outside.entity_id),
+        filter=QueryFilter(relational=RelationalComparison(
+            PropertyOperand(outside.entity_id, SemanticProperty.TEMPERATURE),
+            RelationalOperator.LT,
+            PropertyOperand(inside.entity_id, SemanticProperty.TEMPERATURE),
+        )),
+    )
+
+    assert executor.execute(command, [outside, inside], world).status is (
+        QueryResultStatus.TARGET_NOT_FOUND
+    )
+
+
+def test_relational_query_refuses_incompatible_units():
+    celsius = EntitySnapshot(
+        "sensor.celsius", "Temperatur Celsius", "sensor", "20",
+        device_class="temperature", unit="°C",
+    )
+    fahrenheit = EntitySnapshot(
+        "sensor.fahrenheit", "Temperatur Fahrenheit", "sensor", "60",
+        device_class="temperature", unit="°F",
+    )
+    world = build_world_model([celsius, fahrenheit], [])
+    command = QueryCommand(
+        intent="HassRelationalComparison",
+        scope=QueryScope.SINGLE,
+        target=QueryTarget(domain="sensor", entity_id=celsius.entity_id),
+        filter=QueryFilter(relational=RelationalComparison(
+            PropertyOperand(celsius.entity_id, SemanticProperty.TEMPERATURE),
+            RelationalOperator.LT,
+            PropertyOperand(fahrenheit.entity_id, SemanticProperty.TEMPERATURE),
+        )),
+    )
+
+    assert executor.execute(command, [celsius, fahrenheit], world).status is (
+        QueryResultStatus.TARGET_NOT_FOUND
+    )
 
 
 # --- SINGLE (HassCheckState) ---------------------------------------------

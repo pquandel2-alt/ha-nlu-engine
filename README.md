@@ -797,7 +797,10 @@ Home Assistant Assist
 Loss-aware Language Frontend
         │
         ▼
-Semantic Interpreter + UnderstandingOutcome
+German Structural Analysis + SemanticGraph
+        │
+        ▼
+MeaningCandidates + Semantic Interpreter + UnderstandingOutcome
         │
         ├── semantischer Direktbefehl / Query / Dialog
         │     → SemanticFrame
@@ -827,6 +830,8 @@ Weitere Dokumentation:
 - [`docs/agent-configuration.md`](docs/agent-configuration.md)
 - [`docs/proactive-agent.md`](docs/proactive-agent.md)
 - [`docs/architecture-v7.md`](docs/architecture-v7.md)
+- [`docs/architecture-v8-audit.md`](docs/architecture-v8-audit.md)
+- [`docs/architecture-v8.md`](docs/architecture-v8.md)
 - [`docs/natural-language-roadmap-v7.md`](docs/natural-language-roadmap-v7.md)
 - [`docs/quality-checklist.md`](docs/quality-checklist.md)
 - [`docs/troubleshooting.md`](docs/troubleshooting.md)
@@ -842,7 +847,7 @@ python -m pytest -q --cov=custom_components/ha_nlu --cov-report=term-missing
 Geprüfter Release-Stand von Version 4.71.0:
 
 ```text
-2893 passed, 12 skipped
+2948 passed, 12 skipped
 87 % Gesamt-Coverage
 78 % Coverage für conversation.py
 ```
@@ -869,7 +874,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-4.70.0.json --quiet
+  --check docs/perf/v7-shadow-baseline-4.71.0.json --quiet
 ```
 
 Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die

@@ -152,7 +152,37 @@ ANCHOR_COVER = EntitySnapshot(
     area_id="buero", area_name="Büro", floor_id="eg", floor_name="Erdgeschoss", floor_level=0,
     capabilities=frozenset({"POSITION"}),
 )
-ANCHORS: list[EntitySnapshot] = [ANCHOR_LIGHT, ANCHOR_CLIMATE, ANCHOR_SENSOR, ANCHOR_COVER]
+ANCHOR_LIVING_CEILING = EntitySnapshot(
+    "light.wohnzimmer_decke", "Wohnzimmer Deckenlampe", "light", "on",
+    area_id="wohnzimmer", area_name="Wohnzimmer", floor_id="eg", floor_name="Erdgeschoss", floor_level=0,
+    capabilities=frozenset({"TURN_ON", "TURN_OFF", "BRIGHTNESS"}),
+)
+ANCHOR_LIVING_FLOOR = EntitySnapshot(
+    "light.wohnzimmer_steh", "Wohnzimmer Stehlampe", "light", "on",
+    aliases=("Stehlampe",),
+    area_id="wohnzimmer", area_name="Wohnzimmer", floor_id="eg", floor_name="Erdgeschoss", floor_level=0,
+    capabilities=frozenset({"TURN_ON", "TURN_OFF", "BRIGHTNESS"}),
+)
+ANCHOR_READING_ONE = EntitySnapshot(
+    "light.leselampe_eins", "Leselampe", "light", "off",
+    area_id="wohnzimmer", area_name="Wohnzimmer", floor_id="eg", floor_name="Erdgeschoss", floor_level=0,
+    capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+)
+ANCHOR_READING_TWO = EntitySnapshot(
+    "light.leselampe_zwei", "Leselampe", "light", "off",
+    area_id="schlafzimmer", area_name="Schlafzimmer", floor_id="og", floor_name="Obergeschoss", floor_level=1,
+    capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+)
+ANCHORS: list[EntitySnapshot] = [
+    ANCHOR_LIGHT,
+    ANCHOR_CLIMATE,
+    ANCHOR_SENSOR,
+    ANCHOR_COVER,
+    ANCHOR_LIVING_CEILING,
+    ANCHOR_LIVING_FLOOR,
+    ANCHOR_READING_ONE,
+    ANCHOR_READING_TWO,
+]
 
 
 def generate_entities(n: int) -> list[EntitySnapshot]:
@@ -178,6 +208,19 @@ BENCHMARK_UTTERANCES: list[tuple[str, str]] = [
     ("area_quantifier", "Mach alle Lichter im Wohnzimmer aus"),
     ("cover_percentage", "Fahre Rollladen Büro auf 30 Prozent runter"),
     ("semantic_free_order_query", "Im Erdgeschoss geschlossen, welche Fenster sind das?"),
+    (
+        "complex_relative_filter",
+        "Mach im Wohnzimmer die Lampen aus, die noch an sind, außer der Stehlampe.",
+    ),
+    ("ambiguity", "Mach die Leselampe aus"),
+    (
+        "multi_target",
+        "Schalte Wohnzimmer Deckenlampe und Wohnzimmer Stehlampe aus",
+    ),
+    # This direct-engine benchmark has intentionally no ConversationContext.
+    # It measures frontend/graph cost for a follow-up-shaped utterance; true
+    # multi-turn salience latency belongs to the future dialog benchmark.
+    ("context_free_followup_shape", "Und im Schlafzimmer?"),
 ]
 
 SCALES: list[int] = [100, 500, 1000, 5000]

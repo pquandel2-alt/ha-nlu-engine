@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from ..entities import EntitySnapshot
+from ..entities import EntityIndex, EntitySnapshot
 from .entity_resolution import all_mentioned_entities
 from .meaning import CoordinationKind, SemanticTurn
 from .semantic_lexicon import SemanticKind
@@ -24,7 +24,10 @@ class CompositionalPlan:
 
 
 def build_compositional_plan(
-    turn: SemanticTurn, entities: list[EntitySnapshot]
+    turn: SemanticTurn,
+    entities: list[EntitySnapshot],
+    *,
+    index: EntityIndex | None = None,
 ) -> CompositionalPlan | None:
     """Recognise one safe action distributed over named coordinated targets."""
     markers = turn.semantic_analysis.matching(SemanticKind.COMMAND_MARKER)
@@ -38,7 +41,7 @@ def build_compositional_plan(
         or re.search(r"\b(?:außer|ausser|oder)\b", turn.source_text, re.I)
     ):
         return None
-    targets = all_mentioned_entities(turn.source_text, entities)
+    targets = all_mentioned_entities(turn.source_text, entities, index=index)
     if len(targets) < 2:
         return None
     return CompositionalPlan(

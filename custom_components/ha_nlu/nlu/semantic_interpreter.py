@@ -13,15 +13,21 @@ from typing import cast
 
 from ..entities import EntitySnapshot, normalize_for_compare
 from ..world_model import WorldModel
-from .language_frontend import LanguageDocument, TextVariant
+from .language_frontend import LanguageDocument, TextVariant, tokenize_language
+from .german_structure import ClauseKind, analyse_german_structure
 from .parser import ClarificationRequest, ParseResult
 from .semantic_compiler import SemanticCommandCompiler, SemanticQueryCompiler
 from .semantic_catalog import INTENT_BY_DOMAIN_ACTION
 from .semantic_lexicon import SemanticKind
 from .semantic_lexicon import analyse_semantics
 from .semantic_location import resolve_coordinated_locations, resolve_semantic_location
-from .semantic_utterance import SpeechAct
-from .understanding import EvidenceKind, MeaningCandidate, UnderstandingEvidence
+from .semantic_utterance import SpeechAct, is_contextual_followup
+from .understanding import (
+    EvidenceKind,
+    EvidencePolarity,
+    MeaningCandidate,
+    UnderstandingEvidence,
+)
 from .entity_resolution import all_mentioned_entities
 from .frame import SemanticFrame, TargetReference
 from .primitives import SemanticAction
@@ -29,6 +35,13 @@ from .verb_state_query import match_verb_state_query
 from .composition import CompositionalPlan, build_compositional_plan, project_target
 from .meaning import analyse_turn
 from .registered_operation_compiler import compile_registered_operation
+from .semantic_graph import SemanticEdgeKind, build_semantic_graph
+from .semantic_projection import (
+    attach_graph,
+    project_relative_state_command,
+    project_scoped_negation_exclusion,
+)
+from .temporal_semantics import analyse_temporal_semantics
 
 
 @dataclass(frozen=True)
@@ -37,6 +50,20 @@ class InterpreterResult:
     parse_result: ParseResult | ClarificationRequest | None = None
     selected_variant: TextVariant | None = None
     compositional_plan: CompositionalPlan | None = None
+    semantic_ambiguity: bool = False
+    selected_candidate_index: int | None = None
+
+
+SEMANTIC_AMBIGUITY_MARGIN = 5.0
+
+
+def _candidate_identity(
+    candidate: MeaningCandidate,
+) -> tuple[str, tuple[tuple[str, str], ...]]:
+    return (
+        candidate.key,
+        tuple(sorted((name, repr(value)) for name, value in candidate.slots.items())),
+    )
 
 
 def _slot_values(document: LanguageDocument) -> dict[str, object]:
@@ -79,6 +106,31 @@ def _conflicts(document: LanguageDocument) -> tuple[str, ...]:
         SemanticKind.PROPERTY,
         SemanticKind.COMPARATOR,
     ):
+        if not document.semantics.conflicts(kind):
+            continue
+        if (
+            document.utterance.speech_act is SpeechAct.COMMAND
+            and kind in {SemanticKind.ACTION, SemanticKind.STATE}
+        ):
+            # State/action homonyms in relative filters and exclusions do not
+            # compete with the requested predicate. Coordinated main clauses
+            # remain in scope and therefore still expose true conflicts.
+            actionable_values = {
+                span.value
+                for span in document.semantics.matching(kind)
+                if (
+                    (clause := document.structure.clause_for_char(span.start)) is None
+                    or clause.kind
+                    not in {
+                        ClauseKind.RELATIVE,
+                        ClauseKind.EXCLUSION,
+                        ClauseKind.CONDITION,
+                        ClauseKind.TEMPORAL,
+                    }
+                )
+            }
+            if len(actionable_values) <= 1:
+                continue
         if document.semantics.conflicts(kind):
             conflicts.append(kind.name.lower())
     return tuple(conflicts)
@@ -217,9 +269,15 @@ class SemanticInterpreter:
         resolve_registry: bool = True,
     ) -> InterpreterResult:
         candidates: list[MeaningCandidate] = []
-        best_parse: ParseResult | ClarificationRequest | None = None
-        selected_variant: TextVariant | None = None
-        best_compositional_plan: CompositionalPlan | None = None
+        parse_records: dict[
+            tuple[str, tuple[tuple[str, str], ...]],
+            tuple[
+                float,
+                ParseResult | ClarificationRequest,
+                TextVariant,
+                CompositionalPlan | None,
+            ],
+        ] = {}
         candidate_indexes: dict[
             tuple[str, tuple[tuple[str, str], ...]], int
         ] = {}
@@ -229,7 +287,31 @@ class SemanticInterpreter:
                 if variant.source == "original"
                 else analyse_semantics(variant.text)
             )
-            candidate_document = replace(document, semantics=analysis)
+            variant_tokens = (
+                document.tokens
+                if variant.source == "original"
+                else tokenize_language(variant.text)
+            )
+            variant_structure = (
+                document.structure
+                if variant.source == "original"
+                else analyse_german_structure(variant_tokens)
+            )
+            candidate_document = replace(
+                document,
+                source_text=variant.text,
+                tokens=variant_tokens,
+                semantics=analysis,
+                structure=variant_structure,
+                temporal=analyse_temporal_semantics(variant_tokens),
+            )
+            graph = build_semantic_graph(
+                variant.text,
+                variant_tokens,
+                variant_structure,
+                analysis,
+                document.utterance.speech_act,
+            )
             slots = _slot_values(candidate_document)
             mentions = (
                 all_mentioned_entities(variant.text, entities)
@@ -247,6 +329,7 @@ class SemanticInterpreter:
             )
             if locations:
                 slots["locations"] = tuple(item[0] for item in locations)
+                grounded_locations = locations
             else:
                 location = (
                     resolve_semantic_location(variant.text, entities, world_model)
@@ -255,6 +338,9 @@ class SemanticInterpreter:
                 )
                 if location is not None:
                     slots["locations"] = (location[0],)
+                    grounded_locations = (location,)
+                else:
+                    grounded_locations = ()
 
             evidence = tuple(
                 UnderstandingEvidence(
@@ -264,14 +350,30 @@ class SemanticInterpreter:
                     span.end,
                     1.0,
                     span.text,
+                    claim=f"{span.kind.name.lower()}={span.value}",
+                    source_id="semantic_catalog",
                 )
                 for span in analysis.spans
+            ) + tuple(
+                UnderstandingEvidence(
+                    EvidenceKind.STRUCTURE,
+                    relation.kind.name.lower(),
+                    relation.connector_start,
+                    relation.connector_end,
+                    1.0,
+                    f"{relation.source_clause}->{relation.target_clause}",
+                    claim=relation.kind.name.lower(),
+                    source_id="german_structure",
+                )
+                for relation in variant_structure.relations
             ) + tuple(
                 UnderstandingEvidence(
                     EvidenceKind.REGISTRY,
                     entity.entity_id,
                     score=1.0,
                     detail=entity.friendly_name,
+                    claim=f"entity={entity.entity_id}",
+                    source_id="entity_resolution",
                 )
                 for entity in mentions
             )
@@ -284,6 +386,8 @@ class SemanticInterpreter:
                         variant.text,
                         score=-variant.cost,
                         detail=variant.source,
+                        claim=f"surface={variant.text}",
+                        source_id=variant.source,
                     ),
                 )
 
@@ -293,12 +397,30 @@ class SemanticInterpreter:
             # pass the existing confirm-before-action correction flow.
             may_compile = (
                 compile_result
-                and best_parse is None
                 and not variant.source.startswith("phonetic:")
                 and variant.source != "orthographic"
             )
             if may_compile and document.utterance.speech_act is SpeechAct.QUERY:
-                verb_answer = match_verb_state_query(variant.text, entities)
+                has_standalone_query_meaning = any(
+                    analysis.values(kind)
+                    for kind in (
+                        SemanticKind.DOMAIN,
+                        SemanticKind.DEVICE_CLASS,
+                        SemanticKind.PROPERTY,
+                        SemanticKind.STATE,
+                    )
+                )
+                if (
+                    is_contextual_followup(variant.text)
+                    and not has_standalone_query_meaning
+                ):
+                    # Context-free interpretation cannot ground an elliptical
+                    # follow-up. ConversationContext owns that resolution;
+                    # scanning the complete registry here adds no evidence.
+                    verb_answer = None
+                    parse_result = None
+                else:
+                    verb_answer = match_verb_state_query(variant.text, entities)
                 if verb_answer is not None:
                     domains = {entity.domain for entity in verb_answer.entities}
                     parse_result = ParseResult(
@@ -318,13 +440,22 @@ class SemanticInterpreter:
                         context_predicate=verb_answer.predicate,
                         explanation_text=verb_answer.explanation_text,
                     )
-                else:
+                elif not (
+                    is_contextual_followup(variant.text)
+                    and not has_standalone_query_meaning
+                ):
                     parse_result = SemanticQueryCompiler.compile(
                         variant.text, entities, world_model, analysis
                     )
             elif may_compile and document.utterance.safe_to_execute_directly:
                 compositional_plan = build_compositional_plan(
-                    analyse_turn(variant.text), entities
+                    analyse_turn(variant.text),
+                    entities,
+                    index=(
+                        world_model.entity_index
+                        if world_model is not None
+                        else None
+                    ),
                 )
                 compile_text = (
                     project_target(
@@ -345,9 +476,19 @@ class SemanticInterpreter:
                         world_model,
                         analyse_semantics(compile_text),
                     )
+                if parse_result is None and compositional_plan is None:
+                    parse_result = project_relative_state_command(
+                        candidate_document, entities, world_model
+                    )
+                if parse_result is None and compositional_plan is None:
+                    parse_result = project_scoped_negation_exclusion(
+                        candidate_document, entities, world_model
+                    )
 
             resolved_mentions = mentions
-            if isinstance(parse_result, ParseResult):
+            if compositional_plan is not None:
+                resolved_mentions = compositional_plan.targets
+            elif isinstance(parse_result, ParseResult):
                 resolved_mentions = tuple(parse_result.resolved_entities)
             elif isinstance(parse_result, ClarificationRequest):
                 resolved_mentions = parse_result.candidates
@@ -355,6 +496,31 @@ class SemanticInterpreter:
                 slots["entities"] = tuple(
                     entity.entity_id for entity in resolved_mentions
                 )
+
+            graph = graph.with_grounded_entities(
+                entity.entity_id for entity in resolved_mentions
+            )
+            if grounded_locations:
+                graph = graph.with_grounded_locations(grounded_locations)
+            if isinstance(parse_result, ParseResult):
+                raw_excluded_entity_ids = parse_result.frame.parameters.get(
+                    "excluded_entity_ids", ()
+                )
+                raw_excluded_items: tuple[object, ...] = (
+                    cast(tuple[object, ...], raw_excluded_entity_ids)
+                    if isinstance(raw_excluded_entity_ids, tuple)
+                    else ()
+                )
+                excluded_entity_ids = tuple(
+                    entity_id
+                    for entity_id in raw_excluded_items
+                    if isinstance(entity_id, str)
+                )
+                if excluded_entity_ids and len(excluded_entity_ids) == len(
+                    raw_excluded_items
+                ):
+                    graph = graph.with_excluded_entities(excluded_entity_ids)
+                parse_result = attach_graph(parse_result, graph)
                 slots.setdefault(
                     "domains",
                     tuple(sorted({entity.domain for entity in resolved_mentions})),
@@ -363,6 +529,14 @@ class SemanticInterpreter:
             conflicts = _resolved_conflicts(candidate_document, parse_result)
             missing = _missing_slots(candidate_document, slots, parse_result)
             coverage = len(analysis.spans) * 5.0
+            structural_coverage = min(
+                10.0,
+                sum(
+                    2.0
+                    for edge in graph.edges
+                    if edge.kind is not SemanticEdgeKind.CONTAINS
+                ),
+            )
             registry_tokens = {
                 normalize_for_compare(token)
                 for entity in resolved_mentions
@@ -404,6 +578,29 @@ class SemanticInterpreter:
                 for token in analysis.unexplained_tokens
                 if normalize_for_compare(token) not in registry_tokens
             )
+            evidence += tuple(
+                UnderstandingEvidence(
+                    EvidenceKind.STRUCTURE,
+                    f"conflict={conflict}",
+                    score=-20.0,
+                    detail="competing semantic values in one active scope",
+                    polarity=EvidencePolarity.NEGATIVE,
+                    claim=f"unique_{conflict}",
+                    source_id="candidate_validation",
+                )
+                for conflict in conflicts
+            ) + tuple(
+                UnderstandingEvidence(
+                    EvidenceKind.LEXICON,
+                    f"unexplained={token}",
+                    score=-3.0,
+                    detail="meaning-bearing token has no grounded claim",
+                    polarity=EvidencePolarity.NEGATIVE,
+                    claim=f"explained_token={token}",
+                    source_id="semantic_lexicon",
+                )
+                for token in unexplained
+            )
             complete = (
                 isinstance(parse_result, ParseResult)
                 and not conflicts
@@ -414,7 +611,10 @@ class SemanticInterpreter:
                 + len(conflicts) * 20.0
                 + variant.cost * 10.0
             )
-            score = max(0.0, min(100.0, 50.0 + coverage - penalty))
+            score = max(
+                0.0,
+                min(100.0, 50.0 + coverage + structural_coverage - penalty),
+            )
             key_parts = [document.utterance.speech_act.name.lower()]
             for name in ("actions", "domains", "device_classes", "properties"):
                 if name in slots:
@@ -429,6 +629,16 @@ class SemanticInterpreter:
                 missing_slots=missing,
                 conflicts=conflicts,
                 evidence=evidence,
+                graph=graph,
+                rejection_reason=(
+                    "conflict:" + ",".join(conflicts)
+                    if conflicts
+                    else "missing:" + ",".join(missing)
+                    if missing
+                    else "unexplained:" + ",".join(unexplained)
+                    if unexplained and not complete
+                    else None
+                ),
             )
             previous_index = candidate_indexes.get(identity)
             if previous_index is None:
@@ -452,15 +662,37 @@ class SemanticInterpreter:
                     candidates[previous_index] = replace(
                         previous, evidence=merged_evidence
                     )
-            if best_parse is None and parse_result is not None and not conflicts:
-                best_parse = parse_result
-                selected_variant = variant
-                best_compositional_plan = compositional_plan
+            if parse_result is not None and not conflicts:
+                record = parse_records.get(identity)
+                if record is None or score > record[0]:
+                    parse_records[identity] = (
+                        score,
+                        parse_result,
+                        variant,
+                        compositional_plan,
+                    )
 
         candidates.sort(key=lambda item: (-item.score, item.key))
+        complete = tuple(candidate for candidate in candidates if candidate.complete)
+        semantic_ambiguity = (
+            len(complete) > 1
+            and complete[0].score - complete[1].score <= SEMANTIC_AMBIGUITY_MARGIN
+            and _candidate_identity(complete[0]) != _candidate_identity(complete[1])
+        )
+        selected_record = None
+        selected_candidate_index: int | None = None
+        if not semantic_ambiguity:
+            for index, candidate in enumerate(candidates):
+                record = parse_records.get(_candidate_identity(candidate))
+                if record is not None:
+                    selected_record = record
+                    selected_candidate_index = index
+                    break
         return InterpreterResult(
-            tuple(candidates),
-            best_parse,
-            selected_variant,
-            best_compositional_plan,
+            candidates=tuple(candidates),
+            parse_result=selected_record[1] if selected_record is not None else None,
+            selected_variant=selected_record[2] if selected_record is not None else None,
+            compositional_plan=selected_record[3] if selected_record is not None else None,
+            semantic_ambiguity=semantic_ambiguity,
+            selected_candidate_index=selected_candidate_index,
         )

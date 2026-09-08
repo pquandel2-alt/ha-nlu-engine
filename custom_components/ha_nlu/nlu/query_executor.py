@@ -21,7 +21,16 @@ from __future__ import annotations
 from ..automation_summary import AutomationSummary
 from ..entities import EntitySnapshot
 from ..world_model import WorldModel
-from .query_command import QueryCommand, QueryResult, QueryResultStatus, QueryScope, QueryTargetKind
+from .query_command import (
+    PropertyOperand,
+    QueryCommand,
+    QueryResult,
+    QueryResultStatus,
+    QueryScope,
+    QueryTargetKind,
+    RelationalOperator,
+)
+from .primitives import SemanticProperty
 from .semantic_state import matches_semantic_state
 
 
@@ -39,6 +48,8 @@ class QueryExecutor:
         world_model: WorldModel | None = None,
         automations: tuple[AutomationSummary, ...] = (),
     ) -> QueryResult:
+        if command.filter.relational is not None:
+            return self._execute_relational(command, candidates, world_model)
         if command.target.kind is QueryTargetKind.DEVICE:
             return self._execute_device(command, world_model)
         if command.target.kind is QueryTargetKind.AUTOMATION:
@@ -46,6 +57,73 @@ class QueryExecutor:
         if command.scope is QueryScope.SINGLE:
             return self._execute_single(command, candidates)
         return self._execute_plural(command, candidates)
+
+    @staticmethod
+    def _operand_value(
+        operand: PropertyOperand, world_model: WorldModel
+    ) -> tuple[float, str | None] | None:
+        entity = world_model.entities_by_id.get(operand.entity_id)
+        if entity is None or entity.state in {"unknown", "unavailable"}:
+            return None
+        attribute_by_property = {
+            SemanticProperty.TEMPERATURE: "current_temperature",
+            SemanticProperty.BRIGHTNESS: "brightness",
+            SemanticProperty.POSITION: "current_position",
+            SemanticProperty.POWER: "power",
+            SemanticProperty.ENERGY: "energy",
+            SemanticProperty.HUMIDITY: "humidity",
+            SemanticProperty.BATTERY: "battery_level",
+        }
+        raw = entity.attributes.get(attribute_by_property.get(operand.property, ""))
+        if raw is None:
+            raw = entity.state
+        try:
+            return float(raw), entity.unit
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _execute_relational(
+        cls,
+        command: QueryCommand,
+        candidates: list[EntitySnapshot],
+        world_model: WorldModel | None,
+    ) -> QueryResult:
+        comparison = command.filter.relational
+        if comparison is None or world_model is None:
+            return QueryResult(status=QueryResultStatus.TARGET_NOT_FOUND, command=command)
+        left_reading = cls._operand_value(comparison.left, world_model)
+        right_reading = cls._operand_value(comparison.right, world_model)
+        if left_reading is None or right_reading is None:
+            return QueryResult(status=QueryResultStatus.TARGET_NOT_FOUND, command=command)
+        left, left_unit = left_reading
+        right, right_unit = right_reading
+        if left_unit != right_unit:
+            return QueryResult(status=QueryResultStatus.TARGET_NOT_FOUND, command=command)
+        predicates = {
+            RelationalOperator.LT: left < right,
+            RelationalOperator.LTE: left <= right,
+            RelationalOperator.EQ: left == right,
+            RelationalOperator.GTE: left >= right,
+            RelationalOperator.GT: left > right,
+        }
+        by_id = {entity.entity_id: entity for entity in candidates}
+        considered = tuple(
+            entity
+            for entity_id in (comparison.left.entity_id, comparison.right.entity_id)
+            if (entity := by_id.get(entity_id)) is not None
+        )
+        left_entity = world_model.entities_by_id.get(comparison.left.entity_id)
+        return QueryResult(
+            status=(
+                QueryResultStatus.MATCHED
+                if predicates[comparison.operator]
+                else QueryResultStatus.EMPTY
+            ),
+            entities=(left_entity,) if left_entity is not None else (),
+            considered_entities=considered,
+            command=command,
+        )
 
     @staticmethod
     def _execute_automation(

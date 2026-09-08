@@ -253,7 +253,9 @@ class AutomationActionParser:
         self, text: str, context: ParseContext, is_parallel: bool
     ) -> tuple["ActionModel | ActionGroup", ...] | None:
         turn = analyse_turn(text)
-        plan = build_compositional_plan(turn, context.entities)
+        plan = build_compositional_plan(
+            turn, context.entities, index=context.index
+        )
         if plan is None:
             return None
         actions: list[ActionModel] = []

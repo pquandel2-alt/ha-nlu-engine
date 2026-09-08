@@ -158,6 +158,7 @@ from .nlu.context import (
     PendingDialogKind,
 )
 from .nlu.dialog_focus import DialogFocus, derive_dialog_focus
+from .nlu.discourse import DiscourseRole, remember_entities
 from .nlu.entity_clarification import (
     CandidateReplyKind,
     render_candidate_question,
@@ -2703,6 +2704,7 @@ class NluConversationEntity(
                     response=response, conversation_id=user_input.conversation_id
                 )
 
+        previous_context = self._context_store.get(user_input.conversation_id)
         undo_plan = (
             build_undo_plan(
                 result.plan,
@@ -2713,6 +2715,7 @@ class NluConversationEntity(
             else None
         )
         if result.command is not None:
+            focus = derive_dialog_focus(result.command)
             self._context_store.set(
                 user_input.conversation_id,
                 ConversationContext(
@@ -2720,7 +2723,14 @@ class NluConversationEntity(
                     last_entities=tuple(result.command.entities),
                     last_area=result.command.area,
                     pending_clarification=None,
-                    focus=derive_dialog_focus(result.command),
+                    focus=focus,
+                    discourse=remember_entities(
+                        previous_context.discourse if previous_context else None,
+                        result.command.entities,
+                        role=DiscourseRole.ACTION_TARGET,
+                        active_property=focus.property,
+                        active_action=result.command.intent,
+                    ),
                     pending_undo=undo_plan,
                     last_explanation=result.explanation_text,
                     memory=DialogTurnMemory(
@@ -2741,6 +2751,11 @@ class NluConversationEntity(
                     pending_clarification=None,
                     last_query_predicate=result.context_predicate,
                     last_explanation=result.explanation_text,
+                    discourse=remember_entities(
+                        previous_context.discourse if previous_context else None,
+                        result.context_entities,
+                        role=DiscourseRole.QUERY_RESULT,
+                    ),
                     memory=DialogTurnMemory(
                         source_text=user_input.text,
                         entities=result.context_entities,

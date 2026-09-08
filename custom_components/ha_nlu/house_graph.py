@@ -24,6 +24,8 @@ class NodeKind(StrEnum):
     ENTITY = "entity"
     GROUP = "group"
     MODE = "mode"
+    PROPERTY = "property"
+    CAPABILITY = "capability"
 
 
 class RelationKind(StrEnum):
@@ -37,6 +39,12 @@ class RelationKind(StrEnum):
     VOICE_ORIGIN = "voice_origin"
     LOCATED_IN = "located_in"
     CONTAINS = "contains"
+    ON_FLOOR = "on_floor"
+    MEASURES = "measures"
+    HAS_CAPABILITY = "has_capability"
+    CONTROLS = "controls"
+    RELATED_TO = "related_to"
+    SAME_DEVICE = "same_device"
 
 
 class FactProvenance(StrEnum):
@@ -214,6 +222,8 @@ def build_house_graph(
                 confidence=ConfidenceClass.CERTAIN,
             )
     now = datetime.now(timezone.utc)
+    property_nodes: set[str] = set()
+    capability_nodes: set[str] = set()
     for entity in world.entities:
         kind = NodeKind.PERSON if entity.domain == "person" else NodeKind.ENTITY
         graph.add_node(
@@ -235,6 +245,48 @@ def build_house_graph(
                 f"entity:{entity.entity_id}",
                 RelationKind.LOCATED_IN,
                 f"area:{area_id}",
+                provenance=FactProvenance.OBSERVED,
+                confidence=ConfidenceClass.CERTAIN,
+                observed_at=entity.last_updated or now,
+            )
+        if entity.floor_id is not None and graph.node(f"floor:{entity.floor_id}") is not None:
+            graph.add_relation(
+                f"entity:{entity.entity_id}",
+                RelationKind.ON_FLOOR,
+                f"floor:{entity.floor_id}",
+                provenance=FactProvenance.OBSERVED,
+                confidence=ConfidenceClass.CERTAIN,
+                observed_at=entity.last_updated or now,
+            )
+        measured_property = {
+            "temperature": "temperature",
+            "humidity": "humidity",
+            "power": "power",
+            "energy": "energy",
+            "battery": "battery",
+        }.get(entity.device_class or "")
+        if measured_property is not None:
+            property_id = f"property:{measured_property}"
+            if property_id not in property_nodes:
+                graph.add_node(GraphNode(property_id, NodeKind.PROPERTY, measured_property))
+                property_nodes.add(property_id)
+            graph.add_relation(
+                f"entity:{entity.entity_id}",
+                RelationKind.MEASURES,
+                property_id,
+                provenance=FactProvenance.OBSERVED,
+                confidence=ConfidenceClass.CERTAIN,
+                observed_at=entity.last_updated or now,
+            )
+        for capability in sorted(entity.capabilities):
+            capability_id = f"capability:{capability}"
+            if capability_id not in capability_nodes:
+                graph.add_node(GraphNode(capability_id, NodeKind.CAPABILITY, capability))
+                capability_nodes.add(capability_id)
+            graph.add_relation(
+                f"entity:{entity.entity_id}",
+                RelationKind.HAS_CAPABILITY,
+                capability_id,
                 provenance=FactProvenance.OBSERVED,
                 confidence=ConfidenceClass.CERTAIN,
                 observed_at=entity.last_updated or now,

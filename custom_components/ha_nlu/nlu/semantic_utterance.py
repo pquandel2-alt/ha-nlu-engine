@@ -46,6 +46,13 @@ class Polarity(Enum):
     NEGATIVE = auto()
 
 
+class PragmaticDisposition(Enum):
+    EXECUTABLE_REQUEST = auto()
+    ASK_BEFORE_ACTION = auto()
+    READ_ONLY = auto()
+    NON_ACTION = auto()
+
+
 class ClauseRole(Enum):
     MAIN = auto()
     TRIGGER = auto()
@@ -76,6 +83,19 @@ class SemanticUtterance:
             and self.modality not in {Modality.HYPOTHETICAL, Modality.UNCERTAIN}
             and self.polarity is Polarity.POSITIVE
         )
+
+    @property
+    def pragmatic_disposition(self) -> PragmaticDisposition:
+        if self.safe_to_execute_directly:
+            return PragmaticDisposition.EXECUTABLE_REQUEST
+        if self.speech_act is SpeechAct.QUERY:
+            return PragmaticDisposition.READ_ONLY
+        if (
+            self.speech_act is SpeechAct.STATEMENT
+            and _IMPLICIT_COMPLAINT_RE.search(self.normalized_text)
+        ):
+            return PragmaticDisposition.ASK_BEFORE_ACTION
+        return PragmaticDisposition.NON_ACTION
 
 
 _QUESTION_RE = re.compile(
@@ -132,6 +152,11 @@ _POLITE_RE = re.compile(
 _NEGATION_RE = re.compile(
     r"\b(?:nicht(?!\s+(?:höher|hoeher|niedriger|mehr|weniger)\s+als\b)|"
     r"kein\w*|niemals|keinesfalls|auf\s+keinen\s+fall)\b",
+    re.I,
+)
+_IMPLICIT_COMPLAINT_RE = re.compile(
+    r"\b(?:mir\s+zu|fuer\s+mich\s+zu|für\s+mich\s+zu)\s+"
+    r"(?:hell|dunkel|warm|kalt|laut|leise)\b",
     re.I,
 )
 _COMMAND_RE = re.compile(

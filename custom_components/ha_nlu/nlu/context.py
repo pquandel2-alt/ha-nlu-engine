@@ -22,6 +22,7 @@ from ..service_call import ServiceCallPlan
 from .automation_model import AutomationModel, TriggerModel
 from .command import SemanticCommand
 from .dialog_focus import DialogFocus
+from .discourse import DiscourseState
 from .parser import ClarificationRequest
 from .primitives import SemanticProperty
 from .semantic_state import SemanticState
@@ -339,6 +340,7 @@ class ConversationContext:
     last_query_predicate: str | None = None
     last_explanation: str | None = None
     memory: DialogTurnMemory | None = None
+    discourse: DiscourseState | None = None
 
 
 _PENDING_DIALOG_FIELDS: tuple[tuple[PendingDialogKind, str], ...] = (

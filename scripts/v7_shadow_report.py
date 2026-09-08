@@ -147,6 +147,7 @@ def build_report(max_examples: int) -> dict[str, object]:
     )
     totals: Counter[str] = Counter()
     safety: Counter[str] = Counter()
+    stage_observations: Counter[str] = Counter()
     datasets: dict[str, Counter[str]] = defaultdict(Counter)
     examples: dict[str, list[dict[str, object]]] = defaultdict(list)
     cases = (*_eval_cases(), *_light_cases(), *_domain_cases())
@@ -162,6 +163,7 @@ def build_report(max_examples: int) -> dict[str, object]:
             if outcome.kind.name == "AMBIGUOUS" and outcome.actionable:
                 safety["ambiguous_action_leakage"] += 1
         category = _classification(comparison)
+        stage_observations.update(comparison.stage_differences)
         totals[category] += 1
         datasets[dataset][category] += 1
         if len(examples[category]) < max_examples:
@@ -170,6 +172,7 @@ def build_report(max_examples: int) -> dict[str, object]:
                     "dataset": dataset,
                     "text": sentence,
                     "differences": list(comparison.differences),
+                    "stage_differences": list(comparison.stage_differences),
                     "legacy": _payload_summary(comparison.authoritative.payload),
                     "v7": _payload_summary(comparison.candidate.payload),
                 }
@@ -185,6 +188,7 @@ def build_report(max_examples: int) -> dict[str, object]:
             "ambiguous_action_leakage": safety["ambiguous_action_leakage"],
             "unsafe_outcomes_observed": safety["unsafe_outcomes"],
         },
+        "semantic_stage_observations": dict(sorted(stage_observations.items())),
         "categories": {
             key: totals[key]
             for key in (

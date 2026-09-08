@@ -13,6 +13,7 @@ from conftest import POLERAUM_COVERS
 from ha_nlu.areas import AreaSnapshot
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.context import ConversationContext
+from ha_nlu.nlu.discourse import DiscourseRole, remember_entities
 
 DIMMABLE_LIGHT = EntitySnapshot(
     "light.buerolicht", "Bürolicht", "light", "off",
@@ -256,6 +257,32 @@ def test_match_reference_ambiguous_reference_returns_none(engine, entities):
 def test_match_reference_returns_none_for_unrelated_sentence(engine, entities):
     context = _context((SWITCH_A,))
     assert engine.match_reference("Mach das Licht an.", entities, context) is None
+
+
+def test_discourse_tie_returns_entity_clarification_instead_of_guessing(engine):
+    second_neuter = EntitySnapshot(
+        "switch.hoftor", "Hoftor", "switch", "off",
+        capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+    )
+    discourse = remember_entities(
+        None, (SWITCH_A, second_neuter), role=DiscourseRole.QUERY_RESULT
+    )
+    context = ConversationContext(
+        last_command=None,
+        last_entities=(SWITCH_A, second_neuter),
+        last_area=None,
+        pending_clarification=None,
+        discourse=discourse,
+    )
+
+    result = engine.match_reference("Mach es aus.", [SWITCH_A, second_neuter], context)
+
+    assert result is not None
+    assert result.plan is None
+    assert result.clarification is not None
+    assert {item.entity_id for item in result.clarification.candidates} == {
+        SWITCH_A.entity_id, second_neuter.entity_id
+    }
 
 
 def test_match_reference_others_turn_on_single_remaining(engine, entities):

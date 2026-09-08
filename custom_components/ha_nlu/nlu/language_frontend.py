@@ -16,10 +16,12 @@ from typing import Iterable
 from ..entities import EntitySnapshot, normalize_for_compare
 from ..name_similarity import edit_distance
 from ..phonetic_correction import phonetic_suggestions
+from .german_structure import ClauseKind, GermanStructuralAnalysis, analyse_german_structure
 from .normalize import normalize
 from .semantic_lexicon import SemanticAnalysis, SemanticKind, analyse_semantics
 from .semantic_catalog import CANONICAL_SPELLING_FORMS
 from .semantic_utterance import Polarity, SemanticUtterance, SpeechAct, analyse_utterance
+from .temporal_semantics import TemporalExpression, analyse_temporal_semantics
 
 
 _TOKEN_RE = re.compile(r"\d+(?:[,.]\d+)?|[\wäöüß]+|[%°]|[^\w\s]", re.I)
@@ -76,13 +78,16 @@ class LanguageDocument:
     variants: tuple[TextVariant, ...]
     utterance: SemanticUtterance
     semantics: SemanticAnalysis
+    structure: GermanStructuralAnalysis
+    temporal: tuple[TemporalExpression, ...]
 
     @property
     def normalized_text(self) -> str:
         return self.variants[1].text if len(self.variants) > 1 else self.source_text
 
 
-def _tokens(text: str) -> tuple[LanguageToken, ...]:
+def tokenize_language(text: str) -> tuple[LanguageToken, ...]:
+    """Tokenize one surface while retaining stable source offsets."""
     return tuple(
         LanguageToken(
             text=match.group(0),
@@ -328,10 +333,29 @@ def analyse_language(
         utterance = replace(utterance, polarity=Polarity.POSITIVE)
     if _has_near_negation(text, entity_tuple) and not explicit_unmute:
         utterance = replace(utterance, polarity=Polarity.NEGATIVE)
+    tokens = tokenize_language(text)
+    structure = analyse_german_structure(tokens)
+    if (
+        utterance.polarity is Polarity.NEGATIVE
+        and structure.negations
+        and all(
+            (clause := next(
+                (item for item in structure.clauses if item.clause_id == scope.clause_id),
+                None,
+            )) is not None
+            and clause.kind is ClauseKind.EXCLUSION
+            for scope in structure.negations
+        )
+    ):
+        # Scoped exception negation leaves the main command positive. The
+        # projection still has to resolve the excluded target unambiguously.
+        utterance = replace(utterance, polarity=Polarity.POSITIVE)
     return LanguageDocument(
         source_text=text,
-        tokens=_tokens(text),
+        tokens=tokens,
         variants=tuple(variants),
         utterance=utterance,
         semantics=semantics,
+        structure=structure,
+        temporal=analyse_temporal_semantics(tokens),
     )
