@@ -217,10 +217,27 @@ BENCHMARK_UTTERANCES: list[tuple[str, str]] = [
         "multi_target",
         "Schalte Wohnzimmer Deckenlampe und Wohnzimmer Stehlampe aus",
     ),
+    (
+        "multi_clause_command",
+        "Mach Wohnzimmer Hauptlicht an und fahre Rollladen Büro hoch",
+    ),
+    (
+        "temporal_parse",
+        "Mach Wohnzimmer Hauptlicht in fünf Minuten an",
+    ),
+    (
+        "repair_parse",
+        "Mach Wohnzimmer Hauptlicht an, nein, Wohnzimmer Stehlampe",
+    ),
+    (
+        "relational_query_shape",
+        "Wie warm ist es in dem Raum, in dem das Fenster offen ist?",
+    ),
     # This direct-engine benchmark has intentionally no ConversationContext.
     # It measures frontend/graph cost for a follow-up-shaped utterance; true
     # multi-turn salience latency belongs to the future dialog benchmark.
     ("context_free_followup_shape", "Und im Schlafzimmer?"),
+    ("discourse_reference_shape", "Mach die dort aus"),
 ]
 
 SCALES: list[int] = [100, 500, 1000, 5000]

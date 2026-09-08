@@ -2727,9 +2727,16 @@ class NluConversationEntity(
                     discourse=remember_entities(
                         previous_context.discourse if previous_context else None,
                         result.command.entities,
-                        role=DiscourseRole.ACTION_TARGET,
+                        role=(
+                            DiscourseRole.ACTION_TARGET
+                            if result.plan is not None
+                            else DiscourseRole.QUERY_RESULT
+                        ),
                         active_property=focus.property,
-                        active_action=result.command.intent,
+                        active_action=(
+                            result.command.intent if result.plan is not None else None
+                        ),
+                        semantic_graph=result.command.source_frame.semantic_graph,
                     ),
                     pending_undo=undo_plan,
                     last_explanation=result.explanation_text,

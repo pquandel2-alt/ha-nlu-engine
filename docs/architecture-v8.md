@@ -1,8 +1,9 @@
 # HomeIntent V8 – inkrementelle Understanding-Architektur
 
 Stand: 8. September 2026
-Status: Waves 0–8 des geplanten inkrementellen Ausbaus umgesetzt; bewusst
-nicht projizierbare Produktgrenzen sind unten dokumentiert.
+Status: Direct-Command-Integrationspass umgesetzt; andere Subsysteme sind
+unten ausdrücklich als `IMPLEMENTED`, `PARTIALLY MIGRATED`,
+`OBSERVABILITY ONLY` oder `UNSUPPORTED` gekennzeichnet.
 
 Die vollständige Ist- und Gap-Analyse steht in
 [`architecture-v8-audit.md`](architecture-v8-audit.md). Dieses Dokument
@@ -26,9 +27,12 @@ Originaltext
 ```
 
 Parsing, Graph, Kandidaten, Diskurs und Reasoning importieren keinen
-Home-Assistant-Serviceexecutor. `nlu/semantic_projection.py` ist die einzige
-Graph-zu-Domain-Brücke. Sie darf bestehende Compiler und Resolver aufrufen,
-aber weder Servicepläne ausführen noch Sicherheitsgrenzen überspringen.
+Home-Assistant-Serviceexecutor. `nlu/semantic_projection.py` ist die
+strukturierte Graph-zu-Compatibility-Brücke für die bereits unterstützten
+Direct-Command-Formen. Sie erzeugt keinen deutschen Zwischentext und ruft
+weder `analyse_language()` noch `analyse_semantics()` noch einen Textcompiler
+auf. Identity- und Location-Grounding delegiert sie an die vorhandenen
+Resolver; Servicepläne, Capability- und Policy-Entscheidungen bleiben später.
 
 ## German Structural Analysis
 
@@ -73,20 +77,27 @@ ACTION(turn_off)
   EXCLUDE(light.stehlampe)
 ```
 
-Domain, Area und Ausschluss werden weiterhin vom bestehenden Compiler und
-seinen Resolvern aufgelöst. Erst danach laufen Validator, ReasoningEngine und
+Domain, Area, Quantifier, Zustandsfilter und Ausschluss werden strukturiert
+projiziert; Entity-/Area-/Floor-Identität stammt weiterhin ausschließlich aus
+den vorhandenen Resolvern. Erst danach laufen Validator, ReasoningEngine und
 ServiceMapper. Ein unbekanntes oder mehrdeutiges Relativprädikat bleibt nicht
-ausführbar.
+ausführbar. Eigenständige koordinierte Prädikate werden nur anhand belegter
+Clause-Relationen atomar kompiliert; `OR` und unvollständige Gruppen werden
+nicht vereinfacht.
 
 ## Hypothesen, Evidence und Ambiguität
 
 `MeaningCandidate` ist eine vollständige Hypothese mit Graph, Slots,
 Vollständigkeit, Konflikten, Ablehnungsgrund und strukturierter positiver oder
-negativer Evidence. Alle begrenzten Textvarianten werden ausgewertet; die
+negativer Evidence. Gewichte und Strafen liegen zentral in `nlu/evidence.py`.
+Lexical-, Structural-, Registry-, Entity-, Area-, Floor-, Capability-,
+Property-, Unit-, Temporal-, WorldModel-, Correction- und Negative-Evidence
+erzeugen eine deterministische Score-Erklärung. Alle begrenzten Textvarianten werden ausgewertet; die
 Interpretation endet nicht mehr beim ersten Compiler-Treffer. Ähnlich starke,
 verschiedene und vollständige Bedeutungen erzeugen `AMBIGUOUS_MEANING`.
 Entity-Margins und `ClarificationRequest` bleiben autoritativ. Ein Graphscore
-allein macht nichts ausführbar.
+allein macht nichts ausführbar; Capability-Evidence ersetzt insbesondere
+nicht `validate_command()`.
 
 `build_semantic_snapshot()` bildet stabil ab:
 
@@ -103,7 +114,9 @@ Paritätsklassifikation noch Ausführung.
 
 `DiscourseState` hält begrenzt mehrere stabile Entity-IDs samt Typ, belegtem
 Genus, Numerus, Area/Floor, Erwähnungsrolle, Turnnummer, Property, Zustand und
-Aktion. Recency und Rollen werden deterministisch gewichtet. Der Resolver
+Aktion. Zusätzlich speichert er Focus-Entity-/Area-/Floor-IDs und das
+ausgewählte Graphfragment. Queryresultate werden als `QUERY_RESULT`, nicht als
+Action-Targets gespeichert. Recency und Rollen werden deterministisch gewichtet. Der Resolver
 arbeitet nur gegen aktuelle Live-Snapshots; verschwundene IDs werden nicht
 wiederbelebt. Bei kleiner Margin liefert er eine bestehende Entity-
 Clarification statt einer Wahl. Alte Follow-up-Matcher bleiben vorerst als
@@ -140,32 +153,53 @@ Semantische/Routine-Regeln können nur explizit bestätigt in den lokalen
 Konfigurationsspeicher übernommen werden. Eine unbeaufsichtigte Learning
 Engine existiert nicht.
 
+## Migrationsstatus
+
+| Subsystem | Status | Autorität |
+|---|---|---|
+| Language Frontend / Structural Parser | IMPLEMENTED | gemeinsame Dokument- und Struktureingabe |
+| SemanticGraph / Candidates | PARTIALLY MIGRATED | Turn-IR und Ranking; nicht jede Domainprojektion liest alle Kanten |
+| Direct Commands / Composition | PARTIALLY MIGRATED | Relative, Exclusion und Shared Predicate strukturiert; normale Compatibility-Compiler bleiben |
+| Queries | PARTIALLY MIGRATED | `QueryCommand`/`QueryExecutor` produktiv, viele NL-Projektionen textbasiert |
+| Discourse | PARTIALLY MIGRATED | Multi-Referent/Fokus produktiv, ältere `last_*`-Fallbacks bleiben |
+| WorldModel / relationale Queries | PARTIALLY MIGRATED | Fakten vorhanden; allgemeine relationale NL-Projection UNSUPPORTED |
+| Automationen | OBSERVABILITY ONLY für Graphautorität | Fachparser/Validator/Preview/Write produktiv |
+| Temporal / Repair | OBSERVABILITY ONLY außerhalb bestehender Domainpfade | Erkennung impliziert keine Ausführung |
+| Semantic Aliases | UNSUPPORTED end-to-end | bestätigter Store, keine allgemeine Graph-Expansion |
+| Management / Calendar / Productivity | PARTIALLY MIGRATED | gemeinsame Grenze, separate Fachsemantik |
+| Execution / Safety | IMPLEMENTED | Validator, Policy, Mapper und Executor autoritativ |
+
 ## Tests und Messwerte
 
-- Gesamtsuite: 2.948 bestanden, 12 übersprungen.
-- Language-Evaluation: 124 bestanden.
+- Gesamtsuite: 2.955 bestanden, 12 übersprungen; 88 % Coverage.
+- Language-Evaluation: 125 bestanden.
 - Structural-, Graph-, Snapshot-, Projektions-, Diskurs-, HouseGraph-,
   Relation-, Zeit-, Reparatur-, Pragmatik-, OOD- und Metamorphiktests.
 - handgeschriebenes OOD-Korpus in `tests/data/v8_ood_de.json`, nicht aus
   Produkttemplates generiert.
-- Shadow 4.71.0: 3.772 Turns, 3.752 identisch, 20 beidseitig ohne Treffer,
+- Shadow 4.72.0: 3.772 Turns, 3.752 identisch, 20 beidseitig ohne Treffer,
   keine Divergenz und keine Query-/Unsafe-/Ambiguous-Action-Leakage.
-- CI-Profil mit 5.000 Entities, 20 Messungen, drei Warmups: alle elf Fälle
-  im bestätigenden Lauf unter 100 ms p95.
+- Das Benchmarkscript enthält nun 16 Fälle einschließlich Multi-Clause,
+  Temporal-, Repair-, relationalem Query- und Discourse-Shape.
 
 Jüngste lokale p95-Messwerte der neuen Kategorien:
 
-| Fall | 100 Entities | 1.000 Entities | 5.000 Entities |
-|---|---:|---:|---:|
-| komplexer Relativfilter | 85,5 ms | 112,5 ms | 73,3 ms |
-| Ambiguität | 13,1 ms | 82,9 ms | 39,0 ms |
-| Multi-Target | 5,7 ms | 124,6 ms | 51,4 ms |
-| kontextfreie Follow-up-Form | 17,0 ms | 55,9 ms | 94,9 ms |
+| Fall | p95 bei 5.000 Entities |
+|---|---:|
+| komplexer Relativfilter + Exclusion | 34,92 ms |
+| Ambiguität | 27,00 ms |
+| Multi-Target | 49,96 ms |
+| Multi-Clause | 65,36 ms |
+| Temporal Parse | 33,50 ms |
+| Repair Parse | 41,14 ms |
+| relationaler Unsupported-Shape | 50,64 ms |
+| kontextfreie Follow-up-Form | 79,94 ms |
+| Discourse-Referenz-Shape | 26,92 ms |
 
-100/1.000 wurden mit zehn Iterationen und zwei Warmups gemessen, 5.000 mit
-dem CI-Profil. Der geteilte lokale Host zeigt bei kleinen Stichproben
-Ausreißer; das sind keine Zielhardwaregarantien. Mehrturnige Salience ist
-implementiert, aber noch kein eigener Benchmarkfall im Script.
+Gemessen mit 20 Iterationen und drei Warmups; der höchste p95 aller 16 Fälle
+lag bei 79,94 ms und damit unter dem 100-ms-Gate. Mehrturnige Salience ist
+implementiert; der Scriptfall misst den kontextfreien Referenz-Shape, nicht
+die ConversationContext-Latenz.
 
 ## Bewusste Grenzen
 

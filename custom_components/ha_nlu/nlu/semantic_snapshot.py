@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Mapping
 
 from .language_frontend import LanguageDocument
+from .evidence import explain_candidate
 from .parser import ParseResult
 from .semantic_interpreter import InterpreterResult
 from .understanding import UnderstandingOutcome
@@ -63,6 +64,18 @@ def build_semantic_snapshot(
                 "complete": candidate.complete,
                 "missing": candidate.missing_slots,
                 "conflicts": candidate.conflicts,
+                "rejection_reason": candidate.rejection_reason,
+                "evidence": tuple(
+                    {
+                        "kind": item.kind.name.lower(),
+                        "polarity": item.polarity.name.lower(),
+                        "claim": item.claim,
+                        "score": item.score,
+                        "detail": item.detail,
+                    }
+                    for item in candidate.evidence
+                ),
+                "explanation": explain_candidate(candidate),
             }
             for candidate in interpreted.candidates
         ),

@@ -297,6 +297,22 @@ def build_semantic_graph(
         clause = structure.clause_for_char(span.start)
         if (
             speech_act is SpeechAct.COMMAND
+            and span.kind is SemanticKind.ACTION
+            and clause is not None
+            and clause.kind in {ClauseKind.RELATIVE, ClauseKind.CONDITION}
+            and any(
+                state.kind is SemanticKind.STATE
+                and state.start == span.start
+                and state.end == span.end
+                for state in semantics.spans
+            )
+        ):
+            # In a relative/condition predicate, homonyms such as ``an`` and
+            # ``aus`` describe state. They must not become competing command
+            # actions in the canonical graph.
+            continue
+        if (
+            speech_act is SpeechAct.COMMAND
             and span.kind is SemanticKind.STATE
             and clause is not None
             and clause.kind not in {ClauseKind.RELATIVE, ClauseKind.CONDITION}
@@ -449,6 +465,45 @@ def build_semantic_graph(
             for node in scoped:
                 if node.kind in {SemanticNodeKind.STATE, SemanticNodeKind.ENTITY_CLASS}:
                     edges.append(SemanticEdge(action.node_id, relation_kind, node.node_id))
+
+    # German permits the finite/action predicate after a relative or
+    # exclusion clause. When exactly one active command action exists, bind
+    # the surrounding target/filter/exclusion constituents to that predicate
+    # rather than relying on textual adjacency.
+    if speech_act is SpeechAct.COMMAND:
+        clause_kind_by_id = {
+            clause.clause_id: clause.kind for clause in structure.clauses
+        }
+        active_actions = tuple(
+            node
+            for clause_id, meanings in semantic_by_clause.items()
+            if clause_kind_by_id[clause_id]
+            not in {ClauseKind.RELATIVE, ClauseKind.CONDITION, ClauseKind.TEMPORAL, ClauseKind.REPAIR}
+            for node in meanings
+            if node.kind is SemanticNodeKind.ACTION
+        )
+        if len(active_actions) == 1:
+            action = active_actions[0]
+            existing = {(edge.source, edge.kind, edge.target) for edge in edges}
+            for clause_id, meanings in semantic_by_clause.items():
+                clause_kind = clause_kind_by_id[clause_id]
+                relation_kind = (
+                    SemanticEdgeKind.FILTER
+                    if clause_kind is ClauseKind.RELATIVE
+                    else SemanticEdgeKind.EXCLUDE
+                    if clause_kind is ClauseKind.EXCLUSION
+                    else SemanticEdgeKind.TARGET
+                )
+                accepted_kinds = (
+                    {SemanticNodeKind.STATE}
+                    if relation_kind is SemanticEdgeKind.FILTER
+                    else {SemanticNodeKind.ENTITY_CLASS}
+                )
+                for node in meanings:
+                    key = (action.node_id, relation_kind, node.node_id)
+                    if node.kind in accepted_kinds and key not in existing:
+                        edges.append(SemanticEdge(*key))
+                        existing.add(key)
 
     roots = tuple(clause_nodes[root] for root in structure.root_clause_ids if root in clause_nodes)
     return SemanticGraph(source_text, tuple(nodes), tuple(edges), roots or ("utterance",))

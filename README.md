@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.71.0**
+- Aktuelle Version: **4.72.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -823,6 +823,16 @@ Parser führen keine Home-Assistant-Dienste direkt aus. Sprachverständnis,
 Auflösung, Validierung, Richtlinie, Vorschau und Ausführung bleiben getrennt
 testbar.
 
+Der direkte Command-Pfad projiziert unterstützte relative Filter,
+Ausschlüsse und Shared-Predicate-Targets inzwischen strukturiert aus dem
+bereits analysierten Dokument. Er erzeugt dabei keinen künstlichen deutschen
+Zwischensatz und ruft die Sprache nicht erneut auf. `SemanticFrame` bleibt
+die Compatibility-Projektion für Validator, Policy und ServiceMapper.
+Automationen, Management, allgemeine relationale Queries sowie beliebige
+Temporal-/Repair-Graphen sind dagegen weiterhin nur teilweise migriert oder
+Observability-only; erkannte, aber nicht sicher projizierbare Graphformen
+bleiben `UNSUPPORTED` beziehungsweise verlangen eine Klärung.
+
 Weitere Dokumentation:
 
 - [`docs/jarvis-core.md`](docs/jarvis-core.md)
@@ -832,6 +842,7 @@ Weitere Dokumentation:
 - [`docs/architecture-v7.md`](docs/architecture-v7.md)
 - [`docs/architecture-v8-audit.md`](docs/architecture-v8-audit.md)
 - [`docs/architecture-v8.md`](docs/architecture-v8.md)
+- [`docs/architecture-v8-integration.md`](docs/architecture-v8-integration.md)
 - [`docs/natural-language-roadmap-v7.md`](docs/natural-language-roadmap-v7.md)
 - [`docs/quality-checklist.md`](docs/quality-checklist.md)
 - [`docs/troubleshooting.md`](docs/troubleshooting.md)
@@ -844,11 +855,12 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/ha_nlu --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 4.71.0:
+Geprüfter Release-Stand von Version 4.72.0 einschließlich dieses
+Integrationspasses:
 
 ```text
-2948 passed, 12 skipped
-87 % Gesamt-Coverage
+2955 passed, 12 skipped
+88 % Gesamt-Coverage
 78 % Coverage für conversation.py
 ```
 
@@ -874,7 +886,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-4.71.0.json --quiet
+  --check docs/perf/v7-shadow-baseline-4.72.0.json --quiet
 ```
 
 Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die

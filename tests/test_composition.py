@@ -1,5 +1,11 @@
 from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.composition import build_compositional_plan, project_target
+from ha_nlu.nlu.composition import (
+    build_compositional_plan,
+    build_document_compositional_plan,
+    independent_predicate_clauses,
+    project_target,
+)
+from ha_nlu.nlu.language_frontend import analyse_language
 from ha_nlu.nlu.meaning import analyse_turn
 
 
@@ -26,3 +32,31 @@ def test_alternative_or_multiple_commands_are_not_collapsed():
     assert build_compositional_plan(
         analyse_turn("Schalte Küchenlicht aus und öffne Flurlicht"), LIGHTS
     ) is None
+
+
+def test_production_composition_uses_the_existing_language_document():
+    document = analyse_language(
+        "Schalte Küchenlicht sowie Flurlicht aus", LIGHTS
+    )
+
+    plan = build_document_compositional_plan(document, LIGHTS)
+
+    assert plan is not None
+    assert plan.source_text == document.source_text
+    assert plan.action == "turn_off"
+    assert {entity.entity_id for entity in plan.targets} == {
+        "light.kueche", "light.flur"
+    }
+
+
+def test_structural_and_distinguishes_targets_from_independent_predicates():
+    shared = analyse_language("Schalte Küchenlicht und Flurlicht aus", LIGHTS)
+    independent = analyse_language(
+        "Schalte Küchenlicht an und Flurlicht aus", LIGHTS
+    )
+
+    assert independent_predicate_clauses(shared) == ()
+    assert independent_predicate_clauses(independent) == (
+        "Schalte Küchenlicht an",
+        "Flurlicht aus",
+    )

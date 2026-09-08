@@ -2,7 +2,14 @@
   {
     "id": "relative_colloquial",
     "text": "Also, die Lampen, die sowieso noch an sind, bitte ausmachen.",
-    "relations": ["modifies"]
+    "relations": ["modifies"],
+    "speech_act": "command",
+    "semantic_nodes": [
+      ["action", "turn_off"],
+      ["entity_class", "light"],
+      ["state", "SemanticState.ON"]
+    ],
+    "semantic_edges": ["filter"]
   },
   {
     "id": "exclusion_fronted_area",
@@ -37,12 +44,16 @@
   {
     "id": "alternative_targets",
     "text": "Mach entweder die Leselampe oder das Licht am Sofa an.",
-    "relations": ["or"]
+    "relations": ["or"],
+    "speech_act": "command",
+    "semantic_nodes": [["action", "turn_on"]],
+    "semantic_edges": ["or"]
   },
   {
     "id": "spoken_repair_value",
     "text": "Heizung auf zweiundzwanzig, äh nein, einundzwanzig Grad.",
-    "relations": ["replaces"]
+    "relations": ["replaces"],
+    "semantic_edges": ["replaces"]
   },
   {
     "id": "spoken_repair_target",

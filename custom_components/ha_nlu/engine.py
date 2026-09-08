@@ -45,7 +45,11 @@ from .nlu.entity_resolution import (
     resolve_entity,
 )
 from .nlu.entity_clarification import render_candidate_question
-from .nlu.composition import build_compositional_plan, project_target
+from .nlu.composition import (
+    build_compositional_plan,
+    independent_predicate_clauses,
+    project_target,
+)
 from .nlu.command import SemanticCommand, build_semantic_command
 from .nlu.context import ConversationContext
 from .nlu.discourse import ReferenceStatus, resolve_reference
@@ -74,7 +78,12 @@ from .nlu.domain_operations import DOMAIN_WORDS
 from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
 from .nlu.semantic_interpreter import InterpreterResult, SemanticInterpreter
 from .nlu.meaning import SemanticTurn, analyse_turn
-from .nlu.semantic_utterance import ClauseRole, SpeechAct, analyse_utterance
+from .nlu.semantic_utterance import (
+    ClauseRole,
+    SpeechAct,
+    analyse_utterance,
+    is_contextual_followup,
+)
 from .nlu.understanding import (
     ShadowComparison,
     UnderstandingAuthority,
@@ -993,34 +1002,18 @@ class NluEngine:
         # joins targets. Re-running the independent-clause compiler would
         # rescan the registry for every segment and can become quadratic at
         # large registry sizes without changing the selected meaning.
+        predicate_clauses = independent_predicate_clauses(document)
         multi_result = (
             None
             if interpreted.compositional_plan is not None
-            else self._v7_multi_result(text, entities, world_model)
-        )
-        segments = tuple(
-            segment.strip() for segment in _AND_SPLIT_RE.split(text) if segment.strip()
-        )
-        # Coordinated-location resolution walks the entity registry.  A
-        # sentence without a conjunction cannot contain the supported
-        # ``Küche und Flur`` shape, so keep that O(n) work out of the common
-        # single-command path (notably important with large HA registries).
-        coordinated_locations = (
-            resolve_coordinated_locations(text, entities, world_model)
-            if len(segments) > 1
-            else None
+            else self._v7_multi_result(
+                predicate_clauses, entities, world_model
+            )
         )
         if multi_result is not None:
             v7_result = multi_result
         elif (
-            coordinated_locations is None
-            and interpreted.compositional_plan is None
-            and len(segments) > 1
-            and any(
-                analyse_language(segment, entities).utterance.speech_act
-                in {SpeechAct.COMMAND, SpeechAct.QUERY}
-                for segment in segments[1:]
-            )
+            interpreted.compositional_plan is None and predicate_clauses
         ):
             # Never execute only the first half of an independently shaped
             # conjunction when another clause failed compilation.
@@ -1047,19 +1040,12 @@ class NluEngine:
 
     def _v7_multi_result(
         self,
-        text: str,
+        segments: tuple[str, ...],
         entities: list[EntitySnapshot],
         world_model: WorldModel | None,
     ) -> CommandPlan | None:
-        """Compile independent conjunction clauses without legacy parsers."""
-        segments = tuple(
-            segment.strip()
-            for segment in _AND_SPLIT_RE.split(text)
-            if segment.strip()
-        )
+        """Compile structurally proven independent conjunction clauses."""
         if len(segments) < 2:
-            return None
-        if resolve_coordinated_locations(text, entities, world_model) is not None:
             return None
         results: list[MatchResult] = []
         for segment in segments:
@@ -1307,11 +1293,33 @@ class NluEngine:
                 margin=margin,
             )
 
-        feedback = self.understanding_feedback(text, entities)
         unsafe = (
             document.utterance.speech_act is SpeechAct.COMMAND
             and not document.utterance.safe_to_execute_directly
         )
+        unbound_semantic_query = (
+            document.utterance.speech_act is SpeechAct.QUERY
+            and len(document.structure.clauses) > 1
+            and not document.structure.relations
+        )
+        if unsafe:
+            # Safety classification is already authoritative and does not
+            # benefit from fuzzy target lookup. In particular, a repair or
+            # negated command must not pay for (or be reinterpreted by) a
+            # legacy registry feedback scan.
+            feedback = None
+        elif unbound_semantic_query:
+            feedback = UnderstandingFeedback(
+                ParseFailureReason.UNSUPPORTED_PROPERTY,
+                "Ich habe die Frage erkannt, kann die Beziehungen zwischen "
+                "ihren Teilen aber noch nicht sicher auswerten.",
+            )
+        elif is_contextual_followup(text):
+            # ConversationContext owns contextual grounding. A context-free
+            # miss must not trigger an exhaustive fuzzy registry scan.
+            feedback = None
+        else:
+            feedback = self.understanding_feedback(text, entities)
         return UnderstandingOutcome(
             kind=(
                 UnderstandingKind.UNSAFE

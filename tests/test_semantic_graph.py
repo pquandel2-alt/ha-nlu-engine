@@ -23,8 +23,18 @@ def test_graph_models_relative_state_as_filter_not_competing_root_action():
     graph = _graph("Mach alle Lampen aus, die noch an sind.")
 
     actions = graph.nodes_of_kind(SemanticNodeKind.ACTION)
-    assert {node.value for node in actions} >= {"turn_off", "turn_on"}
-    assert any(edge.kind is SemanticEdgeKind.FILTER for edge in graph.edges)
+    assert {node.value for node in actions} == {"turn_off"}
+    turn_off = next(node for node in actions if node.value == "turn_off")
+    states = {
+        node.node_id: node.value
+        for node in graph.nodes_of_kind(SemanticNodeKind.STATE)
+    }
+    assert any(
+        edge.kind is SemanticEdgeKind.FILTER
+        and edge.source == turn_off.node_id
+        and states.get(edge.target) == "SemanticState.ON"
+        for edge in graph.edges
+    )
 
 
 def test_graph_models_exclusion_relation():

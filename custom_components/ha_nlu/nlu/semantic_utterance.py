@@ -244,7 +244,8 @@ _CONDITION_CUE_RE = re.compile(r"\b(?P<cue>nur\s+wenn|sofern)\b", re.I)
 _CONTEXTUAL_FOLLOWUP_RE = re.compile(
     r"^\s*(?:und|dann|danach|nein[,.]?|stattdessen)\b|"
     r"\b(?:der|die|das)\s+andere\w*\b|"
-    r"^\s*(?:er|sie|es|das|dort|davon)\b",
+    r"^\s*(?:er|sie|es|das|dort|davon)\b|"
+    r"\b(?:dort|davon)\b",
     re.I,
 )
 

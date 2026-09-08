@@ -30,18 +30,24 @@ from .understanding import (
 )
 from .entity_resolution import all_mentioned_entities
 from .frame import SemanticFrame, TargetReference
+from .command import build_semantic_command
+from .evidence import (
+    CAPABILITY_CONTRADICTION_PENALTY,
+    CONFLICT_PENALTY,
+    UNEXPLAINED_TOKEN_PENALTY,
+    evidence_score,
+)
 from .primitives import SemanticAction
 from .verb_state_query import match_verb_state_query
-from .composition import CompositionalPlan, build_compositional_plan, project_target
-from .meaning import analyse_turn
+from .composition import CompositionalPlan, build_document_compositional_plan
 from .registered_operation_compiler import compile_registered_operation
-from .semantic_graph import SemanticEdgeKind, build_semantic_graph
+from .semantic_graph import build_semantic_graph
 from .semantic_projection import (
     attach_graph,
-    project_relative_state_command,
-    project_scoped_negation_exclusion,
+    project_structured_command,
 )
 from .temporal_semantics import analyse_temporal_semantics
+from .validator import ValidationError, validate_command
 
 
 @dataclass(frozen=True)
@@ -348,7 +354,7 @@ class SemanticInterpreter:
                     f"{span.kind.name.lower()}={span.value}",
                     span.start,
                     span.end,
-                    1.0,
+                    0.0,
                     span.text,
                     claim=f"{span.kind.name.lower()}={span.value}",
                     source_id="semantic_catalog",
@@ -360,7 +366,7 @@ class SemanticInterpreter:
                     relation.kind.name.lower(),
                     relation.connector_start,
                     relation.connector_end,
-                    1.0,
+                    0.0,
                     f"{relation.source_clause}->{relation.target_clause}",
                     claim=relation.kind.name.lower(),
                     source_id="german_structure",
@@ -370,7 +376,7 @@ class SemanticInterpreter:
                 UnderstandingEvidence(
                     EvidenceKind.REGISTRY,
                     entity.entity_id,
-                    score=1.0,
+                    score=0.0,
                     detail=entity.friendly_name,
                     claim=f"entity={entity.entity_id}",
                     source_id="entity_resolution",
@@ -382,10 +388,11 @@ class SemanticInterpreter:
                     UnderstandingEvidence(
                         EvidenceKind.PHONETIC
                         if variant.source.startswith("phonetic:")
-                        else EvidenceKind.NORMALIZED,
+                        else EvidenceKind.CORRECTION,
                         variant.text,
-                        score=-variant.cost,
+                        score=0.0,
                         detail=variant.source,
+                        polarity=EvidencePolarity.NEGATIVE,
                         claim=f"surface={variant.text}",
                         source_id=variant.source,
                     ),
@@ -410,6 +417,23 @@ class SemanticInterpreter:
                         SemanticKind.STATE,
                     )
                 )
+                semantic_query_clauses = {
+                    clause.clause_id
+                    for span in analysis.spans
+                    if span.kind in {
+                        SemanticKind.DOMAIN,
+                        SemanticKind.DEVICE_CLASS,
+                        SemanticKind.PROPERTY,
+                        SemanticKind.STATE,
+                    }
+                    if (
+                        clause := variant_structure.clause_for_char(span.start)
+                    ) is not None
+                }
+                unsupported_unbound_query = (
+                    len(semantic_query_clauses) > 1
+                    and not variant_structure.relations
+                )
                 if (
                     is_contextual_followup(variant.text)
                     and not has_standalone_query_meaning
@@ -417,6 +441,14 @@ class SemanticInterpreter:
                     # Context-free interpretation cannot ground an elliptical
                     # follow-up. ConversationContext owns that resolution;
                     # scanning the complete registry here adds no evidence.
+                    verb_answer = None
+                    parse_result = None
+                elif unsupported_unbound_query:
+                    # Several meaning-bearing clauses without a structural
+                    # relation cannot safely be collapsed into one flat
+                    # QueryCommand. Return UNSUPPORTED before an exhaustive
+                    # registry scan; a future relational projector may own
+                    # this graph shape.
                     verb_answer = None
                     parse_result = None
                 else:
@@ -441,48 +473,98 @@ class SemanticInterpreter:
                         explanation_text=verb_answer.explanation_text,
                     )
                 elif not (
-                    is_contextual_followup(variant.text)
-                    and not has_standalone_query_meaning
+                    unsupported_unbound_query
+                    or (
+                        is_contextual_followup(variant.text)
+                        and not has_standalone_query_meaning
+                    )
                 ):
                     parse_result = SemanticQueryCompiler.compile(
                         variant.text, entities, world_model, analysis
                     )
             elif may_compile and document.utterance.safe_to_execute_directly:
-                compositional_plan = build_compositional_plan(
-                    analyse_turn(variant.text),
+                context_only_command = (
+                    is_contextual_followup(variant.text)
+                    and any(
+                        token.canonical in {"dort", "davon"}
+                        for token in candidate_document.tokens
+                    )
+                    and not any(
+                        analysis.values(kind)
+                        for kind in (
+                            SemanticKind.DOMAIN,
+                            SemanticKind.DEVICE_CLASS,
+                        )
+                    )
+                    and not mentions
+                )
+                if context_only_command:
+                    # This graph requires DiscourseState grounding. Running
+                    # fuzzy entity resolution against the complete registry
+                    # would be both expensive and semantically unauthorised.
+                    continue
+                compositional_plan = build_document_compositional_plan(
+                    candidate_document,
                     entities,
                     index=(
                         world_model.entity_index
                         if world_model is not None
                         else None
                     ),
+                    resolved_mentions=(mentions if resolve_registry else None),
                 )
-                compile_text = (
-                    project_target(
-                        compositional_plan, compositional_plan.targets[0]
+                has_exclusion = any(
+                    clause.kind is ClauseKind.EXCLUSION
+                    for clause in candidate_document.structure.clauses
+                )
+                # A comma or hesitation can create a syntactic RELATIVE
+                # candidate. It becomes authoritative only when it actually
+                # modifies an independently recognised entity class. This
+                # prevents punctuation artefacts from suppressing the normal
+                # compiler while still refusing unknown genuine relatives.
+                has_relative_filter = any(
+                    clause.kind is ClauseKind.RELATIVE
+                    and any(
+                        clause.char_start <= span.start < clause.char_end
+                        for span in candidate_document.semantics.matching(
+                            SemanticKind.STATE
+                        )
                     )
-                    if compositional_plan is not None
-                    else variant.text
+                    for clause in candidate_document.structure.clauses
+                ) and any(
+                    span.kind in {SemanticKind.DOMAIN, SemanticKind.DEVICE_CLASS}
+                    and (
+                        (clause := candidate_document.structure.clause_for_char(
+                            span.start
+                        )) is None
+                        or clause.kind in {ClauseKind.MAIN, ClauseKind.COORDINATE}
+                    )
+                    for span in candidate_document.semantics.spans
                 )
-                parse_result = compile_registered_operation(
-                    compile_text,
-                    entities,
-                    index=(world_model.entity_index if world_model is not None else None),
-                )
-                if parse_result is None:
-                    parse_result = SemanticCommandCompiler.compile(
-                        compile_text,
+                has_structured_modifier = has_exclusion or has_relative_filter
+                parse_result = (
+                    project_structured_command(
+                        candidate_document,
+                        graph,
                         entities,
                         world_model,
-                        analyse_semantics(compile_text),
+                        composition=compositional_plan,
                     )
-                if parse_result is None and compositional_plan is None:
-                    parse_result = project_relative_state_command(
-                        candidate_document, entities, world_model
+                    if compositional_plan is not None or has_structured_modifier
+                    else None
+                )
+                if parse_result is None and compositional_plan is None and not has_structured_modifier:
+                    parse_result = compile_registered_operation(
+                        variant.text,
+                        entities,
+                        index=(world_model.entity_index if world_model is not None else None),
                     )
-                if parse_result is None and compositional_plan is None:
-                    parse_result = project_scoped_negation_exclusion(
-                        candidate_document, entities, world_model
+                if parse_result is None and compositional_plan is None and not has_structured_modifier:
+                    parse_result = SemanticCommandCompiler.compile(
+                        variant.text,
+                        entities,
+                        world_model,
+                        analysis,
                     )
 
             resolved_mentions = mentions
@@ -526,17 +608,103 @@ class SemanticInterpreter:
                     tuple(sorted({entity.domain for entity in resolved_mentions})),
                 )
 
+            evidence += tuple(
+                UnderstandingEvidence(
+                    EvidenceKind.ENTITY,
+                    entity.entity_id,
+                    detail=f"exact grounded target: {entity.friendly_name}",
+                    claim=f"entity={entity.entity_id}",
+                    source_id="entity_resolution",
+                )
+                for entity in resolved_mentions
+            )
+            evidence += tuple(
+                UnderstandingEvidence(
+                    EvidenceKind.AREA if area_id is not None else EvidenceKind.FLOOR,
+                    spoken,
+                    detail=area_id or floor_id,
+                    claim=(
+                        f"area={area_id}" if area_id is not None
+                        else f"floor={floor_id}"
+                    ),
+                    source_id="semantic_location",
+                )
+                for spoken, area_id, floor_id in grounded_locations
+                if area_id is not None or floor_id is not None
+            )
+            if world_model is not None:
+                evidence += tuple(
+                    UnderstandingEvidence(
+                        EvidenceKind.WORLD_MODEL,
+                        entity.entity_id,
+                        detail="grounded entity exists in current turn snapshot",
+                        claim=f"live={entity.entity_id}",
+                        source_id="world_model",
+                    )
+                    for entity in resolved_mentions
+                    if entity.entity_id in world_model.entities_by_id
+                )
+            if isinstance(parse_result, ParseResult) and resolved_mentions:
+                validation = validate_command(build_semantic_command(parse_result))
+                evidence += (
+                    UnderstandingEvidence(
+                        EvidenceKind.CAPABILITY,
+                        parse_result.frame.intent,
+                        score=(
+                            CAPABILITY_CONTRADICTION_PENALTY
+                            if validation is ValidationError.UNSUPPORTED_CAPABILITY
+                            else 0.0
+                        ),
+                        detail=(
+                            "target lacks required capability"
+                            if validation is ValidationError.UNSUPPORTED_CAPABILITY
+                            else "target capabilities agree with projected intent"
+                        ),
+                        polarity=(
+                            EvidencePolarity.NEGATIVE
+                            if validation is ValidationError.UNSUPPORTED_CAPABILITY
+                            else EvidencePolarity.POSITIVE
+                        ),
+                        claim=f"capability_for={parse_result.frame.intent}",
+                        source_id="command_validator",
+                    ),
+                )
+                if parse_result.frame.property is not None:
+                    evidence += (
+                        UnderstandingEvidence(
+                            EvidenceKind.PROPERTY,
+                            parse_result.frame.property.name.lower(),
+                            detail="property retained by compatibility projection",
+                            claim=f"property={parse_result.frame.property.name.lower()}",
+                            source_id="semantic_projection",
+                        ),
+                    )
+                if parse_result.frame.numeric_value is not None:
+                    evidence += (
+                        UnderstandingEvidence(
+                            EvidenceKind.UNIT,
+                            parse_result.frame.numeric_value.unit.name.lower(),
+                            detail="typed numeric value and unit",
+                            claim=(
+                                "unit="
+                                + parse_result.frame.numeric_value.unit.name.lower()
+                            ),
+                            source_id="semantic_frame",
+                        ),
+                    )
+            evidence += tuple(
+                UnderstandingEvidence(
+                    EvidenceKind.TEMPORAL,
+                    temporal.value,
+                    detail=temporal.kind.name.lower(),
+                    claim=f"temporal={temporal.kind.name.lower()}",
+                    source_id="temporal_semantics",
+                )
+                for temporal in candidate_document.temporal
+            )
+
             conflicts = _resolved_conflicts(candidate_document, parse_result)
             missing = _missing_slots(candidate_document, slots, parse_result)
-            coverage = len(analysis.spans) * 5.0
-            structural_coverage = min(
-                10.0,
-                sum(
-                    2.0
-                    for edge in graph.edges
-                    if edge.kind is not SemanticEdgeKind.CONTAINS
-                ),
-            )
             registry_tokens = {
                 normalize_for_compare(token)
                 for entity in resolved_mentions
@@ -580,9 +748,9 @@ class SemanticInterpreter:
             )
             evidence += tuple(
                 UnderstandingEvidence(
-                    EvidenceKind.STRUCTURE,
+                    EvidenceKind.NEGATIVE_EVIDENCE,
                     f"conflict={conflict}",
-                    score=-20.0,
+                    score=CONFLICT_PENALTY,
                     detail="competing semantic values in one active scope",
                     polarity=EvidencePolarity.NEGATIVE,
                     claim=f"unique_{conflict}",
@@ -591,9 +759,9 @@ class SemanticInterpreter:
                 for conflict in conflicts
             ) + tuple(
                 UnderstandingEvidence(
-                    EvidenceKind.LEXICON,
+                    EvidenceKind.NEGATIVE_EVIDENCE,
                     f"unexplained={token}",
-                    score=-3.0,
+                    score=UNEXPLAINED_TOKEN_PENALTY,
                     detail="meaning-bearing token has no grounded claim",
                     polarity=EvidencePolarity.NEGATIVE,
                     claim=f"explained_token={token}",
@@ -606,15 +774,7 @@ class SemanticInterpreter:
                 and not conflicts
                 and not missing
             )
-            penalty = (
-                len(unexplained) * 3.0
-                + len(conflicts) * 20.0
-                + variant.cost * 10.0
-            )
-            score = max(
-                0.0,
-                min(100.0, 50.0 + coverage + structural_coverage - penalty),
-            )
+            score = evidence_score(evidence, variant_cost=variant.cost)
             key_parts = [document.utterance.speech_act.name.lower()]
             for name in ("actions", "domains", "device_classes", "properties"):
                 if name in slots:

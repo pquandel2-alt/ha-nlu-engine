@@ -37,7 +37,7 @@ jobs:
         if: matrix.python-version == '3.12'
         run: >-
           python scripts/v7_shadow_report.py
-          --check docs/perf/v7-shadow-baseline-4.71.0.json
+          --check docs/perf/v7-shadow-baseline-4.72.0.json
           --quiet
       - name: V7-Latenzbudget bei großer Registry prüfen
         if: matrix.python-version == '3.12'
@@ -96,6 +96,7 @@ jobs:
           custom_components/ha_nlu/nlu/grounded_answer.py
           custom_components/ha_nlu/nlu/german_morphology.py
           custom_components/ha_nlu/nlu/meaning.py
+          custom_components/ha_nlu/nlu/evidence.py
           custom_components/ha_nlu/nlu/verb_state_query.py
           custom_components/ha_nlu/nlu/understanding.py
           custom_components/ha_nlu/nlu/language_frontend.py

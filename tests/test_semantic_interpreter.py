@@ -4,6 +4,7 @@ from ha_nlu.nlu.parser import ClarificationRequest, ParseResult
 from ha_nlu.nlu.semantic_interpreter import SemanticInterpreter
 from ha_nlu.nlu.understanding import EvidenceKind, EvidencePolarity
 from ha_nlu.nlu.semantic_graph import SemanticNodeKind
+from ha_nlu.nlu.evidence import EVIDENCE_WEIGHTS, explain_candidate
 
 
 ENTITIES = [
@@ -235,3 +236,19 @@ def test_shared_predicate_named_targets_form_one_atomic_compositional_plan():
         node.value
         for node in candidate.graph.nodes_of_kind(SemanticNodeKind.ENTITY)
     } == {"light.kueche", "light.flur"}
+
+
+def test_candidate_score_has_central_grounding_and_capability_explanation():
+    result = SemanticInterpreter.interpret(
+        analyse_language("Mach das Küchenlicht aus", ENTITIES), ENTITIES
+    )
+
+    candidate = next(item for item in result.candidates if item.complete)
+    kinds = {item.kind for item in candidate.evidence}
+    explanation = explain_candidate(candidate)
+
+    assert EvidenceKind.ENTITY in kinds
+    assert EvidenceKind.CAPABILITY in kinds
+    assert EVIDENCE_WEIGHTS[EvidenceKind.ENTITY] > EVIDENCE_WEIGHTS[EvidenceKind.LEXICON]
+    assert explanation[0].endswith(f"{candidate.score:.1f}")
+    assert any("exact grounded target" in line for line in explanation)

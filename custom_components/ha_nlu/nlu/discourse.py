@@ -8,11 +8,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
 from ..entities import EntitySnapshot, normalize_for_compare
 from .german_morphology import GrammaticalGender, entity_name_gender
 from .primitives import SemanticProperty
+
+if TYPE_CHECKING:
+    from .semantic_graph import SemanticGraph
 
 
 class DiscourseRole(Enum):
@@ -49,6 +52,10 @@ class DiscourseReferent:
 class DiscourseState:
     turn_index: int = 0
     referents: tuple[DiscourseReferent, ...] = ()
+    focus_entity_ids: tuple[str, ...] = ()
+    active_area_ids: tuple[str, ...] = ()
+    active_floor_ids: tuple[str, ...] = ()
+    current_graph: SemanticGraph | None = None
 
 
 @dataclass(frozen=True)
@@ -72,6 +79,7 @@ def remember_entities(
     role: DiscourseRole,
     active_property: SemanticProperty | None = None,
     active_action: str | None = None,
+    semantic_graph: SemanticGraph | None = None,
     max_referents: int = 32,
 ) -> DiscourseState:
     """Return a bounded state with this turn's grounded entities promoted."""
@@ -109,7 +117,21 @@ def remember_entities(
         referents,
         key=lambda item: (-item.salience, -item.last_mentioned_turn, item.entity_id),
     )[:max_referents]
-    return DiscourseState(turn, tuple(ordered))
+    focus_entities = tuple(sorted(promoted))
+    active_areas = tuple(sorted({
+        entity.area_id for entity in promoted.values() if entity.area_id is not None
+    }))
+    active_floors = tuple(sorted({
+        entity.floor_id for entity in promoted.values() if entity.floor_id is not None
+    }))
+    return DiscourseState(
+        turn_index=turn,
+        referents=tuple(ordered),
+        focus_entity_ids=focus_entities,
+        active_area_ids=active_areas,
+        active_floor_ids=active_floors,
+        current_graph=semantic_graph,
+    )
 
 
 def _reference_features(text: str) -> tuple[str | None, bool, bool]:

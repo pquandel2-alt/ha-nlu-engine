@@ -5,6 +5,8 @@ from ha_nlu.nlu.discourse import (
     remember_entities,
     resolve_reference,
 )
+from ha_nlu.nlu.language_frontend import analyse_language
+from ha_nlu.nlu.semantic_graph import build_semantic_graph
 
 
 LIGHT_A = EntitySnapshot(
@@ -46,3 +48,26 @@ def test_grounding_never_resurrects_entity_missing_from_live_registry():
     state = remember_entities(None, (LIGHT_A,), role=DiscourseRole.ACTION_TARGET)
 
     assert resolve_reference("mach es aus", state, ()).status is ReferenceStatus.NOT_FOUND
+
+
+def test_state_retains_grounded_focus_and_selected_graph_fragment():
+    document = analyse_language("Mach das Wohnzimmerlicht aus", (LIGHT_A,))
+    graph = build_semantic_graph(
+        document.source_text,
+        document.tokens,
+        document.structure,
+        document.semantics,
+        document.utterance.speech_act,
+    )
+
+    state = remember_entities(
+        None,
+        (LIGHT_A,),
+        role=DiscourseRole.ACTION_TARGET,
+        semantic_graph=graph,
+    )
+
+    assert state.focus_entity_ids == (LIGHT_A.entity_id,)
+    assert state.active_area_ids == ("living",)
+    assert state.active_floor_ids == ("ground",)
+    assert state.current_graph is graph
