@@ -13,7 +13,14 @@ import re
 from dataclasses import dataclass
 from typing import Callable
 
-from hassil import Intents, RangeSlotList, RangeType, WildcardSlotList, recognize
+from hassil import (
+    Intents,
+    RangeSlotList,
+    RangeType,
+    SlotList,
+    WildcardSlotList,
+    recognize,
+)
 
 from .areas import AreaResolutionStatus, AreaResolveStatus, AreaSnapshot, resolve_area_name, resolve_area_scored
 from .automation_summary import AutomationSummary
@@ -171,7 +178,7 @@ class SingleTargetParser:
         self._intents = intents
 
     def parse(self, text: str, context: ParseContext) -> ParseResult | ClarificationRequest | None:
-        slot_lists = {"name": WildcardSlotList(name="name")}
+        slot_lists: dict[str, SlotList] = {"name": WildcardSlotList(name="name")}
         result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
         if result is None or result.intent is None:
             return None
@@ -1111,7 +1118,7 @@ class AreaQueryParser:
     def parse(
         self, text: str, context: ParseContext
     ) -> ParseResult | ClarificationRequest | None:
-        slot_lists = {"area": WildcardSlotList(name="area")}
+        slot_lists: dict[str, SlotList] = {"area": WildcardSlotList(name="area")}
         result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
         if result is None or result.intent is None:
             return None
@@ -1552,7 +1559,7 @@ class CommandFollowupParser:
     def parse(
         self, text: str, entities: list[EntitySnapshot], last_command: SemanticCommand
     ) -> ParseResult | None:
-        slot_lists = {"area": WildcardSlotList(name="area")}
+        slot_lists: dict[str, SlotList] = {"area": WildcardSlotList(name="area")}
         result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
         if result is None or result.intent is None:
             return None
@@ -1690,7 +1697,7 @@ class ReferenceParser:
         last_entities: tuple[EntitySnapshot, ...],
         last_area: AreaSnapshot | None,
     ) -> ParseResult | AmbiguousReference | None:
-        slot_lists = {"domain": _DOMAIN_SLOT_LIST}
+        slot_lists: dict[str, SlotList] = {"domain": _DOMAIN_SLOT_LIST}
         result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
         if result is None or result.intent is None:
             return None
@@ -2487,7 +2494,7 @@ class AutomationDeleteParser:
         context: ParseContext,
         automations: tuple[AutomationSummary, ...],
     ) -> AutomationDeleteMatch | None:
-        slot_lists = {"name": WildcardSlotList(name="name")}
+        slot_lists: dict[str, SlotList] = {"name": WildcardSlotList(name="name")}
         result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
         if result is None or result.intent is None or result.intent.name != "HassAutomationDelete":
             return None
@@ -2544,7 +2551,7 @@ class AutomationToggleParser:
         context: ParseContext,
         automations: tuple[AutomationSummary, ...],
     ) -> AutomationToggleMatch | None:
-        slot_lists = {"name": WildcardSlotList(name="name")}
+        slot_lists: dict[str, SlotList] = {"name": WildcardSlotList(name="name")}
         result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
         if result is None or result.intent is None:
             return None

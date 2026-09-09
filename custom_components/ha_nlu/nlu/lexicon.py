@@ -18,7 +18,7 @@ hassil's matching/recognition machinery into the parser-agnostic layers.
 
 from __future__ import annotations
 
-from hassil import TextSlotList
+from hassil import TextChunk, TextSlotList
 
 from .primitives import SemanticProperty, SemanticQuantity
 
@@ -566,9 +566,17 @@ _DAY_PART_WINDOW_SLOT_LIST = TextSlotList.from_tuples(
 # property. Every value is the SAME candidate per list on purpose - the word
 # only tells you *that* a colour/colour-temperature is being set, not which
 # property-free reading would make sense otherwise.
+def _literal_slot_text(value: object) -> str:
+    """Return text only for the literal slot entries defined in this module."""
+    text_in = getattr(value, "text_in", None)
+    if not isinstance(text_in, TextChunk):
+        raise TypeError("Semantic candidate slot must contain literal text")
+    return text_in.text
+
+
 SEMANTIC_PROPERTY_CANDIDATES: dict[str, SemanticProperty] = {
-    **{v.text_in.text: SemanticProperty.COLOR for v in _COLOR_SLOT_LIST.values},
-    **{v.text_in.text: SemanticProperty.COLOR_TEMPERATURE for v in _COLOR_TEMP_SLOT_LIST.values},
+    **{_literal_slot_text(v): SemanticProperty.COLOR for v in _COLOR_SLOT_LIST.values},
+    **{_literal_slot_text(v): SemanticProperty.COLOR_TEMPERATURE for v in _COLOR_TEMP_SLOT_LIST.values},
 }
 
 # _QUANTIFIER_SLOT_LIST's "all"/"both" and _COUNT_SLOT_LIST's "2".."10"
@@ -576,8 +584,8 @@ SEMANTIC_PROPERTY_CANDIDATES: dict[str, SemanticProperty] = {
 # reuse them 1:1 instead of re-encoding the same words differently here.
 SEMANTIC_QUANTITY_CANDIDATES: dict[str, SemanticQuantity] = {
     **{
-        v.text_in.text: (SemanticQuantity.all() if v.value_out == "all" else SemanticQuantity.exactly(2))
+        _literal_slot_text(v): (SemanticQuantity.all() if v.value_out == "all" else SemanticQuantity.exactly(2))
         for v in _QUANTIFIER_SLOT_LIST.values
     },
-    **{v.text_in.text: SemanticQuantity.exactly(int(v.value_out)) for v in _COUNT_SLOT_LIST.values},
+    **{_literal_slot_text(v): SemanticQuantity.exactly(int(v.value_out)) for v in _COUNT_SLOT_LIST.values},
 }
