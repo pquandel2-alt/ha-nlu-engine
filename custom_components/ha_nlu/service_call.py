@@ -412,6 +412,20 @@ QUERY_INTENTS: dict[str, QueryIntentSpec] = {
         allowed_domains=frozenset({"light", "cover", "climate"}),
         response=lambda es, params: _speak_comparison_matches(es),
     ),
+    # Graph-projected comparison of two explicitly grounded live operands.
+    # ResponseGenerator consumes the typed QueryResult; this registration is
+    # solely the read-only allow-list used by the validator and speech-act
+    # boundary. It has no service mapping.
+    "HassRelationalComparison": QueryIntentSpec(
+        allowed_domains=frozenset({"sensor", "light", "cover", "climate"}),
+        response=lambda es, params: "Das habe ich nicht verstanden.",
+        allows_empty=False,
+    ),
+    "HassRelationshipQuery": QueryIntentSpec(
+        allowed_domains=frozenset({"sensor", "binary_sensor", "light", "switch", "cover", "climate"}),
+        response=lambda es, params: "Das habe ich nicht verstanden.",
+        allows_empty=True,
+    ),
     # WorldModelQuery wave: dead-code responses (engine.py::_build_match_result's
     # "query_result" branch intercepts these four intents before the
     # placeholder lambda below is ever reached - every parser that produces

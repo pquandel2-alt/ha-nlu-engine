@@ -43,6 +43,7 @@ from .automation_action_edit import (
 from .automation_scenarios import interpret_downstairs_shutdown
 from .automation_management import (
     AutomationManagementKind,
+    AutomationManagementRequest,
     format_scheduled_time,
     parse_automation_management,
     select_automation_management,
@@ -2051,10 +2052,11 @@ class NluConversationEntity(
             )
         elif request.operation is MemoryOperation.EXPORT_REDACTED:
             exported = await store.async_redacted_export()
-            counts = exported.get("record_counts", {})
+            exported_counts = exported.get("record_counts", {})
             summary = ", ".join(
-                f"{count} {kind}" for kind, count in sorted(counts.items())
-            ) if isinstance(counts, dict) else ""
+                f"{count} {kind}"
+                for kind, count in sorted(exported_counts.items())
+            ) if isinstance(exported_counts, dict) else ""
             response.async_set_speech(
                 "Der redigierte Export enthält nur Zähler und Herkunftsklassen"
                 + (f": {summary}." if summary else ". Es sind keine aktiven Einträge vorhanden.")
@@ -2473,7 +2475,8 @@ class NluConversationEntity(
                 + "."
             )
         else:
-            reordered = reordered_actions(candidates[0].actions, operation)
+            automation = next(iter(candidates))
+            reordered = reordered_actions(automation.actions, operation)
             if operation.startswith("reorder:") and reordered is None:
                 response.async_set_speech(
                     "Diese Automation hat nicht genügend Aktionen für diese Reihenfolge."
@@ -2484,7 +2487,7 @@ class NluConversationEntity(
                     user_input.conversation_id,
                     PendingAutomationActionEdit(
                         candidates=candidates,
-                        automation=candidates[0],
+                        automation=automation,
                         rendered_actions=reordered or (),
                         action_text=user_input.text if reordered else None,
                         operation=operation,
@@ -3466,6 +3469,11 @@ class NluConversationEntity(
         else:
             response.async_set_speech(speech)
             if isinstance(request, TodoRequest) and request.operation is not TodoOperation.LIST:
+                if request.entity_id is None:
+                    return conversation.ConversationResult(
+                        response=response,
+                        conversation_id=user_input.conversation_id,
+                    )
                 todo_service = {
                     TodoOperation.ADD: "add_item",
                     TodoOperation.COMPLETE: "update_item",
@@ -4130,7 +4138,7 @@ class NluConversationEntity(
         self,
         user_input: conversation.ConversationInput,
         response: intent.IntentResponse,
-        request,
+        request: AutomationManagementRequest,
         entities: list[EntitySnapshot],
     ) -> conversation.ConversationResult:
         """Execute the bounded query/reschedule/cleanup management language."""
@@ -4273,8 +4281,22 @@ class NluConversationEntity(
                     + "."
                 )
             else:
-                automation = selection.automations[0]
+                automation = next(iter(selection.automations))
+                if automation.scheduled_for is None:
+                    response.async_set_speech(
+                        "Der passende Auftrag hat keine sichere geplante Zeit."
+                    )
+                    return conversation.ConversationResult(
+                        response=response,
+                        conversation_id=user_input.conversation_id,
+                    )
                 target = datetime.fromisoformat(automation.scheduled_for)
+                if request.hour is None:
+                    response.async_set_speech("Die neue Uhrzeit ist unvollständig.")
+                    return conversation.ConversationResult(
+                        response=response,
+                        conversation_id=user_input.conversation_id,
+                    )
                 target = target.replace(hour=request.hour, minute=request.minute, second=0)
                 comparable_now = now
                 if target.tzinfo is None and now.tzinfo is not None:
@@ -4327,7 +4349,7 @@ class NluConversationEntity(
                     + "."
                 )
             else:
-                automation = selection.automations[0]
+                automation = next(iter(selection.automations))
                 self._context_store.set(
                     user_input.conversation_id,
                     ConversationContext(
@@ -4364,7 +4386,7 @@ class NluConversationEntity(
                     + "."
                 )
             else:
-                automation = selection.automations[0]
+                automation = next(iter(selection.automations))
                 self._context_store.set(
                     user_input.conversation_id,
                     ConversationContext(
@@ -4398,12 +4420,18 @@ class NluConversationEntity(
                     + "."
                 )
             else:
+                if request.hour is None:
+                    response.async_set_speech("Die Uhrzeit ist nicht vollständig.")
+                    return conversation.ConversationResult(
+                        response=response,
+                        conversation_id=user_input.conversation_id,
+                    )
                 target = (now + timedelta(days=request.day_offset)).replace(
                     hour=request.hour, minute=request.minute, second=0, microsecond=0
                 )
                 if request.day_offset == 0 and target <= now:
                     target += timedelta(days=1)
-                automation = selection.automations[0]
+                automation = next(iter(selection.automations))
                 self._context_store.set(
                     user_input.conversation_id,
                     ConversationContext(
@@ -4443,7 +4471,23 @@ class NluConversationEntity(
             request = pending.request
             if request.kind is AutomationManagementKind.RESCHEDULE:
                 now = dt_util.now()
+                if automation.scheduled_for is None:
+                    self._context_store.clear(user_input.conversation_id)
+                    response.async_set_speech(
+                        "Der passende Auftrag hat keine sichere geplante Zeit."
+                    )
+                    return conversation.ConversationResult(
+                        response=response,
+                        conversation_id=user_input.conversation_id,
+                    )
                 target = datetime.fromisoformat(automation.scheduled_for)
+                if request.hour is None:
+                    self._context_store.clear(user_input.conversation_id)
+                    response.async_set_speech("Die neue Uhrzeit ist unvollständig.")
+                    return conversation.ConversationResult(
+                        response=response,
+                        conversation_id=user_input.conversation_id,
+                    )
                 target = target.replace(hour=request.hour, minute=request.minute, second=0)
                 comparable_now = now
                 if target.tzinfo is None and now.tzinfo is not None:
@@ -4464,6 +4508,13 @@ class NluConversationEntity(
                 question = f"Soll ich {_automation_label(automation)} wirklich duplizieren?"
             elif request.kind is AutomationManagementKind.PAUSE_UNTIL:
                 now = dt_util.now()
+                if request.hour is None:
+                    self._context_store.clear(user_input.conversation_id)
+                    response.async_set_speech("Die Uhrzeit ist nicht vollständig.")
+                    return conversation.ConversationResult(
+                        response=response,
+                        conversation_id=user_input.conversation_id,
+                    )
                 target = (now + timedelta(days=request.day_offset)).replace(
                     hour=request.hour, minute=request.minute, second=0, microsecond=0
                 )
@@ -4541,6 +4592,7 @@ class NluConversationEntity(
                 )
             else:
                 assert pending.automation is not None
+                assert request.max_runs is not None
                 await self._automation_executor.async_set_max_runs(
                     pending.automation.automation_id, request.max_runs
                 )

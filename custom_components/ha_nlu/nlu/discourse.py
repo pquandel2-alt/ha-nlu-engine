@@ -166,6 +166,17 @@ def resolve_reference(
         return ReferenceResolution(ReferenceStatus.NOT_FOUND)
     live = {entity.entity_id: entity for entity in live_entities}
     gender, plural, location_reference = _reference_features(text)
+    words = frozenset(normalize_for_compare(text).replace(".", " ").split())
+    # Feminine articles/pronouns are morphologically ambiguous. A currently
+    # focused group supplies deterministic number evidence for ``die dort``
+    # or ``mach die auch ...``; without such a group the singular ambiguity
+    # handling below remains unchanged.
+    if len(state.focus_entity_ids) > 1 and (
+        words & {"die", "diese", "jene", "anderen", "dieselben"}
+        or location_reference
+    ):
+        plural = True
+        gender = None
     ranked: list[tuple[EntitySnapshot, int]] = []
     for referent in state.referents:
         entity = live.get(referent.entity_id)

@@ -20,7 +20,13 @@ from .german_structure import ClauseKind, GermanStructuralAnalysis, analyse_germ
 from .normalize import normalize
 from .semantic_lexicon import SemanticAnalysis, SemanticKind, analyse_semantics
 from .semantic_catalog import CANONICAL_SPELLING_FORMS
-from .semantic_utterance import Polarity, SemanticUtterance, SpeechAct, analyse_utterance
+from .semantic_utterance import (
+    Polarity,
+    PragmaticDisposition,
+    SemanticUtterance,
+    SpeechAct,
+    analyse_utterance,
+)
 from .temporal_semantics import TemporalExpression, analyse_temporal_semantics
 
 
@@ -46,7 +52,7 @@ _SPELLING_PROTECTED = frozenset(
 _NEGATION_FORMS = frozenset({"nicht", "kein", "keine", "keinen", "niemals"})
 _NEGATION_TYPO_PROTECTED = frozenset({
     "sein", "fein", "klein", "eine", "einen", "einer", "einem", "eines",
-    "meine", "deine", "keinerlei",
+    "meine", "deine", "keinerlei", "nein",
     # Frequent command/temporal vocabulary one edit away from "nicht".
     # These are real words, while a transposition such as "nciht" remains
     # safety-critical below.
@@ -285,6 +291,8 @@ def analyse_language(
     semantics = analyse_semantics(utterance.normalized_text)
     if (
         utterance.speech_act is SpeechAct.STATEMENT
+        and utterance.pragmatic_disposition
+        is not PragmaticDisposition.ASK_BEFORE_ACTION
         and semantics.values(SemanticKind.PROPERTY)
         and not semantics.values(SemanticKind.COMMAND_MARKER)
     ):

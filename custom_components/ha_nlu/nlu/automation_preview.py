@@ -108,9 +108,17 @@ def _speak_target(
             for entity_id in target.entity_ids
         )
     else:
-        noun = _DEVICE_CLASS_NOUN_DE.get(target.device_class) if target.device_class else None
+        noun = (
+            _DEVICE_CLASS_NOUN_DE.get(target.device_class)
+            if target.device_class is not None
+            else None
+        )
         if noun is None:
-            noun = _DOMAIN_NOUN_DE.get(target.domain, "Gerät")
+            noun = (
+                _DOMAIN_NOUN_DE.get(target.domain, "Gerät")
+                if target.domain is not None
+                else "Gerät"
+            )
         if target.quantifier == "all":
             name = f"alle {noun}"
         elif target.quantifier == "both":
@@ -231,7 +239,8 @@ def _speak_condition_leaf(
         return f"es {comparator} dem {event} ist"
     if condition.type is ConditionType.PRESENCE:
         who = _speak_target(condition.target, entity_by_id, area_name_by_id) if condition.target is not None else "jemand"
-        state = _PRESENCE_RAW_STATE_SPOKEN_DE.get(condition.raw_state, condition.raw_state)
+        raw_state = condition.raw_state or "unbekannt"
+        state = _PRESENCE_RAW_STATE_SPOKEN_DE.get(raw_state, raw_state)
         return f"{who} {state} ist"
     if condition.type is ConditionType.DEVICE:
         return f"die Gerätebedingung „{condition.device_condition_type}“ erfüllt ist"
@@ -283,10 +292,12 @@ def _speak_action_leaf(
     if action.type is ActionType.SET_BRIGHTNESS:
         return f"{target} auf {_format_number(action.value)} Prozent Helligkeit stellen"
     if action.type is ActionType.SET_COLOR:
-        color = _COLOR_SPOKEN_DE.get(action.color_name, action.color_name)
+        color_name = action.color_name or "unbekannt"
+        color = _COLOR_SPOKEN_DE.get(color_name, color_name)
         return f"{target} auf die Farbe {color} stellen"
     if action.type is ActionType.SET_COLOR_TEMPERATURE:
-        temp = _COLOR_TEMP_SPOKEN_DE.get(action.color_temp_kelvin, f"{action.color_temp_kelvin} Kelvin")
+        kelvin = action.color_temp_kelvin or 0
+        temp = _COLOR_TEMP_SPOKEN_DE.get(kelvin, f"{kelvin} Kelvin")
         return f"{target} auf {temp} stellen"
     if action.type is ActionType.SET_POSITION:
         return f"{target} auf {_format_number(action.value)} Prozent Position fahren"

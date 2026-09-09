@@ -163,7 +163,7 @@ def resolve_area_name(name: str, entities: list[EntitySnapshot]) -> AreaResolveR
     area_id, not the full scored result.
     """
     result = resolve_area_scored(name, entities)
-    if result.status is AreaResolutionStatus.RESOLVED:
+    if result.status is AreaResolutionStatus.RESOLVED and result.area is not None:
         return AreaResolveResult(status=AreaResolveStatus.OK, area_id=result.area.area_id)
     if result.status is AreaResolutionStatus.AMBIGUOUS:
         return AreaResolveResult(

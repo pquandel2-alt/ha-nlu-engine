@@ -259,7 +259,7 @@ class AutomationConditionParser:
         if left is None:
             return None
         children = [left]
-        while cursor.peek() is not None and cursor.peek()[0] == "OR":
+        while (token := cursor.peek()) is not None and token[0] == "OR":
             cursor.advance()
             right = self._parse_and(cursor, context)
             if right is None:
@@ -274,7 +274,7 @@ class AutomationConditionParser:
         if left is None:
             return None
         children = [left]
-        while cursor.peek() is not None and cursor.peek()[0] == "AND":
+        while (token := cursor.peek()) is not None and token[0] == "AND":
             cursor.advance()
             right = self._parse_not(cursor, context)
             if right is None:
@@ -285,7 +285,8 @@ class AutomationConditionParser:
         return ConditionNode(operator=LogicalOperator.AND, children=tuple(children))
 
     def _parse_not(self, cursor: _TokenCursor, context: ParseContext) -> ConditionNode | None:
-        if cursor.peek() is not None and cursor.peek()[0] == "NOT":
+        token = cursor.peek()
+        if token is not None and token[0] == "NOT":
             cursor.advance()
             child = self._parse_not(cursor, context)
             if child is None:

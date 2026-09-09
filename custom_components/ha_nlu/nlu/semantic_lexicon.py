@@ -31,6 +31,7 @@ from .semantic_catalog import (
     PROPERTY_ENTRIES,
     QUANTIFIER_ENTRIES,
     QUERY_SCOPE_ENTRIES,
+    RELATION_ENTRIES,
     STATE_ENTRIES,
 )
 
@@ -58,6 +59,7 @@ class SemanticKind(Enum):
     AUTOMATION_CUE = auto()
     PROPERTY = auto()
     COMPARATOR = auto()
+    RELATION = auto()
 
 
 @dataclass(frozen=True)
@@ -114,6 +116,8 @@ LEXEMES: tuple[Lexeme, ...] = (
       for item in PROPERTY_ENTRIES),
     *(Lexeme(SemanticKind.COMPARATOR, item.value, item.expressions)
       for item in COMPARATOR_ENTRIES),
+    *(Lexeme(SemanticKind.RELATION, item.value, item.expressions)
+      for item in RELATION_ENTRIES),
 )
 
 
@@ -125,6 +129,7 @@ _FILLERS = frozenset(
         "jetzt vorhanden vorhandenen im in am auf beim nach von zur zum und oder soll sollen dort "
         "möchte will ich dass ob davon denn noch es sie sein sind ist stehen steht hat haben werde werden wird welche welcher welches was wie "
         "kannste könntest koenntest würdest wuerdest würd wuerd gern wär waer nett "
+        "äh aeh also eben irgendwie "
         "nicht "
         "wiedergabe "
         "komplett ganz ganze ganzen ganzer ganzes vollständig halb halbe halber halben hälfte höhe prozent einmal zwar"
@@ -143,13 +148,17 @@ def _compiled() -> tuple[tuple[Lexeme, re.Pattern[str]], ...]:
 
 
 def _remove_shadowed(spans: Iterable[SemanticSpan]) -> tuple[SemanticSpan, ...]:
-    """Remove shorter same-kind/same-value spans contained in longer ones."""
+    """Remove shorter same-kind spans contained in a longer semantic unit.
+
+    The values need not agree: ``nicht höher als`` is one LTE comparator and
+    must shadow the embedded GT phrase ``höher als``. Keeping both would turn
+    a single, well-scoped comparison into an artificial meaning conflict.
+    """
     ordered = sorted(spans, key=lambda span: (span.start, -(span.end - span.start), span.kind.value))
     selected: list[SemanticSpan] = []
     for span in ordered:
         if any(
             other.kind is span.kind
-            and other.value == span.value
             and other.start <= span.start
             and other.end >= span.end
             for other in selected

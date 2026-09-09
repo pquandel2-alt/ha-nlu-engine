@@ -59,6 +59,9 @@ _WEEKDAYS = frozenset({
 })
 _DATES = frozenset({"heute", "morgen", "uebermorgen", "gestern"})
 _SUN_EVENTS = frozenset({"sonnenaufgang", "sonnenuntergang"})
+_NON_TEMPORAL_NACH_COMPLEMENTS = frozenset(
+    {"oben", "unten", "links", "rechts", "vorne", "hinten", "hause"}
+)
 
 
 def _number(word: str) -> int | None:
@@ -83,6 +86,14 @@ def analyse_temporal_semantics(
         if word in _SUN_EVENTS:
             found.append(TemporalExpression(TemporalKind.SUN_EVENT, index, index + 1, word))
         relation = _RELATIONS.get(word)
+        if (
+            word == "nach"
+            and index + 1 < len(words)
+            and words[index + 1] in _NON_TEMPORAL_NACH_COMPLEMENTS
+        ):
+            # Device directions ("nach oben fahren") and the presence
+            # phrase "nach Hause" are not temporal AFTER scopes.
+            relation = None
         if relation is not None:
             found.append(TemporalExpression(relation, index, index + 1, word))
         if index + 2 < len(words):

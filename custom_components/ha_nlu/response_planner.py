@@ -49,6 +49,8 @@ class QueryAnswerKind(StrEnum):
     SINGLE = "single"
     UNKNOWN_SINGLE = "unknown_single"
     UNDETERMINED_SINGLE = "undetermined_single"
+    RELATIONAL_COMPARISON = "relational_comparison"
+    RELATION_LIST = "relation_list"
     COMPLETE_GROUP = "complete_group"
     ONLY_MATCH = "only_match"
     ALL_BUT = "all_but"
@@ -213,6 +215,14 @@ class GermanResponseRealizer:
             return f"Ich konnte keine passenden {noun} finden."
         if kind is QueryAnswerKind.AMBIGUOUS:
             return f"Ich habe mehrere passende {noun} gefunden."
+        if kind is QueryAnswerKind.RELATIONAL_COMPARISON:
+            answer = "Ja" if query.matched else "Nein"
+            suffix = "trifft zu" if query.matched else "trifft nicht zu"
+            return f"{answer}, der Vergleich von {names[0]} mit {names[1]} {suffix}."
+        if kind is QueryAnswerKind.RELATION_LIST:
+            if not names:
+                return f"Keine passenden {noun} gefunden."
+            return f"Passend zur Beziehung: {_join_names(names)}."
         if kind is QueryAnswerKind.FILTERED_LIST:
             if not names:
                 return f"Es sind keine {noun} {state}."

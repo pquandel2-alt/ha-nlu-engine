@@ -399,7 +399,7 @@ class QuantifierParser:
         frame = SemanticFrame(
             intent=result.intent.name,
             target=TargetReference(text=domain, domain=domain),
-            area=AreaReference(text=area_name, area_id=area_id) if area_id is not None else None,
+            area=AreaReference(text=area_name or area_id, area_id=area_id) if area_id is not None else None,
             quantifier=Quantifier(kind=quantifier, value=quantifier_value),
             source_text=text,
         )
@@ -496,7 +496,7 @@ class PercentageParser:
             target_text = domain
             target = TargetReference(text=target_text, domain=domain)
             area_reference = (
-                AreaReference(text=area_name, area_id=area_id)
+                AreaReference(text=area_name or area_id, area_id=area_id)
                 if area_id is not None
                 else None
             )
@@ -883,6 +883,8 @@ class ComparisonQueryParser:
         if len(comparators) != 1 or len(domains) != 1:
             return None
         comparator = next(iter(comparators))
+        if not isinstance(comparator, str):
+            return None
         domain = next(iter(domains))
         threshold_match = re.search(r"\b\d+(?:[,.]\d+)?\b", text)
         if threshold_match is None:
@@ -981,7 +983,7 @@ class ComparisonQueryParser:
         frame = SemanticFrame(
             intent=intent_name,
             target=TargetReference(text=domain, domain=domain),
-            area=AreaReference(text=area_name, area_id=area_id) if area_id is not None else None,
+            area=AreaReference(text=area_name or area_id, area_id=area_id) if area_id is not None else None,
             quantifier=Quantifier(kind="all"),
             parameters={"comparison": Comparison(operator=comparator, value=threshold)},
             source_text=text,
@@ -1307,7 +1309,7 @@ class QueryFollowupParser:
         frame = SemanticFrame(
             intent="HassGetState",
             target=TargetReference(text=target_text, entity_id=entity.entity_id, domain=entity.domain),
-            area=AreaReference(text=area_name, area_id=area_id) if area_id is not None else None,
+            area=AreaReference(text=area_name or area_id, area_id=area_id) if area_id is not None else None,
             source_text=text,
         )
         return ParseResult(frame=frame, resolved_entities=[entity])
@@ -1417,7 +1419,9 @@ class QueryFollowupParser:
             Constraints(domain=domain, area_id=final_area_id, floor_id=final_floor_id, device_class=device_class),
         )
 
-        area_snapshot = AreaSnapshot(area_id=final_area_id, name=final_area_name) if final_area_id is not None else None
+        area_snapshot = AreaSnapshot(
+            area_id=final_area_id, name=final_area_name or final_area_id
+        ) if final_area_id is not None else None
         new_command = QueryCommand(
             intent=previous.intent,
             scope=previous.scope,
@@ -1444,7 +1448,11 @@ class QueryFollowupParser:
         frame = SemanticFrame(
             intent=previous.intent,
             target=TargetReference(text=target_text, domain=domain, device_class=device_class),
-            area=AreaReference(text=final_area_name, area_id=final_area_id, area_name=final_area_name)
+            area=AreaReference(
+                text=final_area_name or final_area_id,
+                area_id=final_area_id,
+                area_name=final_area_name,
+            )
             if final_area_id is not None
             else None,
             quantifier=quantifier,
@@ -1479,7 +1487,7 @@ class QueryFollowupParser:
         """
         if area_id is None:
             return None
-        area_snapshot = AreaSnapshot(area_id=area_id, name=area_name)
+        area_snapshot = AreaSnapshot(area_id=area_id, name=area_name or area_id)
         new_command = QueryCommand(
             intent=previous.intent,
             scope=previous.scope,
@@ -1491,7 +1499,9 @@ class QueryFollowupParser:
         frame = SemanticFrame(
             intent=previous.intent,
             target=None,
-            area=AreaReference(text=area_name, area_id=area_id, area_name=area_name),
+            area=AreaReference(
+                text=area_name or area_id, area_id=area_id, area_name=area_name
+            ),
             quantifier=Quantifier(kind="all"),
             parameters={
                 "query_command": new_command,
@@ -1989,6 +1999,7 @@ class StateQueryParser:
             )
             candidates = [entity for entity in candidates if entity.domain in spec.allowed_domains]
         else:
+            assert device_class_slot is not None
             device_class_value = str(device_class_slot.value)
             domain, device_class, candidates = self._device_class_candidates(
                 device_class_value, context.entities, area_id, floor_id
@@ -2017,7 +2028,9 @@ class StateQueryParser:
         )
         if re.search(r"\bbeide\b", text, re.IGNORECASE) and len(candidates) != 2:
             return None  # "beide" is only truthful when exactly two targets exist
-        area_snapshot = AreaSnapshot(area_id=area_id, name=area_name) if area_id is not None else None
+        area_snapshot = AreaSnapshot(
+            area_id=area_id, name=area_name or area_id
+        ) if area_id is not None else None
         query_command = QueryCommand(
             intent="HassStateQuery",
             scope=(
@@ -2041,7 +2054,9 @@ class StateQueryParser:
         frame = SemanticFrame(
             intent="HassStateQuery",
             target=TargetReference(text=device_class_value, domain=domain, device_class=device_class),
-            area=AreaReference(text=area_name, area_id=area_id, area_name=area_name) if area_id is not None else None,
+            area=AreaReference(
+                text=area_name or area_id, area_id=area_id, area_name=area_name
+            ) if area_id is not None else None,
             quantifier=Quantifier(kind="all"),
             parameters={
                 "semantic_state": requested_state,
@@ -2088,7 +2103,9 @@ class StateQueryParser:
             if not supports_state_predicate(domain, requested_state, device_class):
                 return None
 
-        area_snapshot = AreaSnapshot(area_id=area_id, name=area_name) if area_id is not None else None
+        area_snapshot = AreaSnapshot(
+            area_id=area_id, name=area_name or area_id
+        ) if area_id is not None else None
         query_command = QueryCommand(
             intent="HassExistsQuery",
             scope=QueryScope.EXISTS,
@@ -2106,7 +2123,9 @@ class StateQueryParser:
         frame = SemanticFrame(
             intent="HassExistsQuery",
             target=TargetReference(text=device_class_value, domain=domain, device_class=device_class),
-            area=AreaReference(text=area_name, area_id=area_id, area_name=area_name) if area_id is not None else None,
+            area=AreaReference(
+                text=area_name or area_id, area_id=area_id, area_name=area_name
+            ) if area_id is not None else None,
             quantifier=Quantifier(kind="all"),
             parameters={
                 "semantic_state": requested_state,
@@ -2175,7 +2194,9 @@ class StateQueryParser:
             entity.domain, requested_state, entity.device_class
         ):
             return None
-        area_snapshot = AreaSnapshot(area_id=area_id, name=area_name) if area_id is not None else None
+        area_snapshot = AreaSnapshot(
+            area_id=area_id, name=area_name or area_id
+        ) if area_id is not None else None
         # device_class is inert here (QueryExecutor.SINGLE with a pre-resolved
         # entity_id never looks at it - only entity_id decides membership),
         # but carrying it over gives Phase 8's QueryFollowupParser something
@@ -2202,7 +2223,9 @@ class StateQueryParser:
         frame = SemanticFrame(
             intent="HassCheckState",
             target=TargetReference(text=target_text, entity_id=entity.entity_id, domain=entity.domain),
-            area=AreaReference(text=area_name, area_id=area_id, area_name=area_name) if area_id is not None else None,
+            area=AreaReference(
+                text=area_name or area_id, area_id=area_id, area_name=area_name
+            ) if area_id is not None else None,
             parameters={
                 "semantic_state": requested_state,
                 "query_command": query_command,
@@ -2284,7 +2307,7 @@ class StateQueryParser:
         state_slot = slots.get("state")
         requested_state = _STATE_NAME_TO_SEMANTIC[str(state_slot.value)] if state_slot is not None else None
 
-        area_snapshot = AreaSnapshot(area_id=area_id, name=area_name)
+        area_snapshot = AreaSnapshot(area_id=area_id, name=area_name or area_id)
         query_command = QueryCommand(
             intent="HassDeviceQuery",
             scope=QueryScope.LIST,
@@ -2296,7 +2319,9 @@ class StateQueryParser:
         frame = SemanticFrame(
             intent="HassDeviceQuery",
             target=None,
-            area=AreaReference(text=area_name, area_id=area_id, area_name=area_name),
+            area=AreaReference(
+                text=area_name or area_id, area_id=area_id, area_name=area_name
+            ),
             quantifier=Quantifier(kind="all"),
             parameters={
                 "query_command": query_command,

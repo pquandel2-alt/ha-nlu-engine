@@ -52,7 +52,12 @@ def evidence_score(
     *,
     variant_cost: float = 0.0,
 ) -> float:
-    """Return a stable 0..100 score from explicit evidence only."""
+    """Return an unbounded raw score from explicit evidence only.
+
+    Ranking and ambiguity margins must retain the distance between strongly
+    supported candidates. Presentation code may clamp ``display_score``;
+    the value used for selection is deliberately lossless.
+    """
     total = EVIDENCE_BASE_SCORE - variant_cost * VARIANT_COST_PENALTY
     for item in evidence:
         magnitude = abs(item.score) or EVIDENCE_WEIGHTS[item.kind]
@@ -61,12 +66,15 @@ def evidence_score(
             if item.polarity is EvidencePolarity.NEGATIVE
             else magnitude
         )
-    return max(0.0, min(100.0, total))
+    return total
 
 
 def explain_candidate(candidate: MeaningCandidate) -> tuple[str, ...]:
     """Render a deterministic score breakdown for debug/diagnostics."""
-    lines = [f"{candidate.key}: {candidate.score:.1f}"]
+    lines = [
+        f"{candidate.key}: raw={candidate.raw_score:.1f}, "
+        f"display={candidate.display_score:.1f}"
+    ]
     for item in candidate.evidence:
         magnitude = abs(item.score) or EVIDENCE_WEIGHTS[item.kind]
         sign = "-" if item.polarity is EvidencePolarity.NEGATIVE else "+"

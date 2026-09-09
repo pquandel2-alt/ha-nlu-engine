@@ -102,6 +102,12 @@ def test_empty_everything_yields_empty_world_model():
     assert world_model.devices == ()
     assert world_model.areas == ()
     assert world_model.floors == ()
+
+
+def test_house_graph_is_cached_per_immutable_turn_snapshot():
+    world_model = build_world_model(ENTITIES, DEVICES)
+
+    assert world_model.house_graph is world_model.house_graph
     assert world_model.device_for_entity("light.anything") is None
     assert world_model.entities_for_device("device_anything") == ()
     assert world_model.devices_in_area("area_anything") == ()

@@ -14,6 +14,8 @@ from ha_nlu.areas import AreaSnapshot
 from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.context import ConversationContext
 from ha_nlu.nlu.discourse import DiscourseRole, remember_entities
+from ha_nlu.nlu.language_frontend import analyse_language
+from ha_nlu.nlu.semantic_graph import build_semantic_graph
 
 DIMMABLE_LIGHT = EntitySnapshot(
     "light.buerolicht", "Bürolicht", "light", "off",
@@ -112,6 +114,46 @@ def test_match_reference_pronoun_turn_on_multiple(engine, entities):
     assert result.plan.service == "turn_on"
     assert sorted(result.plan.entity_id) == ["switch.garagentor", "switch.sichtschutz"]
     assert result.response_text == "2 Schalter eingeschaltet."
+
+
+def test_group_reference_consumes_prior_graph_fragment_without_text_reconstruction(
+    engine,
+):
+    source = "Welche Schalter sind aus?"
+    document = analyse_language(source)
+    graph = build_semantic_graph(
+        source,
+        document.tokens,
+        document.structure,
+        document.semantics,
+        document.utterance.speech_act,
+    )
+    discourse = remember_entities(
+        None,
+        (SWITCH_A, SWITCH_B),
+        role=DiscourseRole.QUERY_RESULT,
+        semantic_graph=graph,
+    )
+    context = ConversationContext(
+        last_command=None,
+        last_entities=(SWITCH_A, SWITCH_B),
+        last_area=None,
+        pending_clarification=None,
+        discourse=discourse,
+    )
+
+    result = engine.match_reference(
+        "Mach die auch an.", [SWITCH_A, SWITCH_B], context
+    )
+
+    assert result is not None
+    assert result.plan is not None
+    assert sorted(result.plan.entity_id) == [
+        "switch.garagentor",
+        "switch.sichtschutz",
+    ]
+    assert result.frame is not None
+    assert result.frame.semantic_graph is graph
 
 
 def test_match_reference_pronoun_returns_none_without_last_entities(engine, entities):

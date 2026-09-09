@@ -6,7 +6,7 @@ import logging
 import re
 from dataclasses import replace
 from datetime import time
-from typing import Any
+from typing import Any, Mapping
 
 from homeassistant.components import conversation
 from homeassistant.helpers import intent
@@ -100,7 +100,7 @@ async def async_prepare_automation_structure_edit(
         else automation.conditions
     )
     if request.operation is AutomationEditOperation.CLEAR:
-        rendered: list[dict] = []
+        rendered: list[Mapping[str, Any]] = []
         spoken_edit = "alle Bedingungen entfernen"
     elif request.operation is AutomationEditOperation.REMOVE:
         remove_index = request.index
@@ -163,11 +163,13 @@ async def async_prepare_automation_structure_edit(
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
             )
-        rendered = (
+        rendered = [
+            dict(value) for value in (
             [*existing, *new_values]
             if request.operation is AutomationEditOperation.ADD
             else new_values
-        )
+            )
+        ]
         spoken_edit = edit_text.strip()
     ready = PendingAutomationStructureEdit(
         request=request,
@@ -211,7 +213,7 @@ async def async_handle_automation_structure_edit_turn(
                 await agent._automation_executor.async_replace_automation_section(
                     pending.automation.automation_id,
                     "triggers" if request.section is AutomationEditSection.TRIGGERS else "conditions",
-                    list(pending.rendered),
+                    [dict(value) for value in pending.rendered],
                     (pending.automation.source_text or pending.automation.alias)
                     + " | Änderung: " + (pending.edit_text or ""),
                 )
@@ -284,7 +286,7 @@ async def async_handle_automation_action_edit_turn(
             try:
                 await agent._automation_executor.async_replace_automation_actions(
                     pending.automation.automation_id,
-                    list(pending.rendered_actions),
+                    [dict(value) for value in pending.rendered_actions],
                     (
                         (pending.automation.source_text or pending.automation.alias)
                         + " | Neue Aktion: "
@@ -537,7 +539,7 @@ async def async_handle_calendar_management(
             response=response, conversation_id=user_input.conversation_id
         )
 
-    event = events[0]
+    event = next(iter(events))
     agent._context_store.set(
         user_input.conversation_id,
         ConversationContext(
@@ -640,11 +642,24 @@ async def async_handle_calendar_mutation_confirmation(
                 ),
             ),
         )
+        new_start_time = pending.new_start_time
+        if (
+            pending.kind is CalendarManagementKind.RESCHEDULE
+            and new_start_time is None
+        ):
+            response.async_set_speech("Die neue Uhrzeit fehlt.")
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
         verb = (
             "löschen" if pending.kind is CalendarManagementKind.DELETE
             else f"in „{pending.new_title}“ umbenennen" if pending.new_title
             else f"auf {pending.new_duration_minutes} Minuten Dauer ändern" if pending.kind is CalendarManagementKind.UPDATE
-            else f"auf {pending.new_start_time.strftime('%H:%M')} Uhr verschieben"
+            else (
+                f"auf {new_start_time.strftime('%H:%M')} Uhr verschieben"
+                if new_start_time is not None
+                else "verschieben"
+            )
         )
         response.async_set_speech(f"Soll ich den Termin „{event.summary}“ wirklich {verb}?")
         return conversation.ConversationResult(response=response, conversation_id=user_input.conversation_id)
@@ -686,11 +701,24 @@ async def async_handle_calendar_mutation_confirmation(
             ),
         )
         scope_text = {"this": "nur diesen Termin", "all": "die ganze Serie", "future": "diesen und alle folgenden Termine"}[scopes[0]]
+        new_start_time = pending.new_start_time
+        if (
+            pending.kind is CalendarManagementKind.RESCHEDULE
+            and new_start_time is None
+        ):
+            response.async_set_speech("Die neue Uhrzeit fehlt.")
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
         verb = (
             "löschen" if pending.kind is CalendarManagementKind.DELETE
             else f"in „{pending.new_title}“ umbenennen" if pending.new_title
             else f"auf {pending.new_duration_minutes} Minuten Dauer ändern" if pending.kind is CalendarManagementKind.UPDATE
-            else f"auf {pending.new_start_time.strftime('%H:%M')} Uhr verschieben"
+            else (
+                f"auf {new_start_time.strftime('%H:%M')} Uhr verschieben"
+                if new_start_time is not None
+                else "verschieben"
+            )
         )
         response.async_set_speech(f"Soll ich {scope_text} wirklich {verb}?")
         return conversation.ConversationResult(response=response, conversation_id=user_input.conversation_id)

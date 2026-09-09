@@ -23,6 +23,129 @@ means (that is each dedicated parser's job, further down the pipeline).
 
 from __future__ import annotations
 
+from .german_structure import ClauseKind, StructuralRelationKind
+from .language_frontend import LanguageDocument
+
+
+def split_automation_document(document: LanguageDocument) -> tuple[str, str] | None:
+    """Select trigger/action source spans from the authoritative structure.
+
+    No text is synthesized and no clause boundary is rediscovered. Dedicated
+    automation projectors receive unchanged substrings only after one unique
+    IF relation has identified the trigger and action roles.
+    """
+    if_relations = tuple(
+        relation
+        for relation in document.structure.relations
+        if relation.kind is StructuralRelationKind.IF
+    )
+    if len(if_relations) != 1:
+        return None
+    clauses = {clause.clause_id: clause for clause in document.structure.clauses}
+    relation = if_relations[0]
+    endpoints = tuple(
+        clause
+        for clause_id in (relation.source_clause, relation.target_clause)
+        if (clause := clauses.get(clause_id)) is not None
+    )
+    if len(endpoints) != 2:
+        return None
+    condition = next(
+        (clause for clause in endpoints if clause.kind is ClauseKind.CONDITION),
+        None,
+    )
+    action = next(
+        (clause for clause in endpoints if clause.kind is ClauseKind.MAIN),
+        None,
+    )
+    if condition is None or action is None:
+        return None
+
+    condition_ids = {condition.clause_id}
+    changed = True
+    while changed:
+        changed = False
+        for edge in document.structure.relations:
+            if edge.kind not in {StructuralRelationKind.AND, StructuralRelationKind.OR}:
+                continue
+            if edge.source_clause in condition_ids and edge.target_clause not in condition_ids:
+                candidate = clauses.get(edge.target_clause)
+                if candidate is not None and candidate.char_end <= action.char_start:
+                    condition_ids.add(candidate.clause_id)
+                    changed = True
+    condition_clauses = tuple(clauses[item] for item in condition_ids)
+    trigger_start = min(
+        relation.connector_start,
+        *(clause.char_start for clause in condition_clauses),
+    )
+    trigger_end = max(clause.char_end for clause in condition_clauses)
+    trigger_text = document.source_text[trigger_start:trigger_end].strip(" ,")
+    action_text = document.source_text[action.char_start:action.char_end].strip(" ,")
+    if not trigger_text or not action_text:
+        return None
+    return trigger_text, action_text
+
+
+def structured_automation_condition_clauses(
+    document: LanguageDocument,
+) -> tuple[str, ...]:
+    """Return the structurally bounded IF-side clauses in source order.
+
+    This is deliberately only a boundary projection: trigger/condition
+    meaning remains owned by the established automation domain parsers.  A
+    caller gets no result unless there is one unique IF relation and every
+    returned clause is connected to its condition endpoint by the shared
+    structural AND/OR graph before the action clause.
+    """
+    if_relations = tuple(
+        relation
+        for relation in document.structure.relations
+        if relation.kind is StructuralRelationKind.IF
+    )
+    if len(if_relations) != 1:
+        return ()
+    clauses = {clause.clause_id: clause for clause in document.structure.clauses}
+    relation = if_relations[0]
+    condition = clauses.get(relation.source_clause)
+    action = clauses.get(relation.target_clause)
+    if (
+        condition is None
+        or action is None
+        or condition.kind is not ClauseKind.CONDITION
+    ):
+        return ()
+
+    condition_ids = {condition.clause_id}
+    changed = True
+    while changed:
+        changed = False
+        for edge in document.structure.relations:
+            if edge.kind not in {
+                StructuralRelationKind.AND,
+                StructuralRelationKind.OR,
+            }:
+                continue
+            if edge.source_clause not in condition_ids:
+                continue
+            candidate = clauses.get(edge.target_clause)
+            if (
+                candidate is not None
+                and candidate.char_end <= action.char_start
+                and candidate.clause_id not in condition_ids
+            ):
+                condition_ids.add(candidate.clause_id)
+                changed = True
+
+    ordered = sorted((clauses[item] for item in condition_ids), key=lambda item: item.char_start)
+    result: list[str] = []
+    for index, clause in enumerate(ordered):
+        start = relation.connector_start if index == 0 else clause.char_start
+        text = document.source_text[start:clause.char_end].strip(" ,")
+        if not text:
+            return ()
+        result.append(text)
+    return tuple(result)
+
 
 def split_trigger_action(text: str) -> tuple[str, str] | None:
     """Splits on the first top-level comma - the only separator every one

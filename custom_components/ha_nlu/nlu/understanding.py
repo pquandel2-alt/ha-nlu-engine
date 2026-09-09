@@ -101,6 +101,16 @@ class MeaningCandidate:
     graph: SemanticGraph | None = None
     rejection_reason: str | None = None
 
+    @property
+    def raw_score(self) -> float:
+        """Lossless score used by ranking and ambiguity decisions."""
+        return self.score
+
+    @property
+    def display_score(self) -> float:
+        """Bounded diagnostic presentation without affecting ranking."""
+        return max(0.0, min(100.0, self.score))
+
 
 T = TypeVar("T")
 

@@ -18,6 +18,7 @@ typed house graph; no second entity or location truth is constructed.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Iterable, Mapping, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -123,6 +124,16 @@ class WorldModel:
         from .house_graph import build_house_graph
 
         return build_house_graph(self, configured_relations)
+
+    @cached_property
+    def house_graph(self) -> "HouseGraph":
+        """Indexed registry graph for this immutable per-turn snapshot.
+
+        Relational clauses in one turn must not rebuild the same O(n)
+        projection for every candidate. Explicit configured relations still
+        go through ``build_house_graph`` because their input differs.
+        """
+        return self.build_house_graph()
 
 
 def build_world_model(

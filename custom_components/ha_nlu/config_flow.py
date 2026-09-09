@@ -23,7 +23,7 @@ own docstring.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import voluptuous as vol
 
@@ -101,7 +101,18 @@ _LOGGER = logging.getLogger(__name__)
 TITLE = "HA NLU Engine"
 
 
-class HaNluConfigFlow(ConfigFlow, domain=DOMAIN):
+if TYPE_CHECKING:
+    class _DomainConfigFlow(ConfigFlow):
+        """Typing facade for HA's runtime ``domain=`` class keyword."""
+
+        def __init_subclass__(
+            cls, *, domain: str, **kwargs: object
+        ) -> None: ...
+else:
+    _DomainConfigFlow = ConfigFlow
+
+
+class HaNluConfigFlow(_DomainConfigFlow, domain=DOMAIN):
     """Single-instance config flow; no fields required."""
 
     VERSION = 1

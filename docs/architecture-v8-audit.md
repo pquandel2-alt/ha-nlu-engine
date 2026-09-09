@@ -1,5 +1,8 @@
 # HomeIntent V8 – Architektur-Audit, Gap-Analyse und Migrationsplan
 
+> Historischer Ausgangsaudit. Der produktive Endstand und seine expliziten
+> Unsupported-Grenzen stehen in `architecture-v8-integration.md`.
+
 Stand: 7. September 2026
 Audit-Basis: Commit `c7ec22b`, Release `4.71.0`
 

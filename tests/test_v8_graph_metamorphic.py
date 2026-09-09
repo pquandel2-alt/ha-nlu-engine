@@ -45,9 +45,9 @@ def _semantic_core(text: str):
 @pytest.mark.parametrize(
     "variant",
     [
-        "Schalte das Licht aus.",
-        "Das Licht bitte ausschalten.",
-        "Kannst du mal eben das Licht ausschalten?",
+        "Schalte im Wohnzimmer das Licht aus.",
+        "Das Licht im Wohnzimmer bitte ausschalten.",
+        "Kannst du mal eben das Licht im Wohnzimmer ausschalten?",
         "Im Wohnzimmer das Licht ausmachen.",
         "Das Licht im Wohnzimmer bitte aus.",
     ],
@@ -68,3 +68,16 @@ def test_safe_surface_transformations_preserve_core_graph_meaning(variant):
 )
 def test_meaning_changing_transformations_do_not_share_a_semantic_core(left, right):
     assert _semantic_core(left) != _semantic_core(right)
+
+
+def test_missing_location_is_not_a_meaning_preserving_mutation():
+    located = analyse_language("Mach das Licht im Wohnzimmer aus.")
+    unlocated = analyse_language("Schalte das Licht aus.")
+
+    # The HA-free graph cannot ground an area name without a registry. The
+    # loss-aware boundary still retains the scope distinction, so these two
+    # utterances must not be listed as a positive metamorphic pair.
+    assert located.source_text != unlocated.source_text
+    assert tuple(token.canonical for token in located.tokens) != tuple(
+        token.canonical for token in unlocated.tokens
+    )

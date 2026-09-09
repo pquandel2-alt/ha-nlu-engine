@@ -112,10 +112,26 @@ PROPERTY_ENTRIES = (
 )
 
 COMPARATOR_ENTRIES = (
-    CatalogueEntry("lt", (r"unter", r"weniger\s+als", r"dunkler\s+als")),
-    CatalogueEntry("gt", (r"über", r"mehr\s+als", r"heller\s+als")),
+    CatalogueEntry(
+        "lt",
+        (
+            r"unter", r"weniger\s+als", r"dunkler\s+als",
+            r"kälter\s+als", r"kaelter\s+als", r"niedriger\s+als",
+        ),
+    ),
+    CatalogueEntry(
+        "gt",
+        (
+            r"über", r"mehr\s+als", r"heller\s+als",
+            r"wärmer\s+als", r"waermer\s+als", r"höher\s+als", r"hoeher\s+als",
+        ),
+    ),
     CatalogueEntry("lte", (r"höchstens", r"nicht\s+höher\s+als")),
     CatalogueEntry("gte", (r"mindestens",)),
+)
+
+RELATION_ENTRIES = (
+    CatalogueEntry("same_area", (r"(?:im\s+)?selben\s+raum\s+wie", r"gleichen\s+raum\s+wie")),
 )
 
 MEASUREMENT_PROPERTY_SPECS = {
@@ -226,6 +242,7 @@ def catalogue_expression_groups() -> dict[str, tuple[CatalogueEntry, ...]]:
         "automation_cue": AUTOMATION_CUE_ENTRIES,
         "property": PROPERTY_ENTRIES,
         "comparator": COMPARATOR_ENTRIES,
+        "relation": RELATION_ENTRIES,
     }
 
 
@@ -234,6 +251,7 @@ __all__ = [
     "AUTOMATION_CUE_ENTRIES",
     "COMMAND_MARKER_EXPRESSIONS",
     "COMPARATOR_ENTRIES",
+    "RELATION_ENTRIES",
     "CatalogueEntry",
     "CANONICAL_SPELLING_FORMS",
     "DEVICE_CLASS_ENTRIES",

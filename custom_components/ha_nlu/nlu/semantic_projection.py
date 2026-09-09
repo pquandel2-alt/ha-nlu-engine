@@ -13,17 +13,32 @@ from dataclasses import replace
 from enum import Enum, auto
 from typing import Iterable
 
+from ..areas import AreaSnapshot
 from ..entities import EntitySnapshot, normalize_for_compare
 from ..world_model import WorldModel
 from .composition import CompositionalPlan
 from .constraint_resolver import Constraints, resolve_candidates
 from .domain_operations import INTENT_BY_DOMAIN_ACTION
 from .entity_resolution import ResolutionStatus, resolve_entity_scored
+from .entity_resolution import all_mentioned_entities
 from .frame import AreaReference, Quantifier, SemanticFrame, TargetReference
 from .german_structure import ClauseKind, StructuralRelationKind
 from .language_frontend import LanguageDocument
 from .parser import ParseResult
-from .primitives import SemanticAction, SemanticQuantity
+from .primitives import SemanticAction, SemanticProperty, SemanticQuantity
+from .query_command import (
+    PropertyOperand,
+    QueryCommand,
+    QueryFilter,
+    QueryRelationKind,
+    QueryResultStatus,
+    QueryScope,
+    QueryTarget,
+    RelationalComparison,
+    RelationalOperator,
+    RelationConstraint,
+)
+from .query_executor import QueryExecutor
 from .semantic_graph import SemanticEdgeKind, SemanticGraph, SemanticNodeKind
 from .semantic_lexicon import SemanticKind, SemanticSpan
 from .semantic_location import resolve_coordinated_locations, resolve_semantic_location
@@ -55,10 +70,423 @@ _ACTION_ENUM = {
     "stop": SemanticAction.STOP,
 }
 
+_PROPERTY_ENUM = {
+    "temperature": SemanticProperty.TEMPERATURE,
+    "humidity": SemanticProperty.HUMIDITY,
+    "brightness": SemanticProperty.BRIGHTNESS,
+    "position": SemanticProperty.POSITION,
+    "power": SemanticProperty.POWER,
+    "energy": SemanticProperty.ENERGY,
+    "battery": SemanticProperty.BATTERY,
+    "volume": SemanticProperty.VOLUME,
+}
+
+_RELATIONAL_OPERATOR = {
+    "lt": RelationalOperator.LT,
+    "lte": RelationalOperator.LTE,
+    "eq": RelationalOperator.EQ,
+    "gte": RelationalOperator.GTE,
+    "gt": RelationalOperator.GT,
+}
+
+_QUERY_EXECUTOR = QueryExecutor()
+
 
 def attach_graph(result: ParseResult, graph: SemanticGraph) -> ParseResult:
     """Attach canonical meaning provenance to a compatibility frame."""
     return replace(result, frame=replace(result.frame, semantic_graph=graph))
+
+
+def project_relational_comparison_query(
+    document: LanguageDocument,
+    graph: SemanticGraph,
+    entities: list[EntitySnapshot],
+    world_model: WorldModel | None,
+) -> ParseResult | None:
+    """Project a two-operand live comparison directly from the graph.
+
+    Both operands must be explicit, uniquely grounded registry entities. The
+    shared ``QueryExecutor`` reads their live values; missing readings and
+    incompatible units remain non-projectable instead of being converted or
+    guessed. Entity order is recovered only from the unchanged source spans.
+    """
+    if world_model is None:
+        return None
+    comparators = graph.nodes_of_kind(SemanticNodeKind.COMPARISON)
+    if len(comparators) != 1:
+        return None
+    operator = _RELATIONAL_OPERATOR.get(comparators[0].value)
+    if operator is None:
+        return None
+    mentioned = all_mentioned_entities(
+        document.source_text,
+        entities,
+        index=world_model.entity_index,
+    )
+    normalized_source = normalize_for_compare(document.source_text)
+
+    def mention_position(entity: EntitySnapshot) -> int:
+        positions = tuple(
+            position
+            for name in (entity.friendly_name, *entity.aliases)
+            if (normalized_name := normalize_for_compare(name))
+            and (position := normalized_source.find(normalized_name)) >= 0
+        )
+        return min(positions, default=len(normalized_source))
+
+    if len(mentioned) == 2:
+        operands = tuple(
+            sorted(
+                mentioned,
+                key=lambda entity: (mention_position(entity), entity.entity_id),
+            )
+        )
+        if mention_position(operands[1]) == len(normalized_source):
+            return None
+        grounded_locations: tuple[tuple[str, str | None, str | None], ...] = ()
+    else:
+        area_mentions = sorted(
+            (
+                position,
+                area,
+                surface,
+            )
+            for area in world_model.areas
+            for surface in (area.name, *area.aliases)
+            if (normalized_area := normalize_for_compare(surface))
+            and (position := normalized_source.find(normalized_area)) >= 0
+        )
+        unique_areas: list[tuple[int, AreaSnapshot, str]] = []
+        seen_area_ids: set[str] = set()
+        for position, area, surface in area_mentions:
+            if area.area_id not in seen_area_ids:
+                unique_areas.append((position, area, surface))
+                seen_area_ids.add(area.area_id)
+        if len(unique_areas) != 2:
+            return None
+        readings = tuple(
+            world_model.select_entities(
+                domain="sensor",
+                device_class="temperature",
+                area_id=area.area_id,
+            )
+            for _, area, _ in unique_areas
+        )
+        if any(len(items) != 1 for items in readings):
+            return None
+        operands = (readings[0][0], readings[1][0])
+        grounded_locations = tuple(
+            (surface, area.area_id, None)
+            for _, area, surface in unique_areas
+        )
+
+    properties = {node.value for node in graph.nodes_of_kind(SemanticNodeKind.PROPERTY)}
+    if len(properties) == 1:
+        property_ = _PROPERTY_ENUM.get(next(iter(properties)))
+    else:
+        device_classes = {entity.device_class for entity in operands}
+        only_device_class = next(iter(device_classes)) if len(device_classes) == 1 else None
+        property_ = (
+            _PROPERTY_ENUM.get(only_device_class)
+            if only_device_class is not None
+            else None
+        )
+    if property_ is None:
+        return None
+
+    comparison = RelationalComparison(
+        PropertyOperand(operands[0].entity_id, property_),
+        operator,
+        PropertyOperand(operands[1].entity_id, property_),
+    )
+    command = QueryCommand(
+        intent="HassRelationalComparison",
+        scope=QueryScope.SINGLE,
+        target=QueryTarget(
+            domain=operands[0].domain,
+            device_class=operands[0].device_class,
+            entity_id=operands[0].entity_id,
+        ),
+        filter=QueryFilter(relational=comparison),
+    )
+    query_result = _QUERY_EXECUTOR.execute(command, list(operands), world_model)
+    if query_result.status is QueryResultStatus.TARGET_NOT_FOUND:
+        return None
+    grounded_graph = graph.with_grounded_entities(
+        entity.entity_id for entity in operands
+    )
+    if grounded_locations:
+        grounded_graph = grounded_graph.with_grounded_locations(grounded_locations)
+    return ParseResult(
+        frame=SemanticFrame(
+            intent=command.intent,
+            target=TargetReference(
+                operands[0].friendly_name,
+                operands[0].entity_id,
+                operands[0].domain,
+                operands[0].device_class,
+            ),
+            area=None,
+            parameters={"query_command": command, "query_result": query_result},
+            source_text=document.source_text,
+            action=SemanticAction.QUERY,
+            property=property_,
+            semantic_graph=grounded_graph,
+        ),
+        # SemanticCommand's target cardinality remains singular. The second
+        # operand lives in the typed comparison/QueryResult, not in the
+        # command target list (where it would look like an ambiguous action
+        # target to the central validator).
+        resolved_entities=[operands[0]],
+    )
+
+
+def project_relationship_query(
+    document: LanguageDocument,
+    graph: SemanticGraph,
+    entities: list[EntitySnapshot],
+    world_model: WorldModel | None,
+) -> ParseResult | None:
+    """Project the safe, registry-proven ``same area`` query shape."""
+    if world_model is None:
+        return None
+    relations = graph.nodes_of_kind(SemanticNodeKind.RELATION)
+    if len(relations) != 1 or relations[0].value != "same_area":
+        return None
+    relation_start = relations[0].start
+    if relation_start is None:
+        return None
+    anchors = all_mentioned_entities(
+        document.source_text,
+        entities,
+        index=world_model.entity_index,
+    )
+    if len(anchors) != 1:
+        return None
+    anchor = anchors[0]
+    domains = {
+        str(span.value)
+        for span in document.semantics.matching(SemanticKind.DOMAIN)
+        if span.end <= relation_start
+    }
+    device_classes = {
+        str(span.value)
+        for span in document.semantics.matching(SemanticKind.DEVICE_CLASS)
+        if span.end <= relation_start
+    }
+    if len(domains) != 1 or len(device_classes) > 1:
+        return None
+    domain = next(iter(domains))
+    device_class = next(iter(device_classes), None)
+    candidates = list(
+        world_model.select_entities(domain=domain, device_class=device_class)
+    )
+    command = QueryCommand(
+        intent="HassRelationshipQuery",
+        scope=QueryScope.LIST,
+        target=QueryTarget(domain=domain, device_class=device_class),
+        filter=QueryFilter(
+            relationship=RelationConstraint(
+                QueryRelationKind.SAME_AREA, anchor.entity_id
+            )
+        ),
+    )
+    query_result = _QUERY_EXECUTOR.execute(command, candidates, world_model)
+    if query_result.status is QueryResultStatus.TARGET_NOT_FOUND:
+        return None
+    matched = list(query_result.entities)
+    # The graph describes the requested relation and its grounded anchor.
+    # Potentially thousands of result members stay in the typed QueryResult
+    # (and Discourse query-result group), avoiding an O(result-size) copy of
+    # the complete registry into every MeaningCandidate graph.
+    grounded_graph = graph.with_grounded_entities((anchor.entity_id,))
+    return ParseResult(
+        frame=SemanticFrame(
+            intent=command.intent,
+            target=TargetReference(
+                document.source_text,
+                domain=domain,
+                device_class=device_class,
+            ),
+            area=None,
+            parameters={"query_command": command, "query_result": query_result},
+            source_text=document.source_text,
+            action=SemanticAction.QUERY,
+            semantic_graph=grounded_graph,
+        ),
+        resolved_entities=matched,
+    )
+def project_independent_predicates(
+    document: LanguageDocument,
+    graph: SemanticGraph,
+    entities: list[EntitySnapshot],
+    world_model: WorldModel | None,
+) -> tuple[ParseResult, ...]:
+    """Project a safe structural AND of complete direct predicates.
+
+    Clause and action scope come exclusively from GermanStructuralAnalysis
+    and its graph-backed semantic spans. Each clause must explicitly and
+    uniquely name one live entity. Rich modifiers stay with their dedicated
+    graph projectors so they cannot be flattened accidentally here.
+    """
+    if (
+        not document.utterance.safe_to_execute_directly
+        or document.temporal
+        or any(
+            relation.kind in {
+                StructuralRelationKind.OR,
+                StructuralRelationKind.EXCEPT,
+                StructuralRelationKind.REPLACES,
+            }
+            for relation in document.structure.relations
+        )
+        or any(
+            clause.kind in {
+                ClauseKind.CONDITION,
+                ClauseKind.EXCLUSION,
+                ClauseKind.RELATIVE,
+                ClauseKind.REPAIR,
+            }
+            for clause in document.structure.clauses
+        )
+    ):
+        return ()
+    relations = tuple(
+        relation
+        for relation in document.structure.relations
+        if relation.kind is StructuralRelationKind.AND
+    )
+    if not relations:
+        return ()
+    clauses = {clause.clause_id: clause for clause in document.structure.clauses}
+    ordered_ids: list[str] = []
+    for relation in relations:
+        for clause_id in (relation.source_clause, relation.target_clause):
+            if clause_id not in ordered_ids:
+                ordered_ids.append(clause_id)
+    selected = tuple(clauses[item] for item in ordered_ids if item in clauses)
+    if len(selected) != len(ordered_ids) or len(selected) < 2:
+        return ()
+
+    results: list[ParseResult] = []
+    index = world_model.entity_index if world_model is not None else None
+    for clause in selected:
+        action_values = {
+            span.value
+            for span in document.semantics.matching(SemanticKind.ACTION)
+            if clause.char_start <= span.start < clause.char_end
+            and isinstance(span.value, str)
+        }
+        if len(action_values) != 1:
+            return ()
+        action = next(iter(action_values))
+        semantic_action = _ACTION_ENUM.get(action)
+        if semantic_action is None:
+            return ()
+        clause_text = document.source_text[clause.char_start:clause.char_end]
+        mentioned = all_mentioned_entities(clause_text, entities, index=index)
+        if len(mentioned) != 1:
+            return ()
+        entity = mentioned[0]
+        intent = INTENT_BY_DOMAIN_ACTION.get((entity.domain, action))
+        if intent is None:
+            return ()
+        results.append(
+            ParseResult(
+                frame=SemanticFrame(
+                    intent=intent,
+                    target=TargetReference(
+                        entity.friendly_name,
+                        entity.entity_id,
+                        entity.domain,
+                        entity.device_class,
+                    ),
+                    area=None,
+                    source_text=clause_text,
+                    action=semantic_action,
+                    semantic_graph=graph.with_grounded_entities((entity.entity_id,)),
+                ),
+                resolved_entities=[entity],
+            )
+        )
+    return tuple(results)
+
+
+def project_structured_repair(
+    document: LanguageDocument,
+    graph: SemanticGraph,
+    entities: list[EntitySnapshot],
+    world_model: WorldModel | None = None,
+) -> ParseResult | None:
+    """Project an unambiguous target self-correction without text reparsing.
+
+    The replacement clause must name exactly one live entity and the graph
+    must contain exactly one executable action. The original referent is
+    never included in ``resolved_entities``. Numeric, temporal and predicate
+    repairs remain explicitly unsupported until their domain projections can
+    preserve units/scope just as strictly.
+    """
+    replacements = tuple(
+        relation
+        for relation in document.structure.relations
+        if relation.kind is StructuralRelationKind.REPLACES
+    )
+    if len(replacements) != 1:
+        return None
+    clauses = {clause.clause_id: clause for clause in document.structure.clauses}
+    replacement = clauses.get(replacements[0].target_clause)
+    if replacement is None or replacement.kind is not ClauseKind.REPAIR:
+        return None
+    actions = {node.value for node in graph.nodes_of_kind(SemanticNodeKind.ACTION)}
+    if len(actions) != 1:
+        return None
+    action = next(iter(actions))
+    replacement_text = document.source_text[
+        replacement.char_start:replacement.char_end
+    ]
+    mentioned = all_mentioned_entities(
+        replacement_text,
+        entities,
+        index=(world_model.entity_index if world_model is not None else None),
+    )
+    if len(mentioned) != 1:
+        return None
+    entity = mentioned[0]
+    intent = INTENT_BY_DOMAIN_ACTION.get((entity.domain, action))
+    semantic_action = _ACTION_ENUM.get(action)
+    if intent is None or semantic_action is None:
+        return None
+    # A value/property/temporal expression in the replacement changes more
+    # than entity identity. Refuse it rather than silently retaining a value
+    # from the original clause.
+    if any(
+        node.start is not None
+        and replacement.char_start <= node.start < replacement.char_end
+        for kind in {
+            SemanticNodeKind.VALUE,
+            SemanticNodeKind.PROPERTY,
+            SemanticNodeKind.TEMPORAL,
+            SemanticNodeKind.COMPARISON,
+        }
+        for node in graph.nodes_of_kind(kind)
+    ):
+        return None
+    return ParseResult(
+        frame=SemanticFrame(
+            intent=intent,
+            target=TargetReference(
+                entity.friendly_name,
+                entity.entity_id,
+                entity.domain,
+                entity.device_class,
+            ),
+            area=None,
+            source_text=document.source_text,
+            action=semantic_action,
+            semantic_graph=graph.with_grounded_entities((entity.entity_id,)),
+        ),
+        resolved_entities=[entity],
+    )
 
 
 def _active_spans(

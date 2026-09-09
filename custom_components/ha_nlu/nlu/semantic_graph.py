@@ -39,6 +39,10 @@ class SemanticNodeKind(Enum):
     NEGATION = auto()
     TEMPORAL = auto()
     CONDITION = auto()
+    TRIGGER = auto()
+    UNIT = auto()
+    REPAIR = auto()
+    RELATION = auto()
     LOGICAL = auto()
 
 
@@ -48,6 +52,7 @@ class SemanticEdgeKind(Enum):
     FILTER = auto()
     EXCLUDE = auto()
     CONDITION = auto()
+    TRIGGER = auto()
     THEN = auto()
     AND = auto()
     OR = auto()
@@ -55,6 +60,7 @@ class SemanticEdgeKind(Enum):
     AFTER = auto()
     UNTIL = auto()
     WHILE = auto()
+    SINCE = auto()
     MODIFIES = auto()
     REPLACES = auto()
     RESOLVES_TO = auto()
@@ -62,6 +68,9 @@ class SemanticEdgeKind(Enum):
     ON_FLOOR = auto()
     NOT = auto()
     VALUE_OF = auto()
+    PROPERTY_OF = auto()
+    COMPARE = auto()
+    DEPENDS_ON = auto()
     REFERENCE_TO = auto()
 
 
@@ -223,6 +232,7 @@ _NODE_KIND = {
     SemanticKind.PROPERTY: SemanticNodeKind.PROPERTY,
     SemanticKind.STATE: SemanticNodeKind.STATE,
     SemanticKind.COMPARATOR: SemanticNodeKind.COMPARISON,
+    SemanticKind.RELATION: SemanticNodeKind.RELATION,
     SemanticKind.QUANTIFIER: SemanticNodeKind.QUANTIFIER,
 }
 
@@ -282,12 +292,44 @@ def build_semantic_graph(
                 clause.char_end,
             ))
             edges.append(SemanticEdge(node_id, SemanticEdgeKind.CONTAINS, scope_id))
+            if (
+                clause.kind is ClauseKind.CONDITION
+                and speech_act is SpeechAct.AUTOMATION
+                and clause.connector != "nur wenn"
+            ):
+                trigger_id = f"trigger:{clause.clause_id}"
+                nodes.append(SemanticNode(
+                    trigger_id,
+                    SemanticNodeKind.TRIGGER,
+                    clause.connector or "trigger",
+                    clause.char_start,
+                    clause.char_end,
+                ))
+                edges.append(SemanticEdge(
+                    node_id, SemanticEdgeKind.CONTAINS, trigger_id
+                ))
 
     for relation in structure.relations:
         source = clause_nodes.get(relation.source_clause)
         target = clause_nodes.get(relation.target_clause)
         if source is not None and target is not None:
-            edges.append(SemanticEdge(source, _RELATION_KIND[relation.kind], target))
+            edge_kind = _RELATION_KIND[relation.kind]
+            if (
+                relation.kind is StructuralRelationKind.IF
+                and speech_act is SpeechAct.AUTOMATION
+                and next(
+                    (
+                        clause.connector
+                        for clause in structure.clauses
+                        if clause.clause_id == relation.source_clause
+                    ),
+                    None,
+                ) != "nur wenn"
+            ):
+                edges.append(SemanticEdge(
+                    source, SemanticEdgeKind.TRIGGER, target
+                ))
+            edges.append(SemanticEdge(source, edge_kind, target))
 
     semantic_by_clause: dict[str, list[SemanticNode]] = {}
     for offset, span in enumerate(semantics.spans):
@@ -392,6 +434,16 @@ def build_semantic_graph(
                 clause_nodes[clause.clause_id], SemanticEdgeKind.CONTAINS, node.node_id
             ))
             semantic_by_clause.setdefault(clause.clause_id, []).append(node)
+            temporal_edge = {
+                "before": SemanticEdgeKind.BEFORE,
+                "after": SemanticEdgeKind.AFTER,
+                "until": SemanticEdgeKind.UNTIL,
+                "while": SemanticEdgeKind.WHILE,
+                "since": SemanticEdgeKind.SINCE,
+            }.get(temporal.kind.name.lower(), SemanticEdgeKind.MODIFIES)
+            edges.append(SemanticEdge(
+                node.node_id, temporal_edge, clause_nodes[clause.clause_id]
+            ))
 
     # Negation is a first-class scoped operator.  It points to every semantic
     # constituent inside its conservative scope; if none is known it points
@@ -441,12 +493,29 @@ def build_semantic_graph(
         actions = tuple(node for node in meanings if node.kind is SemanticNodeKind.ACTION)
         targets = tuple(node for node in meanings if node.kind is SemanticNodeKind.ENTITY_CLASS)
         states = tuple(node for node in meanings if node.kind is SemanticNodeKind.STATE)
+        properties = tuple(
+            node for node in meanings if node.kind is SemanticNodeKind.PROPERTY
+        )
+        values = tuple(node for node in meanings if node.kind is SemanticNodeKind.VALUE)
+        comparisons = tuple(
+            node for node in meanings if node.kind is SemanticNodeKind.COMPARISON
+        )
         for action in actions:
             for target in targets:
                 edges.append(SemanticEdge(action.node_id, SemanticEdgeKind.TARGET, target.node_id))
             if clause.kind is ClauseKind.RELATIVE:
                 for state in states:
                     edges.append(SemanticEdge(action.node_id, SemanticEdgeKind.FILTER, state.node_id))
+        for prop in properties:
+            for target in targets:
+                edges.append(SemanticEdge(prop.node_id, SemanticEdgeKind.PROPERTY_OF, target.node_id))
+            for value in values:
+                edges.append(SemanticEdge(value.node_id, SemanticEdgeKind.VALUE_OF, prop.node_id))
+        for comparison in comparisons:
+            for operand in (*properties, *values, *targets):
+                edges.append(SemanticEdge(
+                    comparison.node_id, SemanticEdgeKind.COMPARE, operand.node_id
+                ))
 
     # Relative filters and exclusions often omit the repeated target. Link
     # their meaning to the immediately preceding clause, preserving scope.

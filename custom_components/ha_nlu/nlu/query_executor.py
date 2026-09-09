@@ -21,9 +21,11 @@ from __future__ import annotations
 from ..automation_summary import AutomationSummary
 from ..entities import EntitySnapshot
 from ..world_model import WorldModel
+from ..house_graph import RelationKind
 from .query_command import (
     PropertyOperand,
     QueryCommand,
+    QueryRelationKind,
     QueryResult,
     QueryResultStatus,
     QueryScope,
@@ -50,6 +52,8 @@ class QueryExecutor:
     ) -> QueryResult:
         if command.filter.relational is not None:
             return self._execute_relational(command, candidates, world_model)
+        if command.filter.relationship is not None:
+            return self._execute_relationship(command, candidates, world_model)
         if command.target.kind is QueryTargetKind.DEVICE:
             return self._execute_device(command, world_model)
         if command.target.kind is QueryTargetKind.AUTOMATION:
@@ -57,6 +61,39 @@ class QueryExecutor:
         if command.scope is QueryScope.SINGLE:
             return self._execute_single(command, candidates)
         return self._execute_plural(command, candidates)
+
+    @staticmethod
+    def _execute_relationship(
+        command: QueryCommand,
+        candidates: list[EntitySnapshot],
+        world_model: WorldModel | None,
+    ) -> QueryResult:
+        relationship = command.filter.relationship
+        if relationship is None or world_model is None:
+            return QueryResult(status=QueryResultStatus.TARGET_NOT_FOUND, command=command)
+        if relationship.kind is not QueryRelationKind.SAME_AREA:
+            return QueryResult(status=QueryResultStatus.TARGET_NOT_FOUND, command=command)
+        graph = world_model.house_graph
+        anchor_id = f"entity:{relationship.anchor_entity_id}"
+        areas = graph.related(anchor_id, RelationKind.LOCATED_IN)
+        if len(areas) != 1:
+            return QueryResult(status=QueryResultStatus.TARGET_NOT_FOUND, command=command)
+        related_ids = {
+            node.node_id.removeprefix("entity:")
+            for node in graph.sources(areas[0].node_id, RelationKind.LOCATED_IN)
+            if node.node_id.startswith("entity:")
+        }
+        matched = tuple(
+            entity for entity in candidates
+            if entity.entity_id in related_ids
+            and entity.entity_id != relationship.anchor_entity_id
+        )
+        return QueryResult(
+            status=(QueryResultStatus.MATCHED if matched else QueryResultStatus.EMPTY),
+            entities=matched,
+            considered_entities=tuple(candidates),
+            command=command,
+        )
 
     @staticmethod
     def _operand_value(

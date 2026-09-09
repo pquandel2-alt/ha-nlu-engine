@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any, Mapping
 
 from .automation_summary import AutomationSummary, CREATED_BY_HOMEINTENT
 from .entities import normalize_for_compare
@@ -40,8 +41,8 @@ def action_edit_operation(text: str) -> str:
 
 
 def reordered_actions(
-    actions: tuple[dict, ...], operation: str
-) -> tuple[dict, ...] | None:
+    actions: tuple[Mapping[str, Any], ...], operation: str
+) -> tuple[Mapping[str, Any], ...] | None:
     if not operation.startswith("reorder:"):
         return None
     if any("delay" in action for action in actions):

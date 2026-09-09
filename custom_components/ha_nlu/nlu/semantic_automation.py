@@ -29,7 +29,14 @@ def compile_state_predicate(
         return None
 
     states = analysis.values(SemanticKind.STATE)
-    device_targets = analysis.values(SemanticKind.DEVICE_CLASS)
+    device_targets = {
+        value
+        for value in analysis.values(SemanticKind.DEVICE_CLASS)
+        if isinstance(value, tuple)
+        and len(value) == 2
+        and isinstance(value[0], str)
+        and (value[1] is None or isinstance(value[1], str))
+    }
     domain_targets = {
         value for value in analysis.values(SemanticKind.DOMAIN)
         if isinstance(value, str)
@@ -39,6 +46,13 @@ def compile_state_predicate(
     if len(states) != 1 or len(targets) != 1:
         return None
     domain, device_class = targets[0]
+    if not isinstance(domain, str) or not (
+        device_class is None or isinstance(device_class, str)
+    ):
+        return None
+    state = next(iter(states))
+    if not isinstance(state, SemanticState):
+        return None
 
     location = resolve_semantic_location(text, context.entities)
     if location is None and _LOCATION_CUE_RE.search(text):
@@ -84,5 +98,5 @@ def compile_state_predicate(
             area_id=area_id,
             floor_id=floor_id,
         ),
-        next(iter(states)),
+        state,
     )

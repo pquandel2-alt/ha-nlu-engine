@@ -47,11 +47,12 @@ def _resolve_area_snapshot(frame: SemanticFrame, entities: tuple[EntitySnapshot,
     """
     if frame.area is None or frame.area.area_id is None:
         return None
+    area_id = frame.area.area_id
     for entity in entities:
-        if entity.area_id == frame.area.area_id and entity.area_name is not None:
-            return AreaSnapshot(area_id=entity.area_id, name=entity.area_name)
+        if entity.area_id == area_id and entity.area_name is not None:
+            return AreaSnapshot(area_id=area_id, name=entity.area_name)
     if frame.area.area_name is not None:
-        return AreaSnapshot(area_id=frame.area.area_id, name=frame.area.area_name)
+        return AreaSnapshot(area_id=area_id, name=frame.area.area_name)
     return None
 
 

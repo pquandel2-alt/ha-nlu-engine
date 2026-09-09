@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.72.0**
+- Aktuelle Version: **4.73.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -42,10 +42,10 @@ Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
 
-## Was ist in Version 4.71 neu?
+## Was ist in Version 4.73 neu?
 
-Direkte Befehle und Abfragen laufen jetzt ausschließlich über die
-verlustarme V7-Verständnisgrenze. Historische Geräte- und Query-Grammatiken
+Direkte Befehle und Abfragen laufen über die verlustarme V8-
+Verständnisgrenze. Historische Geräte- und Query-Grammatiken
 werden im Produktivbetrieb weder geladen noch als Fallback verwendet; der
 explizite Shadow-Audit lädt sie nur zum read-only Vergleich. Freie
 Wortstellung, koordinierte Ziele und Orte, Referenzen, Korrekturen sowie
@@ -824,14 +824,17 @@ Auflösung, Validierung, Richtlinie, Vorschau und Ausführung bleiben getrennt
 testbar.
 
 Der direkte Command-Pfad projiziert unterstützte relative Filter,
-Ausschlüsse und Shared-Predicate-Targets inzwischen strukturiert aus dem
-bereits analysierten Dokument. Er erzeugt dabei keinen künstlichen deutschen
-Zwischensatz und ruft die Sprache nicht erneut auf. `SemanticFrame` bleibt
-die Compatibility-Projektion für Validator, Policy und ServiceMapper.
-Automationen, Management, allgemeine relationale Queries sowie beliebige
-Temporal-/Repair-Graphen sind dagegen weiterhin nur teilweise migriert oder
-Observability-only; erkannte, aber nicht sicher projizierbare Graphformen
-bleiben `UNSUPPORTED` beziehungsweise verlangen eine Klärung.
+Ausschlüsse, Shared-Predicate-Targets und unabhängige vollständige Prädikate
+strukturiert aus dem bereits analysierten Dokument. Für diese Shapes wird
+kein deutscher Zwischensatz rekonstruiert. `SemanticFrame` bleibt die
+Compatibility-Projektion für Validator, Policy und ServiceMapper.
+Entity-/Raumvergleiche und belegte Same-Area-Queries nutzen den vorhandenen
+`QueryExecutor` und den indexierten `HouseGraph` produktiv. Automationen
+beziehen ihre äußeren Trigger-/Condition-/Action-Grenzen aus der gemeinsamen
+Strukturanalyse. Temporalbedeutung bleibt erhalten und blockiert den
+generischen Sofortpfad; eindeutiger Entity-Repair wird als Replacement
+projiziert. Nicht verlustfrei abbildbare Graphformen bleiben ausdrücklich
+`UNSUPPORTED` oder verlangen eine Klärung.
 
 Weitere Dokumentation:
 
@@ -855,20 +858,20 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/ha_nlu --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 4.72.0 einschließlich dieses
+Geprüfter Release-Stand von Version 4.73.0 einschließlich dieses
 Integrationspasses:
 
 ```text
-2955 passed, 12 skipped
+2993 passed, 12 skipped
 88 % Gesamt-Coverage
-78 % Coverage für conversation.py
+77 % Coverage für conversation.py
 ```
 
 Zusätzlich wurden ausgeführt:
 
 - Pyflakes für Integration und Tests,
 - eine blockierende Pyright-Prüfung für den Strict-Scope,
-- eine nicht blockierende Pyright-Gesamtprüfung zur schrittweisen Härtung,
+- eine ebenfalls blockierende vollständige Pyright-Prüfung,
 - ein versionierter XML-Coverage-Bericht als CI-Artefakt,
 - JSON-Validierung der deutschen UI-Texte und
 - `git diff --check`.
@@ -886,7 +889,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-4.72.0.json --quiet
+  --check docs/perf/v7-shadow-baseline-4.73.0.json --quiet
 ```
 
 Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die

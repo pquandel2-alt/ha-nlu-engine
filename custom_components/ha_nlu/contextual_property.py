@@ -205,6 +205,7 @@ class ContextualPropertyResolver:
         if absolute is not None:
             raw_value = next(value for value in absolute.groups() if value is not None)
         else:
+            assert relative is not None
             raw_amount = relative.group("amount")
             amount = self._number(raw_amount) or 0
             current = candidates[0].attributes.get("temperature")

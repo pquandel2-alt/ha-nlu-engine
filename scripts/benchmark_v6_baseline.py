@@ -147,6 +147,16 @@ ANCHOR_SENSOR = EntitySnapshot(
     "sensor.aussentemperatur", "Außentemperatur", "sensor", "18.4",
     unit="°C", device_class="temperature",
 )
+ANCHOR_INDOOR_SENSOR = EntitySnapshot(
+    "sensor.innentemperatur", "Innentemperatur", "sensor", "21.2",
+    unit="°C", device_class="temperature", area_id="wohnzimmer",
+    area_name="Wohnzimmer", floor_id="eg", floor_name="Erdgeschoss", floor_level=0,
+)
+ANCHOR_TV = EntitySnapshot(
+    "media_player.wohnzimmer_tv", "Fernseher", "media_player", "on",
+    area_id="wohnzimmer", area_name="Wohnzimmer", floor_id="eg",
+    floor_name="Erdgeschoss", floor_level=0,
+)
 ANCHOR_COVER = EntitySnapshot(
     "cover.rollladen_buero", "Rollladen Büro", "cover", "closed",
     area_id="buero", area_name="Büro", floor_id="eg", floor_name="Erdgeschoss", floor_level=0,
@@ -177,6 +187,8 @@ ANCHORS: list[EntitySnapshot] = [
     ANCHOR_LIGHT,
     ANCHOR_CLIMATE,
     ANCHOR_SENSOR,
+    ANCHOR_INDOOR_SENSOR,
+    ANCHOR_TV,
     ANCHOR_COVER,
     ANCHOR_LIVING_CEILING,
     ANCHOR_LIVING_FLOOR,
@@ -230,8 +242,12 @@ BENCHMARK_UTTERANCES: list[tuple[str, str]] = [
         "Mach Wohnzimmer Hauptlicht an, nein, Wohnzimmer Stehlampe",
     ),
     (
-        "relational_query_shape",
-        "Wie warm ist es in dem Raum, in dem das Fenster offen ist?",
+        "relational_comparison",
+        "Ist Außentemperatur kälter als Innentemperatur?",
+    ),
+    (
+        "house_graph_same_area",
+        "Welche Lampen sind im selben Raum wie der Fernseher?",
     ),
     # This direct-engine benchmark has intentionally no ConversationContext.
     # It measures frontend/graph cost for a follow-up-shaped utterance; true

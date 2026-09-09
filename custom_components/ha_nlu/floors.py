@@ -130,7 +130,7 @@ def resolve_floor_name(name: str, entities: list[EntitySnapshot]) -> FloorResolv
     ``areas.resolve_area_name`` for callers that only need the floor_id.
     """
     result = resolve_floor_scored(name, entities)
-    if result.status is FloorResolutionStatus.RESOLVED:
+    if result.status is FloorResolutionStatus.RESOLVED and result.floor is not None:
         return FloorResolveResult(status=FloorResolveStatus.OK, floor_id=result.floor.floor_id)
     if result.status is FloorResolutionStatus.AMBIGUOUS:
         return FloorResolveResult(
@@ -152,14 +152,15 @@ def resolve_floor_by_level_keyword(keyword: str, entities: list[EntitySnapshot])
     extreme level, or any floor missing a ``level`` value) are AMBIGUOUS/
     NOT_FOUND rather than picking one arbitrarily.
     """
-    floors = [f for f in floor_snapshots(entities) if f.level is not None]
-    if not floors:
+    floors = floor_snapshots(entities)
+    levels = [floor.level for floor in floors if floor.level is not None]
+    if not levels:
         return FloorResolveResult(status=FloorResolveStatus.NOT_FOUND)
 
     if keyword == "up":
-        extreme = max(f.level for f in floors)
+        extreme = max(levels)
     elif keyword == "down":
-        extreme = min(f.level for f in floors)
+        extreme = min(levels)
     else:
         return FloorResolveResult(status=FloorResolveStatus.NOT_FOUND)
 

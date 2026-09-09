@@ -1,149 +1,115 @@
-# HomeIntent V8 – produktiver Integrationsaudit
+# HomeIntent V8 – produktiver Abschlussstand
 
-Stand: 8. September 2026  
-Audit-Basis: `main`, Commit `d0df5436fd4cfeef0b803f474dcce53e0b1b7df4`
+Stand: 9. September 2026
+Ausgangsbasis: `main` bei `46c5bc8a7d3ae20d40f1b9c5a4c2aabc66f6bc83`
 
-## Ergebnis
+## Geltungsbereich
 
-V8 ist im direkten Command-/Query-Pfad die produktive Orchestrierungsgrenze,
-aber der `SemanticGraph` ist noch nicht durchgehend die Quelle der
-Domain-Projektion. `SemanticInterpreter` baut den Graph, ruft anschließend
-jedoch überwiegend textbasierte Compiler auf und hängt deren geerdetes Ergebnis
-danach wieder an den Graph. Damit ist der Graph für Provenienz, Snapshots und
-Safety-Beobachtung relevant, für viele positive Ausführungsentscheidungen aber
-noch nicht autoritativ.
+V8 bezeichnet die gemeinsame deterministische Understanding-Architektur für
+unterstützte Home-Assistant- und Haushaltssemantik. Es ist kein allgemeines
+Sprachmodell. Eine erkannte, aber nicht verlustfrei projizierbare Bedeutung
+endet ausdrücklich `UNSUPPORTED` oder `CLARIFICATION`; sie wird nie durch
+Weglassen von Negation, Relation, Zeit, Repair oder unbekannten Wörtern zu
+einer Aktion vereinfacht.
 
-Die letzte Schreibgrenze ist konsolidiert: Direct Commands passieren
-`validate_command`, `ReasoningEngine`, `ServiceMapper`, `ExecutionPolicy` und
-`async_execute_service_plan`. Queries benutzen den read-only `QueryExecutor`.
-Automationen besitzen einen getrennten, ebenfalls validierten Modell-, Preview-
-und Write-Pfad. Diese Grenzen werden durch die Migration nicht ersetzt.
+```text
+Originaltext
+  -> LanguageDocument
+  -> GermanStructuralAnalysis
+  -> SemanticGraph
+  -> MeaningCandidates + Evidence
+  -> DiscourseState + WorldModel/HouseGraph
+  -> zentrale Resolver / Constraint Resolution
+  -> Domainprojektion
+  -> UnderstandingOutcome
+  -> Validator -> ExecutionPolicy -> ServicePlan/Query/AutomationModel
+```
 
-## Stufen-Audit
+Parser, Graph, Candidates, Discourse und Reasoning führen keine HA-Services
+aus. Queries besitzen keinen Service-Mapping-Eintrag. `UNSUPPORTED`,
+`AMBIGUOUS`, `CLARIFICATION` und `UNSAFE` können keinen ausführbaren Plan
+tragen. Query-Ergebnisse liefern Referenzkontext, niemals Aktionsberechtigung;
+vor Aktionen werden gespeicherte IDs erneut gegen den Live-Snapshot geprüft.
 
-| Stufe | Bedeutungsquelle / Modell | Graph-Nutzung | Reparse / Parallelität | Verlust- und Legacy-Risiko |
-|---|---|---|---|---|
-| Conversation-Eingang | `LanguageDocument`, daneben Router-Regexe und Fachparser | einmal erzeugtes Dokument wird Direct/Management übergeben | Fachrouter analysieren `source_text` weiter selbst | Router vor dem Direct-Pfad können Graph und Candidates vollständig ignorieren |
-| Language Frontend | Originaltext, Tokens, Varianten, `SemanticUtterance`, Lexikon, `GermanStructuralAnalysis`, Temporal | Graph wird erst im Interpreter gebaut | Varianten werden jeweils neu tokenisiert/analysiert; Registry-Compound-Fallback baut ein zweites Dokument | Original bleibt erhalten, aber normalisierte Varianten können später Compiler-Autorität gewinnen |
-| Structural Analysis | tokenbasierte Clauses, Relations, Negation | liefert Graph-Klauseln und Kanten | kein HA-Zugriff; noch begrenzte Clause-Bindung | koordinierte NPs und koordinierte Prädikate sind nicht immer eindeutig unterschieden |
-| Semantic Interpreter | Varianten, flache Slots, Compilerresultat, `MeaningCandidate` | Graph wird je Variante gebaut und nach Resolverresultat ergänzt | `analyse_semantics`, `analyse_turn`, Compiler und Composition analysieren Varianten/Text erneut | Compilerresultat bestimmt Vollständigkeit; Graph selbst projiziert nur Sonderfälle |
-| Semantic Projection | Relative-/Exclusion-Sonderpfade | beobachtet Struktur, erstellt danach Compatibility-Frame | entfernt Klauseltext bzw. synthetisiert deutschen Text und ruft Compiler plus `analyse_semantics` erneut | Graph ist Auslöser, rekonstruierter Text bleibt Wahrheit |
-| Composition | `SemanticTurn`, Mention-Scan, `CompositionalPlan` | kein Graph-Input | löscht andere Entitynamen per Regex, entfernt Konjunktionen, kompiliert pro Ziel neu | Scope kann durch Textoperationen verloren gehen; nur Shared-Predicate-Sonderform |
-| Entity Grounding | `entity_resolution.py`, EntityIndex, Area-/Floor-Resolver, `WorldModel.select_entities` | geerdete IDs werden nachträglich mit `RESOLVES_TO` angehängt | Resolver sind autoritativ, aber Mention-/Registry-Hilfsscans existieren zusätzlich | kein zweiter Identitätsresolver, jedoch mehrfache Registry-Scans und getrennte Aufruflogik |
-| Command Projection | `SemanticFrame` / `SemanticCommand` | Graph nur additives Frame-Feld | zahlreiche typisierte Bedeutungen verbleiben parallel in `parameters` | Action/Target/Filter/Exclusion/Temporal können zwischen Graph und Flat Frame divergieren |
-| Capability / Validation | `validate_command`, Operation Registry | ignoriert Graph absichtlich und validiert Domainmodell | Parser besitzen zusätzliche Vorvalidierungen; Validator bleibt autoritativ | zulässig als Defense-in-depth; hoher Candidate-Score bedeutet nicht ausführbar |
-| Reasoning / Policy | `ReasoningEngine`, `ExecutionPolicy` | Reasoning liest Frame/Context, nicht Graph | Policy wird vor und unmittelbar im Executor geprüft | Graphinformation ohne Frame-Projektion beeinflusst keine Ausführung |
-| Service Mapping / Execution | `ServiceMapper`, `ServiceCallPlan`, zentraler Executor | keine Graph-Nutzung, korrekt späte Grenze | kein zweiter Direct-Executor | Queries werden vor Serviceplan geschützt; Live-Target/Capability wird erneut geprüft |
-| Query | `SemanticQueryCompiler` -> `QueryCommand` -> `QueryExecutor` -> Response | Candidate trägt Graph, QueryCommand entsteht textbasiert | Spezialquerys in `parsers.py`, Household/History/Extended Router parallel | QueryCommand/Result liegen zusätzlich in `SemanticFrame.parameters`; Relation-NL nur teilweise projiziert |
-| Follow-up / Reference | `ConversationContext`, `DiscourseState`, mehrere `match_*followup`-Methoden | vorheriger Graph/MeaningCandidate wird nicht gespeichert | Discourse-Resolver konkurriert mit last-entity/area/floor- und Spezialmatchern | Live-Entity-Prüfung ist sicher; Querygruppen/Fokus/Exclusions/Graphfragment fehlen |
-| Automation | eigener Trigger-/Condition-/Action-Split -> `AutomationModel` -> Validator -> Preview -> Generator/Write | Interpreter baut Graph erst neben dem bereits geparsten Automationresultat | Komma-, Verbmarker-, IF- und AND-Splits sowie Fachparser analysieren Text mehrfach | Graph ist Observability; Clause-Grenzen und Fachmodell haben getrennte Autorität |
-| Management / Calendar / Productivity | gemeinsames Dokument als Router-Eingabe, danach eigene Domainparser | kein produktiver Graph | eigene Datums-, Item- und Intent-Semantik; eigene Validatoren je Domain | benutzt `UnderstandingOutcome`, aber nicht dieselbe Bedeutungsprojektion |
-| Temporal / Repair | Graphknoten und `REPLACES`; alte Temporal-Parameter/Parser | überwiegend Observability | CommandCompiler strippt Temporaltext rekursiv; Repair wird nicht allgemein projiziert | korrekt geparste Formen bleiben teils unsupported; das ist sicherer als Vereinfachung |
-| Semantic Aliases | produktive bestätigte Entity-Aliase; separater `ConfirmedSemanticAliasStore` | keine Graph-Expansion | zwei Aliasmodelle; semantischer Store ohne Conversation-Persistenz/Use | Semantic Alias ist derzeit API/Tests, nicht end-to-end produktiv |
-| WorldModel / HouseGraph | frischer HA-Snapshot; belegte Registryrelationen | getrennt vom Turngraph, wie beabsichtigt | ein WorldModel; HouseGraph wird im Conversation-Pfad gebaut, aber kaum abgefragt | Relationsdaten sind überwiegend Observability; keine erfundenen Beziehungen |
+## Produktive Autoritäten
 
-## Konkrete Reparse- und Rekonstruktionsstellen
+| Subsystem | Produktive Autorität | V8-Endzustand | Bewusste Grenze |
+|---|---|---|---|
+| Language Frontend | `LanguageDocument` | gemeinsamer Eingang mit Original, Tokens, Varianten, Speech Act, Struktur und Temporal | keine freie statistische Korrektur |
+| Clause/Scope | `GermanStructuralAnalysis` | IF, AND, OR, EXCEPT, Negation, Relative, Temporal und Repair werden strukturell gebunden | unklare Bindung wird nicht per first-match entschieden |
+| Bedeutung | `SemanticGraph` | produktive IR für strukturierte Commands, Filter, Exclusions, unabhängige Prädikate, Repair und relationale Queries | nicht jede theoretische Graphform besitzt eine Domainprojektion |
+| Kandidaten | `MeaningCandidate` + `evidence.py` | Graph-/Slot-Hypothesen, Konflikte, Missing Slots, Provenienz; Ranking nutzt ungekappte Raw Scores | Display-Score allein autorisiert nichts |
+| Commands | Graphprojektion -> `SemanticFrame` -> `SemanticCommand` | Shared Predicate, unabhängige Prädikate, relative State-Filter und Exclusions ohne rekonstruierten Satz | reichere nicht repräsentierbare Modifier bleiben unsupported |
+| Queries | `QueryCommand` -> `QueryExecutor` | strikt read-only; vorhandene Status-/Property-Queries bleiben erhalten | kein Query-to-Action-Fallback |
+| Relationale Queries | Graph + `HouseGraph` -> vorhandener `QueryExecutor` | Entity-/Raum-Vergleich und belegte SAME_AREA-Beziehung produktiv | Superlative, Aggregate und mehrdeutige Sensorwahl unsupported |
+| Composition | Structural AND + Graphprojektion | gemeinsame Targets und vollständige Prädikate werden unterschieden und direkt projiziert | alter Reparse nur Kompatibilität für noch nicht migrierte Shapes |
+| Discourse | `DiscourseState` / `DialogFocus` | mehrere Referenten, Gruppen, Query-Ergebnisse, Fokus und Graphfragment werden konsumiert | geringer Salience-Abstand führt zur Klärung |
+| WorldModel / HouseGraph | frischer HA-Snapshot + indexierte Sicht | belegte Entity/Area/Floor/Device/Property/Capability-Beziehungen werden produktiv gelesen und pro Turn gecacht | keine erfundenen Beziehungen |
+| Temporal | typisierte TemporalExpression + Graph | Delay, Dauer, Zeitpunkt und Relationen bleiben erhalten | generischer Direktpfad ist parsed-but-not-executable; sichere Scheduling-Pfade müssen zuerst projizieren |
+| Repair | REPLACES-Struktur + Graphprojektion | eindeutiger Entity-Repair ersetzt das Original vollständig | Value-/Property-/Temporal-Repair ohne verlustfreie Projektion unsupported |
+| Automationen | gemeinsame IF-/Clause-Struktur -> Fachprojektoren -> `AutomationModel` | äußere Trigger/Condition/Action-Grenzen stammen aus V8; Fachparser klassifizieren abgegrenzte Clauses | Textsplitter nur Kompatibilitätsfallback für unklassifizierte Formen |
+| Automation Follow-ups | `AutomationModel` + Edit-Operationen | Conditions, Targetersatz, Werte und Ergänzungen bearbeiten das Modell | unklare Änderung verlangt Klärung; kein Schreiben vor Preview/Bestätigung |
+| Aliase / Concepts | Entity-, bestätigter Semantic- und Procedure-/Routine-Store | Typen bleiben strikt getrennt; kein stilles Lernen | undefinierte Konzepte werden nicht in Gerätewerte übersetzt |
+| Management / Calendar / Productivity | gemeinsame Understanding-Grenze -> Domainmodelle | gemeinsame Speech-Act-, Repair-, Referenz-, Temporal-, Ambiguitäts- und Confirmation-Schicht | Fachmodelle bleiben eigene Domainprojektionen |
+| Execution | ServiceMapper / QueryExecutor / AutomationExecutor | genau ein Ausführungspfad je Domäne | keine Ausführung in NLU/Graph/Reasoning |
+| Safety | Validator + ExecutionPolicy + Confirmation | autoritativ und unmittelbar vor Ausführung erneut geprüft | Candidate-Score kann diese Grenze nie überstimmen |
 
-- `nlu/semantic_projection.py`: `_without_clause`, `projected_text` und der
-  synthetische `... außer ...`-Satz, jeweils gefolgt von
-  `analyse_semantics()` und `SemanticCommandCompiler.compile()`.
-- `nlu/composition.py`: `project_target()` entfernt Entitynamen und
-  Konjunktionen mit Regex; Interpreter und AutomationActionParser kompilieren
-  das Ergebnis erneut.
-- `engine.py`: produktives `_AND_SPLIT_RE` in `understand()` und
-  `_v7_multi_result()`; weitere Vorkommen im explizit read-only Legacy-Shadow.
-- `SemanticInterpreter`: jede Textvariante wird neu lexikalisch und strukturell
-  analysiert; `compile_text` wird nochmals semantisch gescannt.
-- `SemanticCommandCompiler`: Exclusion und Temporal werden über Textsplit bzw.
-  rekursives Textstrippen behandelt.
-- `query_followup_compiler.py` und `semantic_automation.py`: wiederholte
-  Lexikonanalyse statt Übergabe der vorhandenen Analyse/Graphteile.
-- Automation: `split_trigger_action`, Verbmarker-Suche, `re.split(...oder
-  wenn...)` und `split_on_top_level_and` bilden eine parallele Clause-Autorität.
+## Relationen und sichere Ableitung
 
-## Typ- und Qualitätsbaseline vor Änderungen
+Produktiv sind Vergleiche zweier explizit und eindeutig geerdeter
+Messentities, Vergleiche zweier Räume mit genau einem passenden
+Temperatursensor je Raum sowie `im selben Raum wie` über belegte
+`Entity -> Area`-Kanten. Einheitengleichheit und Live-Werte sind hart
+erforderlich. Mehrere passende Sensoren, fehlende Werte, inkompatible
+Einheiten oder eine nicht belegte Device-/Area-Beziehung ergeben keinen
+vermeintlichen Wahrheitswert.
 
-- sauberer Checkout auf `main`;
-- Pyflakes: 0 Befunde;
-- vollständiges Pyright: 101 Fehler. Schwerpunkte sind `conversation.py`,
-  `management_dialogs.py`, `parsers.py`, Automation-Parser/-Preview sowie
-  Optional-Narrowing in Area/Floor/Query-Code;
-- vollständiger Pytest-Baseline-Lauf: 2.948 bestanden, 12 übersprungen;
-- CI enthält bereits Language Eval, Shadowreport, 5k/20/3/p95-100-ms-Gate,
-  Coverage, Pyflakes, Strict-Scope, Hassfest, HACS und HA-Stable-Smoke.
+Sichere `UNSUPPORTED`-Grenzen sind derzeit:
 
-## Migrationsstrategie
+- Superlative und Hausaggregate (`am wärmsten`, `mehr als zwei Räume`),
+- abgeleitete Raum-HAT-Zustandsrelationen mit unklarer Sensor-/Fensterwahl,
+- Gerätebesitz ohne Device-Registry-Kante,
+- räumliche Nähe, Links/Rechts oder Nachbarschaft ohne bestätigte Relation,
+- beliebiger Temporal-/Value-Repair und beliebige verschachtelte Automation,
+  wenn das Domainmodell den Scope nicht verlustfrei ausdrücken kann.
 
-1. **Direct Graph Projection:** eine strukturierte, nicht ausführende
-   Projection für sichere Shared-Predicate-, Relative-Filter- und
-   Exclusion-Graphformen einführen. Sie benutzt ausschließlich vorhandene
-   Entity-/Area-/Floor-Resolver und erzeugt `ParseResult/SemanticFrame` ohne
-   deutschen Zwischentext.
-2. **Structure-authoritative Composition:** Clause-/Relation-Struktur
-   entscheidet, ob `AND` Ziele oder vollständige Prädikate verbindet. Erst
-   alle Teilprojektionen validieren, danach einen atomaren `CommandPlan`
-   freigeben. `OR` und nicht vollständig projizierbare Gruppen bleiben
-   unsupported.
-3. **Evidence:** Evidence-Arten und Gewichte in einem Modul zentralisieren;
-   Registry-, Entity-, Area-, Floor-, Capability-, Property-, Unit-, Scope-,
-   Context- und negative Evidenz nachvollziehbar erfassen. Ranking wählt
-   Bedeutung, der Validator weiterhin Ausführbarkeit.
-4. **Evaluation:** handgeschriebene OOD-Snapshots über Structure, Graph,
-   Candidate, Grounding und Outcome; positive und negative metamorphische
-   Kerne; echte Dialogsequenzen mit Conversation-ID-/TTL-/stale-Entity-Gates.
-5. **Folgewellen:** Query-Follow-ups und relationales NL auf Graphprojection
-   umstellen; danach Automation-Clause-Projection auf vorhandene
-   Trigger/Condition/Action-Fachparser. Management und semantische Alias-
-   Persistenz folgen erst, wenn dieselbe Grenze ohne zweiten Validator oder
-   Resolver nutzbar ist.
-6. **Type Safety:** Runtime-Grenzen in der geforderten Reihenfolge bereinigen
-   und Strict-Scope nur erweitern, wenn der neue Slice tatsächlich 0 Fehler
-   hat. CI wird bis zum vollständigen 0-Fehler-Lauf nicht abgeschwächt.
+Diese Formen dürfen als Struktur/Graph beobachtbar sein, werden aber nicht
+als vollständig unterstützt bezeichnet und erzeugen keinen ServicePlan.
 
-## Bewusst nicht als vollständig deklariert
+## Pragmatik, unbekannte Bedeutung und Aliase
 
-Automation-, Management-, beliebige relationale Query-, allgemeine Temporal-
-und Repair-Projection sowie semantische Alias-Persistenz sind nach diesem Audit
-`PARTIALLY MIGRATED` oder `OBSERVABILITY ONLY`. Ein erkannter Graphoperator ist
-kein Versprechen, dass er bereits sicher in ein ausführbares Domainmodell
-projiziert werden kann.
+Explizite Imperative und eindeutige höfliche Requests können nach Validation
+ausführbar sein. Beschwerden (`Das Licht ist mir zu hell`), Statements,
+Hypothesen, Capability-, Erklärungs- und Simulationsfragen bleiben read-only
+oder fragen nach. Die geschlossene Füllwortmenge wird getrennt von unbekannten
+bedeutungstragenden Tokens behandelt. Ein undefiniertes Wort wie `flauschig`
+wird nicht ignoriert, um eine Teilaktion freizugeben. Semantische Konzepte
+und Routinen entstehen ausschließlich nach expliziter Bestätigung.
 
-## Umgesetzte erste Migrationswelle
+## Legacy
 
-- `semantic_projection.py` rekonstruiert keinen deutschen Satz mehr. Die
-  sichere Projektion für Relative-State-Filter, Exclusions, Quantifier,
-  Locations und Shared-Predicate-Targets erzeugt direkt den Compatibility-
-  `SemanticFrame` und nutzt die bestehenden Resolver.
-- Die produktive AND-Erkennung in `engine.py` wird aus strukturell belegten,
-  vollständigen Prädikatklauseln abgeleitet. Source-Spans werden unverändert
-  weitergereicht; unvollständige Operanden und `OR` werden nicht teilweise
-  ausgeführt. Regex-Splitting bleibt nur im read-only Legacy-Shadow.
-- Candidate-Scores stammen aus einer zentralen Evidence-Policy und tragen
-  erklärbare positive und negative Beiträge. Validator und Policy bleiben
-  davon unabhängig autoritativ.
-- `DiscourseState` trägt mehrere Referenten, Grounding-Fokus und das aktuelle
-  Graphfragment; Query-Ergebnisse werden als solche markiert und niemals als
-  Action-Evidence umgedeutet.
-- OOD-Tests prüfen jetzt Speech-Act, semantische Knoten und Graphkanten;
-  negative Metamorphik schützt Negation, AND/OR und EXCEPT/ONLY.
-- Ungebundene mehrklauselige Queries und kontextfreie Referenzen enden früh
-  `UNSUPPORTED`, bevor ein bedeutungsloser 5k-Fuzzy-Registry-Scan startet.
+Der produktive Regex-AND-Pfad für migrierte unabhängige Prädikate ist durch
+direkte Clause-/Graphprojektion ersetzt. `project_target()` und alte
+Hassil-Grammatiken bleiben nur für den read-only Shadowvergleich oder noch
+nicht projizierbare Kompatibilitätsformen. Automation-Kommasplit und früherer
+Top-Level-AND-Split sind nur Fallback, wenn GermanStructuralAnalysis keine
+eindeutige Grenze liefert. Es gibt keinen zweiten EntityResolver, WorldModel,
+QueryExecutor, ServiceMapper, Validator, Policy- oder Executor-Pfad.
 
-Diese Welle konsolidiert Direct Commands und die gemeinsame IR. Automation,
-allgemeine relationale Query-Projection, Repair-/Temporal-Projection und
-Semantic-Alias-Persistenz bleiben absichtlich Folgewellen.
+## Evaluation und Release-Gates
 
-## Verifikation nach der Welle
+`scripts/run_language_eval.sh` prüft die Pipeline einschließlich
+handgeschriebenem OOD-Korpus, positiver/negativer Metamorphik, Semantic
+Snapshots, relationaler Projektion, Pragmatik und Mehrturn-Referenzen. Der
+Korpus wird nicht aus Produktlexika erzeugt. Der versionierte Shadowreport ist
+read-only und prüft Query-/Ambiguous-/Unsafe-Leakage.
 
-- Gesamtsuite: 2.955 bestanden, 12 übersprungen; Gesamt-Coverage 88 %.
-- Language-Eval: 125 bestanden.
-- Shadow-Baseline: 3.752 identisch, 20 beidseitig abgelehnt, 0 divergent;
-  Query-, Ambiguous- und Unsafe-Action-Leakage jeweils 0.
-- 5k-Registry-Benchmark: 16 Fälle, 20 Iterationen, drei Warmups, höchster
-  p95 79,94 ms bei einem Budget von 100 ms.
-- Pyflakes: 0 Befunde. CI-Strict-Pyright: 0 Fehler. Full-Pyright bleibt bei
-  den bereits vorhandenen 101 Fehlern; diese Welle hat den globalen
-  Restbestand nicht mit `Any`, Ignorierungen oder unsicheren Casts verdeckt.
-- Hassfest, HACS Action und der echte HA-Stable-Smoke bleiben CI-Gates. In
-  der lokalen Umgebung standen weder Docker noch das `homeassistant`-Paket
-  bereit; Manifest und `hacs.json` wurden lokal als valides JSON geprüft.
+Der Release-Gate-Satz umfasst vollständiges Pytest mit Coverage, Language
+Eval, Shadow, Registry-Benchmarks bei 100/1.000/5.000 Entities, Pyflakes,
+Full Pyright, Strict Pyright, Hassfest, HACS und einen echten Home-Assistant-
+Stable-Smoke-Test. Konkrete Messwerte stehen im README und GitHub-Release;
+historische Auditwerte sind keine Aussage über diesen Endstand.
+
+HomeIntent beschreibt diesen Stand als: **Deterministic LLM-like
+natural-language understanding for supported Home-Assistant and household
+semantics.** Das Wort „supported“ ist eine Sicherheitsgrenze.

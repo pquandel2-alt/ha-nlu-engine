@@ -18,6 +18,8 @@ from ha_nlu.nlu.query_command import (
     QueryTargetKind,
     RelationalComparison,
     RelationalOperator,
+    RelationConstraint,
+    QueryRelationKind,
 )
 from ha_nlu.nlu.query_executor import QueryExecutor
 from ha_nlu.nlu.primitives import SemanticProperty
@@ -193,6 +195,35 @@ def test_relational_query_refuses_incompatible_units():
     assert executor.execute(command, [celsius, fahrenheit], world).status is (
         QueryResultStatus.TARGET_NOT_FOUND
     )
+
+
+def test_relationship_query_uses_asserted_same_area_graph_edges():
+    anchor = EntitySnapshot(
+        "media_player.tv", "Fernseher", "media_player", "on",
+        area_id="living", area_name="Wohnzimmer",
+    )
+    same = EntitySnapshot(
+        "light.same", "Lampe", "light", "on",
+        area_id="living", area_name="Wohnzimmer",
+    )
+    elsewhere = EntitySnapshot(
+        "light.other", "Andere", "light", "on",
+        area_id="kitchen", area_name="Küche",
+    )
+    world = build_world_model([anchor, same, elsewhere], [])
+    command = QueryCommand(
+        intent="HassRelationshipQuery",
+        scope=QueryScope.LIST,
+        target=QueryTarget(domain="light"),
+        filter=QueryFilter(
+            relationship=RelationConstraint(QueryRelationKind.SAME_AREA, anchor.entity_id)
+        ),
+    )
+
+    result = executor.execute(command, [same, elsewhere], world)
+
+    assert result.status is QueryResultStatus.MATCHED
+    assert result.entities == (same,)
 
 
 # --- SINGLE (HassCheckState) ---------------------------------------------

@@ -14,7 +14,11 @@ from typing import cast
 from ..entities import EntitySnapshot, normalize_for_compare
 from ..world_model import WorldModel
 from .language_frontend import LanguageDocument, TextVariant, tokenize_language
-from .german_structure import ClauseKind, analyse_german_structure
+from .german_structure import (
+    ClauseKind,
+    StructuralRelationKind,
+    analyse_german_structure,
+)
 from .parser import ClarificationRequest, ParseResult
 from .semantic_compiler import SemanticCommandCompiler, SemanticQueryCompiler
 from .semantic_catalog import INTENT_BY_DOMAIN_ACTION
@@ -44,6 +48,9 @@ from .registered_operation_compiler import compile_registered_operation
 from .semantic_graph import build_semantic_graph
 from .semantic_projection import (
     attach_graph,
+    project_relational_comparison_query,
+    project_relationship_query,
+    project_structured_repair,
     project_structured_command,
 )
 from .temporal_semantics import analyse_temporal_semantics
@@ -61,6 +68,13 @@ class InterpreterResult:
 
 
 SEMANTIC_AMBIGUITY_MARGIN = 5.0
+
+
+def _world_model_boundary(value: object) -> WorldModel | None:
+    """Narrow the optional cross-module model at the interpreter boundary."""
+    if value is None or isinstance(value, WorldModel):
+        return value
+    raise TypeError("world_model must be a WorldModel or None")
 
 
 def _candidate_identity(
@@ -96,6 +110,7 @@ def _slot_values(document: LanguageDocument) -> dict[str, object]:
         ("query_scopes", SemanticKind.QUERY_SCOPE),
         ("properties", SemanticKind.PROPERTY),
         ("comparators", SemanticKind.COMPARATOR),
+        ("relations", SemanticKind.RELATION),
     ):
         values = analysis.values(kind)
         if values:
@@ -166,6 +181,15 @@ def _resolved_conflicts(
     ):
         # An exact registry identity is typed data. Generic nouns occurring
         # inside that user-controlled name cannot introduce a second domain.
+        conflicts.remove("domain")
+    if (
+        "domain" in conflicts
+        and isinstance(parse_result, ParseResult)
+        and parse_result.frame.intent == "HassRelationshipQuery"
+    ):
+        # A relation query has one target class before the relation marker
+        # and a separately grounded anchor after it. Their domains describe
+        # different graph roles and therefore are not competing meanings.
         conflicts.remove("domain")
     if (
         "state" in conflicts
@@ -274,6 +298,9 @@ class SemanticInterpreter:
         compile_result: bool = True,
         resolve_registry: bool = True,
     ) -> InterpreterResult:
+        # Pin the cross-module TYPE_CHECKING cycle to one explicit runtime
+        # boundary; downstream calls retain precise WorldModel contracts.
+        typed_world_model = _world_model_boundary(world_model)
         candidates: list[MeaningCandidate] = []
         parse_records: dict[
             tuple[str, tuple[tuple[str, str], ...]],
@@ -329,7 +356,7 @@ class SemanticInterpreter:
                 if "domains" not in slots:
                     slots["domains"] = tuple(sorted({entity.domain for entity in mentions}))
             locations = (
-                resolve_coordinated_locations(variant.text, entities, world_model)
+                resolve_coordinated_locations(variant.text, entities, typed_world_model)
                 if resolve_registry
                 else None
             )
@@ -338,7 +365,7 @@ class SemanticInterpreter:
                 grounded_locations = locations
             else:
                 location = (
-                    resolve_semantic_location(variant.text, entities, world_model)
+                    resolve_semantic_location(variant.text, entities, typed_world_model)
                     if resolve_registry
                     else None
                 )
@@ -408,6 +435,11 @@ class SemanticInterpreter:
                 and variant.source != "orthographic"
             )
             if may_compile and document.utterance.speech_act is SpeechAct.QUERY:
+                parse_result = project_relational_comparison_query(
+                    candidate_document, graph, entities, typed_world_model
+                ) or project_relationship_query(
+                    candidate_document, graph, entities, typed_world_model
+                )
                 has_standalone_query_meaning = any(
                     analysis.values(kind)
                     for kind in (
@@ -434,7 +466,9 @@ class SemanticInterpreter:
                     len(semantic_query_clauses) > 1
                     and not variant_structure.relations
                 )
-                if (
+                if parse_result is not None:
+                    verb_answer = None
+                elif (
                     is_contextual_followup(variant.text)
                     and not has_standalone_query_meaning
                 ):
@@ -453,7 +487,9 @@ class SemanticInterpreter:
                     parse_result = None
                 else:
                     verb_answer = match_verb_state_query(variant.text, entities)
-                if verb_answer is not None:
+                if parse_result is not None:
+                    pass
+                elif verb_answer is not None:
                     domains = {entity.domain for entity in verb_answer.entities}
                     parse_result = ParseResult(
                         frame=SemanticFrame(
@@ -480,7 +516,7 @@ class SemanticInterpreter:
                     )
                 ):
                     parse_result = SemanticQueryCompiler.compile(
-                        variant.text, entities, world_model, analysis
+                        variant.text, entities, typed_world_model, analysis
                     )
             elif may_compile and document.utterance.safe_to_execute_directly:
                 context_only_command = (
@@ -503,15 +539,30 @@ class SemanticInterpreter:
                     # fuzzy entity resolution against the complete registry
                     # would be both expensive and semantically unauthorised.
                     continue
-                compositional_plan = build_document_compositional_plan(
-                    candidate_document,
-                    entities,
-                    index=(
-                        world_model.entity_index
-                        if world_model is not None
-                        else None
-                    ),
-                    resolved_mentions=(mentions if resolve_registry else None),
+                has_repair = any(
+                    relation.kind is StructuralRelationKind.REPLACES
+                    for relation in candidate_document.structure.relations
+                )
+                parse_result = (
+                    project_structured_repair(
+                        candidate_document, graph, entities, typed_world_model
+                    )
+                    if has_repair
+                    else None
+                )
+                compositional_plan = (
+                    None
+                    if has_repair
+                    else build_document_compositional_plan(
+                        candidate_document,
+                        entities,
+                        index=(
+                            typed_world_model.entity_index
+                            if typed_world_model is not None
+                            else None
+                        ),
+                        resolved_mentions=(mentions if resolve_registry else None),
+                    )
                 )
                 has_exclusion = any(
                     clause.kind is ClauseKind.EXCLUSION
@@ -541,29 +592,36 @@ class SemanticInterpreter:
                     )
                     for span in candidate_document.semantics.spans
                 )
-                has_structured_modifier = has_exclusion or has_relative_filter
-                parse_result = (
+                has_structured_modifier = (
+                    has_exclusion or has_relative_filter or has_repair
+                )
+                parse_result = parse_result or (
                     project_structured_command(
                         candidate_document,
                         graph,
                         entities,
-                        world_model,
+                        typed_world_model,
                         composition=compositional_plan,
                     )
-                    if compositional_plan is not None or has_structured_modifier
+                    if not has_repair
+                    and (compositional_plan is not None or has_structured_modifier)
                     else None
                 )
                 if parse_result is None and compositional_plan is None and not has_structured_modifier:
                     parse_result = compile_registered_operation(
                         variant.text,
                         entities,
-                        index=(world_model.entity_index if world_model is not None else None),
+                        index=(
+                            typed_world_model.entity_index
+                            if typed_world_model is not None
+                            else None
+                        ),
                     )
                 if parse_result is None and compositional_plan is None and not has_structured_modifier:
                     parse_result = SemanticCommandCompiler.compile(
                         variant.text,
                         entities,
-                        world_model,
+                        typed_world_model,
                         analysis,
                     )
 
@@ -574,14 +632,32 @@ class SemanticInterpreter:
                 resolved_mentions = tuple(parse_result.resolved_entities)
             elif isinstance(parse_result, ClarificationRequest):
                 resolved_mentions = parse_result.candidates
-            if resolved_mentions and "entities" not in slots:
+            typed_query_result = (
+                isinstance(parse_result, ParseResult)
+                and parse_result.frame.action is SemanticAction.QUERY
+                and "query_result" in parse_result.frame.parameters
+            )
+            semantic_targets = () if typed_query_result else resolved_mentions
+            if typed_query_result:
+                slots["query_result_count"] = len(resolved_mentions)
+            elif resolved_mentions and "entities" not in slots:
                 slots["entities"] = tuple(
                     entity.entity_id for entity in resolved_mentions
                 )
 
-            graph = graph.with_grounded_entities(
-                entity.entity_id for entity in resolved_mentions
-            )
+            if (
+                typed_query_result
+                and isinstance(parse_result, ParseResult)
+                and parse_result.frame.semantic_graph is not None
+            ):
+                # Query result membership belongs to QueryResult/Discourse,
+                # not to the request graph's target nodes. The projector has
+                # already grounded its operands or relation anchor.
+                graph = parse_result.frame.semantic_graph
+            else:
+                graph = graph.with_grounded_entities(
+                    entity.entity_id for entity in semantic_targets
+                )
             if grounded_locations:
                 graph = graph.with_grounded_locations(grounded_locations)
             if isinstance(parse_result, ParseResult):
@@ -616,7 +692,7 @@ class SemanticInterpreter:
                     claim=f"entity={entity.entity_id}",
                     source_id="entity_resolution",
                 )
-                for entity in resolved_mentions
+                for entity in semantic_targets
             )
             evidence += tuple(
                 UnderstandingEvidence(
@@ -641,10 +717,14 @@ class SemanticInterpreter:
                         claim=f"live={entity.entity_id}",
                         source_id="world_model",
                     )
-                    for entity in resolved_mentions
+                    for entity in semantic_targets
                     if entity.entity_id in world_model.entities_by_id
                 )
-            if isinstance(parse_result, ParseResult) and resolved_mentions:
+            if (
+                isinstance(parse_result, ParseResult)
+                and semantic_targets
+                and not typed_query_result
+            ):
                 validation = validate_command(build_semantic_command(parse_result))
                 evidence += (
                     UnderstandingEvidence(

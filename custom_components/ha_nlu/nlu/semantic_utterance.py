@@ -118,7 +118,8 @@ _AUTOMATION_RE = re.compile(
     re.I,
 )
 _META_AUTOMATION_QUERY_RE = re.compile(
-    r"^\s*(?:was\s+(?:passiert|geschieht)|wie\s+wäre\s+es|was\s+wäre)\b.*\b(?:wenn|falls)\b",
+    r"^\s*(?:was\s+(?:(?:würde|wuerde)\s+)?(?:passieren|geschehen|passiert|geschieht)|"
+    r"wie\s+wäre\s+es|was\s+wäre)\b.*\b(?:wenn|falls)\b",
     re.I,
 )
 _INFORMATIONAL_CAN_RE = re.compile(r"^\s*kann\s+man\b", re.I)

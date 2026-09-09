@@ -99,6 +99,9 @@ class HouseGraph:
     def __init__(self) -> None:
         self._nodes: dict[str, GraphNode] = {}
         self._relations: dict[str, GraphRelation] = {}
+        self._outgoing: dict[tuple[str, RelationKind], set[str]] = {}
+        self._incoming: dict[tuple[str, RelationKind], set[str]] = {}
+        self._asserted_edges: set[tuple[str, RelationKind, str]] = set()
 
     @property
     def nodes(self) -> tuple[GraphNode, ...]:
@@ -138,6 +141,13 @@ class HouseGraph:
             observed_at,
         )
         self._relations[relation_id] = relation
+        self._outgoing.setdefault((source_id, kind), set()).add(target_id)
+        self._incoming.setdefault((target_id, kind), set()).add(source_id)
+        edge = (source_id, kind, target_id)
+        if relation.is_asserted_fact:
+            self._asserted_edges.add(edge)
+        else:
+            self._asserted_edges.discard(edge)
         return relation
 
     def node(self, node_id: str) -> GraphNode | None:
@@ -150,14 +160,49 @@ class HouseGraph:
         *,
         asserted_only: bool = True,
     ) -> tuple[GraphNode, ...]:
-        target_ids = {
-            relation.target_id
-            for relation in self._relations.values()
-            if relation.source_id == node_id
-            and (kind is None or relation.kind is kind)
-            and (not asserted_only or relation.is_asserted_fact)
-        }
+        target_ids = (
+            set(self._outgoing.get((node_id, kind), ()))
+            if kind is not None
+            else {
+                target_id
+                for (source_id, _), targets in self._outgoing.items()
+                if source_id == node_id
+                for target_id in targets
+            }
+        )
+        if asserted_only:
+            if kind is not None:
+                target_ids = {
+                    target_id
+                    for target_id in target_ids
+                    if (node_id, kind, target_id) in self._asserted_edges
+                }
+            else:
+                target_ids = {
+                    target_id
+                    for (source_id, asserted_kind), targets in self._outgoing.items()
+                    if source_id == node_id
+                    for target_id in targets
+                    if (source_id, asserted_kind, target_id) in self._asserted_edges
+                }
         return tuple(self._nodes[item] for item in sorted(target_ids))
+
+    def sources(
+        self,
+        node_id: str,
+        kind: RelationKind,
+        *,
+        asserted_only: bool = True,
+    ) -> tuple[GraphNode, ...]:
+        """Return asserted incoming neighbours through the indexed graph."""
+        source_ids = set(self._incoming.get((node_id, kind), ()))
+        if asserted_only:
+            source_ids = {
+                source_id
+                for source_id in source_ids
+                if (source_id, kind, node_id) in self._asserted_edges
+            }
+        return tuple(self._nodes[item] for item in sorted(source_ids))
 
     def evidence(
         self, source_id: str, kind: RelationKind, target_id: str

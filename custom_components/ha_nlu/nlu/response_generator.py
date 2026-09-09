@@ -153,6 +153,10 @@ class ResponseGenerator:
             plan = self._respond_device_list(result)
         elif command.target.kind is QueryTargetKind.AUTOMATION:
             plan = self._respond_automation(result)
+        elif command.filter.relational is not None:
+            plan = self._respond_relational(result)
+        elif command.filter.relationship is not None:
+            plan = self._respond_relationship(result)
         elif command.scope is QueryScope.SINGLE:
             plan = self._respond_single(result)
         elif command.scope is QueryScope.EXISTS:
@@ -170,6 +174,37 @@ class ResponseGenerator:
             result,
             context=context,
             allow_reference=allow_reference,
+        )
+
+    @staticmethod
+    def _respond_relational(result: QueryResult) -> ResponsePlan:
+        """Realize the truth value already computed by QueryExecutor."""
+        assert result.command is not None
+        comparison = result.command.filter.relational
+        assert comparison is not None
+        by_id = {entity.entity_id: entity for entity in result.considered_entities}
+        left = by_id.get(comparison.left.entity_id)
+        right = by_id.get(comparison.right.entity_id)
+        if left is None or right is None:
+            return ResponseGenerator._wrap(
+                QueryResponsePlan(QueryAnswerKind.NOT_FOUND)
+            )
+        return ResponseGenerator._wrap(
+            QueryResponsePlan(
+                QueryAnswerKind.RELATIONAL_COMPARISON,
+                names=(left.friendly_name, right.friendly_name),
+                matched=result.status is QueryResultStatus.MATCHED,
+            )
+        )
+
+    @staticmethod
+    def _respond_relationship(result: QueryResult) -> ResponsePlan:
+        return ResponseGenerator._wrap(
+            QueryResponsePlan(
+                QueryAnswerKind.RELATION_LIST,
+                noun_plural=ResponseGenerator._noun(result),
+                names=tuple(entity.friendly_name for entity in result.entities),
+            )
         )
 
     @staticmethod

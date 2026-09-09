@@ -158,59 +158,63 @@ Engine existiert nicht.
 | Subsystem | Status | Autorität |
 |---|---|---|
 | Language Frontend / Structural Parser | IMPLEMENTED | gemeinsame Dokument- und Struktureingabe |
-| SemanticGraph / Candidates | PARTIALLY MIGRATED | Turn-IR und Ranking; nicht jede Domainprojektion liest alle Kanten |
-| Direct Commands / Composition | PARTIALLY MIGRATED | Relative, Exclusion und Shared Predicate strukturiert; normale Compatibility-Compiler bleiben |
-| Queries | PARTIALLY MIGRATED | `QueryCommand`/`QueryExecutor` produktiv, viele NL-Projektionen textbasiert |
-| Discourse | PARTIALLY MIGRATED | Multi-Referent/Fokus produktiv, ältere `last_*`-Fallbacks bleiben |
-| WorldModel / relationale Queries | PARTIALLY MIGRATED | Fakten vorhanden; allgemeine relationale NL-Projection UNSUPPORTED |
-| Automationen | OBSERVABILITY ONLY für Graphautorität | Fachparser/Validator/Preview/Write produktiv |
-| Temporal / Repair | OBSERVABILITY ONLY außerhalb bestehender Domainpfade | Erkennung impliziert keine Ausführung |
+| SemanticGraph / Candidates | PRODUCTIVE WITH SAFE BOUNDARIES | Turn-IR, ungekappte Rankings und strukturierte Domainprojektionen; unbekannte Graphformen bleiben unsupported |
+| Direct Commands / Composition | MIGRATED FOR SUPPORTED SHAPES | Relative, Exclusion, Shared Predicate und unabhängige Prädikate direkt strukturiert |
+| Queries | PRODUCTIVE READ-ONLY | `QueryCommand`/`QueryExecutor`; keine Serviceplan-Abbildung |
+| Discourse | PRODUCTIVE | Multi-Referent, Gruppen, Fokus und Graphfragmente; ältere `last_*` nur Compatibility |
+| WorldModel / relationale Queries | PRODUCTIVE WITH SAFE BOUNDARIES | belegte Vergleiche/Same-Area; Aggregate, Superlative und erfundene Beziehungen unsupported |
+| Automationen | STRUCTURE MIGRATED | V8-Clause-Grenzen; bestehende Fachmodelle/Validator/Preview/Write bleiben autoritativ |
+| Temporal / Repair | PRODUCTIVE OR EXPLICITLY UNSUPPORTED | Temporal blockiert Bedeutungsverlust; eindeutiger Entity-Repair produktiv |
 | Semantic Aliases | UNSUPPORTED end-to-end | bestätigter Store, keine allgemeine Graph-Expansion |
 | Management / Calendar / Productivity | PARTIALLY MIGRATED | gemeinsame Grenze, separate Fachsemantik |
 | Execution / Safety | IMPLEMENTED | Validator, Policy, Mapper und Executor autoritativ |
 
 ## Tests und Messwerte
 
-- Gesamtsuite: 2.955 bestanden, 12 übersprungen; 88 % Coverage.
-- Language-Evaluation: 125 bestanden.
+- Gesamtsuite: 2.993 bestanden, 12 übersprungen; 88 % Coverage.
+- Language-Evaluation: 210 bestanden.
 - Structural-, Graph-, Snapshot-, Projektions-, Diskurs-, HouseGraph-,
   Relation-, Zeit-, Reparatur-, Pragmatik-, OOD- und Metamorphiktests.
 - handgeschriebenes OOD-Korpus in `tests/data/v8_ood_de.json`, nicht aus
   Produkttemplates generiert.
-- Shadow 4.72.0: 3.772 Turns, 3.752 identisch, 20 beidseitig ohne Treffer,
+- Shadow 4.73.0: 3.772 Turns, 3.752 identisch, 20 beidseitig ohne Treffer,
   keine Divergenz und keine Query-/Unsafe-/Ambiguous-Action-Leakage.
-- Das Benchmarkscript enthält nun 16 Fälle einschließlich Multi-Clause,
+- Das Benchmarkscript enthält nun 17 Fälle einschließlich Multi-Clause,
   Temporal-, Repair-, relationalem Query- und Discourse-Shape.
 
 Jüngste lokale p95-Messwerte der neuen Kategorien:
 
 | Fall | p95 bei 5.000 Entities |
 |---|---:|
-| komplexer Relativfilter + Exclusion | 34,92 ms |
-| Ambiguität | 27,00 ms |
-| Multi-Target | 49,96 ms |
-| Multi-Clause | 65,36 ms |
-| Temporal Parse | 33,50 ms |
-| Repair Parse | 41,14 ms |
-| relationaler Unsupported-Shape | 50,64 ms |
-| kontextfreie Follow-up-Form | 79,94 ms |
-| Discourse-Referenz-Shape | 26,92 ms |
+| komplexer Relativfilter + Exclusion | 29,13 ms |
+| Ambiguität | 37,04 ms |
+| Multi-Target | 72,90 ms |
+| Multi-Clause | 62,29 ms |
+| Temporal Parse | 31,84 ms |
+| Repair Parse | 32,82 ms |
+| relationaler Vergleich | 13,89 ms |
+| HouseGraph Same-Area | 45,77 ms |
+| kontextfreie Follow-up-Form | 47,21 ms |
+| Discourse-Referenz-Shape | 9,32 ms |
 
-Gemessen mit 20 Iterationen und drei Warmups; der höchste p95 aller 16 Fälle
-lag bei 79,94 ms und damit unter dem 100-ms-Gate. Mehrturnige Salience ist
+Gemessen mit 20 Iterationen und drei Warmups; der höchste p95 aller 17 Fälle
+lag bei 72,90 ms und damit unter dem 100-ms-Gate. Mehrturnige Salience ist
 implementiert; der Scriptfall misst den kontextfreien Referenz-Shape, nicht
 die ConversationContext-Latenz.
 
 ## Bewusste Grenzen
 
 - kein allgemeines Weltwissen und kein vollständiger Universalparser,
-- keine Ausführung beliebig verschachtelter Condition-/Automationgraphen,
-- keine natürliche Projektion jeder relationalen Hausquery,
-- keine Ausführung jedes korrekt geparsten Zeit-/Reparaturgraphen,
-- Dialog-UI/Persistenz für semantische Aliase bleibt kontrollierte
-  Integrationsarbeit,
-- Shadow kompletter Dialogsequenzen bleibt zusätzlich zum Einzelturn-Shadow
-  offen.
+- keine Ausführung beliebig verschachtelter, nicht verlustfrei projizierbarer
+  Condition-/Automationgraphen,
+- keine erfundenen Relationen; Superlative und Hausaggregate bleiben
+  `UNSUPPORTED`,
+- Zeitsemantik ohne sicheren Scheduling-Projektor wird nicht als Sofortaktion
+  ausgeführt,
+- Value-/Property-/Temporal-Repair bleibt ohne verlustfreie Projektion
+  `UNSUPPORTED`,
+- semantische Aliase und Routinen entstehen ausschließlich nach expliziter
+  Bestätigung.
 
 Solche Fälle bleiben beim vorhandenen sicheren Verhalten oder werden
 `UNSUPPORTED`/Clarification. Es gibt keinen LLM-, Cloud- oder statistischen

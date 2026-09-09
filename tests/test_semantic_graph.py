@@ -111,3 +111,21 @@ def test_conditions_time_values_and_references_are_not_flattened():
     assert graph.nodes_of_kind(SemanticNodeKind.VALUE)
     assert graph.nodes_of_kind(SemanticNodeKind.REFERENCE)
     assert any(edge.kind is SemanticEdgeKind.CONDITION for edge in graph.edges)
+    assert any(edge.kind is SemanticEdgeKind.SINCE for edge in graph.edges)
+
+
+def test_property_value_and_comparison_have_typed_graph_relations():
+    graph = _graph("Ist die Temperatur unter 20 Grad?")
+
+    assert graph.nodes_of_kind(SemanticNodeKind.PROPERTY)
+    assert graph.nodes_of_kind(SemanticNodeKind.VALUE)
+    assert graph.nodes_of_kind(SemanticNodeKind.COMPARISON)
+    assert any(edge.kind is SemanticEdgeKind.VALUE_OF for edge in graph.edges)
+    assert any(edge.kind is SemanticEdgeKind.COMPARE for edge in graph.edges)
+
+
+def test_automation_condition_is_typed_as_trigger_relation():
+    graph = _graph("Wenn das Fenster offen ist, mach das Licht aus.")
+
+    assert graph.nodes_of_kind(SemanticNodeKind.TRIGGER)
+    assert any(edge.kind is SemanticEdgeKind.TRIGGER for edge in graph.edges)

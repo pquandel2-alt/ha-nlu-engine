@@ -87,6 +87,18 @@ class RelationalComparison:
     right: PropertyOperand
 
 
+class QueryRelationKind(Enum):
+    SAME_AREA = auto()
+
+
+@dataclass(frozen=True)
+class RelationConstraint:
+    """A registry-proven relationship anchored at one live entity."""
+
+    kind: QueryRelationKind
+    anchor_entity_id: str
+
+
 @dataclass(frozen=True)
 class QueryTarget:
     """What a query searches over, before any state filter is applied.
@@ -121,6 +133,7 @@ class QueryFilter:
 
     state: SemanticState | None = None
     relational: RelationalComparison | None = None
+    relationship: RelationConstraint | None = None
 
 
 @dataclass(frozen=True)

@@ -215,7 +215,9 @@ _TEMPORAL_PREPOSITIONS = frozenset({"nach", "vor", "bis", "seit", "waehrend", "f
 _DATIVE_ARTICLES = frozenset({"dem", "einem", "einer"})
 _ACCUSATIVE_ARTICLES = frozenset({"den", "einen"})
 _PARTICLES = frozenset({"an", "aus", "auf", "zu", "ein", "hoch", "runter", "ab", "weiter"})
-_SAFE_FILLERS = frozenset({"also", "aeh", "eh", "mal", "eben", "bitte", "halt"})
+_SAFE_FILLERS = frozenset({
+    "also", "aeh", "eh", "ach", "mal", "eben", "bitte", "halt"
+})
 _CONJUNCTIONS = frozenset(word for connector in _CONNECTORS for word in connector.words)
 
 
@@ -438,7 +440,15 @@ def analyse_german_structure(
             # Sentence-initial ``nur`` restricts the following target/filter;
             # only comma-delimited ``..., nur X nicht`` is an exclusion.
             connector_match = None
-        is_relative = _is_relative_start(tokens, token_index)
+        repair_is_pending = bool(
+            boundaries
+            and boundaries[-1][2] is not None
+            and boundaries[-1][2].right_kind is ClauseKind.REPAIR
+        )
+        # ``nein, das Wohnzimmer`` is an elliptical replacement, not a
+        # relative clause. Once a repair marker has opened a replacement,
+        # an article after its comma belongs to that replacement span.
+        is_relative = _is_relative_start(tokens, token_index) and not repair_is_pending
         is_repair = tokens[token_index].canonical in _REPAIR_WORDS
         if connector_match is None and not is_relative and not is_repair:
             word_offset += 1
@@ -545,7 +555,23 @@ def analyse_german_structure(
             source_clause = clause.clause_id
             target_clause = target.clause_id
         else:
-            source_clause = clauses[index - 1].clause_id
+            previous_index = index - 1
+            if connector.relation is StructuralRelationKind.REPLACES:
+                # Hesitations such as ``äh``/``ach`` between the original and
+                # ``nein`` carry no replaceable meaning. Link REPLACES to the
+                # nearest substantive clause instead of the filler fragment.
+                while previous_index >= 0 and all(
+                    not tokens[token_index].is_word
+                    or token_features[token_index].safe_filler
+                    for token_index in range(
+                        clauses[previous_index].token_start,
+                        clauses[previous_index].token_end,
+                    )
+                ):
+                    previous_index -= 1
+            if previous_index < 0:
+                continue
+            source_clause = clauses[previous_index].clause_id
             target_clause = clause.clause_id
         relations.append(StructuralRelation(
             kind=connector.relation,

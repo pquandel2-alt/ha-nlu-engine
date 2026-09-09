@@ -122,11 +122,15 @@ def _validate_semantic(model: AutomationModel) -> AutomationValidationError | No
         return AutomationValidationError.INVALID_PARAMETER
     if (model.quiet_start_hour is None) != (model.quiet_end_hour is None):
         return AutomationValidationError.INVALID_PARAMETER
-    if model.quiet_start_hour is not None and (
+    if (
+        model.quiet_start_hour is not None
+        and model.quiet_end_hour is not None
+        and (
         not 0 <= model.quiet_start_hour <= 23
         or not 0 <= model.quiet_end_hour <= 23
         or model.quiet_start_hour == model.quiet_end_hour
         or not model.once
+        )
     ):
         return AutomationValidationError.INVALID_PARAMETER
     if any(trigger.type is TriggerType.CALENDAR_TIME for trigger in model.triggers):

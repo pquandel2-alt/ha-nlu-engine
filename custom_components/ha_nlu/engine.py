@@ -56,6 +56,7 @@ from .nlu.discourse import ReferenceStatus, resolve_reference
 from .nlu.debug import DebugTrace, format_command
 from .nlu.degree_semantics import extract_degree
 from .nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
+from .nlu.primitives import SemanticAction, SemanticDirection, SemanticProperty
 from .nlu.normalize import normalize
 from .nlu.language_frontend import LanguageDocument, analyse_language
 from .nlu.parser import (
@@ -74,12 +75,15 @@ from .nlu.semantic_compiler import (
     SemanticQueryCompiler,
     has_exclusion_clause,
 )
-from .nlu.domain_operations import DOMAIN_WORDS
 from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
+from .nlu.semantic_catalog import INTENT_BY_DOMAIN_ACTION
 from .nlu.semantic_interpreter import InterpreterResult, SemanticInterpreter
+from .nlu.semantic_projection import project_independent_predicates
 from .nlu.meaning import SemanticTurn, analyse_turn
 from .nlu.semantic_utterance import (
     ClauseRole,
+    Modality,
+    PragmaticDisposition,
     SpeechAct,
     analyse_utterance,
     is_contextual_followup,
@@ -117,10 +121,19 @@ from .scheduled_time_command_parser import ScheduledTimeCommandParser
 from .nlu.automation_model import AutomationModel, TriggerModel, TriggerType, render_automation_tree
 from .nlu.automation_model import TriggerTarget
 from .nlu.action_model import ActionGroup, ActionModel, ActionType
-from .nlu.automation_sentence_split import split_trigger_action
+from .nlu.automation_sentence_split import (
+    split_automation_document,
+    split_trigger_action,
+    structured_automation_condition_clauses,
+)
 from .nlu.automation_validator import validate_automation
 from .nlu.automation_operations import validate_registered_operation
-from .nlu.condition_model import ConditionModel, ConditionNode, ConditionType
+from .nlu.condition_model import (
+    ConditionModel,
+    ConditionNode,
+    ConditionType,
+    LogicalOperator,
+)
 from .parsers import (
     AreaQueryParser,
     AutomationDeleteMatch,
@@ -1003,13 +1016,37 @@ class NluEngine:
         # rescan the registry for every segment and can become quadratic at
         # large registry sizes without changing the selected meaning.
         predicate_clauses = independent_predicate_clauses(document)
-        multi_result = (
-            None
-            if interpreted.compositional_plan is not None
-            else self._v7_multi_result(
+        selected_graph = next(
+            (
+                candidate.graph
+                for candidate in interpreted.candidates
+                if candidate.complete and candidate.graph is not None
+            ),
+            None,
+        )
+        projected_predicates = (
+            project_independent_predicates(
+                document, selected_graph, entities, world_model
+            )
+            if interpreted.compositional_plan is None
+            and selected_graph is not None
+            and predicate_clauses
+            else ()
+        )
+        multi_result: CommandPlan | None = None
+        if projected_predicates:
+            rendered_items: list[MatchResult] = []
+            for parsed in projected_predicates:
+                rendered_item = self._build_match_result(parsed, entities)
+                if rendered_item is not None and rendered_item.plan is not None:
+                    rendered_items.append(rendered_item)
+            rendered = tuple(rendered_items)
+            if len(rendered) == len(projected_predicates):
+                multi_result = CommandPlan(rendered)
+        elif interpreted.compositional_plan is None:
+            multi_result = self._v7_multi_result(
                 predicate_clauses, entities, world_model
             )
-        )
         if multi_result is not None:
             v7_result = multi_result
         elif (
@@ -1032,6 +1069,26 @@ class NluEngine:
             document.utterance.speech_act is SpeechAct.COMMAND
             and not document.utterance.safe_to_execute_directly
         ):
+            result = None
+            authority = UnderstandingAuthority.NONE
+        if document.utterance.modality is Modality.HYPOTHETICAL:
+            # A counterfactual may contain executable-looking predicates, but
+            # they describe a simulated world. Do not let ordinary state or
+            # command compilers answer a different, literal question.
+            result = None
+            authority = UnderstandingAuthority.NONE
+        if (
+            document.utterance.speech_act is SpeechAct.COMMAND
+            and document.temporal
+            and (
+                isinstance(result, CommandPlan)
+                or isinstance(result, MatchResult) and result.plan is not None
+            )
+        ):
+            # Scheduling/duration is a different domain projection from an
+            # immediate service call. Conversation routes supported temporal
+            # forms into AutomationModel first; this generic boundary must
+            # never discard the time semantics and execute the remainder.
             result = None
             authority = UnderstandingAuthority.NONE
         return self._direct_understanding_outcome(
@@ -1234,6 +1291,45 @@ class NluEngine:
         )
         evidence = self._selected_evidence(interpreted)
 
+        if (
+            document.utterance.pragmatic_disposition
+            is PragmaticDisposition.ASK_BEFORE_ACTION
+        ):
+            return UnderstandingOutcome(
+                kind=UnderstandingKind.CLARIFICATION,
+                source_text=text,
+                normalized_text=document.utterance.normalized_text,
+                speech_act=document.utterance.speech_act,
+                reason=ParseFailureReason.INCOMPLETE_REQUEST,
+                speech="Möchtest du, dass ich daraus eine konkrete Änderung ableite?",
+                candidates=interpreted.candidates,
+                evidence=evidence,
+                unexplained_tokens=document.semantics.unexplained_tokens,
+                route="pragmatic_clarification",
+                authority=UnderstandingAuthority.V7_MIGRATED,
+                margin=margin,
+            )
+        if (
+            result is None
+            and document.utterance.pragmatic_disposition
+            is PragmaticDisposition.READ_ONLY
+            and document.utterance.modality is Modality.HYPOTHETICAL
+        ):
+            return UnderstandingOutcome(
+                kind=UnderstandingKind.QUERY,
+                source_text=text,
+                normalized_text=document.utterance.normalized_text,
+                speech_act=document.utterance.speech_act,
+                reason=ParseFailureReason.UNSUPPORTED_PROPERTY,
+                speech="Die hypothetische Aussage wurde nur lesend verstanden; daraus wird keine Aktion ausgeführt.",
+                candidates=interpreted.candidates,
+                evidence=evidence,
+                unexplained_tokens=document.semantics.unexplained_tokens,
+                route="read_only_hypothetical",
+                authority=UnderstandingAuthority.V7_MIGRATED,
+                margin=margin,
+            )
+
         if isinstance(result, CommandPlan):
             has_action = any(command.plan is not None for command in result.commands)
             return UnderstandingOutcome(
@@ -1308,6 +1404,11 @@ class NluEngine:
             # negated command must not pay for (or be reinterpreted by) a
             # legacy registry feedback scan.
             feedback = None
+        elif document.temporal and document.utterance.speech_act is SpeechAct.COMMAND:
+            feedback = UnderstandingFeedback(
+                ParseFailureReason.UNSUPPORTED_PROPERTY,
+                "Die Zeitangabe wurde erkannt, ist in diesem direkten Pfad aber nicht sicher ausführbar.",
+            )
         elif unbound_semantic_query:
             feedback = UnderstandingFeedback(
                 ParseFailureReason.UNSUPPORTED_PROPERTY,
@@ -1750,32 +1851,86 @@ class NluEngine:
         if direction.group(1).casefold() in {"heller", "dunkler"} and len(candidates) != 1:
             return None
         probe = candidates[0]
-        parsed = SemanticCommandCompiler.compile(
-            f"mach {probe.friendly_name} {direction.group(1)}", [probe]
-        )
-        # Numeric suffixes in registry names (``Rolllade Büro 2``) are
-        # deliberately interpreted as quantities by the general compiler.
-        # Here the candidate is already fixed by the discourse reference, so
-        # retry with its typed domain noun instead of reinterpreting user data.
-        if not isinstance(parsed, ParseResult):
-            domain_words = DOMAIN_WORDS.get(probe.domain, ())
-            for domain_word in domain_words:
-                parsed = SemanticCommandCompiler.compile(
-                    f"mach {domain_word} {direction.group(1)}", [probe]
-                )
-                if isinstance(parsed, ParseResult):
-                    break
-        if not isinstance(parsed, ParseResult):
+        direction_word = direction.group(1).casefold()
+        action_value = {
+            "an": "turn_on",
+            "ein": "turn_on",
+            "aus": "turn_off",
+            "hoch": "open",
+            "auf": "open",
+            "runter": "close",
+            "herunter": "close",
+            "zu": "close",
+        }.get(direction_word)
+        intent: str | None
+        parameters: dict[str, object] = {}
+        property_: SemanticProperty | None = None
+        semantic_direction: SemanticDirection | None = None
+        degree = None
+        if direction_word in {"heller", "dunkler"}:
+            if probe.domain != "light":
+                return None
+            adjustment = extract_degree(text)
+            intent = (
+                "HassLightBrighten"
+                if direction_word == "heller"
+                else "HassLightDim"
+            )
+            parameters["step_percent"] = adjustment.light_percent
+            semantic_action = SemanticAction.ADJUST
+            property_ = SemanticProperty.BRIGHTNESS
+            semantic_direction = (
+                SemanticDirection.INCREASE
+                if direction_word == "heller"
+                else SemanticDirection.DECREASE
+            )
+            degree = adjustment.degree
+        else:
+            if action_value is None:
+                return None
+            intents = {
+                INTENT_BY_DOMAIN_ACTION.get((entity.domain, action_value))
+                for entity in candidates
+            }
+            if None in intents or len(intents) != 1:
+                return None
+            intent = next(iter(intents))
+            semantic_action = {
+                "turn_on": SemanticAction.TURN_ON,
+                "turn_off": SemanticAction.TURN_OFF,
+                "open": SemanticAction.OPEN,
+                "close": SemanticAction.CLOSE,
+            }[action_value]
+        if intent is None:
             return None
-        frame = replace(
-            parsed.frame,
+        frame = SemanticFrame(
+            intent=intent,
             target=TargetReference(
                 text=text,
                 entity_id=(probe.entity_id if len(candidates) == 1 else None),
                 domain=probe.domain,
             ),
+            area=(
+                AreaReference(
+                    text=context.last_area.name,
+                    area_id=context.last_area.area_id,
+                    area_name=context.last_area.name,
+                )
+                if is_area_reference and context.last_area is not None
+                else None
+            ),
             quantifier=(Quantifier("all") if len(candidates) > 1 else None),
+            parameters=parameters,
             source_text=text,
+            action=semantic_action,
+            property=property_,
+            direction=semantic_direction,
+            degree=degree,
+            semantic_graph=(
+                context.discourse.current_graph
+                if context.discourse is not None
+                else None
+            ),
         )
         if (
             discourse_resolution is not None
@@ -2463,7 +2618,15 @@ class NluEngine:
             last_area=last_area,
         )
 
-        split = split_trigger_action(normalized)
+        # GermanStructuralAnalysis owns the clause boundary. The legacy comma
+        # splitter remains a compatibility fallback only for shapes the
+        # structural layer deliberately cannot classify yet.
+        automation_document = analyse_language(
+            normalized, entities, include_registry_compounds=False
+        )
+        split = split_automation_document(automation_document)
+        if split is None:
+            split = split_trigger_action(normalized)
         if split is not None:
             # ``split_trigger_action`` assumes trigger-then-action order
             # around the first comma. When the action actually comes first
@@ -2585,7 +2748,9 @@ class NluEngine:
                         for index, candidate in enumerate(parsed, start=1)
                     )
         if not triggers:
-            split_result = self._split_trigger_condition(trigger_text, parse_context)
+            split_result = self._split_structured_trigger_condition(
+                automation_document, parse_context
+            ) or self._split_trigger_condition(trigger_text, parse_context)
             if split_result is None:
                 return None
             trigger, condition_node = split_result
@@ -3214,6 +3379,48 @@ class NluEngine:
             return None
         return matches[0]
 
+    def _split_structured_trigger_condition(
+        self, document: LanguageDocument, parse_context: ParseContext
+    ) -> tuple[TriggerModel, ConditionNode] | None:
+        """Project a structurally delimited IF-side into domain models.
+
+        GermanStructuralAnalysis alone decides the clause boundaries.  The
+        existing trigger and condition parsers only classify each already
+        bounded clause.  Exactly one trigger assignment must succeed; an
+        ambiguous assignment is refused rather than selected by order.
+        """
+        clause_texts = structured_automation_condition_clauses(document)
+        if len(clause_texts) < 2:
+            return None
+        matches: list[tuple[TriggerModel, ConditionNode]] = []
+        for trigger_index, trigger_text in enumerate(clause_texts):
+            trigger = self.parse_automation_trigger(trigger_text, list(parse_context.entities), parse_context.world_model)
+            if trigger is None:
+                continue
+            conditions: list[ConditionNode] = []
+            for index, condition_text in enumerate(clause_texts):
+                if index == trigger_index:
+                    continue
+                condition = self.parse_automation_condition(
+                    condition_text,
+                    list(parse_context.entities),
+                    parse_context.world_model,
+                )
+                if condition is None:
+                    break
+                conditions.append(condition)
+            else:
+                condition_node = (
+                    conditions[0]
+                    if len(conditions) == 1
+                    else ConditionNode(
+                        operator=LogicalOperator.AND,
+                        children=tuple(conditions),
+                    )
+                )
+                matches.append((trigger, condition_node))
+        return matches[0] if len(matches) == 1 else None
+
     def resolve_clarification(
         self, reply_text: str, clarification: ClarificationRequest, entities: list[EntitySnapshot]
     ) -> MatchResult | None:
@@ -3483,6 +3690,7 @@ class NluEngine:
             context is None
             and frame.target is not None
             and frame.target.entity_id is not None
+            and frame.parameters.get("query_result") is None
             and (
                 len(matched) != 1
                 or tuple(entity.entity_id for entity in resolved_intent.entities)

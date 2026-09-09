@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from datetime import date, datetime, time as dt_time
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Callable
+from typing import Any, TYPE_CHECKING, Callable, Mapping
 
 from ..areas import AreaSnapshot
 from ..automation_summary import AutomationSummary
@@ -30,6 +31,8 @@ from .semantic_state import SemanticState
 if TYPE_CHECKING:
     from ..alias_learning import AliasLearningDraft
     from ..automation_wizard import AutomationWizardState
+    from ..automation_management import AutomationManagementRequest
+    from ..automation_structure_edit import AutomationStructureEditRequest
     from ..calendar_event import CalendarEventDraft
     from ..calendar_management import (
         CalendarEventSummary,
@@ -176,7 +179,7 @@ class PendingAutomationActionEdit:
 
     candidates: tuple[AutomationSummary, ...]
     automation: AutomationSummary | None = None
-    rendered_actions: tuple[dict, ...] = ()
+    rendered_actions: tuple[Mapping[str, Any], ...] = ()
     action_text: str | None = None
     operation: str = "replace"
 
@@ -185,10 +188,10 @@ class PendingAutomationActionEdit:
 class PendingAutomationStructureEdit:
     """Select, preview and confirm a trigger/condition edit."""
 
-    request: object
+    request: "AutomationStructureEditRequest"
     candidates: tuple[AutomationSummary, ...]
     automation: AutomationSummary | None = None
-    rendered: tuple[dict, ...] = ()
+    rendered: tuple[Mapping[str, Any], ...] = ()
     edit_text: str | None = None
     ready: bool = False
 
@@ -197,9 +200,9 @@ class PendingAutomationStructureEdit:
 class PendingAutomationManagement:
     """A state-changing management operation awaiting explicit consent."""
 
-    request: object
+    request: "AutomationManagementRequest"
     automation: AutomationSummary | None = None
-    target: object | None = None
+    target: datetime | None = None
     candidates: tuple[AutomationSummary, ...] = ()
 
 
@@ -217,11 +220,11 @@ class PendingCalendarMutation:
 
     kind: "CalendarManagementKind"
     event: "CalendarEventSummary | None" = None
-    new_start_time: object | None = None
+    new_start_time: dt_time | None = None
     candidates: tuple["CalendarEventSummary", ...] = ()
     request: "CalendarManagementRequest | None" = None
     recurrence_scope: str | None = None  # this / all / future
-    new_date: object | None = None
+    new_date: date | None = None
     new_title: str | None = None
     new_duration_minutes: int | None = None
 
