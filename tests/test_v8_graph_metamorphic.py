@@ -1,7 +1,11 @@
 import pytest
 
+from ha_nlu.engine import NluEngine
+from ha_nlu.entities import EntitySnapshot
 from ha_nlu.nlu.language_frontend import analyse_language
 from ha_nlu.nlu.semantic_graph import SemanticNodeKind, build_semantic_graph
+from ha_nlu.nlu.understanding import UnderstandingKind
+from ha_nlu.world_model import build_world_model
 
 
 def _meaning_nodes(text: str):
@@ -71,13 +75,30 @@ def test_meaning_changing_transformations_do_not_share_a_semantic_core(left, rig
 
 
 def test_missing_location_is_not_a_meaning_preserving_mutation():
-    located = analyse_language("Mach das Licht im Wohnzimmer aus.")
-    unlocated = analyse_language("Schalte das Licht aus.")
+    entities = [
+        EntitySnapshot(
+            "light.living", "Wohnzimmerlicht", "light", "on",
+            area_id="living", area_name="Wohnzimmer",
+        ),
+        EntitySnapshot(
+            "light.kitchen", "Küchenlicht", "light", "on",
+            area_id="kitchen", area_name="Küche",
+        ),
+    ]
+    world = build_world_model(entities, [])
+    engine = NluEngine()
 
-    # The HA-free graph cannot ground an area name without a registry. The
-    # loss-aware boundary still retains the scope distinction, so these two
-    # utterances must not be listed as a positive metamorphic pair.
-    assert located.source_text != unlocated.source_text
-    assert tuple(token.canonical for token in located.tokens) != tuple(
-        token.canonical for token in unlocated.tokens
+    located = engine.understand("Mach das Licht im Wohnzimmer aus.", entities, world)
+    unlocated = engine.understand("Mach das Licht aus.", entities, world)
+
+    assert located.kind is UnderstandingKind.COMMAND
+    assert located.payload is not None
+    assert tuple(entity.entity_id for entity in located.payload.command.entities) == (
+        "light.living",
     )
+    assert unlocated.kind in {UnderstandingKind.AMBIGUOUS, UnderstandingKind.UNSUPPORTED}
+    assert not unlocated.actionable
+    assert unlocated.payload is None
+    assert located.payload.frame is not None
+    assert located.payload.frame.target is not None
+    assert located.payload.frame.target.entity_id == "light.living"

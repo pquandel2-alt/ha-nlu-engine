@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from enum import StrEnum
+from enum import Enum, StrEnum, auto
 from typing import Iterable, Mapping
 
 from .world_model import WorldModel
@@ -36,6 +36,7 @@ class RelationKind(StrEnum):
     OBSERVED_BY = "observed_by"
     INFLUENCES = "influences"
     PREFERRED_DEVICE = "preferred_device"
+    PREFERRED_MEASUREMENT = "preferred_measurement"
     VOICE_ORIGIN = "voice_origin"
     LOCATED_IN = "located_in"
     CONTAINS = "contains"
@@ -93,6 +94,25 @@ class RelationSpec:
     target_id: str
 
 
+class TraversalDirection(Enum):
+    OUTGOING = auto()
+    INCOMING = auto()
+
+
+@dataclass(frozen=True)
+class TraversalStep:
+    kind: RelationKind
+    direction: TraversalDirection = TraversalDirection.OUTGOING
+
+
+@dataclass(frozen=True)
+class TraversalMatch:
+    """One deterministic result path, including its explicit evidence."""
+
+    node: GraphNode
+    path: tuple[GraphRelation, ...]
+
+
 class HouseGraph:
     """Immutable-id graph with deterministic traversal and explanations."""
 
@@ -102,6 +122,7 @@ class HouseGraph:
         self._outgoing: dict[tuple[str, RelationKind], set[str]] = {}
         self._incoming: dict[tuple[str, RelationKind], set[str]] = {}
         self._asserted_edges: set[tuple[str, RelationKind, str]] = set()
+        self._edge_relations: dict[tuple[str, RelationKind, str], GraphRelation] = {}
 
     @property
     def nodes(self) -> tuple[GraphNode, ...]:
@@ -140,10 +161,11 @@ class HouseGraph:
             confidence,
             observed_at,
         )
+        edge = (source_id, kind, target_id)
         self._relations[relation_id] = relation
+        self._edge_relations[edge] = relation
         self._outgoing.setdefault((source_id, kind), set()).add(target_id)
         self._incoming.setdefault((target_id, kind), set()).add(source_id)
-        edge = (source_id, kind, target_id)
         if relation.is_asserted_fact:
             self._asserted_edges.add(edge)
         else:
@@ -207,15 +229,74 @@ class HouseGraph:
     def evidence(
         self, source_id: str, kind: RelationKind, target_id: str
     ) -> GraphRelation | None:
-        return next(
-            (
-                relation
-                for relation in self._relations.values()
-                if relation.source_id == source_id
-                and relation.kind is kind
-                and relation.target_id == target_id
-            ),
-            None,
+        return self._edge_relations.get((source_id, kind, target_id))
+
+    def traverse(
+        self,
+        start_ids: Iterable[str],
+        steps: tuple[TraversalStep, ...],
+        *,
+        asserted_only: bool = True,
+        max_depth: int = 4,
+    ) -> tuple[TraversalMatch, ...]:
+        """Follow an explicit bounded relation path using graph indices.
+
+        This is deliberately not an open-ended graph search.  Every hop is a
+        typed ``RelationKind`` and direction supplied by the caller. Paths
+        exceeding ``max_depth`` are rejected, repeated nodes in one path are
+        ignored, and statistical edges disappear under the safe default.
+        """
+        if max_depth < 0 or max_depth > 8:
+            raise ValueError("max_depth must be between 0 and 8")
+        if len(steps) > max_depth:
+            raise ValueError("Traversal exceeds its maximum hop depth")
+        frontier: list[tuple[str, tuple[GraphRelation, ...], frozenset[str]]] = [
+            (node_id, (), frozenset({node_id}))
+            for node_id in sorted(set(start_ids))
+            if node_id in self._nodes
+        ]
+        for step in steps:
+            next_frontier: list[
+                tuple[str, tuple[GraphRelation, ...], frozenset[str]]
+            ] = []
+            for node_id, path, visited in frontier:
+                neighbours = (
+                    self._outgoing.get((node_id, step.kind), ())
+                    if step.direction is TraversalDirection.OUTGOING
+                    else self._incoming.get((node_id, step.kind), ())
+                )
+                for neighbour_id in sorted(neighbours):
+                    if neighbour_id in visited:
+                        continue
+                    edge = (
+                        (node_id, step.kind, neighbour_id)
+                        if step.direction is TraversalDirection.OUTGOING
+                        else (neighbour_id, step.kind, node_id)
+                    )
+                    relation = self._edge_relations.get(edge)
+                    if relation is None or (
+                        asserted_only and not relation.is_asserted_fact
+                    ):
+                        continue
+                    next_frontier.append((
+                        neighbour_id,
+                        (*path, relation),
+                        visited | {neighbour_id},
+                    ))
+            frontier = next_frontier
+            if not frontier:
+                break
+        # Multiple graph paths may reach the same node. Keep the lexically
+        # first evidence path so result and trace ordering are reproducible.
+        by_node: dict[str, tuple[GraphRelation, ...]] = {}
+        for node_id, path, _ in sorted(
+            frontier,
+            key=lambda item: (item[0], tuple(edge.relation_id for edge in item[1])),
+        ):
+            by_node.setdefault(node_id, path)
+        return tuple(
+            TraversalMatch(self._nodes[node_id], by_node[node_id])
+            for node_id in sorted(by_node)
         )
 
     def redacted_diagnostics(self) -> dict[str, object]:

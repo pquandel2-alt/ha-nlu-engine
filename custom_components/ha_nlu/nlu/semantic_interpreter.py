@@ -1,4 +1,4 @@
-"""Unified semantic candidate interpreter for HomeIntent V7.
+"""Unified semantic candidate interpreter for HomeIntent V8.
 
 The interpreter consumes one loss-aware ``LanguageDocument`` and produces
 ranked meaning candidates before any domain executor runs.  Existing safe
@@ -42,6 +42,7 @@ from .evidence import (
     evidence_score,
 )
 from .primitives import SemanticAction
+from .query_command import QueryCommand
 from .verb_state_query import match_verb_state_query
 from .composition import CompositionalPlan, build_document_compositional_plan
 from .registered_operation_compiler import compile_registered_operation
@@ -49,8 +50,11 @@ from .semantic_graph import build_semantic_graph
 from .semantic_projection import (
     attach_graph,
     project_relational_comparison_query,
+    project_relational_command,
     project_relationship_query,
+    project_semantic_reasoning_query,
     project_structured_repair,
+    project_value_repair,
     project_structured_command,
 )
 from .temporal_semantics import analyse_temporal_semantics
@@ -218,6 +222,29 @@ def _resolved_conflicts(
         # query is read-only and therefore resolves this lexical action
         # conflict without weakening command validation.
         conflicts.remove("action")
+    if (
+        "state" in conflicts
+        and isinstance(parse_result, ParseResult)
+        and parse_result.frame.action is SemanticAction.QUERY
+        and isinstance(parse_result.frame.parameters.get("query_command"), QueryCommand)
+        and parse_result.frame.parameters["query_command"].algebra is not None
+    ):
+        # Nested relational predicates legitimately carry different states;
+        # the typed algebra preserves their scopes.
+        conflicts.remove("state")
+    if (
+        isinstance(parse_result, ParseResult)
+        and parse_result.frame.action not in {None, SemanticAction.QUERY}
+        and isinstance(parse_result.frame.parameters.get("selection_query"), QueryCommand)
+        and parse_result.frame.parameters["selection_query"].algebra is not None
+    ):
+        # The relational command projector has separated its executable
+        # predicate from nested read-only state predicates and re-grounded
+        # every target. Surface homonyms in the nested clause no longer
+        # compete with the selected action.
+        for scoped_conflict in ("action", "state"):
+            if scoped_conflict in conflicts:
+                conflicts.remove(scoped_conflict)
     if (
         "state" in conflicts
         and "action" not in conflicts
@@ -439,6 +466,8 @@ class SemanticInterpreter:
                     candidate_document, graph, entities, typed_world_model
                 ) or project_relationship_query(
                     candidate_document, graph, entities, typed_world_model
+                ) or project_semantic_reasoning_query(
+                    candidate_document, graph, entities, typed_world_model
                 )
                 has_standalone_query_meaning = any(
                     analysis.values(kind)
@@ -544,12 +573,18 @@ class SemanticInterpreter:
                     for relation in candidate_document.structure.relations
                 )
                 parse_result = (
-                    project_structured_repair(
+                    project_value_repair(
+                        candidate_document, graph, entities, typed_world_model
+                    ) or project_structured_repair(
                         candidate_document, graph, entities, typed_world_model
                     )
                     if has_repair
                     else None
                 )
+                if parse_result is None and not has_repair:
+                    parse_result = project_relational_command(
+                        candidate_document, graph, entities, typed_world_model
+                    )
                 compositional_plan = (
                     None
                     if has_repair

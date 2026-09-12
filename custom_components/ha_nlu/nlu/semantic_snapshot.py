@@ -7,6 +7,7 @@ from typing import Mapping
 from .language_frontend import LanguageDocument
 from .evidence import explain_candidate
 from .parser import ParseResult
+from .query_command import QueryResult
 from .semantic_interpreter import InterpreterResult
 from .understanding import UnderstandingOutcome
 
@@ -29,6 +30,11 @@ def build_semantic_snapshot(
         tuple(entity.entity_id for entity in interpreted.parse_result.resolved_entities)
         if isinstance(interpreted.parse_result, ParseResult)
         else ()
+    )
+    query_result = (
+        interpreted.parse_result.frame.parameters.get("query_result")
+        if isinstance(interpreted.parse_result, ParseResult)
+        else None
     )
     return {
         "input": document.source_text,
@@ -81,6 +87,20 @@ def build_semantic_snapshot(
         ),
         "selected": selected.key if selected is not None else None,
         "resolved_entities": resolved,
+        "reasoning_trace": (
+            tuple(
+                {
+                    "operation": step.operation,
+                    "inputs": step.input_ids,
+                    "outputs": step.output_ids,
+                    "relations": step.relation_ids,
+                    "detail": step.detail,
+                }
+                for step in query_result.trace.steps
+            )
+            if isinstance(query_result, QueryResult) and query_result.trace is not None
+            else ()
+        ),
         "outcome": {
             "kind": outcome.kind.name.lower(),
             "reason": outcome.reason.name.lower() if outcome.reason else None,

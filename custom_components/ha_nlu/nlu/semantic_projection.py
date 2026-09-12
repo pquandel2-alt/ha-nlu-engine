@@ -13,30 +13,53 @@ from dataclasses import replace
 from enum import Enum, auto
 from typing import Iterable
 
-from ..areas import AreaSnapshot
+from ..areas import AreaResolutionStatus, AreaSnapshot, resolve_area_scored
+from ..house_graph import RelationKind, TraversalDirection
 from ..entities import EntitySnapshot, normalize_for_compare
 from ..world_model import WorldModel
 from .composition import CompositionalPlan
 from .constraint_resolver import Constraints, resolve_candidates
 from .domain_operations import INTENT_BY_DOMAIN_ACTION
+from .semantic_catalog import VALUE_INTENT_BY_DOMAIN_PROPERTY
 from .entity_resolution import ResolutionStatus, resolve_entity_scored
 from .entity_resolution import all_mentioned_entities
 from .frame import AreaReference, Quantifier, SemanticFrame, TargetReference
 from .german_structure import ClauseKind, StructuralRelationKind
 from .language_frontend import LanguageDocument
 from .parser import ParseResult
-from .primitives import SemanticAction, SemanticProperty, SemanticQuantity
+from .primitives import (
+    NumericUnit,
+    NumericValue,
+    SemanticAction,
+    SemanticProperty,
+    SemanticQuantity,
+)
 from .query_command import (
+    AggregateExpression,
+    AggregateKind,
+    CompareExpression,
+    GroupExpression,
+    LimitExpression,
+    MeasurementExpression,
+    OrderExpression,
     PropertyOperand,
     QueryCommand,
     QueryFilter,
     QueryRelationKind,
+    QueryResult,
     QueryResultStatus,
     QueryScope,
     QueryTarget,
+    QueryTargetKind,
     RelationalComparison,
     RelationalOperator,
     RelationConstraint,
+    RelationFilterExpression,
+    SortDirection,
+    SourceExpression,
+    StateFilterExpression,
+    ThresholdExpression,
+    QueryTraversal,
 )
 from .query_executor import QueryExecutor
 from .semantic_graph import SemanticEdgeKind, SemanticGraph, SemanticNodeKind
@@ -90,6 +113,388 @@ _RELATIONAL_OPERATOR = {
 }
 
 _QUERY_EXECUTOR = QueryExecutor()
+
+
+_NUMBER_WORDS = {
+    "null": 0, "ein": 1, "eine": 1, "einen": 1, "eins": 1,
+    "zwei": 2, "drei": 3, "vier": 4, "fünf": 5, "fuenf": 5,
+    "sechs": 6, "sieben": 7, "acht": 8, "neun": 9, "zehn": 10,
+}
+
+
+def _entity_source(domain: str, device_class: str | None = None) -> SourceExpression:
+    return SourceExpression(QueryTarget(domain=domain, device_class=device_class))
+
+
+def _state_for_device_class(
+    document: LanguageDocument, device_class: str
+) -> SemanticState | None:
+    classes = tuple(document.semantics.matching(SemanticKind.DEVICE_CLASS))
+    matching = tuple(
+        span for span in classes
+        if isinstance(span.value, tuple) and span.value[1] == device_class
+    )
+    if not matching:
+        return None
+    anchor = matching[0]
+    states = tuple(
+        span for span in document.semantics.matching(SemanticKind.STATE)
+        if span.text.casefold() not in {"ein", "eine", "einen", "einem", "einer"}
+    )
+    if not states:
+        return None
+    selected = min(states, key=lambda span: abs(span.start - anchor.start)).value
+    return selected if isinstance(selected, SemanticState) else None
+
+
+def _explain_reasoning_result(result: QueryResult, world: WorldModel) -> str | None:
+    """Render only explicit graph/state facts used by the symbolic result."""
+    facts: list[str] = []
+    graph = world.house_graph
+    for area in result.areas:
+        area_node = f"area:{area.area_id}"
+        evidence_entities = tuple(
+            world.entities_by_id.get(node.node_id.removeprefix("entity:"))
+            for node in graph.sources(area_node, RelationKind.LOCATED_IN)
+            if node.node_id.startswith("entity:")
+        )
+        windows = tuple(
+            entity for entity in evidence_entities
+            if entity is not None
+            and entity.device_class == "window"
+            and matches_semantic_state(entity, SemanticState.OPEN)
+        )
+        if windows:
+            facts.append(
+                f"in {area.name} ist "
+                + ", ".join(entity.friendly_name for entity in windows)
+                + " offen"
+            )
+            continue
+        measurements = tuple(
+            entity for entity in evidence_entities
+            if entity is not None and entity.device_class in {
+                "temperature", "humidity", "battery", "power", "energy"
+            }
+        )
+        if measurements:
+            facts.append(
+                f"für {area.name} wurde "
+                + ", ".join(
+                    f"{entity.friendly_name} mit {entity.state}{(' ' + entity.unit) if entity.unit else ''}"
+                    for entity in measurements
+                )
+                + " verwendet"
+            )
+    if not facts and result.entities:
+        facts.extend(
+            f"{entity.friendly_name} hat den Zustand {entity.state}"
+            for entity in result.entities
+        )
+    return "; ".join(facts).capitalize() + "." if facts else None
+
+
+def project_semantic_reasoning_query(
+    document: LanguageDocument,
+    graph: SemanticGraph,
+    entities: list[EntitySnapshot],
+    world_model: WorldModel | None,
+) -> ParseResult | None:
+    """Compile compositional relational/aggregate meanings into QueryCommand.
+
+    The recognizer combines independently typed target, property, state,
+    relation, comparator and query-scope evidence. It intentionally does not
+    match complete sentences; surface variants sharing those components
+    therefore produce the same algebra tree.
+    """
+    if world_model is None:
+        return None
+    normalized = normalize_for_compare(document.source_text)
+    words = frozenset(token.canonical for token in document.tokens if token.is_word)
+    lexical_area_target = bool(
+        words & {"raum", "räume", "räumen", "raeume", "raeumen", "zimmer", "zimmern"}
+    )
+    floor_group = "pro" in words and bool(words & {"etage", "stockwerk", "geschoss"})
+    domains = tuple(str(value) for value in document.semantics.values(SemanticKind.DOMAIN))
+    classes = tuple(
+        value for value in document.semantics.values(SemanticKind.DEVICE_CLASS)
+        if isinstance(value, tuple) and len(value) == 2
+    )
+    properties = tuple(str(value) for value in document.semantics.values(SemanticKind.PROPERTY))
+    scopes = {str(value) for value in document.semantics.values(SemanticKind.QUERY_SCOPE)}
+    area_target = lexical_area_target or "locations" in scopes
+    comparators = tuple(str(value) for value in document.semantics.values(SemanticKind.COMPARATOR))
+
+    expression = None
+    output_kind = QueryTargetKind.ENTITY
+
+    # Generic target + relation + nested constraint.
+    window_class = next((item for item in classes if item[1] == "window"), None)
+    if window_class is not None:
+        window_state = _state_for_device_class(document, "window") or SemanticState.OPEN
+        windows = StateFilterExpression(
+            _entity_source(str(window_class[0]), str(window_class[1])), window_state
+        )
+        if floor_group:
+            expression = GroupExpression(
+                windows,
+                QueryTraversal(((RelationKind.ON_FLOOR, TraversalDirection.OUTGOING),)),
+                QueryTargetKind.FLOOR,
+            )
+            output_kind = QueryTargetKind.FLOOR
+        elif area_target:
+            location = resolve_semantic_location(
+                document.source_text, entities, world_model
+            )
+            requested_floor = location[2] if location is not None else None
+            areas = RelationFilterExpression(
+                SourceExpression(QueryTarget(
+                    kind=QueryTargetKind.AREA, floor_id=requested_floor
+                )),
+                QueryTraversal(((RelationKind.LOCATED_IN, TraversalDirection.INCOMING),)),
+                windows,
+            )
+            if domains:
+                target_domain = domains[0]
+                expression = RelationFilterExpression(
+                    _entity_source(target_domain),
+                    QueryTraversal(((RelationKind.LOCATED_IN, TraversalDirection.OUTGOING),)),
+                    areas,
+                )
+                outer_states = tuple(
+                    span.value
+                    for span in document.semantics.matching(SemanticKind.STATE)
+                    if span.value is not window_state
+                    and span.text.casefold()
+                    not in {"ein", "eine", "einen", "einem", "einer"}
+                )
+                if len(set(outer_states)) == 1:
+                    expression = StateFilterExpression(expression, outer_states[0])  # type: ignore[arg-type]
+            else:
+                expression = areas
+                output_kind = QueryTargetKind.AREA
+
+            if "exists" in scopes and comparators:
+                number = next(
+                    (
+                        int(word) if word.isdigit() else _NUMBER_WORDS[word]
+                        for word in words
+                        if word.isdigit() or word in _NUMBER_WORDS
+                    ),
+                    None,
+                )
+                operator = _RELATIONAL_OPERATOR.get(comparators[0])
+                if number is not None and operator is not None:
+                    grouped = GroupExpression(
+                        windows,
+                        QueryTraversal(((RelationKind.LOCATED_IN, TraversalDirection.OUTGOING),)),
+                        QueryTargetKind.AREA,
+                    )
+                    expression = AggregateExpression(
+                        ThresholdExpression(grouped, operator, float(number)),
+                        AggregateKind.EXISTS,
+                    )
+
+    # Measurement superlative over a typed selection scope.
+    superlative = any(
+        marker in normalized
+        for marker in ("wärmsten", "waermsten", "kältesten", "kaeltesten", "höchsten", "hoechsten", "niedrigsten")
+    )
+    if expression is None and properties and superlative:
+        property_ = _PROPERTY_ENUM.get(properties[0])
+        if property_ is not None:
+            if area_target or "locations" in scopes:
+                source = SourceExpression(QueryTarget(kind=QueryTargetKind.AREA))
+                output_kind = QueryTargetKind.AREA
+            elif classes:
+                source = _entity_source(str(classes[0][0]), str(classes[0][1]))
+            else:
+                return None
+            direction = (
+                SortDirection.ASCENDING
+                if any(marker in normalized for marker in ("kältesten", "kaeltesten", "niedrigsten"))
+                else SortDirection.DESCENDING
+            )
+            expression = LimitExpression(
+                OrderExpression(
+                    source,
+                    MeasurementExpression(source, property_),
+                    direction,
+                ),
+                1,
+            )
+
+    # Comparative set against one explicitly resolved area.
+    if expression is None and area_target and properties and len(comparators) == 1:
+        property_ = _PROPERTY_ENUM.get(properties[0])
+        separator = " als "
+        reference_text = normalized.split(separator, 1)[1].strip(" ?.!") if separator in normalized else ""
+        reference = resolve_area_scored(
+            reference_text, entities, snapshots=world_model.areas
+        )
+        operator = _RELATIONAL_OPERATOR.get(comparators[0])
+        if (
+            property_ is not None
+            and operator is not None
+            and reference.status is AreaResolutionStatus.RESOLVED
+            and reference.area is not None
+        ):
+            all_areas = SourceExpression(QueryTarget(kind=QueryTargetKind.AREA))
+            one_area = SourceExpression(QueryTarget(
+                kind=QueryTargetKind.AREA, area=reference.area
+            ))
+            expression = CompareExpression(
+                MeasurementExpression(all_areas, property_),
+                operator,
+                MeasurementExpression(one_area, property_),
+            )
+            output_kind = QueryTargetKind.AREA
+
+    if expression is None:
+        return None
+    command = QueryCommand(
+        intent="HassStateQuery",
+        scope=QueryScope.LIST,
+        target=QueryTarget(kind=output_kind),
+        filter=QueryFilter(),
+        algebra=expression,
+    )
+    query_result = _QUERY_EXECUTOR.execute(command, [], world_model)
+    return ParseResult(
+        frame=SemanticFrame(
+            intent=command.intent,
+            target=TargetReference(document.source_text),
+            area=None,
+            quantifier=Quantifier("all"),
+            parameters={"query_command": command, "query_result": query_result},
+            source_text=document.source_text,
+            action=SemanticAction.QUERY,
+            property=_PROPERTY_ENUM.get(properties[0]) if properties else None,
+            semantic_graph=graph,
+        ),
+        resolved_entities=list(query_result.entities),
+        explanation_text=_explain_reasoning_result(query_result, world_model),
+    )
+
+
+def project_relational_command(
+    document: LanguageDocument,
+    graph: SemanticGraph,
+    entities: list[EntitySnapshot],
+    world_model: WorldModel | None,
+) -> ParseResult | None:
+    """Select command targets with the read-only algebra, then re-ground live.
+
+    Selection is evidence, never execution authority: the returned ordinary
+    ``ParseResult`` still goes through the canonical validator, policy and
+    service mapper. Only a positive, direct, explicitly universal command is
+    eligible here.
+    """
+    if world_model is None or not document.utterance.safe_to_execute_directly:
+        return None
+    quantifiers = {
+        str(value) for value in document.semantics.values(SemanticKind.QUANTIFIER)
+    }
+    normalized = normalize_for_compare(document.source_text)
+    if "all" not in quantifiers and "überall" not in normalized:
+        return None
+    domains = {
+        str(value) for value in document.semantics.values(SemanticKind.DOMAIN)
+    }
+    classes = {
+        value for value in document.semantics.values(SemanticKind.DEVICE_CLASS)
+        if isinstance(value, tuple) and len(value) == 2
+    }
+    window_class = next((item for item in classes if item[1] == "window"), None)
+    if len(domains) != 1 or window_class is None:
+        return None
+    domain = next(iter(domains))
+    actions = {
+        str(span.value)
+        for span in document.semantics.matching(SemanticKind.ACTION)
+        if span.text.casefold() not in {"ein", "eine", "einen", "einem", "einer"}
+        if INTENT_BY_DOMAIN_ACTION.get((domain, str(span.value))) is not None
+    }
+    if len(actions) != 1:
+        return None
+    action = next(iter(actions))
+    semantic_action = _ACTION_ENUM.get(action)
+    intent = INTENT_BY_DOMAIN_ACTION.get((domain, action))
+    if semantic_action is None or intent is None:
+        return None
+    window_state = _state_for_device_class(document, "window") or SemanticState.OPEN
+    qualifying_areas = RelationFilterExpression(
+        SourceExpression(QueryTarget(kind=QueryTargetKind.AREA)),
+        QueryTraversal(((RelationKind.LOCATED_IN, TraversalDirection.INCOMING),)),
+        StateFilterExpression(
+            _entity_source(str(window_class[0]), str(window_class[1])),
+            window_state,
+        ),
+    )
+    target_expression = RelationFilterExpression(
+        _entity_source(domain),
+        QueryTraversal(((RelationKind.LOCATED_IN, TraversalDirection.OUTGOING),)),
+        qualifying_areas,
+    )
+    selection = QueryCommand(
+        "HassStateQuery", QueryScope.LIST, QueryTarget(domain=domain),
+        QueryFilter(), target_expression,
+    )
+    selected = _QUERY_EXECUTOR.execute(selection, [], world_model)
+    if selected.status is not QueryResultStatus.MATCHED or not selected.entities:
+        # The relation was understood, but its live target set is empty (or
+        # could not be evaluated). Keep that meaning authoritative so the
+        # generic command compiler cannot silently discard the constraint
+        # and broaden the action to every entity in the domain.
+        return ParseResult(
+            frame=SemanticFrame(
+                intent=intent,
+                target=TargetReference(document.source_text, domain=domain),
+                area=None,
+                quantifier=Quantifier("all"),
+                parameters={
+                    "selection_query": selection,
+                    "reasoning_trace": selected.trace,
+                },
+                source_text=document.source_text,
+                action=semantic_action,
+                semantic_graph=graph,
+            ),
+            resolved_entities=[],
+        )
+    # Re-ground every id against this exact live turn snapshot before the
+    # normal action pipeline sees it.
+    targets = tuple(
+        world_model.entities_by_id[entity.entity_id]
+        for entity in selected.entities
+        if entity.entity_id in world_model.entities_by_id
+    )
+    if len(targets) != len(selected.entities):
+        return None
+    first = targets[0]
+    return ParseResult(
+        frame=SemanticFrame(
+            intent=intent,
+            target=TargetReference(
+                document.source_text,
+                first.entity_id if len(targets) == 1 else None,
+                domain,
+                first.device_class,
+            ),
+            area=None,
+            quantifier=Quantifier("all"),
+            parameters={
+                "selection_query": selection,
+                "reasoning_trace": selected.trace,
+            },
+            source_text=document.source_text,
+            action=semantic_action,
+            semantic_graph=graph.with_grounded_entities(
+                entity.entity_id for entity in targets
+            ),
+        ),
+        resolved_entities=list(targets),
+    )
 
 
 def attach_graph(result: ParseResult, graph: SemanticGraph) -> ParseResult:
@@ -483,6 +888,97 @@ def project_structured_repair(
             area=None,
             source_text=document.source_text,
             action=semantic_action,
+            semantic_graph=graph.with_grounded_entities((entity.entity_id,)),
+        ),
+        resolved_entities=[entity],
+    )
+
+
+def project_value_repair(
+    document: LanguageDocument,
+    graph: SemanticGraph,
+    entities: list[EntitySnapshot],
+    world_model: WorldModel | None = None,
+) -> ParseResult | None:
+    """Replace one typed property value; never retain the superseded value."""
+    replacements = tuple(
+        relation for relation in document.structure.relations
+        if relation.kind is StructuralRelationKind.REPLACES
+    )
+    if len(replacements) != 1:
+        return None
+    clauses = {clause.clause_id: clause for clause in document.structure.clauses}
+    original = clauses.get(replacements[0].source_clause)
+    replacement = clauses.get(replacements[0].target_clause)
+    if original is None or replacement is None:
+        return None
+    values = graph.nodes_of_kind(SemanticNodeKind.VALUE)
+    original_values = tuple(
+        node for node in values
+        if node.start is not None and original.char_start <= node.start < original.char_end
+    )
+    replacement_values = tuple(
+        node for node in values
+        if node.start is not None and replacement.char_start <= node.start < replacement.char_end
+    )
+    if len(original_values) != 1 or len(replacement_values) != 1:
+        return None
+    try:
+        replacement_value = float(replacement_values[0].value.replace(",", "."))
+    except ValueError:
+        return None
+    domains = {
+        str(value) for value in document.semantics.values(SemanticKind.DOMAIN)
+    }
+    properties = {
+        str(value) for value in document.semantics.values(SemanticKind.PROPERTY)
+    }
+    source = normalize_for_compare(document.source_text)
+    if len(domains) != 1:
+        return None
+    domain = next(iter(domains))
+    if "prozent" in source or "%" in document.source_text:
+        property_name = (
+            "position" if domain == "cover" else "brightness" if domain == "light" else None
+        )
+        unit = NumericUnit.PERCENT
+        parameter = "percent"
+        if not 0 <= replacement_value <= 100:
+            return None
+        parameter_value: float | int = int(replacement_value)
+    elif "grad" in source and domain == "climate":
+        property_name = "temperature"
+        unit = NumericUnit.CELSIUS
+        parameter = "temperature"
+        parameter_value = replacement_value
+    else:
+        return None
+    if property_name is None or (properties and properties != {property_name}):
+        # A changed/incomplete property cannot inherit the former unit.
+        return None
+    intent = VALUE_INTENT_BY_DOMAIN_PROPERTY.get((domain, property_name))
+    property_ = _PROPERTY_ENUM.get(property_name)
+    candidates = tuple(
+        world_model.select_entities(domain=domain)
+        if world_model is not None
+        else (entity for entity in entities if entity.domain == domain)
+    )
+    if intent is None or property_ is None or len(candidates) != 1:
+        return None
+    entity = candidates[0]
+    numeric = NumericValue(replacement_value, unit)
+    return ParseResult(
+        frame=SemanticFrame(
+            intent=intent,
+            target=TargetReference(
+                entity.friendly_name, entity.entity_id, entity.domain, entity.device_class
+            ),
+            area=None,
+            parameters={parameter: parameter_value},
+            source_text=document.source_text,
+            action=SemanticAction.SET,
+            property=property_,
+            numeric_value=numeric,
             semantic_graph=graph.with_grounded_entities((entity.entity_id,)),
         ),
         resolved_entities=[entity],

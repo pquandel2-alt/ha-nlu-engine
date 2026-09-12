@@ -571,7 +571,10 @@ def _literal_slot_text(value: object) -> str:
     text_in = getattr(value, "text_in", None)
     if not isinstance(text_in, TextChunk):
         raise TypeError("Semantic candidate slot must contain literal text")
-    return text_in.text
+    text = getattr(text_in, "text", None)
+    if not isinstance(text, str):
+        raise TypeError("Semantic candidate slot must contain non-empty literal text")
+    return text
 
 
 SEMANTIC_PROPERTY_CANDIDATES: dict[str, SemanticProperty] = {

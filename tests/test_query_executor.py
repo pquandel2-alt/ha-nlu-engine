@@ -171,7 +171,7 @@ def test_relational_query_refuses_unknown_or_unavailable_operand():
     )
 
 
-def test_relational_query_refuses_incompatible_units():
+def test_relational_query_normalizes_compatible_temperature_units():
     celsius = EntitySnapshot(
         "sensor.celsius", "Temperatur Celsius", "sensor", "20",
         device_class="temperature", unit="°C",
@@ -192,8 +192,9 @@ def test_relational_query_refuses_incompatible_units():
         )),
     )
 
+    # 20 °C is warmer than 60 °F, so the LT comparison is safely false.
     assert executor.execute(command, [celsius, fahrenheit], world).status is (
-        QueryResultStatus.TARGET_NOT_FOUND
+        QueryResultStatus.EMPTY
     )
 
 

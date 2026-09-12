@@ -17,7 +17,7 @@ typed house graph; no second entity or location truth is constructed.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cached_property
 from typing import Iterable, Mapping, TYPE_CHECKING
 
@@ -54,6 +54,7 @@ class WorldModel:
     entities_by_area_id: Mapping[str, tuple[EntitySnapshot, ...]]
     entities_by_floor_id: Mapping[str, tuple[EntitySnapshot, ...]]
     entities_by_capability: Mapping[str, tuple[EntitySnapshot, ...]]
+    configured_house_graph: "HouseGraph | None" = None
 
     def device_for_entity(self, entity_id: str) -> DeviceSnapshot | None:
         """The device owning ``entity_id``, or ``None`` if it has no device
@@ -125,6 +126,10 @@ class WorldModel:
 
         return build_house_graph(self, configured_relations)
 
+    def with_house_graph(self, graph: "HouseGraph") -> "WorldModel":
+        """Attach the configured graph to this same immutable turn snapshot."""
+        return replace(self, configured_house_graph=graph)
+
     @cached_property
     def house_graph(self) -> "HouseGraph":
         """Indexed registry graph for this immutable per-turn snapshot.
@@ -133,7 +138,7 @@ class WorldModel:
         projection for every candidate. Explicit configured relations still
         go through ``build_house_graph`` because their input differs.
         """
-        return self.build_house_graph()
+        return self.configured_house_graph or self.build_house_graph()
 
 
 def build_world_model(

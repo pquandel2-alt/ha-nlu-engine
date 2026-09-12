@@ -35,8 +35,15 @@ class UnderstandingAuthority(Enum):
 
     NONE = auto()
     LEGACY = auto()
-    V7_FALLBACK = auto()
-    V7_MIGRATED = auto()
+    LEGACY_SHADOW = auto()
+    V8_COMPATIBILITY = auto()
+    V8_SEMANTIC = auto()
+
+    # Compatibility aliases for integrations and persisted diagnostics from
+    # releases up to 4.73.  Enum aliases retain identity and therefore do not
+    # break callers comparing the historical members with ``is``.
+    V7_FALLBACK = LEGACY_SHADOW
+    V7_MIGRATED = V8_SEMANTIC
 
 
 class EvidenceKind(Enum):
@@ -258,7 +265,7 @@ def _freeze(value: object) -> object:
 def _payload_signature(payload: object | None) -> object | None:
     """Compare observable meaning, not parser-specific bookkeeping.
 
-    Legacy and V7 intentionally build independent frame and reasoning
+    Legacy and V8 intentionally build independent frame and reasoning
     objects.  A shadow comparison must flag a changed service, target,
     parameter, query answer, or clarification set, but not object-internal
     provenance that cannot affect the user-visible result.

@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.73.0**
+- Aktuelle Version: **4.74.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -42,7 +42,16 @@ Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
 
-## Was ist in Version 4.73 neu?
+## Was ist in Version 4.74 neu?
+
+V9 ergänzt die bestehende V8-Verständnispipeline um typisierte semantische
+Abfragen über belegte HouseGraph-Fakten. Relationale Filter, bounded
+Multi-Hop-Traversal, Aggregate, Gruppierung, sichere Superlative,
+Messwertbindung, Unit-Konvertierung, Mengenoperationen, ReasoningTrace und
+live re-geerdete relationale Lichtbefehle sind in
+[`docs/architecture-v9.md`](docs/architecture-v9.md) beschrieben.
+
+V8 bleibt die autoritative Sprachverständnisschicht:
 
 Direkte Befehle und Abfragen laufen über die verlustarme V8-
 Verständnisgrenze. Historische Geräte- und Query-Grammatiken
@@ -846,6 +855,7 @@ Weitere Dokumentation:
 - [`docs/architecture-v8-audit.md`](docs/architecture-v8-audit.md)
 - [`docs/architecture-v8.md`](docs/architecture-v8.md)
 - [`docs/architecture-v8-integration.md`](docs/architecture-v8-integration.md)
+- [`docs/architecture-v9.md`](docs/architecture-v9.md)
 - [`docs/natural-language-roadmap-v7.md`](docs/natural-language-roadmap-v7.md)
 - [`docs/quality-checklist.md`](docs/quality-checklist.md)
 - [`docs/troubleshooting.md`](docs/troubleshooting.md)
@@ -858,11 +868,10 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/ha_nlu --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 4.73.0 einschließlich dieses
-Integrationspasses:
+Geprüfter Release-Stand von Version 4.74.0:
 
 ```text
-2993 passed, 12 skipped
+3020 passed, 12 skipped
 88 % Gesamt-Coverage
 77 % Coverage für conversation.py
 ```
@@ -889,7 +898,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-4.73.0.json --quiet
+  --check docs/perf/v7-shadow-baseline-4.74.0.json --quiet
 ```
 
 Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die

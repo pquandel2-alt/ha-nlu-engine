@@ -6,6 +6,7 @@ It does not resolve entity names, call services, or infer unknown relations.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Iterable
@@ -15,6 +16,7 @@ from .german_morphology import GrammaticalGender, entity_name_gender
 from .primitives import SemanticProperty
 
 if TYPE_CHECKING:
+    from .query_command import QueryCommand, QueryResult
     from .semantic_graph import SemanticGraph
 
 
@@ -49,6 +51,19 @@ class DiscourseReferent:
 
 
 @dataclass(frozen=True)
+class DiscourseGroup:
+    group_id: str
+    semantic_type: str
+    member_ids: tuple[str, ...]
+    origin_query: QueryCommand
+    graph_fragment: SemanticGraph | None
+    filters: tuple[str, ...]
+    relation_provenance: tuple[str, ...]
+    turn: int
+    salience: int
+
+
+@dataclass(frozen=True)
 class DiscourseState:
     turn_index: int = 0
     referents: tuple[DiscourseReferent, ...] = ()
@@ -56,6 +71,7 @@ class DiscourseState:
     active_area_ids: tuple[str, ...] = ()
     active_floor_ids: tuple[str, ...] = ()
     current_graph: SemanticGraph | None = None
+    groups: tuple[DiscourseGroup, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -131,6 +147,84 @@ def remember_entities(
         active_area_ids=active_areas,
         active_floor_ids=active_floors,
         current_graph=semantic_graph,
+        groups=prior.groups,
+    )
+
+
+def remember_query_group(
+    previous: DiscourseState | None,
+    result: QueryResult,
+    *,
+    semantic_graph: SemanticGraph | None = None,
+    max_groups: int = 8,
+) -> DiscourseState:
+    """Remember typed result membership, never a future execution target."""
+    prior = previous or DiscourseState()
+    if result.command is None:
+        return prior
+    turn = prior.turn_index or 1
+    member_types = {
+        member_id.split(":", 1)[0]
+        for member_id in result.member_ids
+        if ":" in member_id
+    }
+    semantic_type = (
+        next(iter(member_types))
+        if len(member_types) == 1
+        else result.command.target.kind.name.lower()
+    )
+    relation_ids = tuple(sorted({
+        relation_id
+        for step in (result.trace.steps if result.trace is not None else ())
+        for relation_id in step.relation_ids
+    }))
+    digest = hashlib.sha256(
+        (f"{turn}\0{semantic_type}\0" + "\0".join(result.member_ids)).encode()
+    ).hexdigest()[:16]
+    group = DiscourseGroup(
+        group_id=f"group:{digest}",
+        semantic_type=semantic_type,
+        member_ids=result.member_ids,
+        origin_query=result.command,
+        graph_fragment=semantic_graph,
+        filters=tuple(
+            step.operation for step in (result.trace.steps if result.trace is not None else ())
+            if step.operation.startswith("filter")
+        ),
+        relation_provenance=relation_ids,
+        turn=turn,
+        salience=100,
+    )
+    decayed = tuple(
+        DiscourseGroup(**{**item.__dict__, "salience": max(0, item.salience - 20)})
+        for item in prior.groups
+        if item.salience > 20
+    )
+    return DiscourseState(
+        turn_index=turn,
+        referents=prior.referents,
+        focus_entity_ids=prior.focus_entity_ids,
+        active_area_ids=prior.active_area_ids,
+        active_floor_ids=prior.active_floor_ids,
+        current_graph=semantic_graph or prior.current_graph,
+        groups=(group, *decayed)[:max_groups],
+    )
+
+
+def current_discourse_group(
+    state: DiscourseState | None, *, semantic_type: str | None = None
+) -> DiscourseGroup | None:
+    """Return the most salient compatible typed group deterministically."""
+    if state is None:
+        return None
+    compatible = tuple(
+        group for group in state.groups
+        if semantic_type is None or group.semantic_type == semantic_type
+    )
+    return min(
+        compatible,
+        key=lambda group: (-group.salience, -group.turn, group.group_id),
+        default=None,
     )
 
 

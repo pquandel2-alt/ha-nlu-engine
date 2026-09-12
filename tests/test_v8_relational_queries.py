@@ -60,7 +60,7 @@ def test_relational_comparison_preserves_negated_comparator_scope():
     assert command.filter.relational.operator.name == "LTE"
 
 
-def test_incompatible_comparison_units_are_explicitly_non_executable():
+def test_known_temperature_units_are_normalized_and_stay_read_only():
     celsius = _temperature("sensor.celsius", "Temperatur Celsius", "20")
     fahrenheit = _temperature("sensor.fahrenheit", "Temperatur Fahrenheit", "60", "°F")
     entities = [celsius, fahrenheit]
@@ -70,8 +70,10 @@ def test_incompatible_comparison_units_are_explicitly_non_executable():
         build_world_model(entities, []),
     )
 
-    assert outcome.kind is UnderstandingKind.UNSUPPORTED
+    assert outcome.kind is UnderstandingKind.QUERY
     assert not outcome.actionable
+    assert outcome.payload is not None
+    assert outcome.payload.plan is None
 
 
 def test_room_comparison_uses_one_unique_registry_temperature_sensor_per_area():
@@ -169,7 +171,7 @@ def test_same_area_query_uses_house_graph_registry_relation():
         "Welche Lampen in Räumen mit offenem Fenster sind an?",
     ),
 )
-def test_unimplemented_relational_aggregates_have_a_safe_boundary(text):
+def test_v9_relational_aggregates_use_typed_read_only_query_algebra(text):
     window = EntitySnapshot(
         "binary_sensor.window",
         "Fenster oben",
@@ -185,6 +187,11 @@ def test_unimplemented_relational_aggregates_have_a_safe_boundary(text):
         text, [window], build_world_model([window], [])
     )
 
-    assert outcome.kind is UnderstandingKind.UNSUPPORTED
+    assert outcome.kind is UnderstandingKind.QUERY
     assert not outcome.actionable
-    assert outcome.payload is None
+    assert outcome.payload is not None
+    assert outcome.payload.plan is None
+    assert outcome.payload.frame is not None
+    command = outcome.payload.frame.parameters["query_command"]
+    assert isinstance(command, QueryCommand)
+    assert command.algebra is not None

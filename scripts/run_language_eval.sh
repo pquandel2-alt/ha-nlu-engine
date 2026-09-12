@@ -13,6 +13,7 @@ python -m pytest -q \
   tests/test_v8_graph_metamorphic.py \
   tests/test_semantic_snapshot.py \
   tests/test_v8_relational_queries.py \
+  tests/test_v9_semantic_reasoning.py \
   tests/test_pragmatics_v8.py \
   tests/test_reference.py \
   tests/test_discourse.py

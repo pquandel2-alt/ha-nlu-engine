@@ -27,7 +27,7 @@ class CatalogueEntry:
 
 
 DEVICE_CLASS_ENTRIES = (
-    CatalogueEntry(("binary_sensor", "window"), (r"fenster(?:kontakte?)?",)),
+    CatalogueEntry(("binary_sensor", "window"), (r"fenster(?:n|kontakte?)?",)),
     CatalogueEntry(("binary_sensor", "door"), (r"tür(?:en)?",)),
     CatalogueEntry(("binary_sensor", "garage_door"), (r"garagentor(?:e)?",)),
     CatalogueEntry(
@@ -67,7 +67,7 @@ STATE_ENTRIES = (
 )
 
 QUANTIFIER_ENTRIES = (
-    CatalogueEntry("all", (r"alle", r"sämtliche\w*", r"jede\w*", r"die\s+ganzen")),
+    CatalogueEntry("all", (r"alle\w*", r"sämtliche\w*", r"jede\w*", r"überall", r"die\s+ganzen")),
     CatalogueEntry("both", (r"beide\w*",)),
 )
 

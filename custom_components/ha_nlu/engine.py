@@ -1,23 +1,15 @@
-"""Deterministic NLU matching: hassil for sentence structure, ``entities``
-for name resolution. No fuzzy scoring anywhere in the pipeline.
+"""Canonical HomeIntent understanding orchestrator.
 
-A hit requires all three to hold:
-  1. hassil ``recognize()`` matches a sentence template for a known intent.
-  2. The captured ``{name}`` resolves unambiguously to exactly one entity
-     (``entities.resolve_entity`` - exact match, or unambiguous contains-match).
-  3. The resolved entity's domain is allowed for the matched intent.
+The engine consumes the loss-aware ``LanguageDocument`` and its
+``GermanStructuralAnalysis``/``SemanticGraph``, ranks ``MeaningCandidate``
+objects with explicit evidence, grounds them against the per-turn
+``WorldModel`` and then projects them onto the established query, automation
+or validated command path.  Hassil grammars remain compatibility inputs for
+closed domains; they are not a parallel understanding authority.
 
-Anything else (no template match, ambiguous/unknown name, wrong domain)
-returns ``None`` - the caller (``conversation.py``) turns that into a fixed
-"not understood" response. There is no LLM fallback and no confidence score;
-this is intentional (see plan: predictability over coverage).
-
-Sentence-matching and entity/area resolution live in ``parsers.py`` (one
-``IntentParser`` per grammar - see its module docstring for why six
-grammars stay separately compiled). This module only routes text to the
-right parser and turns its ``ParseResult`` into a ``ServiceCallPlan`` -
-see the v2 plan, Phase 2 ("Intent-System vereinheitlichen"):
-``docs/architecture-v7.md``.
+No LLM or cloud fallback is used.  Queries stay read-only and commands only
+become ``ServiceCallPlan`` objects after the existing validator, execution
+policy and service mapper have accepted the grounded semantic result.
 """
 
 from __future__ import annotations
@@ -69,6 +61,7 @@ from .nlu.reasoning import ReasoningEngine, ResolvedSemanticIntent
 from .nlu.response import NluError, NluResponse
 from .nlu.parse_outcome import ParseFailureReason, UnderstandingFeedback
 from .nlu.response_generator import ResponseGenerator, _automation_label
+from .nlu.query_command import QueryResult, QueryResultStatus
 from .nlu.service_mapper import map_to_service_call
 from .nlu.semantic_compiler import (
     SemanticCommandCompiler,
@@ -636,7 +629,7 @@ class NluEngine:
         automation_toggle_dir: Path = AUTOMATION_TOGGLE_DIR,
         relative_time_dir: Path = RELATIVE_TIME_DIR,
     ) -> None:
-        # Direct device/query language is compiled natively by V7. Keep the
+        # Direct device/query language is compiled natively by V8. Keep the
         # historical grammar locations only for the explicit read-only
         # shadow report; production startup no longer loads those grammars.
         self._shadow_parser_specs: dict[str, tuple[Path, type[Any]]] = {
@@ -795,7 +788,7 @@ class NluEngine:
         *,
         _compatibility_first: bool = False,
     ) -> MatchResult | CommandPlan | None:
-        """Compatibility API backed by the canonical V7 understanding path.
+        """Compatibility API backed by the canonical V8 understanding path.
 
         ``_compatibility_first`` is private and exists solely for the
         read-only regression report. Production callers can no longer enter
@@ -972,7 +965,7 @@ class NluEngine:
     ) -> UnderstandingOutcome[MatchResult | CommandPlan]:
         """Return a canonical, reason-carrying result for one direct turn.
 
-        The V7 language document and semantic interpreter are the sole
+        The V8 language document and semantic interpreter are the sole
         production authority.  ``match()`` remains available only to the
         explicit, read-only shadow comparison so historical grammars can be
         measured without being able to create a production service plan.
@@ -1044,7 +1037,7 @@ class NluEngine:
             if len(rendered) == len(projected_predicates):
                 multi_result = CommandPlan(rendered)
         elif interpreted.compositional_plan is None:
-            multi_result = self._v7_multi_result(
+            multi_result = self._semantic_multi_result(
                 predicate_clauses, entities, world_model
             )
         if multi_result is not None:
@@ -1057,13 +1050,13 @@ class NluEngine:
             v7_result = None
         result: MatchResult | CommandPlan | None = v7_result
         authority = (
-            UnderstandingAuthority.V7_MIGRATED
+            UnderstandingAuthority.V8_SEMANTIC
             if v7_result is not None
             else UnderstandingAuthority.NONE
         )
         # The loss-aware frontend recognizes bounded safety-critical spelling
         # variants (especially a mistyped negation) that legacy grammars may
-        # otherwise absorb into a wildcard entity name.  The canonical V7
+        # otherwise absorb into a wildcard entity name.  The canonical V8
         # boundary is authoritative for non-executability.
         if (
             document.utterance.speech_act is SpeechAct.COMMAND
@@ -1095,7 +1088,7 @@ class NluEngine:
             text, document, interpreted, result, entities, authority
         )
 
-    def _v7_multi_result(
+    def _semantic_multi_result(
         self,
         segments: tuple[str, ...],
         entities: list[EntitySnapshot],
@@ -1148,7 +1141,7 @@ class NluEngine:
         world_model: WorldModel | None = None,
         document: LanguageDocument | None = None,
     ) -> ShadowComparison:
-        """Compare legacy and fully compiled V7 without executing either.
+        """Compare legacy and fully compiled V8 without executing either.
 
         This explicit diagnostic entry point keeps the production
         ``understand()`` fast: registry resolution and semantic compilation
@@ -1191,7 +1184,7 @@ class NluEngine:
             v7_result,
             entities,
             (
-                UnderstandingAuthority.V7_FALLBACK
+                UnderstandingAuthority.LEGACY_SHADOW
                 if v7_result is not None
                 else UnderstandingAuthority.NONE
             ),
@@ -1280,7 +1273,7 @@ class NluEngine:
         entities: list[EntitySnapshot],
         authority: UnderstandingAuthority,
     ) -> UnderstandingOutcome[MatchResult | CommandPlan]:
-        """Render one direct pipeline result as the canonical V7 outcome."""
+        """Render one direct pipeline result as the canonical V8 outcome."""
         route = type(result).__name__ if result is not None else "no_match"
         margin = self._candidate_margin(interpreted)
         corrections = (
@@ -1306,7 +1299,7 @@ class NluEngine:
                 evidence=evidence,
                 unexplained_tokens=document.semantics.unexplained_tokens,
                 route="pragmatic_clarification",
-                authority=UnderstandingAuthority.V7_MIGRATED,
+                authority=UnderstandingAuthority.V8_SEMANTIC,
                 margin=margin,
             )
         if (
@@ -1326,7 +1319,7 @@ class NluEngine:
                 evidence=evidence,
                 unexplained_tokens=document.semantics.unexplained_tokens,
                 route="read_only_hypothetical",
-                authority=UnderstandingAuthority.V7_MIGRATED,
+                authority=UnderstandingAuthority.V8_SEMANTIC,
                 margin=margin,
             )
 
@@ -1366,6 +1359,31 @@ class NluEngine:
                     unexplained_tokens=document.semantics.unexplained_tokens,
                     corrections=corrections,
                     route=route,
+                    authority=authority,
+                    margin=margin,
+                )
+            reasoning_result = (
+                result.frame.parameters.get("query_result")
+                if result.frame is not None
+                else None
+            )
+            if (
+                isinstance(reasoning_result, QueryResult)
+                and reasoning_result.status is QueryResultStatus.AMBIGUOUS
+            ):
+                return UnderstandingOutcome(
+                    kind=UnderstandingKind.AMBIGUOUS,
+                    source_text=text,
+                    normalized_text=document.utterance.normalized_text,
+                    speech_act=document.utterance.speech_act,
+                    payload=result,
+                    candidates=interpreted.candidates,
+                    evidence=evidence,
+                    reason=ParseFailureReason.AMBIGUOUS_TARGET,
+                    speech=result.response_text,
+                    unexplained_tokens=document.semantics.unexplained_tokens,
+                    corrections=corrections,
+                    route=result.frame.intent if result.frame is not None else None,
                     authority=authority,
                     margin=margin,
                 )
@@ -1458,7 +1476,7 @@ class NluEngine:
         context: ConversationContext | None = None,
         document: LanguageDocument | None = None,
     ) -> UnderstandingOutcome[AutomationMatchResult]:
-        """Canonical V7 boundary for a trigger/condition/action turn."""
+        """Canonical V8 boundary for a trigger/condition/action turn."""
         document = document or analyse_language(text, entities)
         result = self.match_automation(text, entities, world_model, context)
         interpreted = SemanticInterpreter.interpret(
@@ -3523,7 +3541,7 @@ class NluEngine:
         return None
 
     def respond(self, text: str, entities: list[EntitySnapshot]) -> NluResponse:
-        """Render the canonical V7 outcome through the compact legacy API."""
+        """Render the canonical V8 outcome through the compact legacy API."""
         outcome = self.understand(text, entities)
         match_result = outcome.payload
         if not isinstance(match_result, MatchResult):
@@ -3549,7 +3567,7 @@ class NluEngine:
         )
 
     def debug(self, text: str, entities: list[EntitySnapshot]) -> DebugTrace:
-        """Return a read-only trace of the canonical V7 interpretation."""
+        """Return a read-only trace of the canonical V8 interpretation."""
         outcome = self.understand(text, entities)
         normalized = outcome.normalized_text
         parser_name = "SemanticInterpreter"
@@ -3682,10 +3700,23 @@ class NluEngine:
         if validate_command(command) is not None:
             return None
 
-        # Compose the central semantic view once. For an explicitly resolved
-        # singular target it is an execution gate: entity, domain, room/floor
-        # and capability constraints must still agree after composition.
-        resolved_intent = ReasoningEngine.resolve(frame, entities, context)
+        # A typed QueryResult has already been grounded by the authoritative
+        # QueryExecutor. Re-running the generic fuzzy constraint resolver over
+        # the complete registry would be redundant and can dominate aggregate
+        # latency when an answer is empty. Commands and legacy queries retain
+        # the normal central reasoning gate.
+        typed_result = frame.parameters.get("query_result")
+        if isinstance(typed_result, QueryResult):
+            resolved_intent = ResolvedSemanticIntent(
+                action=frame.action,
+                entities=tuple(matched),
+                property=frame.property,
+                direction=frame.direction,
+                degree=frame.degree,
+                area=frame.area,
+            )
+        else:
+            resolved_intent = ReasoningEngine.resolve(frame, entities, context)
         if (
             context is None
             and frame.target is not None
@@ -3768,7 +3799,7 @@ class NluEngine:
         # QueryResult (status included, not just the matched entities) - when
         # present, ResponseGenerator speaks it directly instead of the
         # QUERY_INTENTS response lambda below, which loses QueryResultStatus.
-        query_result = frame.parameters.get("query_result")
+        query_result = typed_result
         if query_result is not None:
             return MatchResult(
                 plan=None,
@@ -3783,6 +3814,7 @@ class NluEngine:
                 frame=frame,
                 command=command,
                 resolved_intent=resolved_intent,
+                explanation_text=result.explanation_text,
             )
 
         query_spec = QUERY_INTENTS.get(frame.intent)

@@ -159,7 +159,8 @@ from .nlu.context import (
     PendingDialogKind,
 )
 from .nlu.dialog_focus import DialogFocus, derive_dialog_focus
-from .nlu.discourse import DiscourseRole, remember_entities
+from .nlu.discourse import DiscourseRole, remember_entities, remember_query_group
+from .nlu.query_command import QueryResult
 from .nlu.entity_clarification import (
     CandidateReplyKind,
     render_candidate_question,
@@ -426,6 +427,7 @@ class NluConversationEntity(
         except ValueError:
             # Invalid migrated configuration never weakens language safety.
             self._house_graph = self._world_model.build_house_graph()
+        self._world_model = self._world_model.with_house_graph(self._house_graph)
         pending = self._context_store.get(user_input.conversation_id)
         conversation_area = resolve_conversation_area(self.hass, user_input)
         localized_text = materialize_local_reference(
@@ -1035,7 +1037,7 @@ class NluConversationEntity(
             direct_understanding.payload
             if direct_understanding is not None
             and direct_understanding.authority
-            is UnderstandingAuthority.V7_MIGRATED
+            is UnderstandingAuthority.V8_SEMANTIC
             and not _AUTOMATION_QUERY_RE.search(user_input.text)
             and not (
                 isinstance(direct_understanding.payload, MatchResult)
@@ -2719,6 +2721,27 @@ class NluConversationEntity(
         )
         if result.command is not None:
             focus = derive_dialog_focus(result.command)
+            discourse = remember_entities(
+                previous_context.discourse if previous_context else None,
+                result.command.entities,
+                role=(
+                    DiscourseRole.ACTION_TARGET
+                    if result.plan is not None
+                    else DiscourseRole.QUERY_RESULT
+                ),
+                active_property=focus.property,
+                active_action=(
+                    result.command.intent if result.plan is not None else None
+                ),
+                semantic_graph=result.command.source_frame.semantic_graph,
+            )
+            query_result = result.command.parameters.get("query_result")
+            if isinstance(query_result, QueryResult) and query_result.member_ids:
+                discourse = remember_query_group(
+                    discourse,
+                    query_result,
+                    semantic_graph=result.command.source_frame.semantic_graph,
+                )
             self._context_store.set(
                 user_input.conversation_id,
                 ConversationContext(
@@ -2727,20 +2750,7 @@ class NluConversationEntity(
                     last_area=result.command.area,
                     pending_clarification=None,
                     focus=focus,
-                    discourse=remember_entities(
-                        previous_context.discourse if previous_context else None,
-                        result.command.entities,
-                        role=(
-                            DiscourseRole.ACTION_TARGET
-                            if result.plan is not None
-                            else DiscourseRole.QUERY_RESULT
-                        ),
-                        active_property=focus.property,
-                        active_action=(
-                            result.command.intent if result.plan is not None else None
-                        ),
-                        semantic_graph=result.command.source_frame.semantic_graph,
-                    ),
+                    discourse=discourse,
                     pending_undo=undo_plan,
                     last_explanation=result.explanation_text,
                     memory=DialogTurnMemory(

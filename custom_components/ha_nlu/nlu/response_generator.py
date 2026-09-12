@@ -120,9 +120,36 @@ class ResponseGenerator:
     ) -> str:
         """Plan and realize one deterministic query response."""
 
+        if result.command is not None and result.command.algebra is not None:
+            return self._respond_algebra(result)
+
         return GermanResponseRealizer().realize(
             self.plan(result, context=context, allow_reference=allow_reference)
         )
+
+    @staticmethod
+    def _respond_algebra(result: QueryResult) -> str:
+        """Render typed V9 results without reinterpreting the source text."""
+        if result.status is QueryResultStatus.AMBIGUOUS:
+            return "Mehrere gleichwertige Messwerte sind möglich. Welchen soll ich verwenden?"
+        if result.status is QueryResultStatus.TARGET_NOT_FOUND:
+            return "Diese Abfrage kann ich mit den bekannten Fakten nicht sicher auswerten."
+        if result.groups:
+            return ", ".join(f"{group.label}: {group.value}" for group in result.groups) + "."
+        if isinstance(result.scalar, bool):
+            return "Ja." if result.scalar else "Nein."
+        if result.scalar is not None:
+            return f"{result.scalar:g}." if isinstance(result.scalar, float) else f"{result.scalar}."
+        names = tuple(
+            item.friendly_name for item in result.entities
+        ) or tuple(item.name for item in result.areas) or tuple(
+            item.name for item in result.floors
+        )
+        if not names:
+            return "Keine passenden Ergebnisse."
+        if len(names) == 1:
+            return f"{names[0]}."
+        return f"{', '.join(names[:-1])} und {names[-1]}."
 
     def plan(
         self,

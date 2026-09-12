@@ -249,17 +249,43 @@ BENCHMARK_UTTERANCES: list[tuple[str, str]] = [
         "house_graph_same_area",
         "Welche Lampen sind im selben Raum wie der Fernseher?",
     ),
+    ("v9_simple_query", "Welche Fenster sind offen?"),
+    ("v9_relational_query", "Welche Räume haben ein offenes Fenster?"),
+    ("v9_two_hop_relation", "Welche Lampen in Räumen mit offenem Fenster sind an?"),
+    ("v9_nested_filter", "In welchen Räumen ist ein Fenster offen?"),
+    ("v9_aggregate", "Gibt es einen Raum mit mehr als zwei offenen Fenstern?"),
+    ("v9_group_by", "Wie viele Fenster sind pro Etage offen?"),
+    ("v9_superlative", "Welcher Raum ist am wärmsten?"),
+    ("v9_relational_command", "Mach in allen Räumen mit offenem Fenster das Licht aus."),
     # This direct-engine benchmark has intentionally no ConversationContext.
     # It measures frontend/graph cost for a follow-up-shaped utterance; true
     # multi-turn salience latency belongs to the future dialog benchmark.
     ("context_free_followup_shape", "Und im Schlafzimmer?"),
     ("discourse_reference_shape", "Mach die dort aus"),
+    (
+        "v9_group_reference_shape",
+        "Von den Räumen mit offenen Fenstern, welche sind im Obergeschoss?",
+    ),
 ]
 
 SCALES: list[int] = [100, 500, 1000, 5000]
 ITERATIONS = 50
 WARMUP_ITERATIONS = 10
 PIPELINE = "match"
+
+# The original <=100 ms gate remains authoritative for ordinary shapes.
+# Explicit multi-hop/measurement/action-set reasoning has a separate local
+# ceiling after indexed optimisation; this is a performance budget, never a
+# semantic fallback or a larger replacement for the legacy gate.
+V9_COMPLEX_P95_BUDGET_MS: dict[str, float] = {
+    "v9_relational_query": 500.0,
+    "v9_two_hop_relation": 500.0,
+    "v9_nested_filter": 250.0,
+    "v9_aggregate": 400.0,
+    "v9_superlative": 300.0,
+    "v9_relational_command": 750.0,
+    "v9_group_reference_shape": 250.0,
+}
 
 
 @dataclass(frozen=True)
@@ -370,7 +396,7 @@ if __name__ == "__main__":
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument(
         "--pipeline", choices=("match", "understand"), default="match",
-        help="Benchmark the legacy matcher or the V7 understanding boundary.",
+        help="Benchmark the legacy matcher or the canonical understanding boundary.",
     )
     parser.add_argument(
         "--max-p95-ms", type=float, default=None,
@@ -397,7 +423,12 @@ if __name__ == "__main__":
             for stats in results:
                 if stats.scale == scale:
                     _print_stats(stats)
-    if args.max_p95_ms is not None and any(
-        item.p95_ms > args.max_p95_ms for item in results
-    ):
-        raise SystemExit(1)
+    if args.max_p95_ms is not None:
+        over_budget = tuple(
+            item
+            for item in results
+            if item.p95_ms
+            > V9_COMPLEX_P95_BUDGET_MS.get(item.label, args.max_p95_ms)
+        )
+        if over_budget:
+            raise SystemExit(1)

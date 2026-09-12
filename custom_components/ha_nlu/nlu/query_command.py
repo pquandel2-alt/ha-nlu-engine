@@ -1,21 +1,14 @@
-"""QueryCommand/QueryResult type system (HomeIntent v4.2.1 plan, Sections
-6-11): the 3-stage separation the plan's Section 12 asks for -
+"""Typed query model shared by HomeIntent's parser and read-only executor.
 
     Parser -> QueryCommand
     QueryCommand -> QueryExecutor -> QueryResult   (Phase 5)
     QueryResult -> ResponseGenerator -> text        (Phase 6)
 
-Phase 4 only introduces these types. ``StateQueryParser`` (parsers.py) keeps
-building its existing ``frame.parameters``-based results until Phase 7
-migrates it onto this infrastructure non-destructively (Section 13, "keine
-Big-Bang-Refactorisierung") - nothing here is wired into ``engine.py``/
-``parsers.py`` yet, so existing behavior is completely unaffected by this
-module's presence.
-
-Field shapes mirror what ``StateQueryParser`` already resolves today (domain,
-device_class, area, requested ``SemanticState``, matched entities) - this is
-a restructuring of data already flowing through the pipeline, not new
-information.
+V9 extends the established ``QueryCommand`` rather than introducing another
+query engine. Simple V8 commands retain their compact target/filter fields;
+relational, aggregate and set queries optionally carry the compositional
+``algebra`` tree below. No node contains source-language snippets or an
+untyped expression dictionary.
 
 Kept free of Home Assistant/hassil imports, same boundary as ``frame.py``/
 ``command.py``.
@@ -30,6 +23,8 @@ from ..areas import AreaSnapshot
 from ..automation_summary import AutomationSummary
 from ..devices import DeviceSnapshot
 from ..entities import EntitySnapshot
+from ..floors import FloorSnapshot
+from ..house_graph import RelationKind, TraversalDirection
 from .semantic_state import SemanticState
 from .primitives import SemanticProperty
 
@@ -62,6 +57,8 @@ class QueryTargetKind(Enum):
     ENTITY = auto()
     DEVICE = auto()
     AUTOMATION = auto()
+    AREA = auto()
+    FLOOR = auto()
 
 
 class RelationalOperator(Enum):
@@ -89,6 +86,144 @@ class RelationalComparison:
 
 class QueryRelationKind(Enum):
     SAME_AREA = auto()
+
+
+class SetOperator(Enum):
+    INTERSECTION = auto()
+    UNION = auto()
+    DIFFERENCE = auto()
+
+
+class AggregateKind(Enum):
+    COUNT = auto()
+    EXISTS = auto()
+    ANY = auto()
+    ALL = auto()
+    MIN = auto()
+    MAX = auto()
+    AVG = auto()
+
+
+class SortDirection(Enum):
+    ASCENDING = auto()
+    DESCENDING = auto()
+
+
+@dataclass(frozen=True)
+class QueryTraversal:
+    """One bounded, explicitly directed HouseGraph relation path."""
+
+    steps: tuple[tuple[RelationKind, TraversalDirection], ...]
+    max_depth: int = 4
+    asserted_only: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.steps or len(self.steps) > self.max_depth or self.max_depth > 8:
+            raise ValueError("Query traversal must contain 1..max_depth (<=8) hops")
+
+
+class QueryExpression:
+    """Marker base for the closed set of typed algebra nodes."""
+
+
+@dataclass(frozen=True)
+class SourceExpression(QueryExpression):
+    target: "QueryTarget"
+
+
+@dataclass(frozen=True)
+class StateFilterExpression(QueryExpression):
+    source: "QueryExpression"
+    state: SemanticState
+
+
+@dataclass(frozen=True)
+class RelationFilterExpression(QueryExpression):
+    """Keep source members reaching at least one nested-query member."""
+
+    source: "QueryExpression"
+    traversal: QueryTraversal
+    nested: "QueryExpression"
+
+
+@dataclass(frozen=True)
+class TraverseExpression(QueryExpression):
+    source: "QueryExpression"
+    traversal: QueryTraversal
+    target_kind: QueryTargetKind
+
+
+@dataclass(frozen=True)
+class SetExpression(QueryExpression):
+    left: "QueryExpression"
+    operator: SetOperator
+    right: "QueryExpression"
+
+
+@dataclass(frozen=True)
+class AggregateExpression(QueryExpression):
+    source: "QueryExpression"
+    kind: AggregateKind
+
+
+@dataclass(frozen=True)
+class QuantifiedExpression(QueryExpression):
+    """Evaluate ANY/ALL against an explicit matching subset."""
+
+    source: "QueryExpression"
+    matching: "QueryExpression"
+    kind: AggregateKind
+
+    def __post_init__(self) -> None:
+        if self.kind not in {AggregateKind.ANY, AggregateKind.ALL}:
+            raise ValueError("QuantifiedExpression supports only ANY or ALL")
+
+
+@dataclass(frozen=True)
+class GroupExpression(QueryExpression):
+    source: "QueryExpression"
+    traversal: QueryTraversal
+    group_kind: QueryTargetKind
+    aggregate: AggregateKind = AggregateKind.COUNT
+
+
+@dataclass(frozen=True)
+class ThresholdExpression(QueryExpression):
+    """Select groups whose typed aggregate satisfies a numeric threshold."""
+
+    source: GroupExpression
+    operator: RelationalOperator
+    value: float
+
+
+@dataclass(frozen=True)
+class MeasurementExpression(QueryExpression):
+    source: "QueryExpression"
+    property: SemanticProperty
+
+
+@dataclass(frozen=True)
+class CompareExpression(QueryExpression):
+    left: "QueryExpression"
+    operator: RelationalOperator
+    right: "QueryExpression"
+
+
+@dataclass(frozen=True)
+class OrderExpression(QueryExpression):
+    source: "QueryExpression"
+    key: MeasurementExpression | GroupExpression
+    direction: SortDirection
+
+
+@dataclass(frozen=True)
+class LimitExpression(QueryExpression):
+    source: "QueryExpression"
+    count: int
+
+    def __post_init__(self) -> None:
+        if self.count < 1 or self.count > 1000:
+            raise ValueError("Query limit must be between 1 and 1000")
 
 
 @dataclass(frozen=True)
@@ -145,6 +280,7 @@ class QueryCommand:
     scope: QueryScope
     target: QueryTarget
     filter: QueryFilter
+    algebra: QueryExpression | None = None
 
 
 class QueryResultStatus(Enum):
@@ -159,6 +295,28 @@ class QueryResultStatus(Enum):
 
 
 @dataclass(frozen=True)
+class GroupedValue:
+    group_id: str
+    label: str
+    member_ids: tuple[str, ...]
+    value: int | float | bool
+
+
+@dataclass(frozen=True)
+class ReasoningStep:
+    operation: str
+    input_ids: tuple[str, ...] = ()
+    output_ids: tuple[str, ...] = ()
+    relation_ids: tuple[str, ...] = ()
+    detail: str | None = None
+
+
+@dataclass(frozen=True)
+class ReasoningTrace:
+    steps: tuple[ReasoningStep, ...]
+
+
+@dataclass(frozen=True)
 class QueryResult:
     status: QueryResultStatus
     entities: tuple[EntitySnapshot, ...] = ()
@@ -169,3 +327,9 @@ class QueryResult:
     devices: tuple[DeviceSnapshot, ...] = ()
     automations: tuple[AutomationSummary, ...] = ()
     command: QueryCommand | None = None
+    areas: tuple[AreaSnapshot, ...] = ()
+    floors: tuple[FloorSnapshot, ...] = ()
+    member_ids: tuple[str, ...] = ()
+    scalar: int | float | bool | None = None
+    groups: tuple[GroupedValue, ...] = ()
+    trace: ReasoningTrace | None = None

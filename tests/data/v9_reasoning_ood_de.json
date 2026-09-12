@@ -1,0 +1,8 @@
+[
+  {"text": "Wo ist es eigentlich gerade am wärmsten?", "expected_area_ids": ["bed"]},
+  {"text": "In welchen Zimmern steht irgendwo ein Fenster offen?", "expected_area_ids": ["bed", "kitchen"]},
+  {"text": "Von den Räumen mit offenen Fenstern, welche sind im Obergeschoss?", "expected_area_ids": ["bed"]},
+  {"text": "Welche Lampen hängen in Zimmern, wo gerade ein Fenster auf ist?", "expected_entity_ids": ["light.bed", "light.kitchen"]},
+  {"text": "Wo ist die Luftfeuchtigkeit am höchsten?", "expected_area_ids": ["office"]},
+  {"text": "Mach überall dort das Licht aus, wo ein Fenster offen steht.", "expected_action_entity_ids": ["light.bed", "light.kitchen"]}
+]

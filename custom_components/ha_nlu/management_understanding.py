@@ -84,7 +84,7 @@ def understand_management(
             speech_act=document.utterance.speech_act,
             speech="Meinst du den Kalender oder eine Liste beziehungsweise einen Timer?",
             route="management:ambiguous",
-            authority=UnderstandingAuthority.V7_MIGRATED,
+            authority=UnderstandingAuthority.V8_SEMANTIC,
         )
     payload = matches[0]
     return UnderstandingOutcome(
@@ -98,5 +98,5 @@ def understand_management(
             if isinstance(payload, CalendarManagementRequest)
             else "management:productivity"
         ),
-        authority=UnderstandingAuthority.V7_MIGRATED,
+        authority=UnderstandingAuthority.V8_SEMANTIC,
     )
