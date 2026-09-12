@@ -1369,7 +1369,9 @@ class SemanticCommandCompiler:
         # the name itself contains another generic noun (for example a switch
         # named ``Licht Sportraum``). This prevents lexical words inside user
         # data from overriding the registry's typed identity.
-        if len(explicit) == 1 and distinctive_explicit_target:
+        if len(explicit) == 1 and (
+            not source_area_applied or distinctive_explicit_target
+        ):
             domains = frozenset({explicit[0].domain})
         elif not domains:
             preliminary = _entity_candidates(
