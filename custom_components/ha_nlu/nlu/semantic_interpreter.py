@@ -59,6 +59,7 @@ from .semantic_projection import (
 )
 from .temporal_semantics import analyse_temporal_semantics
 from .validator import ValidationError, validate_command
+from .understanding_context import UnderstandingContext
 
 
 @dataclass(frozen=True)
@@ -324,6 +325,7 @@ class SemanticInterpreter:
         *,
         compile_result: bool = True,
         resolve_registry: bool = True,
+        context: UnderstandingContext | None = None,
     ) -> InterpreterResult:
         # Pin the cross-module TYPE_CHECKING cycle to one explicit runtime
         # boundary; downstream calls retain precise WorldModel contracts.
@@ -658,6 +660,7 @@ class SemanticInterpreter:
                         entities,
                         typed_world_model,
                         analysis,
+                        context=context,
                     )
 
             resolved_mentions = mentions

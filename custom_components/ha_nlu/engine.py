@@ -89,6 +89,7 @@ from .nlu.understanding import (
     UnderstandingOutcome,
     compare_outcomes,
 )
+from .nlu.understanding_context import UnderstandingContext
 from .nlu.verb_state_query import (
     match_contextual_verb_state_query,
     match_verb_state_query,
@@ -962,6 +963,8 @@ class NluEngine:
         entities: list[EntitySnapshot],
         world_model: WorldModel | None = None,
         document: LanguageDocument | None = None,
+        *,
+        context: UnderstandingContext | None = None,
     ) -> UnderstandingOutcome[MatchResult | CommandPlan]:
         """Return a canonical, reason-carrying result for one direct turn.
 
@@ -985,6 +988,7 @@ class NluEngine:
             # keeps it disabled while ``compare_understanding_pipelines()``
             # explicitly enables it.
             resolve_registry=False,
+            context=context,
         )
         v7_result = self._interpreted_match_result(interpreted, entities)
         if v7_result is None and not supplied_document and re.search(
@@ -1002,6 +1006,7 @@ class NluEngine:
                     world_model,
                     compile_result=True,
                     resolve_registry=False,
+                    context=context,
                 )
                 v7_result = self._interpreted_match_result(interpreted, entities)
         # A shared-predicate compositional plan already proves that ``und``
@@ -1038,7 +1043,7 @@ class NluEngine:
                 multi_result = CommandPlan(rendered)
         elif interpreted.compositional_plan is None:
             multi_result = self._semantic_multi_result(
-                predicate_clauses, entities, world_model
+                predicate_clauses, entities, world_model, context
             )
         if multi_result is not None:
             v7_result = multi_result
@@ -1093,6 +1098,7 @@ class NluEngine:
         segments: tuple[str, ...],
         entities: list[EntitySnapshot],
         world_model: WorldModel | None,
+        context: UnderstandingContext | None = None,
     ) -> CommandPlan | None:
         """Compile structurally proven independent conjunction clauses."""
         if len(segments) < 2:
@@ -1113,6 +1119,7 @@ class NluEngine:
                 world_model,
                 compile_result=True,
                 resolve_registry=False,
+                context=context,
             )
             result = self._interpreted_match_result(interpreted, entities)
             if not isinstance(result, MatchResult) or result.command is None or result.clarification is not None:

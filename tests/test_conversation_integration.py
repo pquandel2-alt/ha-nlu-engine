@@ -32,6 +32,7 @@ import _ha_stub  # noqa: E402
 _ha_stub.install()
 
 import ha_nlu.conversation as ha_conversation  # noqa: E402
+from ha_nlu.areas import AreaSnapshot  # noqa: E402
 from ha_nlu.automation_management import (  # noqa: E402
     AutomationManagementKind,
     AutomationManagementRequest,
@@ -185,6 +186,133 @@ def test_turn_on_command_calls_service_and_responds_action_done(monkeypatch):
     assert result.response.error_code is None
     assert result.response.response_type == intent.IntentResponseType.ACTION_DONE
     assert result.response.speech
+
+
+def test_source_area_resolves_roomless_percentage_command_locally(monkeypatch):
+    """A generic target is scoped by this turn's physical voice origin."""
+    entities = [
+        EntitySnapshot(
+            "cover.rollladen_wohnzimmer",
+            "Rolllade Wohnzimmer",
+            "cover",
+            "closed",
+            area_id="wohnzimmer",
+            area_name="Wohnzimmer",
+            capabilities=frozenset({"POSITION"}),
+        ),
+        EntitySnapshot(
+            "cover.rollladen_gaeste_wc",
+            "Rolllade Gäste WC",
+            "cover",
+            "closed",
+            area_id="gaeste_wc",
+            area_name="Gäste-WC",
+            capabilities=frozenset({"POSITION"}),
+        ),
+    ]
+    entity = _make_entity(monkeypatch, entities)
+    monkeypatch.setattr(
+        ha_conversation,
+        "resolve_conversation_area",
+        lambda hass, user_input: AreaSnapshot("wohnzimmer", "Wohnzimmer"),
+    )
+
+    result = _run(entity, "Fahr die Rolllade auf fünfzig Prozent.")
+
+    assert result.response.speech == "Rolllade Wohnzimmer auf 50 Prozent gefahren."
+    entity.hass.services.async_call.assert_awaited_once_with(
+        "cover",
+        "set_cover_position",
+        {"position": 50, "entity_id": "cover.rollladen_wohnzimmer"},
+        blocking=True,
+    )
+
+
+def test_explicit_remote_entity_name_overrides_source_area(monkeypatch):
+    entities = [
+        EntitySnapshot(
+            "cover.rollladen_wohnzimmer",
+            "Rolllade Wohnzimmer",
+            "cover",
+            "closed",
+            area_id="wohnzimmer",
+            area_name="Wohnzimmer",
+            capabilities=frozenset({"POSITION"}),
+        ),
+        EntitySnapshot(
+            "cover.rollladen_gaeste_wc",
+            "Rolllade Gäste WC",
+            "cover",
+            "closed",
+            area_id="gaeste_wc",
+            area_name="Gäste-WC",
+            capabilities=frozenset({"POSITION"}),
+        ),
+    ]
+    entity = _make_entity(monkeypatch, entities)
+    monkeypatch.setattr(
+        ha_conversation,
+        "resolve_conversation_area",
+        lambda hass, user_input: AreaSnapshot("wohnzimmer", "Wohnzimmer"),
+    )
+
+    _run(entity, "Fahr die Rolllade Gäste WC auf fünfzig Prozent.")
+
+    assert entity.hass.services.async_call.await_args.args[2]["entity_id"] == (
+        "cover.rollladen_gaeste_wc"
+    )
+
+
+def test_fresh_roomless_command_uses_source_area_not_previous_area(monkeypatch):
+    entities = [
+        EntitySnapshot(
+            "sensor.schlafzimmer_temperatur",
+            "Temperatur Schlafzimmer",
+            "sensor",
+            "21",
+            area_id="schlafzimmer",
+            area_name="Schlafzimmer",
+            unit="°C",
+            device_class="temperature",
+        ),
+        EntitySnapshot(
+            "cover.rollladen_wohnzimmer",
+            "Rolllade Wohnzimmer",
+            "cover",
+            "closed",
+            area_id="wohnzimmer",
+            area_name="Wohnzimmer",
+            capabilities=frozenset({"POSITION"}),
+        ),
+        EntitySnapshot(
+            "cover.rollladen_gaeste_wc",
+            "Rolllade Gäste WC",
+            "cover",
+            "closed",
+            area_id="gaeste_wc",
+            area_name="Gäste-WC",
+            capabilities=frozenset({"POSITION"}),
+        ),
+    ]
+    entity = _make_entity(monkeypatch, entities)
+    monkeypatch.setattr(
+        ha_conversation,
+        "resolve_conversation_area",
+        lambda hass, user_input: AreaSnapshot("wohnzimmer", "Wohnzimmer"),
+    )
+
+    first = _run(entity, "Wie warm ist es im Schlafzimmer?", "source-area-turn")
+    second = _run(
+        entity,
+        "Fahr die Rolllade auf fünfzig Prozent.",
+        "source-area-turn",
+    )
+
+    assert first.response.speech == "21 Grad."
+    assert second.response.speech == "Rolllade Wohnzimmer auf 50 Prozent gefahren."
+    assert entity.hass.services.async_call.await_args.args[2]["entity_id"] == (
+        "cover.rollladen_wohnzimmer"
+    )
 
 
 def test_conversation_has_no_legacy_device_router(monkeypatch):

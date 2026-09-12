@@ -60,12 +60,14 @@ from .query_command import (
 from .query_executor import QueryExecutor
 from .semantic_lexicon import SemanticAnalysis, SemanticKind, analyse_semantics
 from .semantic_catalog import (
+    DOMAIN_WORDS,
     INTENT_BY_DOMAIN_ACTION,
     MEASUREMENT_PROPERTY_SPECS,
     SEMANTIC_RESOLUTION_WORDS,
     V7_ENTITY_AMBIGUITY_MARGIN,
     VALUE_INTENT_BY_DOMAIN_PROPERTY,
 )
+from .understanding_context import UnderstandingContext
 from .semantic_location import (
     has_explicit_location_cue,
     resolve_coordinated_locations,
@@ -1174,6 +1176,47 @@ def _entity_candidates(
     ]
 
 
+def _has_distinctive_explicit_target(
+    text: str,
+    entity: EntitySnapshot,
+    analysis: SemanticAnalysis,
+) -> bool:
+    """Whether an entity mention says more than its generic device noun.
+
+    A registry entity named only ``Rolllade`` must not turn that generic noun
+    into stronger identity evidence than the current voice-source area.  A
+    name such as ``Rolllade Gäste WC`` remains an explicit remote target.
+    """
+
+    generic_tokens = {
+        normalize_for_compare(word)
+        for words in DOMAIN_WORDS.values()
+        for word in words
+    }
+    generic_tokens.update(
+        normalize_for_compare(token)
+        for span in analysis.matching(SemanticKind.DOMAIN)
+        for token in _TOKEN_RE.findall(span.text)
+    )
+    normalized_text = normalize_for_compare(text)
+    for name in (
+        entity.friendly_name,
+        *entity.aliases,
+        *(alias.text for alias in generate_aliases(entity)),
+    ):
+        normalized_name = normalize_for_compare(name)
+        if not normalized_name or re.search(
+            rf"(?<!\w){re.escape(normalized_name)}(?!\w)", normalized_text
+        ) is None:
+            continue
+        name_tokens = {
+            normalize_for_compare(token) for token in _TOKEN_RE.findall(name)
+        }
+        if name_tokens - generic_tokens:
+            return True
+    return False
+
+
 class SemanticCommandCompiler:
     """Compile a direct command from semantic facts and live HA constraints."""
 
@@ -1183,6 +1226,7 @@ class SemanticCommandCompiler:
         entities: list[EntitySnapshot],
         world_model: WorldModel | None = None,
         analysis: SemanticAnalysis | None = None,
+        context: UnderstandingContext | None = None,
     ) -> ParseResult | ClarificationRequest | None:
         if _QUESTION_RE.search(text):
             return None
@@ -1190,7 +1234,7 @@ class SemanticCommandCompiler:
         if temporal is not None:
             stripped, expression = temporal
             compiled = SemanticCommandCompiler.compile(
-                stripped, entities, world_model
+                stripped, entities, world_model, context=context
             )
             if isinstance(compiled, ParseResult):
                 return replace(
@@ -1257,6 +1301,12 @@ class SemanticCommandCompiler:
                 index=world_model.entity_index if world_model is not None else None,
             )
         )
+        distinctive_explicit_target = (
+            len(explicit) == 1
+            and _has_distinctive_explicit_target(
+                positive_text, explicit[0], analysis
+            )
+        )
         coordinated_locations = resolve_coordinated_locations(
             positive_text, entities, world_model
         )
@@ -1278,6 +1328,21 @@ class SemanticCommandCompiler:
         ):
             location = None
         locations = coordinated_locations or ((location,) if location else ())
+        source_area = context.source_area if context is not None else None
+        source_area_applied = (
+            source_area is not None
+            and not locations
+            and quantity is None
+            and not distinctive_explicit_target
+        )
+        resolution_area_id = (
+            location[1]
+            if location is not None
+            else source_area.area_id
+            if source_area_applied and source_area is not None
+            else None
+        )
+        resolution_floor_id = location[2] if location is not None else None
         # A spoken scope is a hard constraint.  If HA does not know it (or
         # two floors make "oben" ambiguous), never silently widen the
         # request to every device in the house.
@@ -1304,15 +1369,15 @@ class SemanticCommandCompiler:
         # the name itself contains another generic noun (for example a switch
         # named ``Licht Sportraum``). This prevents lexical words inside user
         # data from overriding the registry's typed identity.
-        if len(explicit) == 1:
+        if len(explicit) == 1 and distinctive_explicit_target:
             domains = frozenset({explicit[0].domain})
         elif not domains:
             preliminary = _entity_candidates(
                 positive_text,
                 entities,
                 domains,
-                area_id=location[1] if location else None,
-                floor_id=location[2] if location else None,
+                area_id=resolution_area_id,
+                floor_id=resolution_floor_id,
                 world_model=world_model,
             )
             if preliminary:
@@ -1333,8 +1398,8 @@ class SemanticCommandCompiler:
             temperature=temperature,
             quantity=quantity,
             location_text=" und ".join(item[0] for item in locations) if locations else None,
-            area_id=location[1] if location else None,
-            floor_id=location[2] if location else None,
+            area_id=resolution_area_id,
+            floor_id=resolution_floor_id,
         )
         if len(facts.intents) != 1 or len(facts.domains) != 1:
             return None
@@ -1384,13 +1449,36 @@ class SemanticCommandCompiler:
                 ignored_tokens=frozenset(SEMANTIC_RESOLUTION_WORDS | _STOP_WORDS),
                 index=world_model.entity_index if world_model is not None else None,
             )
-            top_score = ranked_candidates[0].score if ranked_candidates else 0
-            selected_ranked = [
-                item
-                for item in ranked_candidates
-                if top_score - item.score <= V7_ENTITY_AMBIGUITY_MARGIN
-            ]
-            candidates = [item.entity for item in selected_ranked]
+            if ranked_candidates:
+                top_score = ranked_candidates[0].score
+                selected_ranked = [
+                    item
+                    for item in ranked_candidates
+                    if top_score - item.score <= V7_ENTITY_AMBIGUITY_MARGIN
+                ]
+                candidates = [item.entity for item in selected_ranked]
+            elif source_area_applied:
+                selected_ranked = []
+                candidates = list(
+                    world_model.select_entities(
+                        domain=domain, area_id=facts.area_id
+                    )
+                    if world_model is not None
+                    else resolve_candidates(
+                        entities,
+                        Constraints(domain=domain, area_id=facts.area_id),
+                    )
+                )
+                if percent is not None:
+                    capability = "POSITION" if domain == "cover" else "BRIGHTNESS"
+                    candidates = [
+                        entity
+                        for entity in candidates
+                        if capability in entity.capabilities
+                    ]
+            else:
+                selected_ranked = []
+                candidates = []
             if len(candidates) > 1:
                 return ClarificationRequest(
                     intent,
@@ -1416,7 +1504,15 @@ class SemanticCommandCompiler:
             matches = candidates
             entity = matches[0]
             target = TargetReference(entity.friendly_name, entity.entity_id, entity.domain)
-            area = None
+            area = (
+                AreaReference(
+                    text=source_area.name,
+                    area_id=source_area.area_id,
+                    area_name=source_area.name,
+                )
+                if source_area_applied and source_area is not None
+                else None
+            )
 
         if intent == "HassClimateSetTemperature" and temperature is not None:
             try:

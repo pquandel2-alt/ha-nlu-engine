@@ -180,6 +180,7 @@ from .nlu.semantic_utterance import (
     is_contextual_followup,
 )
 from .nlu.understanding import UnderstandingAuthority
+from .nlu.understanding_context import UnderstandingContext
 from .service_call import QUERY_INTENTS, ServiceCallPlan
 from .service_executor import async_execute_service_plan
 from .semantic_dialog import continue_semantic_dialog, start_semantic_dialog
@@ -430,6 +431,7 @@ class NluConversationEntity(
         self._world_model = self._world_model.with_house_graph(self._house_graph)
         pending = self._context_store.get(user_input.conversation_id)
         conversation_area = resolve_conversation_area(self.hass, user_input)
+        understanding_context = UnderstandingContext(source_area=conversation_area)
         localized_text = materialize_local_reference(
             user_input.text, conversation_area
         )
@@ -509,7 +511,11 @@ class NluConversationEntity(
                 )
             ):
                 candidate = self._engine.understand(
-                    user_input.text, entities, self._world_model, language_document
+                    user_input.text,
+                    entities,
+                    self._world_model,
+                    language_document,
+                    context=understanding_context,
                 )
                 if _is_complete_actionable_understanding(candidate.payload):
                     self._context_store.clear(user_input.conversation_id)
@@ -528,7 +534,11 @@ class NluConversationEntity(
             and not is_contextual_followup(user_input.text)
         ):
             candidate = self._engine.understand(
-                user_input.text, entities, self._world_model, language_document
+                user_input.text,
+                entities,
+                self._world_model,
+                language_document,
+                context=understanding_context,
             )
             if _is_complete_actionable_understanding(candidate.payload):
                 manager.replace_with_complete_command(user_input.conversation_id)
@@ -1022,7 +1032,11 @@ class NluConversationEntity(
         # computed below only if the established routers did not match.
         direct_understanding = direct_understanding or (
             self._engine.understand(
-                user_input.text, entities, self._world_model, language_document
+                user_input.text,
+                entities,
+                self._world_model,
+                language_document,
+                context=understanding_context,
             )
             if language_document.utterance.speech_act in {
                 SpeechAct.COMMAND,
@@ -1081,6 +1095,7 @@ class NluConversationEntity(
                         entities,
                         self._world_model,
                         language_document,
+                        context=understanding_context,
                     )
                 result = direct_understanding.payload
             if result is None:
@@ -1396,6 +1411,7 @@ class NluConversationEntity(
                         entities,
                         self._world_model,
                         language_document,
+                        context=understanding_context,
                     )
                 result = direct_understanding.payload
 
@@ -2557,7 +2573,12 @@ class NluConversationEntity(
         # clearly command-shaped no-match that may enter bounded ASR
         # correction) escapes; short answers such as "Küche" continue below.
         fresh = self._engine.understand(
-            user_input.text, entities, self._world_model
+            user_input.text,
+            entities,
+            self._world_model,
+            context=UnderstandingContext(
+                source_area=resolve_conversation_area(self.hass, user_input)
+            ),
         ).payload
         if isinstance(fresh, CommandPlan):
             self._context_store.clear(user_input.conversation_id)
@@ -2982,7 +3003,12 @@ class NluConversationEntity(
             () if is_query else phonetic_suggestions(user_input.text, entities)
         ):
             corrected = self._engine.understand(
-                suggestion.corrected_text, entities, self._world_model
+                suggestion.corrected_text,
+                entities,
+                self._world_model,
+                context=UnderstandingContext(
+                    source_area=resolve_conversation_area(self.hass, user_input)
+                ),
             ).payload
             plan = getattr(corrected, "plan", None)
             success = getattr(corrected, "response_text", None)

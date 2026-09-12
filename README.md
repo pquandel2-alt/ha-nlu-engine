@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.74.0**
+- Aktuelle Version: **4.75.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -42,7 +42,20 @@ Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
 
-## Was ist in Version 4.74 neu?
+## Was ist in Version 4.75 neu?
+
+Raumlose, singuläre Gerätebefehle berücksichtigen jetzt den physischen
+Bereich des aktuellen Assist-Satelliten. Ein Satz wie „Fahr die Rolllade auf
+50 Prozent“ wird dadurch auf eine eindeutig passende Rolllade im Raum des
+Satelliten begrenzt. Explizit genannte Räume und Geräte bleiben stärker;
+mehrere lokale Treffer führen weiterhin zu einer Rückfrage.
+
+Der Quellbereich wird als typisierter Kontext durch die V8-Pipeline bis zur
+semantischen Zielauflösung gereicht. Er bleibt vom zuletzt im Gespräch
+erwähnten Bereich getrennt und wird nicht künstlich in den gesprochenen Text
+eingefügt.
+
+### Version 4.74
 
 V9 ergänzt die bestehende V8-Verständnispipeline um typisierte semantische
 Abfragen über belegte HouseGraph-Fakten. Relationale Filter, bounded
@@ -868,10 +881,10 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/ha_nlu --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 4.74.0:
+Geprüfter Release-Stand von Version 4.75.0:
 
 ```text
-3020 passed, 12 skipped
+3023 passed, 12 skipped
 88 % Gesamt-Coverage
 77 % Coverage für conversation.py
 ```
