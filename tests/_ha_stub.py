@@ -82,10 +82,14 @@ def install() -> None:
         context: Any = None
         device_id: str | None = None
 
-    @dataclass
+    @dataclass(slots=True)
     class ConversationResult:
         response: Any
         conversation_id: str | None = None
+        # Mirrors Home Assistant 2025.2+. slots=True matches the real
+        # dataclass too, so a typo'd attribute fails here exactly as it would
+        # in production instead of silently sticking to the instance.
+        continue_conversation: bool = False
 
     def async_set_agent(hass: Any, entry: Any, agent: Any) -> None:
         return None
