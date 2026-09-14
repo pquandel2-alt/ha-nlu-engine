@@ -316,6 +316,39 @@ def _dialog_manager_kind(
     return DialogTaskKind.MISSING_SLOT, DialogPriority.FOLLOWUP
 
 
+# Pending dialog kinds after which a voice satellite should keep listening.
+#
+# Every kind currently defined means "a question was spoken and the user's
+# answer is expected next" - each payload dataclass in nlu/context.py says so
+# in its own docstring ("awaiting explicit consent", "waiting for a target,
+# value or selection", 'A pending "Soll diese Automation erstellt werden?"').
+# So this set is, today, all of PendingDialogKind.
+#
+# They are still listed one by one rather than derived from the enum: a future
+# kind that parks state *without* having asked anything would otherwise be
+# opted in silently and hold satellite microphones open after an ordinary
+# command. Membership here is the claim "we just asked something out loud",
+# and that claim should be made deliberately per kind.
+_CONTINUE_CONVERSATION_KINDS: frozenset[PendingDialogKind] = frozenset(
+    {
+        PendingDialogKind.ALIAS_LEARNING,
+        PendingDialogKind.AUTOMATION_WIZARD,
+        PendingDialogKind.PRODUCTIVITY,
+        PendingDialogKind.CALENDAR_EVENT,
+        PendingDialogKind.CALENDAR_MUTATION,
+        PendingDialogKind.AUTOMATION_CONFIRMATION,
+        PendingDialogKind.AUTOMATION_ACTION_EDIT,
+        PendingDialogKind.AUTOMATION_STRUCTURE_EDIT,
+        PendingDialogKind.AUTOMATION_MANAGEMENT,
+        PendingDialogKind.AUTOMATION_DELETION,
+        PendingDialogKind.SERVICE_CONFIRMATION,
+        PendingDialogKind.SEMANTIC_COMMAND,
+        PendingDialogKind.AUTOMATION_DRAFT,
+        PendingDialogKind.CLARIFICATION,
+    }
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -386,6 +419,59 @@ class NluConversationEntity(
         return ["de"]
 
     async def _async_handle_message(
+        self,
+        user_input: conversation.ConversationInput,
+        chat_log: conversation.ChatLog,
+    ) -> conversation.ConversationResult:
+        """Answer the turn, then tell the client whether to keep listening.
+
+        A voice satellite closes its microphone after every reply unless the
+        result carries ``continue_conversation``. Without it, a spoken
+        rückfrage ("Welchen Rollladen meinst du?") forces the user to say the
+        wake word again before answering - which defeats every multi-turn
+        dialog this agent builds.
+
+        The flag is derived in this one place instead of at the ~130
+        ``ConversationResult(...)`` construction sites below, because "is a
+        question outstanding?" is already modelled exactly once, by
+        ``active_pending_dialog()``. That reads only the explicit ``pending_*``
+        state-machine fields. The follow-up context (``last_area``,
+        ``last_command``, ``focus``) is deliberately *not* consulted: it is
+        populated after every successful command, so keying off it would hold
+        satellite microphones open after a plain "Mach das Licht an".
+        """
+        result = await self._async_handle_message_inner(user_input, chat_log)
+        self._apply_continue_conversation(user_input, result)
+        return result
+
+    def _apply_continue_conversation(
+        self,
+        user_input: conversation.ConversationInput,
+        result: conversation.ConversationResult,
+    ) -> None:
+        """Flag the turn as awaiting an answer, for clients that can listen on.
+
+        Read back from the context store rather than from anything the turn
+        returned: the pending state is written by whichever handler asked the
+        question, so this stays correct for handlers that do not exist yet.
+        """
+        conversation_id = result.conversation_id or user_input.conversation_id
+        if conversation_id is None:
+            return
+        active = active_pending_dialog(self._context_store.get(conversation_id))
+        if active is None or active.kind not in _CONTINUE_CONVERSATION_KINDS:
+            return
+        # ConversationResult grew this field in Home Assistant 2025.2 and is a
+        # slots dataclass, so on an older core the assignment raises instead of
+        # silently adding an attribute. Setting it after construction (rather
+        # than passing a constructor keyword) confines that to a no-op here,
+        # instead of a TypeError on every single turn.
+        try:
+            result.continue_conversation = True
+        except AttributeError:  # pragma: no cover - pre-2025.2 cores only
+            pass
+
+    async def _async_handle_message_inner(
         self,
         user_input: conversation.ConversationInput,
         chat_log: conversation.ChatLog,
