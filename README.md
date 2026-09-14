@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.75.0**
+- Aktuelle Version: **4.76.0**
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -42,7 +42,26 @@ Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
 
-## Was ist in Version 4.75 neu?
+## Was ist in Version 4.76 neu?
+
+Sprachsatelliten hören nach einer Rückfrage weiter zu. Stellt HomeIntent eine
+Frage – „Soll die Automation erstellt werden?“, „Welchen Rollladen meinst
+du?“ –, bleibt das Mikrofon offen und die Antwort kann direkt gesprochen
+werden. Bisher schloss der Satellit nach jeder Antwort sein Mikrofon, sodass
+vor jeder Antwort erneut das Wakeword nötig war.
+
+Dafür setzt HomeIntent das seit Home Assistant 2025.2 verfügbare Feld
+`ConversationResult.continue_conversation`. Das Gerät selbst öffnet daraufhin
+sein Mikrofon; an der ESPHome-Konfiguration eines Satelliten ist keine
+Änderung nötig. Ältere Home-Assistant-Versionen ignorieren das Feld
+folgenlos.
+
+Das Flag wird zentral aus dem Dialogzustand abgeleitet und ist genau dann
+gesetzt, wenn tatsächlich eine Rückfrage offen ist. Ein gewöhnlicher
+erfolgreicher Befehl beendet das Gespräch wie bisher und lässt kein Mikrofon
+offen.
+
+### Version 4.75
 
 Raumlose, singuläre Gerätebefehle berücksichtigen jetzt den physischen
 Bereich des aktuellen Assist-Satelliten. Ein Satz wie „Fahr die Rolllade auf
@@ -881,10 +900,10 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/ha_nlu --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 4.75.0:
+Geprüfter Release-Stand von Version 4.76.0:
 
 ```text
-3023 passed, 12 skipped
+3030 passed, 12 skipped
 88 % Gesamt-Coverage
 77 % Coverage für conversation.py
 ```
@@ -911,7 +930,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-4.75.0.json --quiet
+  --check docs/perf/v7-shadow-baseline-4.76.0.json --quiet
 ```
 
 Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die
