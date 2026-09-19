@@ -32,11 +32,16 @@ Stand: 19. September 2026
 - [x] vollständiges Pyright: 0 Fehler; CI-identischer Strict-Scope: 0 Fehler
 - [x] lokaler Schema-Smoke mit echtem Home Assistant 2025.1.4:
   `HOME_ASSISTANT_AUTOMATION_AND_CALENDAR_SCHEMA_OK`
-- [ ] lokales 5k-Performance-Gate: unter Host-Last ~61/4 CPUs nicht vollständig
-  grün; Discourse-Follow-up p95 84,23 ms, Budgets unverändert
-- [ ] offizieller HA-Stable-Container-Smoke, Hassfest und HACS lokal nicht
-  ausführbar, weil alle drei CI-Jobs eine Container-Runtime benötigen;
-  Ausführung auf dem Release-Commit in GitHub Actions steht aus
+- [x] unverändertes 5k-Performance-Gate in GitHub Actions: grün; höchster
+  gemessener V9-p95 15,57 ms (relationaler Command), produktiver
+  Discourse-Follow-up 2,96 ms
+- [x] HA-Stable-Container-Smoke, Hassfest und HACS: grün in
+  [CI-Lauf 35452062222](https://github.com/pquandel2-alt/ha-nlu-engine/actions/runs/35452062222)
+
+Der zusätzliche lokale 5k-Lauf unter einer Host-Last von etwa 61 auf vier
+sichtbaren CPUs war nicht vollständig grün; seine Messwerte werden deshalb
+nicht als Release-Gate gewertet. Die Grenzen wurden nicht verändert. Details
+und die maßgebliche CI-Messung stehen im Performanceprotokoll.
 
 ## Bereits erfüllt oder für HomeIntent nicht anwendbar
 
