@@ -8,7 +8,7 @@ Selbstzertifizierung.
 
 Stand: 19. September 2026
 
-## V9 Completion / 4.76.0
+## V9 Completion / 4.77.0
 
 - [x] Query-Algebra bleibt einziger Reasoning-Evaluator
 - [x] relationale Klassen, Kardinalität, Difference und Discourse-Literalsets
@@ -23,7 +23,7 @@ Stand: 19. September 2026
 - [x] explizite Recorder-Queries nutzen den vorhandenen History-Adapter;
   nicht belegbare Mengen-History bleibt unsupported
 
-## Abschlussvalidierung 4.76.0
+## Abschlussvalidierung 4.77.0
 
 - [x] Gesamtsuite: 3.047 bestanden, 12 übersprungen, 0 fehlgeschlagen
 - [x] Coverage: 87,75 Prozent (17.462/19.899 Zeilen)
