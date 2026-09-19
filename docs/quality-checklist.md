@@ -25,18 +25,18 @@ Stand: 19. September 2026
 
 ## Abschlussvalidierung 4.77.0
 
-- [x] Gesamtsuite: 3.047 bestanden, 12 übersprungen, 0 fehlgeschlagen
-- [x] Coverage: 87,75 Prozent (17.462/19.899 Zeilen)
+- [x] Gesamtsuite: 3.054 bestanden, 12 übersprungen, 0 fehlgeschlagen
+- [x] Coverage: 87,76 Prozent (17.475/19.913 Zeilen)
 - [x] Language Safety: 252 bestanden
 - [x] Shadow: 3.772 Turns, 0 Divergenzen, 0 Action-Leakage
 - [x] vollständiges Pyright: 0 Fehler; CI-identischer Strict-Scope: 0 Fehler
 - [x] lokaler Schema-Smoke mit echtem Home Assistant 2025.1.4:
   `HOME_ASSISTANT_AUTOMATION_AND_CALENDAR_SCHEMA_OK`
 - [x] unverändertes 5k-Performance-Gate in GitHub Actions: grün; höchster
-  gemessener V9-p95 15,57 ms (relationaler Command), produktiver
-  Discourse-Follow-up 2,96 ms
+  gemessener V9-p95 21,55 ms (verschachtelter Filter), produktiver
+  Discourse-Follow-up 2,19 ms
 - [x] HA-Stable-Container-Smoke, Hassfest und HACS: grün in
-  [CI-Lauf 35452062222](https://github.com/pquandel2-alt/ha-nlu-engine/actions/runs/35452062222)
+  [CI-Lauf 35453737883](https://github.com/pquandel2-alt/ha-nlu-engine/actions/runs/35453737883)
 
 Der zusätzliche lokale 5k-Lauf unter einer Host-Last von etwa 61 auf vier
 sichtbaren CPUs war nicht vollständig grün; seine Messwerte werden deshalb

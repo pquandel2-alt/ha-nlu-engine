@@ -57,22 +57,22 @@ dokumentierte GitHub-Actions-Lauf der maßgebliche Performance-Nachweis.
 ## Maßgeblicher Release-Lauf
 
 Der unveränderte Benchmark bestand im
-[GitHub-Actions-Lauf 35452062222](https://github.com/pquandel2-alt/ha-nlu-engine/actions/runs/35452062222)
-auf Commit `3f9e282ff3ace7b63ea9a4911ac9fab6e28a6ac1`. Die für V9 relevanten p95-Werte
+[GitHub-Actions-Lauf 35453737883](https://github.com/pquandel2-alt/ha-nlu-engine/actions/runs/35453737883)
+auf Commit `33fe49b29591c84840648cbc7514ab19546a0870`. Die für V9 relevanten p95-Werte
 bei 5.000 Entities waren:
 
 | Pfad | p95 | Budget |
 |---|---:|---:|
-| einfacher V9-Query | 1,80 ms | 100 ms |
-| relationale Query | 8,99 ms | 500 ms |
-| Zwei-Hop-Relation | 13,87 ms | 500 ms |
-| verschachtelter Filter | 9,22 ms | 250 ms |
-| Aggregate | 8,35 ms | 400 ms |
-| Grouping | 2,02 ms | 100 ms |
-| Superlativ | 4,81 ms | 300 ms |
-| relationaler Command | 15,57 ms | 750 ms |
-| Gruppenreferenz | 6,02 ms | 250 ms |
-| produktiver Discourse-Follow-up | 2,96 ms | 100 ms |
+| einfacher V9-Query | 1,32 ms | 100 ms |
+| relationale Query | 8,80 ms | 500 ms |
+| Zwei-Hop-Relation | 16,19 ms | 500 ms |
+| verschachtelter Filter | 21,55 ms | 250 ms |
+| Aggregate | 6,89 ms | 400 ms |
+| Grouping | 1,43 ms | 100 ms |
+| Superlativ | 3,18 ms | 300 ms |
+| relationaler Command | 13,82 ms | 750 ms |
+| Gruppenreferenz | 4,18 ms | 250 ms |
+| produktiver Discourse-Follow-up | 2,19 ms | 100 ms |
 
 Damit ist das offizielle Performance-Gate grün. Der lokale Lauf oben bleibt
 als transparente Dokumentation der abweichenden, stark belasteten Umgebung

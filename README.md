@@ -128,7 +128,7 @@ Capability-Prüfung, Execution Policy und den zentralen Executor geführt.
 
 Das 5.000-Entity-Gate behält sein 100-ms-p95-Budget unverändert. Im
 maßgeblichen GitHub-Actions-Lauf lag der produktive Discourse-Follow-up bei
-2,96 ms p95; auch alle komplexitätsspezifischen V9-Budgets wurden eingehalten.
+2,19 ms p95; auch alle komplexitätsspezifischen V9-Budgets wurden eingehalten.
 Ein zusätzlicher lokaler Lauf war bei einer Host-Last von etwa 61 auf vier
 sichtbaren CPUs nicht grün und wird nicht als Release-Messung ausgegeben. Die
 vollständigen Werte und die Umgebungsgrenze stehen in
@@ -928,8 +928,8 @@ python -m pytest -q --cov=custom_components/ha_nlu --cov-report=term-missing
 Geprüfter Release-Stand von Version 4.77.0:
 
 ```text
-3047 passed, 12 skipped, 0 failed
-87,75 % Gesamt-Coverage (17462/19899 Zeilen; Terminalanzeige 88 %)
+3054 passed, 12 skipped, 0 failed
+87,76 % Gesamt-Coverage (17475/19913 Zeilen; Terminalanzeige 88 %)
 77 % Coverage für conversation.py
 ```
 
