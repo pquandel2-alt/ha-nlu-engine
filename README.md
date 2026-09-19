@@ -107,15 +107,14 @@ erweitert. Dialogaufgaben verwenden typisierte Manager-Payloads. Persistierte
 oder verzögerte Aktionen werden weiterhin mit frischem Snapshot erneut durch
 Capability-Prüfung, Execution Policy und den zentralen Executor geführt.
 
-Das 5.000-Entity-Gate behält sein 100-ms-p95-Budget unverändert. Der echte
-Discourse-Follow-up liegt im jüngsten Lauf bei 84,23 ms p95. Der vollständige
-lokale Lauf war bei einer Host-Last von etwa 61 auf vier sichtbaren CPUs nicht
-grün; mehrere bereits bestehende Normalpfade zeigten dabei starke Ausreißer.
-Die vollständigen Werte und die Umgebungsgrenze stehen in
+Das 5.000-Entity-Gate behält sein 100-ms-p95-Budget unverändert. Im
+maßgeblichen GitHub-Actions-Lauf lag der produktive Discourse-Follow-up bei
+2,96 ms p95; auch alle komplexitätsspezifischen V9-Budgets wurden eingehalten.
+Ein zusätzlicher lokaler Lauf war bei einer Host-Last von etwa 61 auf vier
+sichtbaren CPUs nicht grün und wird nicht als Release-Messung ausgegeben. Die
+vollständigen Werte und die Umgebungsgrenze stehen in
 [`docs/perf/v9-completion.md`](docs/perf/v9-completion.md). Hassfest, HACS und
-das stabile Home-Assistant-Containerimage werden zusätzlich in den vorhandenen
-CI-Jobs geprüft; die dafür benötigte Container-Runtime ist lokal nicht
-installiert.
+der stabile Home-Assistant-Container-Smoke waren im selben CI-Lauf grün.
 
 Ältere Änderungen stehen in den
 [GitHub-Releases](https://github.com/pquandel2-alt/ha-nlu-engine/releases).
