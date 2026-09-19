@@ -113,6 +113,10 @@ class TraversalMatch:
     path: tuple[GraphRelation, ...]
 
 
+class TraversalLimitExceeded(RuntimeError):
+    """A complete traversal would exceed a deterministic safety bound."""
+
+
 class HouseGraph:
     """Immutable-id graph with deterministic traversal and explanations."""
 
@@ -238,6 +242,9 @@ class HouseGraph:
         *,
         asserted_only: bool = True,
         max_depth: int = 4,
+        max_nodes_visited: int = 20_000,
+        max_frontier_size: int = 5_000,
+        max_paths: int = 10_000,
     ) -> tuple[TraversalMatch, ...]:
         """Follow an explicit bounded relation path using graph indices.
 
@@ -250,11 +257,16 @@ class HouseGraph:
             raise ValueError("max_depth must be between 0 and 8")
         if len(steps) > max_depth:
             raise ValueError("Traversal exceeds its maximum hop depth")
+        if min(max_nodes_visited, max_frontier_size, max_paths) < 1:
+            raise ValueError("Traversal complexity bounds must be positive")
         frontier: list[tuple[str, tuple[GraphRelation, ...], frozenset[str]]] = [
             (node_id, (), frozenset({node_id}))
             for node_id in sorted(set(start_ids))
             if node_id in self._nodes
         ]
+        if len(frontier) > max_frontier_size or len(frontier) > max_paths:
+            raise TraversalLimitExceeded("initial frontier exceeds traversal bound")
+        nodes_visited = len(frontier)
         for step in steps:
             next_frontier: list[
                 tuple[str, tuple[GraphRelation, ...], frozenset[str]]
@@ -283,6 +295,13 @@ class HouseGraph:
                         (*path, relation),
                         visited | {neighbour_id},
                     ))
+                    nodes_visited += 1
+                    if nodes_visited > max_nodes_visited:
+                        raise TraversalLimitExceeded("visited-node bound exceeded")
+                    if len(next_frontier) > max_frontier_size:
+                        raise TraversalLimitExceeded("frontier bound exceeded")
+                    if len(next_frontier) > max_paths:
+                        raise TraversalLimitExceeded("path bound exceeded")
             frontier = next_frontier
             if not frontier:
                 break

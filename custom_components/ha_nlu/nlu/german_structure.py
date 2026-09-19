@@ -201,7 +201,7 @@ _CONNECTORS = tuple(sorted((
 ), key=lambda item: len(item.words), reverse=True))
 
 _RELATIVE_WORDS = frozenset({"der", "die", "das", "welcher", "welche", "welches"})
-_REPAIR_WORDS = frozenset({"nein", "sondern", "stattdessen"})
+_REPAIR_WORDS = frozenset({"nein", "sondern", "stattdessen", "aeh"})
 _NEGATION_WORDS = frozenset({"nicht", "nie", "niemals", "keinesfalls"})
 _NEGATIVE_QUANTIFIERS = frozenset({"kein", "keine", "keinen", "keinem", "keiner", "keines", "niemand"})
 _FINITE_OR_ACTION_SUFFIXES = ("en", "st", "t", "e")

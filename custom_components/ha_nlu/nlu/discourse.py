@@ -61,6 +61,7 @@ class DiscourseGroup:
     relation_provenance: tuple[str, ...]
     turn: int
     salience: int
+    expires_after_turns: int = 4
 
 
 @dataclass(frozen=True)
@@ -163,9 +164,15 @@ def remember_query_group(
     if result.command is None:
         return prior
     turn = prior.turn_index or 1
+    member_ids = result.member_ids or tuple(
+        [f"entity:{item.entity_id}" for item in result.entities]
+        + [f"device:{item.device_id}" for item in result.devices]
+        + [f"area:{item.area_id}" for item in result.areas]
+        + [f"floor:{item.floor_id}" for item in result.floors]
+    )
     member_types = {
         member_id.split(":", 1)[0]
-        for member_id in result.member_ids
+        for member_id in member_ids
         if ":" in member_id
     }
     semantic_type = (
@@ -179,12 +186,12 @@ def remember_query_group(
         for relation_id in step.relation_ids
     }))
     digest = hashlib.sha256(
-        (f"{turn}\0{semantic_type}\0" + "\0".join(result.member_ids)).encode()
+        (f"{turn}\0{semantic_type}\0" + "\0".join(member_ids)).encode()
     ).hexdigest()[:16]
     group = DiscourseGroup(
         group_id=f"group:{digest}",
         semantic_type=semantic_type,
-        member_ids=result.member_ids,
+        member_ids=member_ids,
         origin_query=result.command,
         graph_fragment=semantic_graph,
         filters=tuple(
@@ -220,6 +227,7 @@ def current_discourse_group(
     compatible = tuple(
         group for group in state.groups
         if semantic_type is None or group.semantic_type == semantic_type
+        if state.turn_index - group.turn <= group.expires_after_turns
     )
     return min(
         compatible,

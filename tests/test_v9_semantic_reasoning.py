@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import pytest
 
@@ -19,15 +21,23 @@ from ha_nlu.house_graph import (
     RelationSpec,
     TraversalDirection,
     TraversalStep,
+    TraversalLimitExceeded,
 )
 from ha_nlu.nlu.primitives import SemanticProperty
-from ha_nlu.nlu.discourse import current_discourse_group, remember_query_group
+from ha_nlu.nlu.context import ConversationContext
+from ha_nlu.nlu.discourse import (
+    DiscourseRole,
+    current_discourse_group,
+    remember_entities,
+    remember_query_group,
+)
 from ha_nlu.nlu.query_command import (
     AggregateExpression,
     AggregateKind,
     CompareExpression,
     GroupExpression,
     LimitExpression,
+    LiteralSetExpression,
     MeasurementExpression,
     OrderExpression,
     QueryCommand,
@@ -45,6 +55,8 @@ from ha_nlu.nlu.query_command import (
     SortDirection,
     SourceExpression,
     StateFilterExpression,
+    StateDurationFilterExpression,
+    ThresholdExpression,
 )
 from ha_nlu.nlu.query_executor import QueryExecutor
 from ha_nlu.nlu.semantic_state import SemanticState
@@ -69,6 +81,7 @@ def _entity(
         entity_id, name, domain, state,
         area_id=area, area_name=area_name,
         floor_id=floor, floor_name=floor_name,
+        floor_level=(1 if floor == "upper" else 0),
         device_class=device_class, unit=unit,
     )
 
@@ -183,6 +196,34 @@ def test_superlative_uses_unique_measurement_binding_and_unit_normalization(worl
     assert [step.operation for step in result.trace.steps][-2:] == ["order", "limit"]
 
 
+def test_superlative_limit_retains_equal_boundary_values():
+    entities = [
+        _entity(
+            f"sensor.{area}", f"{area} Temperatur", "sensor", "23",
+            area=area, area_name=area.title(), floor="ground",
+            floor_name="Erdgeschoss", device_class="temperature", unit="°C",
+        )
+        for area in ("a", "b")
+    ]
+    world = build_world_model(entities, [])
+    areas = _source(QueryTargetKind.AREA)
+    result = _run(
+        LimitExpression(
+            OrderExpression(
+                areas,
+                MeasurementExpression(areas, SemanticProperty.TEMPERATURE),
+                SortDirection.DESCENDING,
+            ),
+            1,
+        ),
+        world,
+    )
+
+    assert tuple(area.area_id for area in result.areas) == ("a", "b")
+    assert result.trace is not None
+    assert result.trace.steps[-1].detail == "1;ties=retained"
+
+
 def test_comparative_set_query_compares_against_one_reference_area(world):
     all_areas = _source(QueryTargetKind.AREA)
     office = _source(
@@ -220,6 +261,206 @@ def test_query_result_is_remembered_as_typed_non_executable_group(world):
     assert group.member_ids == ("area:bed", "area:kitchen")
     assert group.origin_query.algebra is not None
     assert group.relation_provenance
+
+
+def test_stale_discourse_literal_never_returns_a_partial_set(world):
+    expression = LiteralSetExpression(
+        QueryTargetKind.AREA, ("area:kitchen", "area:removed")
+    )
+    result = _run(expression, world)
+
+    assert result.status is QueryResultStatus.TARGET_NOT_FOUND
+    assert result.member_ids == ()
+    assert result.trace is not None
+    assert result.trace.steps[-1].operation == "discourse_reference"
+
+
+def _query_context(result, previous=None):
+    assert result.payload is not None and result.payload.command is not None
+    command = result.payload.command
+    query_result = command.parameters["query_result"]
+    discourse = remember_entities(
+        previous.discourse if previous is not None else None,
+        command.entities,
+        role=DiscourseRole.QUERY_RESULT,
+    )
+    discourse = remember_query_group(discourse, query_result)
+    return ConversationContext(
+        last_command=command,
+        last_entities=tuple(command.entities),
+        last_area=command.area,
+        pending_clarification=None,
+        discourse=discourse,
+    )
+
+
+def test_multiturn_area_set_filter_then_relational_command(world):
+    engine = NluEngine()
+    first = engine.understand(
+        "Welche Räume haben offene Fenster?", list(world.entities), world
+    )
+    first_context = _query_context(first)
+
+    second = engine.match_query_followup(
+        "Welche davon sind oben?", list(world.entities), first_context, world
+    )
+
+    assert second is not None and second.command is not None
+    second_result = second.command.parameters["query_result"]
+    assert tuple(area.area_id for area in second_result.areas) == ("bed",)
+    second_context = _query_context(
+        type("Outcome", (), {"payload": second})(), first_context
+    )
+
+    third = engine.match_reference(
+        "Mach dort die Lichter aus.", list(world.entities), second_context, world
+    )
+
+    assert third is not None and third.plan is not None
+    assert third.plan.entity_id == "light.bed"
+
+
+def test_multiturn_area_set_exclusion_uses_difference(world):
+    engine = NluEngine()
+    first = engine.understand(
+        "Welche Räume haben offene Fenster?", list(world.entities), world
+    )
+    context = _query_context(first)
+
+    followup = engine.match_query_followup(
+        "Außer im Schlafzimmer.", list(world.entities), context, world
+    )
+
+    assert followup is not None and followup.command is not None
+    command = followup.command.parameters["query_command"]
+    assert isinstance(command.algebra, SetExpression)
+    assert command.algebra.operator is SetOperator.DIFFERENCE
+    result = followup.command.parameters["query_result"]
+    assert tuple(area.area_id for area in result.areas) == ("kitchen",)
+
+
+def test_multiturn_area_set_accepts_nested_relation_then_floor_filter(world):
+    adjusted = tuple(
+        replace(entity, state="on")
+        if entity.entity_id == "binary_sensor.office_window"
+        else replace(entity, state="75")
+        if entity.entity_id == "sensor.kitchen_temp"
+        else replace(entity, state="23")
+        if entity.entity_id == "sensor.office_temp"
+        else entity
+        for entity in world.entities
+    )
+    adjusted_world = build_world_model(adjusted, [])
+    engine = NluEngine()
+    first = engine.understand(
+        "Welche Räume sind wärmer als das Schlafzimmer?",
+        list(adjusted), adjusted_world,
+    )
+    first_context = _query_context(first)
+
+    second = engine.match_query_followup(
+        "Welche davon haben offene Fenster?",
+        list(adjusted), first_context, adjusted_world,
+    )
+
+    assert second is not None and second.command is not None
+    second_result = second.command.parameters["query_result"]
+    assert tuple(area.area_id for area in second_result.areas) == (
+        "kitchen", "office",
+    )
+    second_context = _query_context(
+        type("Outcome", (), {"payload": second})(), first_context
+    )
+    third = engine.match_query_followup(
+        "Und davon nur die oben.",
+        list(adjusted), second_context, adjusted_world,
+    )
+    assert third is not None and third.command is not None
+    third_result = third.command.parameters["query_result"]
+    assert tuple(area.area_id for area in third_result.areas) == ("office",)
+
+
+def test_multiturn_entity_set_exclusion_uses_normal_command_pipeline(world):
+    standing = _entity(
+        "light.standing", "Stehlampe", "light", "on",
+        area="office", area_name="Büro",
+        floor="upper", floor_name="Obergeschoss",
+    )
+    entities = [*world.entities, standing]
+    expanded_world = build_world_model(entities, [])
+    engine = NluEngine()
+    first = engine.understand("Welche Lampen sind an?", entities, expanded_world)
+    context = _query_context(first)
+
+    second = engine.match_reference(
+        "Alle außer der Stehlampe aus.", entities, context, expanded_world
+    )
+
+    assert second is not None and second.plan is not None
+    assert sorted(second.plan.entity_id) == ["light.kitchen", "light.office"]
+
+
+def test_multiturn_entity_set_can_add_state_filter(world):
+    entities = [
+        replace(entity, state="off")
+        if entity.entity_id == "light.kitchen"
+        else entity
+        for entity in world.entities
+    ]
+    adjusted_world = build_world_model(entities, [])
+    engine = NluEngine()
+    first = engine.understand("Welche Lampen gibt es?", entities, adjusted_world)
+    context = _query_context(first)
+
+    second = engine.match_query_followup(
+        "Und davon nur die, die noch an sind.",
+        entities,
+        context,
+        adjusted_world,
+    )
+
+    assert second is not None and second.command is not None
+    command = second.command.parameters["query_command"]
+    assert isinstance(command.algebra, StateFilterExpression)
+    result = second.command.parameters["query_result"]
+    assert tuple(entity.entity_id for entity in result.entities) == ("light.office",)
+
+
+def test_meaning_changing_quantifier_and_temporal_forms_stay_distinct(world):
+    engine = NluEngine()
+    more_than = engine.understand(
+        "Welche Räume haben mehr als zwei offene Fenster?",
+        list(world.entities), world,
+    )
+    at_least = engine.understand(
+        "Welche Räume haben mindestens zwei offene Fenster?",
+        list(world.entities), world,
+    )
+    duration = engine.understand(
+        "Welche Fenster sind seit fünf Minuten offen?",
+        list(world.entities), world,
+    )
+    history = engine.understand(
+        "Welche Fenster wurden in den letzten fünf Minuten geöffnet?",
+        list(world.entities), world,
+    )
+
+    assert more_than.payload is not None and more_than.payload.command is not None
+    assert at_least.payload is not None and at_least.payload.command is not None
+    left = more_than.payload.command.parameters["query_command"].algebra
+    right = at_least.payload.command.parameters["query_command"].algebra
+    assert isinstance(left, ThresholdExpression)
+    assert isinstance(right, ThresholdExpression)
+    assert left.operator is RelationalOperator.GT
+    assert right.operator is RelationalOperator.GTE
+    assert duration.kind.name == "UNSUPPORTED"
+    assert duration.payload is not None and duration.payload.command is not None
+    assert isinstance(
+        duration.payload.command.parameters["query_command"].algebra,
+        StateDurationFilterExpression,
+    )
+    assert history.kind.name == "UNSUPPORTED"
+    assert history.payload is None or history.payload.command is None
 
 
 def test_multiple_measurements_for_area_are_ambiguous():
@@ -299,6 +540,71 @@ def test_registry_backed_four_hop_sensor_to_floor_traversal():
     assert len(matches[0].path) == 3
 
 
+def test_graph_frontier_bounds_fail_atomically():
+    graph = HouseGraph()
+    graph.add_node(GraphNode("area:root", NodeKind.AREA, "Root"))
+    for index in range(4):
+        node_id = f"area:{index}"
+        graph.add_node(GraphNode(node_id, NodeKind.AREA, node_id))
+        graph.add_relation(
+            "area:root", RelationKind.ADJACENT_TO, node_id,
+            provenance=FactProvenance.CONFIGURED,
+            confidence=ConfidenceClass.CONFIRMED,
+        )
+
+    with pytest.raises(TraversalLimitExceeded):
+        graph.traverse(
+            ("area:root",), (TraversalStep(RelationKind.ADJACENT_TO),),
+            max_frontier_size=3,
+        )
+
+
+def test_state_duration_uses_last_changed_not_event_history():
+    old = EntitySnapshot(
+        "binary_sensor.old", "Altes Fenster", "binary_sensor", "on",
+        device_class="window", last_changed=datetime.now(timezone.utc) - timedelta(minutes=8),
+    )
+    recent = EntitySnapshot(
+        "binary_sensor.recent", "Neues Fenster", "binary_sensor", "on",
+        device_class="window", last_changed=datetime.now(timezone.utc) - timedelta(minutes=2),
+    )
+    world = build_world_model([old, recent], [])
+    expression = StateDurationFilterExpression(
+        StateFilterExpression(
+            _source(QueryTargetKind.ENTITY, domain="binary_sensor", device_class="window"),
+            SemanticState.OPEN,
+        ),
+        300,
+    )
+
+    result = _run(expression, world)
+
+    assert result.status is QueryResultStatus.MATCHED
+    assert result.member_ids == ("entity:binary_sensor.old",)
+    assert result.trace is not None
+    assert result.trace.steps[-1].operation == "filter_duration"
+
+
+def test_state_duration_requires_complete_last_changed_evidence():
+    entity = EntitySnapshot(
+        "binary_sensor.window", "Fenster", "binary_sensor", "on",
+        device_class="window",
+    )
+    result = _run(
+        StateDurationFilterExpression(
+            StateFilterExpression(
+                _source(QueryTargetKind.ENTITY, domain="binary_sensor", device_class="window"),
+                SemanticState.OPEN,
+            ),
+            300,
+        ),
+        build_world_model([entity], []),
+    )
+
+    assert result.status is QueryResultStatus.UNSUPPORTED
+    assert result.member_ids == ()
+
+
 def test_unit_reasoning_is_closed_and_dimension_safe():
     fahrenheit = normalize_measurement(68, "°F", SemanticProperty.TEMPERATURE)
     kilowatts = normalize_measurement(1.5, "kW", SemanticProperty.POWER)
@@ -362,6 +668,50 @@ def test_nested_relational_query_is_productive_end_to_end(world):
     result = outcome.payload.frame.parameters["query_result"]
     assert tuple(entity.entity_id for entity in result.entities) == ("light.kitchen",)
     assert outcome.payload.plan is None
+
+
+def test_relational_projection_is_not_window_specific():
+    door = _entity(
+        "binary_sensor.kitchen_door", "Küchentür", "binary_sensor", "on",
+        area="kitchen", area_name="Küche", floor="ground",
+        floor_name="Erdgeschoss", device_class="door",
+    )
+    world = build_world_model([door], [])
+    outcome = NluEngine().understand(
+        "Welche Räume haben eine offene Tür?", [door], world
+    )
+
+    assert outcome.kind.name == "QUERY"
+    assert outcome.payload is not None and outcome.payload.frame is not None
+    result = outcome.payload.frame.parameters["query_result"]
+    assert tuple(area.area_id for area in result.areas) == ("kitchen",)
+
+
+def test_group_threshold_projects_from_quantifier_components(world):
+    outcome = NluEngine().understand(
+        "Welche Räume haben mindestens zwei offene Fenster?",
+        list(world.entities), world,
+    )
+
+    assert outcome.kind.name == "QUERY"
+    assert outcome.payload is not None and outcome.payload.frame is not None
+    expression = outcome.payload.frame.parameters["query_command"].algebra
+    assert isinstance(expression, ThresholdExpression)
+
+
+def test_negative_relational_scope_projects_to_difference(world):
+    outcome = NluEngine().understand(
+        "Welche Räume haben offene Fenster aber kein eingeschaltetes Licht?",
+        list(world.entities), world,
+    )
+
+    assert outcome.kind.name == "QUERY"
+    assert outcome.payload is not None and outcome.payload.frame is not None
+    expression = outcome.payload.frame.parameters["query_command"].algebra
+    assert isinstance(expression, SetExpression)
+    assert expression.operator is SetOperator.DIFFERENCE
+    result = outcome.payload.frame.parameters["query_result"]
+    assert tuple(area.area_id for area in result.areas) == ("bed",)
 
 
 def test_reasoning_ambiguity_is_never_actionable():
@@ -436,9 +786,11 @@ def test_handwritten_v9_ood_corpus_runs_end_to_end(world):
     engine = NluEngine()
     for case in cases:
         outcome = engine.understand(case["text"], list(world.entities), world)
+        assert outcome.actionable is (
+            "expected_action_entity_ids" in case
+        ), case["text"]
         if "expected_kind" in case:
             assert outcome.kind.name.casefold() == case["expected_kind"], case["text"]
-            assert not outcome.actionable
             continue
         assert outcome.payload is not None and outcome.payload.frame is not None, case["text"]
         if "expected_action_entity_ids" in case:
@@ -451,6 +803,32 @@ def test_handwritten_v9_ood_corpus_runs_end_to_end(world):
             assert [area.area_id for area in result.areas] == case["expected_area_ids"], case["text"]
         if "expected_entity_ids" in case:
             assert [entity.entity_id for entity in result.entities] == case["expected_entity_ids"], case["text"]
+
+
+def test_handwritten_v9_ood_corpus_is_large_unique_and_oracled():
+    cases = json.loads(
+        (Path(__file__).parent / "data" / "v9_reasoning_ood_de.json").read_text()
+    )
+
+    assert len(cases) >= 150
+    assert len({case["text"] for case in cases}) == len(cases)
+    assert all(
+        isinstance(case.get("category"), str) and case["category"]
+        for case in cases
+    )
+    assert all(
+        "expected_kind" in case
+        or "expected_area_ids" in case
+        or "expected_entity_ids" in case
+        or "expected_action_entity_ids" in case
+        for case in cases
+    )
+    categories = {case.get("category") for case in cases}
+    assert {
+        "free_order", "colloquial", "relative", "quantifier", "negation",
+        "aggregate", "measurement", "superlative", "state_duration",
+        "event_history", "hypothetical", "safety", "invalid_repair",
+    } <= categories
 
 
 @pytest.mark.parametrize(

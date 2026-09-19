@@ -77,8 +77,10 @@ def test_query_result_can_carry_matched_entities_and_its_originating_command():
     assert result.command is command
 
 
-def test_query_result_status_members_cover_the_four_documented_cases():
-    assert {s.name for s in QueryResultStatus} == {"MATCHED", "EMPTY", "TARGET_NOT_FOUND", "AMBIGUOUS"}
+def test_query_result_status_members_cover_the_documented_cases():
+    assert {s.name for s in QueryResultStatus} == {
+        "MATCHED", "EMPTY", "TARGET_NOT_FOUND", "AMBIGUOUS", "UNSUPPORTED"
+    }
 
 
 def test_query_scope_members_cover_the_documented_cardinalities():

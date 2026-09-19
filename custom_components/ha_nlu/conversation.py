@@ -1343,7 +1343,9 @@ class NluConversationEntity(
                     user_input.text, entities, pending
                 )
             if result is None:
-                result = self._engine.match_reference(user_input.text, entities, pending)
+                result = self._engine.match_reference(
+                    user_input.text, entities, pending, self._world_model
+                )
             if result is None:
                 result = self._engine.match_query_followup(
                     user_input.text, entities, pending, self._world_model
@@ -2843,7 +2845,13 @@ class NluConversationEntity(
                 semantic_graph=result.command.source_frame.semantic_graph,
             )
             query_result = result.command.parameters.get("query_result")
-            if isinstance(query_result, QueryResult) and query_result.member_ids:
+            if isinstance(query_result, QueryResult) and (
+                query_result.member_ids
+                or query_result.entities
+                or query_result.devices
+                or query_result.areas
+                or query_result.floors
+            ):
                 discourse = remember_query_group(
                     discourse,
                     query_result,

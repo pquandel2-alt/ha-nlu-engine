@@ -290,6 +290,17 @@ def analyse_language(
     utterance = analyse_utterance(text)
     semantics = analyse_semantics(utterance.normalized_text)
     if (
+        utterance.speech_act is SpeechAct.COMMAND
+        and utterance.normalized_text.rstrip().endswith("?")
+        and "locations" in semantics.values(SemanticKind.QUERY_SCOPE)
+        and semantics.values(SemanticKind.DEVICE_CLASS)
+    ):
+        # Interrogatives such as "In welchen Zimmern kann man ... finden?"
+        # may contain lexical command homonyms (notably the article "ein").
+        # A typed location scope plus question punctuation is read-only query
+        # evidence and cannot authorize a service call.
+        utterance = replace(utterance, speech_act=SpeechAct.QUERY)
+    if (
         utterance.speech_act is SpeechAct.STATEMENT
         and utterance.pragmatic_disposition
         is not PragmaticDisposition.ASK_BEFORE_ACTION
@@ -335,6 +346,19 @@ def analyse_language(
         )
         and _has_registry_mention(utterance.normalized_text, entity_tuple)
     ):
+        utterance = replace(utterance, speech_act=SpeechAct.COMMAND)
+    if (
+        utterance.speech_act is SpeechAct.STATEMENT
+        and not utterance.normalized_text.rstrip().endswith("?")
+        and re.search(r"\b(?:nein|sondern|stattdessen|äh|aeh)\b", text, re.I)
+        and re.search(r"\d+(?:[,.]\d+)?", text)
+        and semantics.values(SemanticKind.DOMAIN)
+        and _has_registry_mention(utterance.normalized_text, entity_tuple)
+    ):
+        # A compact spoken setpoint repair ("Rollladen auf 70, nein 40%")
+        # is directive only when the target is a real unique registry name.
+        # The repair projector still checks slot/unit compatibility and the
+        # normal validator/capability/policy pipeline remains authoritative.
         utterance = replace(utterance, speech_act=SpeechAct.COMMAND)
     explicit_unmute = re.search(r"\bnicht\s+mehr\s+stumm\b", text, re.I) is not None
     if explicit_unmute:

@@ -14,6 +14,7 @@ from ha_nlu.nlu.frame import TemporalExpression
 from ha_nlu.nlu.language_frontend import analyse_language
 from ha_nlu.nlu.semantic_interpreter import SemanticInterpreter
 from ha_nlu.nlu.understanding import UnderstandingKind
+from ha_nlu.world_model import build_world_model
 
 LAMP = EntitySnapshot(
     "light.wohnzimmerlampe", "Wohnzimmerlampe", "light", "on",
@@ -82,6 +83,36 @@ def test_absolute_time_hour(engine):
     text = "mach die Wohnzimmerlampe um 20 Uhr an"
     assert _parsed_temporal(text) == TemporalExpression(kind="absolute_time", hour=20)
     _assert_parsed_but_not_immediate(engine, text)
+
+
+def test_relative_one_shot_repair_keeps_only_final_delay(engine):
+    result = engine.match_relative_time_automation(
+        "Mach in zehn Minuten die Wohnzimmerlampe aus — ach nein, in fünf.",
+        ENTITIES,
+        build_world_model(ENTITIES, []),
+    )
+
+    assert result is not None
+    assert result.model.once
+    assert result.model.triggers[0].relative_offset_seconds == 300
+    assert result.model.source_text.endswith("in fünf.")
+
+
+def test_absolute_one_shot_repair_keeps_only_final_time(engine):
+    outside = EntitySnapshot(
+        "light.outside", "Außenbeleuchtung", "light", "on",
+        capabilities=frozenset({"TURN_OFF"}),
+    )
+    result = engine.match_calendar_time_automation(
+        "Um 22 Uhr — nein, um 23 Uhr die Außenbeleuchtung aus.",
+        [outside], build_world_model([outside], []),
+    )
+
+    assert result is not None
+    assert result.model.once
+    assert result.model.calendar_schedule is not None
+    assert result.model.calendar_schedule.hour == 23
+    assert result.model.source_text.startswith("Um 22 Uhr")
 
 
 def test_plain_sentence_without_temporal_modifier_still_works(engine):

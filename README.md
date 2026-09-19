@@ -42,7 +42,28 @@ Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
 
-## Was ist in Version 4.76 neu?
+## Was ist in Version 4.77 neu?
+
+Version 4.77 schließt weitere V9-Reasoning-Lücken innerhalb der bestehenden
+V8/V9-Architektur: relationale Klassenprojektion ist nicht mehr auf Fenster
+beschränkt, gruppierte Kardinalitätsfilter und negative relationale Mengen
+werden in die zentrale Query-Algebra projiziert, und gleichwertige
+Superlativ-Grenzwerte bleiben vollständig erhalten. Typisierte
+Discourse-Resultatmengen können über `davon`/`dort` gefiltert und für einen
+nachfolgenden Befehl live neu geerdet werden. Value- und Property-Repair
+verwenden ausschließlich den finalen kompatiblen Slot. Kontinuierliche
+Zustandsdauer wird aus `last_changed` belegt; Event-History bleibt ohne
+Recorder-Evidenz ausdrücklich unsupported. Relative Zeitkorrekturen laufen
+über denselben persistenten One-Shot-Automationspfad wie unkorrigierte
+Zeitbefehle; eindeutige absolute Uhrzeiten werden ebenfalls als persistente
+One-shot-Automation projiziert. HouseGraph-Traversals besitzen zusätzlich zu `max_depth`
+deterministische Grenzen für besuchte Knoten, Frontier und Pfade.
+Ein unabhängiger handgeschriebener deutscher V9-Korpus prüft 159 OOD-Fälle
+einschließlich freier Wortstellung, Repair, Negation, Quantifier, Messungen,
+Zustandsdauer, Temporalität und Safety-Grenzen. Echte Discourse-Set-Folgen
+werden zusätzlich in separaten Mehrturn-E2E-Tests geprüft.
+
+### Version 4.76
 
 Sprachsatelliten hören nach einer Rückfrage weiter zu. Stellt HomeIntent eine
 Frage – „Soll die Automation erstellt werden?“, „Welchen Rollladen meinst
@@ -105,10 +126,15 @@ erweitert. Dialogaufgaben verwenden typisierte Manager-Payloads. Persistierte
 oder verzögerte Aktionen werden weiterhin mit frischem Snapshot erneut durch
 Capability-Prüfung, Execution Policy und den zentralen Executor geführt.
 
-Die lokale 5.000-Entity-Messung bleibt ohne aufgeweichtes Budget unter
-100 ms p95. Hassfest, HACS und das stabile Home-Assistant-Containerimage
-werden zusätzlich in den vorhandenen CI-Jobs geprüft; die dafür benötigten
-Werkzeuge sind in der lokalen Entwicklungsumgebung nicht installiert.
+Das 5.000-Entity-Gate behält sein 100-ms-p95-Budget unverändert. Der echte
+Discourse-Follow-up liegt im jüngsten Lauf bei 84,23 ms p95. Der vollständige
+lokale Lauf war bei einer Host-Last von etwa 61 auf vier sichtbaren CPUs nicht
+grün; mehrere bereits bestehende Normalpfade zeigten dabei starke Ausreißer.
+Die vollständigen Werte und die Umgebungsgrenze stehen in
+[`docs/perf/v9-completion.md`](docs/perf/v9-completion.md). Hassfest, HACS und
+das stabile Home-Assistant-Containerimage werden zusätzlich in den vorhandenen
+CI-Jobs geprüft; die dafür benötigte Container-Runtime ist lokal nicht
+installiert.
 
 Ältere Änderungen stehen in den
 [GitHub-Releases](https://github.com/pquandel2-alt/ha-nlu-engine/releases).
@@ -900,11 +926,11 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/ha_nlu --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 4.76.0:
+Geprüfter Release-Stand von Version 4.77.0:
 
 ```text
-3030 passed, 12 skipped
-88 % Gesamt-Coverage
+3047 passed, 12 skipped, 0 failed
+87,75 % Gesamt-Coverage (17462/19899 Zeilen; Terminalanzeige 88 %)
 77 % Coverage für conversation.py
 ```
 

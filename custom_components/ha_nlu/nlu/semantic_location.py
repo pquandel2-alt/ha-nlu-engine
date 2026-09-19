@@ -6,7 +6,7 @@ import re
 from typing import TYPE_CHECKING
 
 from ..areas import AreaResolutionStatus, resolve_area_scored
-from ..entities import EntitySnapshot, generate_aliases
+from ..entities import EntitySnapshot, generate_aliases, normalize_for_compare
 from ..floors import (
     FloorResolutionStatus,
     FloorResolveStatus,
@@ -70,9 +70,23 @@ def _inside_entity_name(
     text: str, start: int, end: int, entities: list[EntitySnapshot]
 ) -> bool:
     """Whether a directional word belongs to a registered entity name."""
+    needle = text[start:end].casefold()
+    folded_text = text.casefold()
     for entity in entities:
+        # Alias generation performs several regex substitutions.  A generated
+        # alias cannot invent a directional token, so cheaply reject the
+        # overwhelmingly common non-candidates before doing that work.
+        lexical_sources = (
+            entity.friendly_name,
+            entity.entity_id.replace("_", " ").replace(".", " "),
+            *entity.aliases,
+        )
+        if not any(needle in source.casefold() for source in lexical_sources):
+            continue
         names = (entity.friendly_name, *(alias.text for alias in generate_aliases(entity)))
         for name in names:
+            if name.casefold() not in folded_text:
+                continue
             for match in re.finditer(rf"\b{re.escape(name)}\b", text, re.I):
                 if match.start() <= start and end <= match.end():
                     return True
@@ -130,11 +144,40 @@ def resolve_semantic_location(
     level = next(
         (
             match for match in _LEVEL_CUE_RE.finditer(text)
-            if not _inside_entity_name(text, match.start(), match.end(), entities)
+            if not _inside_entity_name(
+                text,
+                match.start(),
+                match.end(),
+                (
+                    list(world_model.entity_index.by_normalized_name_token.get(
+                        normalize_for_compare(match.group(0)), ()
+                    ))
+                    if world_model is not None
+                    else entities
+                ),
+            )
         ),
         None,
     )
     if level is not None and not explicit_named_location:
+        if world_model is not None:
+            known_levels = tuple(
+                floor.level for floor in world_model.floors
+                if floor.level is not None
+            )
+            if not known_levels:
+                return None
+            extreme = (
+                max(known_levels)
+                if level.group(0).casefold() == "oben"
+                else min(known_levels)
+            )
+            matching = tuple(
+                floor for floor in world_model.floors if floor.level == extreme
+            )
+            if len(matching) != 1:
+                return None
+            return level.group(0), None, matching[0].floor_id
         resolved_level = resolve_floor_by_level_keyword(
             "up" if level.group(0).casefold() == "oben" else "down", entities
         )

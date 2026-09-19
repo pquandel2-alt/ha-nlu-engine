@@ -53,6 +53,7 @@ from .semantic_projection import (
     project_relational_command,
     project_relationship_query,
     project_semantic_reasoning_query,
+    project_property_repair_query,
     project_structured_repair,
     project_value_repair,
     project_structured_command,
@@ -177,6 +178,15 @@ def _resolved_conflicts(
     ``Licht an und aus`` remain conflicts.
     """
     conflicts = list(_conflicts(document))
+    if (
+        "property" in conflicts
+        and isinstance(parse_result, ParseResult)
+        and parse_result.frame.parameters.get("repair_replacement") is not None
+    ):
+        # The structured REPLACES edge and property projector have selected
+        # one final compatible slot; the superseded property remains in the
+        # graph for audit but is no longer an active semantic conflict.
+        conflicts.remove("property")
     if (
         "domain" in conflicts
         and isinstance(parse_result, ParseResult)
@@ -464,7 +474,9 @@ class SemanticInterpreter:
                 and variant.source != "orthographic"
             )
             if may_compile and document.utterance.speech_act is SpeechAct.QUERY:
-                parse_result = project_relational_comparison_query(
+                parse_result = project_property_repair_query(
+                    candidate_document, graph, entities, typed_world_model
+                ) or project_relational_comparison_query(
                     candidate_document, graph, entities, typed_world_model
                 ) or project_relationship_query(
                     candidate_document, graph, entities, typed_world_model

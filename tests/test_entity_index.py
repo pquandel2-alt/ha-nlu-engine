@@ -15,6 +15,8 @@ from ha_nlu.entities import (
     build_entity_index,
     resolve_entity_scored,
 )
+from ha_nlu.nlu.semantic_location import resolve_semantic_location
+from ha_nlu.world_model import build_world_model
 
 LIGHT_WOHNZIMMER = EntitySnapshot(
     "light.wohnzimmer", "Wohnzimmerlicht", "light", "on", area_id="wohnzimmer", area_name="Wohnzimmer",
@@ -54,12 +56,42 @@ def test_by_normalized_alias_covers_entity_id_and_configured_alias():
     assert LIGHT_KUECHE in index.by_normalized_alias["kueche"]
 
 
+def test_name_token_index_covers_names_and_generated_aliases():
+    upstairs = EntitySnapshot(
+        "light.badlicht_oben", "Badlicht oben", "light", "off",
+        floor_id="og", floor_name="Obergeschoss", floor_level=1,
+    )
+    index = build_entity_index([upstairs])
+
+    assert index.by_normalized_name_token["oben"] == (upstairs,)
+    assert index.by_normalized_name_token["badlicht"] == (upstairs,)
+
+
+def test_indexed_level_cue_still_distinguishes_entity_name_from_floor():
+    downstairs = EntitySnapshot(
+        "light.kueche", "Küchenlicht", "light", "off",
+        floor_id="eg", floor_name="Erdgeschoss", floor_level=0,
+    )
+    upstairs = EntitySnapshot(
+        "light.badlicht_oben", "Badlicht oben", "light", "off",
+        floor_id="og", floor_name="Obergeschoss", floor_level=1,
+    )
+    entities = [downstairs, upstairs]
+    world = build_world_model(entities, [])
+
+    assert resolve_semantic_location("Ist Badlicht oben an?", entities, world) is None
+    assert resolve_semantic_location("Welche davon sind oben?", entities, world) == (
+        "oben", None, "og",
+    )
+
+
 def test_empty_entities_yields_empty_index():
     index = build_entity_index([])
     assert index.by_domain == {}
     assert index.by_area == {}
     assert index.by_normalized_name == {}
     assert index.by_normalized_alias == {}
+    assert index.by_normalized_name_token == {}
 
 
 # --- resolve_entity_scored(index=...) - candidate prefilter (World Model Wave 1) ---

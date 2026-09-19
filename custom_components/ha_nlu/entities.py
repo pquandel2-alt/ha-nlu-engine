@@ -539,6 +539,7 @@ class EntityIndex:
     by_area: Mapping[str, tuple[EntitySnapshot, ...]]
     by_normalized_name: Mapping[str, tuple[EntitySnapshot, ...]]
     by_normalized_alias: Mapping[str, tuple[EntitySnapshot, ...]]
+    by_normalized_name_token: Mapping[str, tuple[EntitySnapshot, ...]]
 
 
 def build_entity_index(entities: list[EntitySnapshot]) -> EntityIndex:
@@ -555,18 +556,31 @@ def build_entity_index(entities: list[EntitySnapshot]) -> EntityIndex:
     by_area: dict[str, list[EntitySnapshot]] = {}
     by_normalized_name: dict[str, list[EntitySnapshot]] = {}
     by_normalized_alias: dict[str, list[EntitySnapshot]] = {}
+    by_normalized_name_token: dict[str, list[EntitySnapshot]] = {}
 
     for entity in entities:
         by_domain.setdefault(entity.domain, []).append(entity)
         if entity.area_id is not None:
             by_area.setdefault(entity.area_id, []).append(entity)
-        by_normalized_name.setdefault(normalize_for_compare(entity.friendly_name), []).append(entity)
-        for alias in generate_aliases(entity):
-            by_normalized_alias.setdefault(normalize_for_compare(alias.text), []).append(entity)
+        normalized_name = normalize_for_compare(entity.friendly_name)
+        by_normalized_name.setdefault(normalized_name, []).append(entity)
+        aliases = generate_aliases(entity)
+        normalized_aliases = tuple(normalize_for_compare(alias.text) for alias in aliases)
+        for normalized_alias in normalized_aliases:
+            by_normalized_alias.setdefault(normalized_alias, []).append(entity)
+        for token in {
+            token
+            for candidate in (normalized_name, *normalized_aliases)
+            for token in candidate.split()
+        }:
+            by_normalized_name_token.setdefault(token, []).append(entity)
 
     return EntityIndex(
         by_domain={key: tuple(value) for key, value in by_domain.items()},
         by_area={key: tuple(value) for key, value in by_area.items()},
         by_normalized_name={key: tuple(value) for key, value in by_normalized_name.items()},
         by_normalized_alias={key: tuple(value) for key, value in by_normalized_alias.items()},
+        by_normalized_name_token={
+            key: tuple(value) for key, value in by_normalized_name_token.items()
+        },
     )

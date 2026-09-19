@@ -69,17 +69,24 @@ STATE_ENTRIES = (
 QUANTIFIER_ENTRIES = (
     CatalogueEntry("all", (r"alle\w*", r"sämtliche\w*", r"jede\w*", r"überall", r"die\s+ganzen")),
     CatalogueEntry("both", (r"beide\w*",)),
+    CatalogueEntry("any", (r"irgendein\w*", r"mindestens\s+ein\w*")),
+    CatalogueEntry("none", (r"kein\w*", r"keiner\s+davon")),
+    CatalogueEntry("some", (r"einige\w*", r"mehrere\w*")),
 )
 
 QUERY_SCOPE_ENTRIES = (
     CatalogueEntry("count", (r"wie\s+viele",)),
     CatalogueEntry(
-        "locations", (r"wo", r"in\s+welchen\s+räumen", r"welche\s+räume")
+        "locations", (
+            r"wo",
+            r"in\s+welchen\s+(?:räumen|zimmern)",
+            r"welche\s+(?:räume|zimmer)",
+        )
     ),
     CatalogueEntry(
         "exists", (r"gibt\s+es", r"haben\s+wir", r"irgendein\w*", r"irgendwelche")
     ),
-    CatalogueEntry("none", (r"kein\w*",)),
+    CatalogueEntry("none", (r"kein\w*", r"ohne")),
     CatalogueEntry("average", (r"durchschnitt\w*",)),
     CatalogueEntry(
         "measurement", (r"wie\s+viel", r"aktuell\w*", r"momentan", r"gerade")
@@ -93,9 +100,12 @@ AUTOMATION_CUE_ENTRIES = (
 PROPERTY_ENTRIES = (
     CatalogueEntry(
         "temperature",
-        (r"temperatur", r"wärme", r"warm", r"kalt", r"wärm\w*", r"waerm\w*", r"kält\w*", r"kaelt\w*", r"grad"),
+        (r"temperatur\w*", r"wärme", r"warm", r"kalt", r"wärm\w*", r"waerm\w*", r"kält\w*", r"kaelt\w*", r"grad"),
     ),
-    CatalogueEntry("humidity", (r"luftfeuchtigkeit", r"feuchtigkeit", r"feucht")),
+    CatalogueEntry(
+        "humidity",
+        (r"luftfeuchtigkeit\w*", r"feuchtigkeit\w*", r"feucht\w*"),
+    ),
     CatalogueEntry("battery", (r"batteriestand", r"batterie", r"batterien")),
     CatalogueEntry("power", (r"leistung", r"strom(?:aufnahme)?")),
     CatalogueEntry(
@@ -126,8 +136,9 @@ COMPARATOR_ENTRIES = (
             r"wärmer\s+als", r"waermer\s+als", r"höher\s+als", r"hoeher\s+als",
         ),
     ),
-    CatalogueEntry("lte", (r"höchstens", r"nicht\s+höher\s+als")),
-    CatalogueEntry("gte", (r"mindestens",)),
+    CatalogueEntry("lte", (r"höchstens", r"maximal", r"nicht\s+höher\s+als")),
+    CatalogueEntry("gte", (r"mindestens", r"wenigstens", r"\w+\s+oder\s+mehr")),
+    CatalogueEntry("eq", (r"genau",)),
 )
 
 RELATION_ENTRIES = (
