@@ -19,15 +19,18 @@ nothing in ``engine.py``/``parsers.py`` constructs a ``QueryExecutor``.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from ..automation_summary import AutomationSummary
 from ..entities import EntitySnapshot
 from ..world_model import WorldModel
 from ..house_graph import (
+    NodeKind,
     RelationKind,
     TraversalDirection,
     TraversalMatch,
     TraversalStep,
+    TraversalLimitExceeded,
 )
 from .query_command import (
     AggregateExpression,
@@ -36,6 +39,7 @@ from .query_command import (
     GroupExpression,
     GroupedValue,
     LimitExpression,
+    LiteralSetExpression,
     MeasurementExpression,
     OrderExpression,
     PropertyOperand,
@@ -56,6 +60,7 @@ from .query_command import (
     SortDirection,
     SourceExpression,
     StateFilterExpression,
+    StateDurationFilterExpression,
     ThresholdExpression,
     TraverseExpression,
 )
@@ -120,12 +125,24 @@ class QueryExecutor:
                 trace=ReasoningTrace((ReasoningStep("cost", detail=str(cost)),)),
                 command=command,
             )
-        evaluated = cls._evaluate(algebra, world_model)
+        try:
+            evaluated = cls._evaluate(algebra, world_model)
+        except TraversalLimitExceeded as err:
+            return QueryResult(
+                QueryResultStatus.UNSUPPORTED,
+                trace=ReasoningTrace((ReasoningStep("complexity_limit", detail=str(err)),)),
+                command=command,
+            )
         trace = ReasoningTrace(tuple(evaluated.steps))
         if evaluated.ambiguous:
             return QueryResult(QueryResultStatus.AMBIGUOUS, trace=trace, command=command)
         if evaluated.unsupported:
-            return QueryResult(QueryResultStatus.TARGET_NOT_FOUND, trace=trace, command=command)
+            status = (
+                QueryResultStatus.UNSUPPORTED
+                if any(step.operation == "filter_duration" for step in evaluated.steps)
+                else QueryResultStatus.TARGET_NOT_FOUND
+            )
+            return QueryResult(status, trace=trace, command=command)
         entities = tuple(
             entity
             for member_id in evaluated.member_ids
@@ -217,6 +234,21 @@ class QueryExecutor:
                 steps=[ReasoningStep("source", output_ids=members, detail=target.kind.name.lower())],
             )
 
+        if isinstance(expression, LiteralSetExpression):
+            known = {
+                QueryTargetKind.ENTITY: {f"entity:{item.entity_id}" for item in world.entities},
+                QueryTargetKind.AREA: {f"area:{item.area_id}" for item in world.areas},
+                QueryTargetKind.FLOOR: {f"floor:{item.floor_id}" for item in world.floors},
+                QueryTargetKind.DEVICE: {f"device:{item.device_id}" for item in world.devices},
+            }.get(expression.kind, set())
+            members = tuple(sorted(set(expression.member_ids) & known))
+            return _Evaluation(
+                expression.kind,
+                members,
+                steps=[ReasoningStep("discourse_reference", expression.member_ids, members)],
+                unsupported=(set(members) != set(expression.member_ids)),
+            )
+
         if isinstance(expression, StateFilterExpression):
             source = cls._evaluate(expression.source, world)
             state_matches = tuple(
@@ -233,6 +265,35 @@ class QueryExecutor:
             source.member_ids = state_matches
             return source
 
+        if isinstance(expression, StateDurationFilterExpression):
+            source = cls._evaluate(expression.source, world)
+            now = datetime.now(timezone.utc)
+            duration_matches: list[str] = []
+            missing_evidence = False
+            for member_id in source.member_ids:
+                if not member_id.startswith("entity:"):
+                    missing_evidence = True
+                    continue
+                entity = world.entities_by_id.get(member_id.removeprefix("entity:"))
+                if entity is None or entity.last_changed is None:
+                    missing_evidence = True
+                    continue
+                changed = entity.last_changed
+                if changed.tzinfo is None:
+                    missing_evidence = True
+                    continue
+                if (now - changed.astimezone(timezone.utc)).total_seconds() >= expression.minimum_seconds:
+                    duration_matches.append(member_id)
+            source.steps.append(ReasoningStep(
+                "filter_duration", source.member_ids, tuple(duration_matches),
+                detail=f">={expression.minimum_seconds}s:last_changed",
+            ))
+            source.member_ids = tuple(duration_matches)
+            # Missing timestamps make a complete answer impossible. Never
+            # silently report a partial set as though it were exhaustive.
+            source.unsupported = source.unsupported or missing_evidence
+            return source
+
         if isinstance(expression, TraverseExpression):
             source = cls._evaluate(expression.source, world)
             matches = graph.traverse(
@@ -240,6 +301,9 @@ class QueryExecutor:
                 tuple(TraversalStep(kind, direction) for kind, direction in expression.traversal.steps),
                 asserted_only=expression.traversal.asserted_only,
                 max_depth=expression.traversal.max_depth,
+                max_nodes_visited=expression.traversal.max_nodes_visited,
+                max_frontier_size=expression.traversal.max_frontier_size,
+                max_paths=expression.traversal.max_paths,
             )
             members = tuple(match.node.node_id for match in matches)
             source.steps.append(ReasoningStep(
@@ -254,6 +318,11 @@ class QueryExecutor:
         if isinstance(expression, RelationFilterExpression):
             source = cls._evaluate(expression.source, world)
             nested = cls._evaluate(expression.nested, world)
+            if (
+                len(source.member_ids) > expression.traversal.max_nodes_visited
+                or len(source.member_ids) > expression.traversal.max_paths
+            ):
+                raise TraversalLimitExceeded("relation-filter source bound exceeded")
             accepted = set(nested.member_ids)
             matched_ids: list[str] = []
             filter_relation_ids: list[str] = []
@@ -292,11 +361,19 @@ class QueryExecutor:
                         )
                         for node in nodes
                     )
+                    if (
+                        len(reached) > expression.traversal.max_frontier_size
+                        or len(reached) > expression.traversal.max_paths
+                    ):
+                        raise TraversalLimitExceeded("relation-filter frontier bound exceeded")
                 else:
                     reached = graph.traverse(
                         (member_id,), steps,
                         asserted_only=expression.traversal.asserted_only,
                         max_depth=expression.traversal.max_depth,
+                        max_nodes_visited=expression.traversal.max_nodes_visited,
+                        max_frontier_size=expression.traversal.max_frontier_size,
+                        max_paths=expression.traversal.max_paths,
                     )
                 proving = tuple(item for item in reached if item.node.node_id in accepted)
                 if proving:
@@ -384,7 +461,28 @@ class QueryExecutor:
 
         if isinstance(expression, GroupExpression):
             source = cls._evaluate(expression.source, world)
+            if (
+                len(source.member_ids) > expression.traversal.max_nodes_visited
+                or len(source.member_ids) > expression.traversal.max_paths
+            ):
+                raise TraversalLimitExceeded("group source bound exceeded")
             grouped: dict[str, list[str]] = {}
+            if expression.include_empty_groups:
+                node_kind = {
+                    QueryTargetKind.AREA: NodeKind.AREA,
+                    QueryTargetKind.FLOOR: NodeKind.FLOOR,
+                    QueryTargetKind.DEVICE: NodeKind.DEVICE,
+                }.get(expression.group_kind)
+                if node_kind is None:
+                    source.unsupported = True
+                    return source
+                grouped.update(
+                    (node.node_id, [])
+                    for node in graph.nodes
+                    if node.kind is node_kind
+                )
+                if len(grouped) > expression.traversal.max_frontier_size:
+                    raise TraversalLimitExceeded("empty group universe bound exceeded")
             group_relation_ids: set[str] = set()
             traversal_steps = tuple(
                 TraversalStep(kind, direction)
@@ -413,11 +511,19 @@ class QueryExecutor:
                         )
                         for node in nodes
                     )
+                    if (
+                        len(matches) > expression.traversal.max_frontier_size
+                        or len(matches) > expression.traversal.max_paths
+                    ):
+                        raise TraversalLimitExceeded("group frontier bound exceeded")
                 else:
                     matches = graph.traverse(
                         (member_id,), traversal_steps,
                         asserted_only=expression.traversal.asserted_only,
                         max_depth=expression.traversal.max_depth,
+                        max_nodes_visited=expression.traversal.max_nodes_visited,
+                        max_frontier_size=expression.traversal.max_frontier_size,
+                        max_paths=expression.traversal.max_paths,
                     )
                 for match in matches:
                     grouped.setdefault(match.node.node_id, []).append(member_id)
@@ -579,8 +685,9 @@ class QueryExecutor:
             reverse = expression.direction is SortDirection.DESCENDING
             members = tuple(sorted(
                 (item for item in source.member_ids if item in key.values),
-                key=lambda item: (key.values[item], item),
-                reverse=reverse,
+                key=lambda item: (
+                    -key.values[item] if reverse else key.values[item], item
+                ),
             ))
             source.steps.extend(key.steps)
             source.steps.append(ReasoningStep(
@@ -594,8 +701,20 @@ class QueryExecutor:
         if isinstance(expression, LimitExpression):
             source = cls._evaluate(expression.source, world)
             limited = source.member_ids[:expression.count]
+            if source.values and limited:
+                boundary = source.values.get(limited[-1])
+                if boundary is not None:
+                    limited = tuple(
+                        member_id for member_id in source.member_ids
+                        if member_id in limited
+                        or source.values.get(member_id) == boundary
+                    )
             source.steps.append(ReasoningStep(
-                "limit", source.member_ids, limited, detail=str(expression.count)
+                "limit", source.member_ids, limited,
+                detail=(
+                    f"{expression.count};ties=retained"
+                    if len(limited) > expression.count else str(expression.count)
+                ),
             ))
             source.member_ids = limited
             return source
@@ -605,9 +724,9 @@ class QueryExecutor:
     @classmethod
     def _query_cost(cls, expression: QueryExpression, candidate_count: int) -> int:
         """Conservative deterministic complexity score; never changes meaning."""
-        if isinstance(expression, SourceExpression):
+        if isinstance(expression, (SourceExpression, LiteralSetExpression)):
             return max(1, candidate_count)
-        if isinstance(expression, StateFilterExpression):
+        if isinstance(expression, (StateFilterExpression, StateDurationFilterExpression)):
             return cls._query_cost(expression.source, candidate_count) + candidate_count
         if isinstance(expression, TraverseExpression):
             return cls._query_cost(expression.source, candidate_count) + candidate_count * len(expression.traversal.steps)

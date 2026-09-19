@@ -20,7 +20,7 @@ from ..world_model import WorldModel
 from .composition import CompositionalPlan
 from .constraint_resolver import Constraints, resolve_candidates
 from .domain_operations import INTENT_BY_DOMAIN_ACTION
-from .semantic_catalog import VALUE_INTENT_BY_DOMAIN_PROPERTY
+from .semantic_catalog import MEASUREMENT_PROPERTY_SPECS, VALUE_INTENT_BY_DOMAIN_PROPERTY
 from .entity_resolution import ResolutionStatus, resolve_entity_scored
 from .entity_resolution import all_mentioned_entities
 from .frame import AreaReference, Quantifier, SemanticFrame, TargetReference
@@ -55,17 +55,23 @@ from .query_command import (
     RelationalOperator,
     RelationConstraint,
     RelationFilterExpression,
+    SetExpression,
+    SetOperator,
     SortDirection,
     SourceExpression,
     StateFilterExpression,
+    StateDurationFilterExpression,
     ThresholdExpression,
     QueryTraversal,
+    ReasoningStep,
+    ReasoningTrace,
 )
 from .query_executor import QueryExecutor
 from .semantic_graph import SemanticEdgeKind, SemanticGraph, SemanticNodeKind
 from .semantic_lexicon import SemanticKind, SemanticSpan
 from .semantic_location import resolve_coordinated_locations, resolve_semantic_location
 from .semantic_state import SemanticState, matches_semantic_state
+from .temporal_semantics import TemporalKind
 
 
 class ProjectionStatus(Enum):
@@ -136,6 +142,16 @@ def _state_for_device_class(
     )
     if not matching:
         return None
+    if device_class in {"window", "door", "garage_door"}:
+        for index, token in enumerate(document.tokens):
+            if token.canonical != "auf":
+                continue
+            following = (
+                document.tokens[index + 1]
+                if index + 1 < len(document.tokens) else None
+            )
+            if following is None or not following.is_number:
+                return SemanticState.OPEN
     anchor = matching[0]
     states = tuple(
         span for span in document.semantics.matching(SemanticKind.STATE)
@@ -224,20 +240,91 @@ def project_semantic_reasoning_query(
     scopes = {str(value) for value in document.semantics.values(SemanticKind.QUERY_SCOPE)}
     area_target = lexical_area_target or "locations" in scopes
     comparators = tuple(str(value) for value in document.semantics.values(SemanticKind.COMPARATOR))
+    domain_spans = document.semantics.matching(SemanticKind.DOMAIN)
+    negated_domain_constraint = any(
+        (clause := document.structure.clause_for_char(span.start)) is not None
+        and any(
+            negation.clause_id == clause.clause_id
+            for negation in document.structure.negations
+        )
+        for span in domain_spans
+    )
+    area_positions = tuple(
+        span.start
+        for span in document.semantics.matching(SemanticKind.QUERY_SCOPE)
+        if str(span.value) == "locations"
+    ) + tuple(
+        token.start
+        for token in document.tokens
+        if token.canonical in {
+            "raum", "räume", "räumen", "raeume", "raeumen",
+            "zimmer", "zimmern",
+        }
+    )
+    domain_positions = tuple(
+        span.start for span in document.semantics.matching(SemanticKind.DOMAIN)
+    )
+    # In "Lampen in Räumen ..." the entity precedes and therefore owns the
+    # question focus.  In "Räume ... aber kein Licht" the room set remains
+    # the focus and the later entity phrase is a constraint on that set.
+    primary_entity_target = bool(
+        domains
+        and area_positions
+        and domain_positions
+        and min(domain_positions) < min(area_positions)
+    )
 
     expression = None
     output_kind = QueryTargetKind.ENTITY
 
+    # Continuous current-state duration comes from the typed temporal span.
+    # Event-history wording has no SINCE expression and therefore cannot be
+    # collapsed into this last_changed-backed operation.
+    since = tuple(
+        item for item in document.temporal
+        if item.kind is TemporalKind.SINCE and item.seconds is not None
+    )
+    state_values = tuple(
+        span.value for span in document.semantics.matching(SemanticKind.STATE)
+        if isinstance(span.value, SemanticState)
+        and span.text.casefold() not in {"ein", "eine", "einen", "einem", "einer"}
+    )
+    if len(since) == 1 and len(set(state_values)) == 1:
+        if len(classes) == 1:
+            duration_domain = str(classes[0][0])
+            duration_class = str(classes[0][1])
+        elif len(set(domains)) == 1:
+            duration_domain = domains[0]
+            duration_class = None
+        else:
+            duration_domain = ""
+            duration_class = None
+        if duration_domain:
+            expression = StateDurationFilterExpression(
+                StateFilterExpression(
+                    _entity_source(duration_domain, duration_class), state_values[0]
+                ),
+                since[0].seconds or 0,
+            )
+
     # Generic target + relation + nested constraint.
-    window_class = next((item for item in classes if item[1] == "window"), None)
-    if window_class is not None:
-        window_state = _state_for_device_class(document, "window") or SemanticState.OPEN
-        windows = StateFilterExpression(
-            _entity_source(str(window_class[0]), str(window_class[1])), window_state
+    related_class = next(
+        (
+            item for item in classes
+            if _state_for_device_class(document, str(item[1])) is not None
+        ),
+        classes[0] if len(classes) == 1 else None,
+    )
+    if related_class is not None:
+        related_state = _state_for_device_class(document, str(related_class[1]))
+        related_entities: SourceExpression | StateFilterExpression = _entity_source(
+            str(related_class[0]), str(related_class[1])
         )
+        if related_state is not None:
+            related_entities = StateFilterExpression(related_entities, related_state)
         if floor_group:
             expression = GroupExpression(
-                windows,
+                related_entities,
                 QueryTraversal(((RelationKind.ON_FLOOR, TraversalDirection.OUTGOING),)),
                 QueryTargetKind.FLOOR,
             )
@@ -252,29 +339,67 @@ def project_semantic_reasoning_query(
                     kind=QueryTargetKind.AREA, floor_id=requested_floor
                 )),
                 QueryTraversal(((RelationKind.LOCATED_IN, TraversalDirection.INCOMING),)),
-                windows,
+                related_entities,
             )
-            if domains:
+            outer_states = tuple(
+                span.value
+                for span in document.semantics.matching(SemanticKind.STATE)
+                if span.value is not related_state
+                and span.text.casefold()
+                not in {"ein", "eine", "einen", "einem", "einer"}
+                and not (
+                    related_state is SemanticState.OPEN
+                    and span.text.casefold() == "steht"
+                )
+            )
+            if domains and ("none" in scopes or negated_domain_constraint):
+                target_domain = domains[0]
+                excluded_entities: SourceExpression | StateFilterExpression = _entity_source(
+                    target_domain
+                )
+                if len(set(outer_states)) == 1:
+                    excluded_entities = StateFilterExpression(
+                        excluded_entities, outer_states[0]  # type: ignore[arg-type]
+                    )
+                excluded_areas = RelationFilterExpression(
+                    SourceExpression(QueryTarget(kind=QueryTargetKind.AREA)),
+                    QueryTraversal(((RelationKind.LOCATED_IN, TraversalDirection.INCOMING),)),
+                    excluded_entities,
+                )
+                expression = SetExpression(areas, SetOperator.DIFFERENCE, excluded_areas)
+                output_kind = QueryTargetKind.AREA
+            elif domains and primary_entity_target:
                 target_domain = domains[0]
                 expression = RelationFilterExpression(
                     _entity_source(target_domain),
                     QueryTraversal(((RelationKind.LOCATED_IN, TraversalDirection.OUTGOING),)),
                     areas,
                 )
-                outer_states = tuple(
-                    span.value
-                    for span in document.semantics.matching(SemanticKind.STATE)
-                    if span.value is not window_state
-                    and span.text.casefold()
-                    not in {"ein", "eine", "einen", "einem", "einer"}
-                )
                 if len(set(outer_states)) == 1:
                     expression = StateFilterExpression(expression, outer_states[0])  # type: ignore[arg-type]
+            elif domains:
+                target_domain = domains[0]
+                constrained_entities: SourceExpression | StateFilterExpression = (
+                    _entity_source(target_domain)
+                )
+                if len(set(outer_states)) == 1:
+                    constrained_entities = StateFilterExpression(
+                        constrained_entities, outer_states[0]  # type: ignore[arg-type]
+                    )
+                constrained_areas = RelationFilterExpression(
+                    SourceExpression(QueryTarget(kind=QueryTargetKind.AREA)),
+                    QueryTraversal(((RelationKind.LOCATED_IN, TraversalDirection.INCOMING),)),
+                    constrained_entities,
+                )
+                expression = SetExpression(
+                    areas, SetOperator.INTERSECTION, constrained_areas
+                )
+                output_kind = QueryTargetKind.AREA
             else:
                 expression = areas
                 output_kind = QueryTargetKind.AREA
 
-            if "exists" in scopes and comparators:
+            if comparators:
                 number = next(
                     (
                         int(word) if word.isdigit() else _NUMBER_WORDS[word]
@@ -286,19 +411,40 @@ def project_semantic_reasoning_query(
                 operator = _RELATIONAL_OPERATOR.get(comparators[0])
                 if number is not None and operator is not None:
                     grouped = GroupExpression(
-                        windows,
+                        related_entities,
                         QueryTraversal(((RelationKind.LOCATED_IN, TraversalDirection.OUTGOING),)),
                         QueryTargetKind.AREA,
+                        include_empty_groups=(
+                            operator in {
+                                RelationalOperator.LTE,
+                                RelationalOperator.EQ,
+                            }
+                        ),
                     )
-                    expression = AggregateExpression(
-                        ThresholdExpression(grouped, operator, float(number)),
-                        AggregateKind.EXISTS,
-                    )
+                    threshold = ThresholdExpression(grouped, operator, float(number))
+                    if "exists" in scopes and "locations" not in scopes:
+                        expression = AggregateExpression(threshold, AggregateKind.EXISTS)
+                    else:
+                        expression = (
+                            SetExpression(
+                                threshold,
+                                SetOperator.INTERSECTION,
+                                SourceExpression(QueryTarget(
+                                    kind=QueryTargetKind.AREA,
+                                    floor_id=requested_floor,
+                                )),
+                            )
+                            if requested_floor is not None else threshold
+                        )
+                        output_kind = QueryTargetKind.AREA
 
     # Measurement superlative over a typed selection scope.
     superlative = any(
         marker in normalized
-        for marker in ("wärmsten", "waermsten", "kältesten", "kaeltesten", "höchsten", "hoechsten", "niedrigsten")
+        for marker in (
+            "wärmst", "waermst", "kältest", "kaeltest", "höchst", "hoechst",
+            "niedrigst", "feuchtest",
+        )
     )
     if expression is None and properties and superlative:
         property_ = _PROPERTY_ENUM.get(properties[0])
@@ -312,7 +458,7 @@ def project_semantic_reasoning_query(
                 return None
             direction = (
                 SortDirection.ASCENDING
-                if any(marker in normalized for marker in ("kältesten", "kaeltesten", "niedrigsten"))
+                if any(marker in normalized for marker in ("kältest", "kaeltest", "niedrigst"))
                 else SortDirection.DESCENDING
             )
             expression = LimitExpression(
@@ -377,6 +523,114 @@ def project_semantic_reasoning_query(
     )
 
 
+def project_property_repair_query(
+    document: LanguageDocument,
+    graph: SemanticGraph,
+    entities: list[EntitySnapshot],
+    world_model: WorldModel | None,
+) -> ParseResult | None:
+    """Replace one query property while retaining one proven location slot."""
+    replacements = tuple(
+        relation for relation in document.structure.relations
+        if relation.kind is StructuralRelationKind.REPLACES
+    )
+    if len(replacements) != 1:
+        return None
+    clauses = {clause.clause_id: clause for clause in document.structure.clauses}
+    original = clauses.get(replacements[0].source_clause)
+    replacement = clauses.get(replacements[0].target_clause)
+    if original is None or replacement is None:
+        return None
+    spans = document.semantics.matching(SemanticKind.PROPERTY)
+    old = {str(span.value) for span in spans if original.char_start <= span.start < original.char_end}
+    new = {str(span.value) for span in spans if replacement.char_start <= span.start < replacement.char_end}
+    if len(old) != 1 or len(new) != 1 or old == new:
+        return None
+    property_name = next(iter(new))
+    spec = MEASUREMENT_PROPERTY_SPECS.get(property_name)
+    if spec is None:
+        return None
+    original_text = document.source_text[original.char_start:original.char_end]
+    replacement_text = document.source_text[replacement.char_start:replacement.char_end]
+    location = resolve_semantic_location(original_text, entities, world_model)
+    if location is None or resolve_semantic_location(replacement_text, entities, world_model) is not None:
+        return None
+    domain, device_class, label, canonical_property = spec
+    pool = (
+        world_model.select_entities(
+            domain=domain, device_class=device_class,
+            area_id=location[1], floor_id=location[2],
+        )
+        if world_model is not None else tuple(entities)
+    )
+    matched = tuple(
+        entity for entity in pool
+        if entity.domain == domain and entity.device_class == device_class
+        and (location[1] is None or entity.area_id == location[1])
+        and (location[2] is None or entity.floor_id == location[2])
+    )
+    if not matched:
+        return None
+    primary = matched[0]
+    if location[1] is not None and len(matched) > 1:
+        preferred_ids = {
+            node.node_id.removeprefix("entity:")
+            for node in world_model.house_graph.related(
+                f"area:{location[1]}", RelationKind.PREFERRED_MEASUREMENT
+            )
+            if node.node_id.startswith("entity:")
+        } if world_model is not None else set()
+        preferred = tuple(
+            entity for entity in matched if entity.entity_id in preferred_ids
+        )
+        if len(preferred) == 1:
+            primary = preferred[0]
+            matched = (primary,)
+    single_scope = location[1] is not None
+    query_command = QueryCommand(
+        "HassGetState",
+        QueryScope.SINGLE if single_scope else QueryScope.LIST,
+        QueryTarget(
+            domain=domain,
+            device_class=device_class,
+            entity_id=primary.entity_id if len(matched) == 1 else None,
+        ),
+        QueryFilter(),
+    )
+    query_result = _QUERY_EXECUTOR.execute(query_command, list(matched), world_model)
+    return ParseResult(
+        frame=SemanticFrame(
+            intent="HassGetState" if single_scope else "HassLocationPropertyQuery",
+            target=TargetReference(
+                location[0], primary.entity_id if len(matched) == 1 else None,
+                domain, device_class,
+            ),
+            area=(AreaReference(location[0], location[1], primary.area_name) if location[1] else None),
+            quantifier=None if single_scope else Quantifier("all"),
+            parameters={
+                "property": canonical_property, "property_label": label,
+                "average": False,
+                "location_kind": "area" if location[1] else "floor",
+                "location_id": location[1] or location[2],
+                "repair_replacement": property_name,
+                "reasoning_trace": ReasoningTrace((ReasoningStep(
+                    "repair_replacement",
+                    tuple(f"property:{item}" for item in sorted(old)),
+                    (f"property:{property_name}",),
+                    detail="property",
+                ),)),
+                "query_command": query_command,
+                "query_result": query_result,
+            },
+            source_text=document.source_text,
+            action=SemanticAction.QUERY,
+            property=_PROPERTY_ENUM.get(property_name),
+            semantic_graph=graph.with_grounded_entities(entity.entity_id for entity in matched),
+        ),
+        resolved_entities=list(matched),
+    )
+
+
 def project_relational_command(
     document: LanguageDocument,
     graph: SemanticGraph,
@@ -405,9 +659,13 @@ def project_relational_command(
         value for value in document.semantics.values(SemanticKind.DEVICE_CLASS)
         if isinstance(value, tuple) and len(value) == 2
     }
-    window_class = next((item for item in classes if item[1] == "window"), None)
-    if len(domains) != 1 or window_class is None:
+    related_classes = tuple(
+        item for item in classes
+        if _state_for_device_class(document, str(item[1])) is not None
+    )
+    if len(domains) != 1 or len(related_classes) != 1:
         return None
+    related_class = related_classes[0]
     domain = next(iter(domains))
     actions = {
         str(span.value)
@@ -422,13 +680,15 @@ def project_relational_command(
     intent = INTENT_BY_DOMAIN_ACTION.get((domain, action))
     if semantic_action is None or intent is None:
         return None
-    window_state = _state_for_device_class(document, "window") or SemanticState.OPEN
+    related_state = _state_for_device_class(document, str(related_class[1]))
+    if related_state is None:
+        return None
     qualifying_areas = RelationFilterExpression(
         SourceExpression(QueryTarget(kind=QueryTargetKind.AREA)),
         QueryTraversal(((RelationKind.LOCATED_IN, TraversalDirection.INCOMING),)),
         StateFilterExpression(
-            _entity_source(str(window_class[0]), str(window_class[1])),
-            window_state,
+            _entity_source(str(related_class[0]), str(related_class[1])),
+            related_state,
         ),
     )
     target_expression = RelationFilterExpression(
@@ -827,9 +1087,9 @@ def project_structured_repair(
 
     The replacement clause must name exactly one live entity and the graph
     must contain exactly one executable action. The original referent is
-    never included in ``resolved_entities``. Numeric, temporal and predicate
-    repairs remain explicitly unsupported until their domain projections can
-    preserve units/scope just as strictly.
+    never included in ``resolved_entities``. Numeric and temporal repairs are
+    owned by their typed projections; predicate changes that cannot preserve
+    property and scope remain unsupported.
     """
     replacements = tuple(
         relation
@@ -886,6 +1146,14 @@ def project_structured_repair(
                 entity.device_class,
             ),
             area=None,
+            parameters={
+                "reasoning_trace": ReasoningTrace((ReasoningStep(
+                    "repair_replacement",
+                    (),
+                    (f"entity:{entity.entity_id}",),
+                    detail="target",
+                ),)),
+            },
             source_text=document.source_text,
             action=semantic_action,
             semantic_graph=graph.with_grounded_entities((entity.entity_id,)),
@@ -934,6 +1202,14 @@ def project_value_repair(
         str(value) for value in document.semantics.values(SemanticKind.PROPERTY)
     }
     source = normalize_for_compare(document.source_text)
+    original_text = document.source_text[original.char_start:original.char_end]
+    original_mentions = all_mentioned_entities(
+        original_text,
+        entities,
+        index=(world_model.entity_index if world_model is not None else None),
+    )
+    if not domains and len(original_mentions) == 1:
+        domains = {original_mentions[0].domain}
     if len(domains) != 1:
         return None
     domain = next(iter(domains))
@@ -958,10 +1234,14 @@ def project_value_repair(
         return None
     intent = VALUE_INTENT_BY_DOMAIN_PROPERTY.get((domain, property_name))
     property_ = _PROPERTY_ENUM.get(property_name)
-    candidates = tuple(
-        world_model.select_entities(domain=domain)
-        if world_model is not None
-        else (entity for entity in entities if entity.domain == domain)
+    candidates = (
+        original_mentions
+        if len(original_mentions) == 1 and original_mentions[0].domain == domain
+        else tuple(
+            world_model.select_entities(domain=domain)
+            if world_model is not None
+            else (entity for entity in entities if entity.domain == domain)
+        )
     )
     if intent is None or property_ is None or len(candidates) != 1:
         return None
@@ -974,7 +1254,16 @@ def project_value_repair(
                 entity.friendly_name, entity.entity_id, entity.domain, entity.device_class
             ),
             area=None,
-            parameters={parameter: parameter_value},
+            parameters={
+                parameter: parameter_value,
+                "repair_replacement": property_name,
+                "reasoning_trace": ReasoningTrace((ReasoningStep(
+                    "repair_replacement",
+                    (f"value:{original_values[0].value}",),
+                    (f"value:{replacement_values[0].value}",),
+                    detail=property_name,
+                ),)),
+            },
             source_text=document.source_text,
             action=SemanticAction.SET,
             property=property_,

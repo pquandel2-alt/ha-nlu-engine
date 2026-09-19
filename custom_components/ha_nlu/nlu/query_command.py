@@ -116,10 +116,15 @@ class QueryTraversal:
     steps: tuple[tuple[RelationKind, TraversalDirection], ...]
     max_depth: int = 4
     asserted_only: bool = True
+    max_nodes_visited: int = 20_000
+    max_frontier_size: int = 5_000
+    max_paths: int = 10_000
 
     def __post_init__(self) -> None:
         if not self.steps or len(self.steps) > self.max_depth or self.max_depth > 8:
             raise ValueError("Query traversal must contain 1..max_depth (<=8) hops")
+        if min(self.max_nodes_visited, self.max_frontier_size, self.max_paths) < 1:
+            raise ValueError("Query traversal complexity bounds must be positive")
 
 
 class QueryExpression:
@@ -132,9 +137,41 @@ class SourceExpression(QueryExpression):
 
 
 @dataclass(frozen=True)
+class LiteralSetExpression(QueryExpression):
+    """A typed, already-grounded set (for example a discourse result)."""
+
+    kind: QueryTargetKind
+    member_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        prefix = self.kind.name.casefold() + ":"
+        if any(not member_id.startswith(prefix) for member_id in self.member_ids):
+            raise ValueError("Literal set members must match their semantic kind")
+        if len(self.member_ids) > 10_000:
+            raise ValueError("Literal set exceeds result bound")
+
+
+@dataclass(frozen=True)
 class StateFilterExpression(QueryExpression):
     source: "QueryExpression"
     state: SemanticState
+
+
+@dataclass(frozen=True)
+class StateDurationFilterExpression(QueryExpression):
+    """Keep entities continuously in their current state for a minimum time.
+
+    This expression deliberately uses ``last_changed`` only. Event-window
+    questions need recorder/history evidence and are not represented by this
+    current-state operator.
+    """
+
+    source: "QueryExpression"
+    minimum_seconds: int
+
+    def __post_init__(self) -> None:
+        if self.minimum_seconds < 1:
+            raise ValueError("State duration must be positive")
 
 
 @dataclass(frozen=True)
@@ -185,6 +222,7 @@ class GroupExpression(QueryExpression):
     traversal: QueryTraversal
     group_kind: QueryTargetKind
     aggregate: AggregateKind = AggregateKind.COUNT
+    include_empty_groups: bool = False
 
 
 @dataclass(frozen=True)
@@ -292,6 +330,7 @@ class QueryResultStatus(Enum):
     EMPTY = auto()  # target resolved fine, 0 entities passed the filter - a normal answer, not an error
     TARGET_NOT_FOUND = auto()  # the named {name}/{area} itself didn't resolve to anything known
     AMBIGUOUS = auto()  # SINGLE scope, 2+ candidates, no quantifier - never guess (Regel 4)
+    UNSUPPORTED = auto()  # Required evidence/cost bound unavailable; never partial
 
 
 @dataclass(frozen=True)

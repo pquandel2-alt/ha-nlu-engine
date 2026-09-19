@@ -44,7 +44,7 @@ from .nlu.composition import (
 )
 from .nlu.command import SemanticCommand, build_semantic_command
 from .nlu.context import ConversationContext
-from .nlu.discourse import ReferenceStatus, resolve_reference
+from .nlu.discourse import ReferenceStatus, current_discourse_group, resolve_reference
 from .nlu.debug import DebugTrace, format_command
 from .nlu.degree_semantics import extract_degree
 from .nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
@@ -61,7 +61,24 @@ from .nlu.reasoning import ReasoningEngine, ResolvedSemanticIntent
 from .nlu.response import NluError, NluResponse
 from .nlu.parse_outcome import ParseFailureReason, UnderstandingFeedback
 from .nlu.response_generator import ResponseGenerator, _automation_label
-from .nlu.query_command import QueryResult, QueryResultStatus
+from .nlu.query_command import (
+    LiteralSetExpression,
+    QueryCommand,
+    QueryFilter,
+    QueryResult,
+    QueryResultStatus,
+    QueryScope,
+    QueryTarget,
+    QueryTargetKind,
+    QueryTraversal,
+    RelationFilterExpression,
+    SetExpression,
+    SetOperator,
+    SourceExpression,
+    StateFilterExpression,
+)
+from .nlu.query_executor import QueryExecutor
+from .house_graph import RelationKind, TraversalDirection
 from .nlu.service_mapper import map_to_service_call
 from .nlu.semantic_compiler import (
     SemanticCommandCompiler,
@@ -69,8 +86,11 @@ from .nlu.semantic_compiler import (
     has_exclusion_clause,
 )
 from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
+from .nlu.semantic_state import SemanticState
 from .nlu.semantic_catalog import INTENT_BY_DOMAIN_ACTION
 from .nlu.semantic_interpreter import InterpreterResult, SemanticInterpreter
+from .nlu.repair_semantics import repaired_temporal_command
+from .nlu.temporal_semantics import TemporalKind
 from .nlu.semantic_projection import project_independent_predicates
 from .nlu.meaning import SemanticTurn, analyse_turn
 from .nlu.semantic_utterance import (
@@ -112,7 +132,14 @@ from .conversation_correction import ConversationCorrectionResolver
 from .relative_time_command_parser import RelativeTimeCommandParser
 from .productivity import parse_duration_seconds
 from .scheduled_time_command_parser import ScheduledTimeCommandParser
-from .nlu.automation_model import AutomationModel, TriggerModel, TriggerType, render_automation_tree
+from .nlu.automation_model import (
+    AutomationModel,
+    CalendarReference,
+    CalendarSchedule,
+    TriggerModel,
+    TriggerType,
+    render_automation_tree,
+)
 from .nlu.automation_model import TriggerTarget
 from .nlu.action_model import ActionGroup, ActionModel, ActionType
 from .nlu.automation_sentence_split import (
@@ -1013,7 +1040,16 @@ class NluEngine:
         # joins targets. Re-running the independent-clause compiler would
         # rescan the registry for every segment and can become quadratic at
         # large registry sizes without changing the selected meaning.
-        predicate_clauses = independent_predicate_clauses(document)
+        has_typed_query = (
+            isinstance(interpreted.parse_result, ParseResult)
+            and isinstance(
+                interpreted.parse_result.frame.parameters.get("query_result"),
+                QueryResult,
+            )
+        )
+        predicate_clauses = (
+            () if has_typed_query else independent_predicate_clauses(document)
+        )
         selected_graph = next(
             (
                 candidate.graph
@@ -1235,6 +1271,22 @@ class NluEngine:
             return CommandPlan(tuple(rendered))
         if isinstance(interpreted.parse_result, ParseResult):
             if interpreted.parse_result.response_text is not None:
+                if isinstance(
+                    interpreted.parse_result.frame.parameters.get("query_result"),
+                    QueryResult,
+                ):
+                    built = NluEngine._build_match_result(
+                        interpreted.parse_result, entities
+                    )
+                    if built is not None:
+                        return replace(
+                            built,
+                            response_text=interpreted.parse_result.response_text,
+                            explanation_text=(
+                                interpreted.parse_result.explanation_text
+                                or built.explanation_text
+                            ),
+                        )
                 return MatchResult(
                     plan=None,
                     response_text=interpreted.parse_result.response_text,
@@ -1388,6 +1440,26 @@ class NluEngine:
                     evidence=evidence,
                     reason=ParseFailureReason.AMBIGUOUS_TARGET,
                     speech=result.response_text,
+                    unexplained_tokens=document.semantics.unexplained_tokens,
+                    corrections=corrections,
+                    route=result.frame.intent if result.frame is not None else None,
+                    authority=authority,
+                    margin=margin,
+                )
+            if (
+                isinstance(reasoning_result, QueryResult)
+                and reasoning_result.status is QueryResultStatus.UNSUPPORTED
+            ):
+                return UnderstandingOutcome(
+                    kind=UnderstandingKind.UNSUPPORTED,
+                    source_text=text,
+                    normalized_text=document.utterance.normalized_text,
+                    speech_act=document.utterance.speech_act,
+                    payload=result,
+                    candidates=interpreted.candidates,
+                    evidence=evidence,
+                    reason=ParseFailureReason.UNSUPPORTED_PROPERTY,
+                    speech="Dafür fehlen mir vollständige Zustands- oder Verlaufsdaten.",
                     unexplained_tokens=document.semantics.unexplained_tokens,
                     corrections=corrections,
                     route=result.frame.intent if result.frame is not None else None,
@@ -1771,7 +1843,13 @@ class NluEngine:
                 clarification=outcome,
             )
         return self._build_match_result(outcome, entities, context)
-    def match_reference(self, text: str, entities: list[EntitySnapshot], context: ConversationContext | None) -> MatchResult | None:
+    def match_reference(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        context: ConversationContext | None,
+        world_model: WorldModel | None = None,
+    ) -> MatchResult | None:
         """Resolve a pronoun or relative reference ("Mach es aus.", "Mach die
         auch an.", "Die Rollläden dort runter.", "Die andere.") against the
         stored ``ConversationContext`` (v2 plan Phase 27, "Pronomen und
@@ -1804,7 +1882,32 @@ class NluEngine:
             r"\b(?:hier|dort|im\s+selben\s+raum)\b", normalized, re.I
         ) is not None
         is_pronoun = re.search(r"\b(?:es|sie|ihn|die\s+auch)\b", normalized, re.I) is not None
-        if not (is_others or is_area_reference or is_pronoun):
+        is_exclusion_reference = re.search(
+            r"\b(?:außer|ausser)\b", normalized, re.I
+        ) is not None
+        exclusion_candidates: list[EntitySnapshot] = []
+        if is_exclusion_reference and context.discourse is not None:
+            group = current_discourse_group(
+                context.discourse, semantic_type="entity"
+            )
+            excluded = all_mentioned_entities(normalized, entities)
+            if group is not None and len(excluded) == 1:
+                live_by_id = {entity.entity_id: entity for entity in entities}
+                group_ids = {
+                    member_id.removeprefix("entity:")
+                    for member_id in group.member_ids
+                    if member_id.startswith("entity:")
+                }
+                if excluded[0].entity_id in group_ids:
+                    exclusion_candidates = [
+                        live_by_id[entity_id]
+                        for entity_id in sorted(group_ids - {excluded[0].entity_id})
+                        if entity_id in live_by_id
+                    ]
+        if not (
+            is_others or is_area_reference or is_pronoun
+            or exclusion_candidates
+        ):
             return None
 
         discourse_resolution = (
@@ -1829,7 +1932,9 @@ class NluEngine:
         # even when a small caller-provided test/preview inventory omits it;
         # execution still performs the mandatory live-snapshot validation.
         resolved_remembered = fresh_remembered or list(remembered_entities)
-        if is_others:
+        if exclusion_candidates:
+            candidates = exclusion_candidates
+        elif is_others:
             if context.last_area is None or not resolved_remembered:
                 return None
             domains = {entity.domain for entity in resolved_remembered}
@@ -1844,8 +1949,6 @@ class NluEngine:
                 and entity.entity_id not in remembered_ids
             ]
         elif is_area_reference:
-            if context.last_area is None:
-                return None
             analysis = analyse_semantics(normalized)
             domains = {
                 value
@@ -1855,12 +1958,39 @@ class NluEngine:
             if len(domains) != 1:
                 return None
             domain = next(iter(domains))
-            candidates = [
-                entity
-                for entity in entities
-                if entity.domain == domain
-                and entity.area_id == context.last_area.area_id
-            ]
+            group = current_discourse_group(
+                context.discourse, semantic_type="area"
+            )
+            if group is not None and world_model is not None:
+                selection = QueryCommand(
+                    "HassStateQuery",
+                    QueryScope.LIST,
+                    QueryTarget(domain=domain),
+                    QueryFilter(),
+                    RelationFilterExpression(
+                        SourceExpression(QueryTarget(domain=domain)),
+                        QueryTraversal(((
+                            RelationKind.LOCATED_IN,
+                            TraversalDirection.OUTGOING,
+                        ),)),
+                        LiteralSetExpression(
+                            QueryTargetKind.AREA, group.member_ids
+                        ),
+                    ),
+                )
+                selected = QueryExecutor().execute(selection, [], world_model)
+                if selected.status is not QueryResultStatus.MATCHED:
+                    return None
+                candidates = list(selected.entities)
+            elif context.last_area is not None:
+                candidates = [
+                    entity
+                    for entity in entities
+                    if entity.domain == domain
+                    and entity.area_id == context.last_area.area_id
+                ]
+            else:
+                return None
         else:
             candidates = resolved_remembered
         if not candidates:
@@ -2015,6 +2145,172 @@ class NluEngine:
         """
         if context is None:
             return None
+
+        normalized_reference = normalize(text)
+        discourse_group = current_discourse_group(context.discourse)
+        discourse_location = resolve_semantic_location(
+            normalized_reference, entities, world_model
+        )
+        excludes_location = re.search(
+            r"\b(?:außer|ausser|ohne)\b", normalized_reference, re.I
+        ) is not None
+        if (
+            discourse_group is not None
+            and discourse_group.semantic_type == "entity"
+            and re.search(
+                r"\b(?:davon|diese|jene|die|beide|alle)\b",
+                normalized_reference,
+                re.I,
+            )
+            and world_model is not None
+        ):
+            analysis = analyse_semantics(normalized_reference)
+            states = tuple({
+                span.value
+                for span in analysis.matching(SemanticKind.STATE)
+                if isinstance(span.value, SemanticState)
+                and span.text.casefold()
+                not in {"ein", "eine", "einen", "einem", "einer", "steht"}
+            })
+            if len(states) == 1:
+                expression = StateFilterExpression(
+                    LiteralSetExpression(
+                        QueryTargetKind.ENTITY, discourse_group.member_ids
+                    ),
+                    states[0],
+                )
+                command = QueryCommand(
+                    "HassStateQuery",
+                    QueryScope.LIST,
+                    QueryTarget(kind=QueryTargetKind.ENTITY),
+                    QueryFilter(),
+                    expression,
+                )
+                query_result = QueryExecutor().execute(
+                    command, entities, world_model
+                )
+                parsed = ParseResult(
+                    frame=SemanticFrame(
+                        intent=command.intent,
+                        target=TargetReference(text),
+                        area=None,
+                        quantifier=Quantifier("all"),
+                        parameters={
+                            "query_command": command,
+                            "query_result": query_result,
+                        },
+                        source_text=text,
+                        action=SemanticAction.QUERY,
+                    ),
+                    resolved_entities=list(query_result.entities),
+                )
+                return self._build_match_result(parsed, entities, context)
+        if (
+            discourse_group is not None
+            and discourse_group.semantic_type == "area"
+            and (
+                excludes_location
+                or re.search(r"\b(?:davon|diese|jene|welche)\b", normalized_reference, re.I)
+            )
+            and discourse_location is not None
+            and world_model is not None
+        ):
+            expression = SetExpression(
+                LiteralSetExpression(QueryTargetKind.AREA, discourse_group.member_ids),
+                (
+                    SetOperator.DIFFERENCE
+                    if excludes_location else SetOperator.INTERSECTION
+                ),
+                SourceExpression(QueryTarget(
+                    kind=QueryTargetKind.AREA,
+                    area=(
+                        next(
+                            (area for area in world_model.areas if area.area_id == discourse_location[1]),
+                            None,
+                        )
+                        if discourse_location[1] is not None
+                        else None
+                    ),
+                    floor_id=discourse_location[2],
+                )),
+            )
+            command = QueryCommand(
+                "HassStateQuery", QueryScope.LIST,
+                QueryTarget(kind=QueryTargetKind.AREA), QueryFilter(), expression,
+            )
+            query_result = QueryExecutor().execute(command, [], world_model)
+            parsed = ParseResult(
+                frame=SemanticFrame(
+                    intent=command.intent,
+                    target=TargetReference(text),
+                    area=None,
+                    quantifier=Quantifier("all"),
+                    parameters={"query_command": command, "query_result": query_result},
+                    source_text=text,
+                    action=SemanticAction.QUERY,
+                ),
+                resolved_entities=[],
+            )
+            return self._build_match_result(parsed, entities, context)
+
+        if (
+            discourse_group is not None
+            and discourse_group.semantic_type == "area"
+            and re.search(r"\b(?:davon|diese|jene|welche)\b", normalized_reference, re.I)
+            and world_model is not None
+        ):
+            analysis = analyse_semantics(normalized_reference)
+            classes = tuple(
+                value
+                for value in analysis.values(SemanticKind.DEVICE_CLASS)
+                if isinstance(value, tuple) and len(value) == 2
+            )
+            states = tuple(
+                span.value
+                for span in analysis.matching(SemanticKind.STATE)
+                if isinstance(span.value, SemanticState)
+                and span.text.casefold()
+                not in {"ein", "eine", "einen", "einem", "einer", "steht"}
+            )
+            if len(classes) == 1 and len(set(states)) == 1:
+                related_domain, related_class = classes[0]
+                expression = RelationFilterExpression(
+                    LiteralSetExpression(
+                        QueryTargetKind.AREA, discourse_group.member_ids
+                    ),
+                    QueryTraversal(((
+                        RelationKind.LOCATED_IN,
+                        TraversalDirection.INCOMING,
+                    ),)),
+                    StateFilterExpression(
+                        SourceExpression(QueryTarget(
+                            domain=str(related_domain),
+                            device_class=str(related_class),
+                        )),
+                        states[0],
+                    ),
+                )
+                command = QueryCommand(
+                    "HassStateQuery", QueryScope.LIST,
+                    QueryTarget(kind=QueryTargetKind.AREA), QueryFilter(), expression,
+                )
+                query_result = QueryExecutor().execute(command, [], world_model)
+                parsed = ParseResult(
+                    frame=SemanticFrame(
+                        intent=command.intent,
+                        target=TargetReference(text),
+                        area=None,
+                        quantifier=Quantifier("all"),
+                        parameters={
+                            "query_command": command,
+                            "query_result": query_result,
+                        },
+                        source_text=text,
+                        action=SemanticAction.QUERY,
+                    ),
+                    resolved_entities=[],
+                )
+                return self._build_match_result(parsed, entities, context)
 
         remembered_entities = (
             context.memory.entities if context.memory is not None else context.last_entities
@@ -2988,6 +3284,18 @@ class NluEngine:
         Gated by ``_RELATIVE_TIME_RE`` first, same cheap pre-check reasoning
         ``_AUTOMATION_TRIGGER_RE`` documents for ``match_automation()``.
         """
+        repair_document = analyse_language(text, entities)
+        repaired = repaired_temporal_command(repair_document)
+        if repaired is not None and repaired != text:
+            projected = self.match_relative_time_automation(
+                repaired, entities, world_model, context
+            )
+            if projected is None:
+                return None
+            return replace(
+                projected,
+                model=replace(projected.model, source_text=text),
+            )
         if not _RELATIVE_TIME_RE.search(text):
             return None
 
@@ -3344,8 +3652,10 @@ class NluEngine:
         context: ConversationContext | None = None,
     ) -> AutomationMatchResult | None:
         """Match a date-bound command such as "morgen um 8 Uhr ..."."""
-        if not _CALENDAR_TIME_RE.search(text):
-            return None
+        source_text = text
+        repaired = repaired_temporal_command(analyse_language(text, entities))
+        if repaired is not None:
+            text = repaired
         normalized = normalize(text)
         parse_context = create_parse_context(
             entities,
@@ -3354,16 +3664,36 @@ class NluEngine:
             last_area=context.last_area if context is not None else None,
         )
         decomposed = self._scheduled_time_command_parser.decompose(normalized)
-        if decomposed is None:
-            return None
-        command_text, schedule = decomposed
+        if decomposed is not None:
+            command_text, schedule = decomposed
+        else:
+            temporal_document = analyse_language(normalized, entities)
+            absolute = tuple(
+                item for item in temporal_document.temporal
+                if item.kind is TemporalKind.ABSOLUTE_TIME
+            )
+            if len(absolute) != 1:
+                return None
+            expression = absolute[0]
+            first = temporal_document.tokens[expression.token_start]
+            last = temporal_document.tokens[expression.token_end - 1]
+            command_text = (
+                normalized[:first.start] + " " + normalized[last.end:]
+            ).strip(" ,.")
+            hour, minute = (int(part) for part in expression.value.split(":"))
+            schedule = CalendarSchedule(
+                reference=CalendarReference.TODAY,
+                hour=hour,
+                minute=minute,
+                spoken=normalized[first.start:last.end],
+            )
         actions = self._parse_action_semantically(command_text, parse_context)
         if actions is None:
             return None
         model = AutomationModel(
             triggers=(TriggerModel(type=TriggerType.CALENDAR_TIME),),
             actions=actions,
-            source_text=text,
+            source_text=source_text,
             once=True,
             calendar_schedule=schedule,
         )
@@ -3687,6 +4017,29 @@ class NluEngine:
         frame = result.frame
         matched = result.resolved_entities
         command = build_semantic_command(result)
+        typed_result = frame.parameters.get("query_result")
+
+        if (
+            isinstance(typed_result, QueryResult)
+            and typed_result.status is QueryResultStatus.AMBIGUOUS
+            and frame.action is SemanticAction.QUERY
+            and frame.intent in QUERY_INTENTS
+        ):
+            resolved_intent = ResolvedSemanticIntent(
+                action=frame.action,
+                entities=tuple(matched),
+                property=frame.property,
+                direction=frame.direction,
+                degree=frame.degree,
+                area=frame.area,
+            )
+            return MatchResult(
+                plan=None,
+                response_text=ResponseGenerator().respond(typed_result),
+                frame=frame,
+                command=command,
+                resolved_intent=resolved_intent,
+            )
 
         # Defense in depth for every caller of this builder: a syntactic
         # question can only use registered read-only query intents. Never
@@ -3712,7 +4065,6 @@ class NluEngine:
         # the complete registry would be redundant and can dominate aggregate
         # latency when an answer is empty. Commands and legacy queries retain
         # the normal central reasoning gate.
-        typed_result = frame.parameters.get("query_result")
         if isinstance(typed_result, QueryResult):
             resolved_intent = ResolvedSemanticIntent(
                 action=frame.action,

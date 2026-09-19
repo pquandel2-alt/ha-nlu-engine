@@ -37,6 +37,12 @@ sys.path.insert(0, str(REPO_ROOT / "custom_components"))
 
 from ha_nlu.engine import NluEngine  # noqa: E402
 from ha_nlu.entities import EntitySnapshot  # noqa: E402
+from ha_nlu.nlu.context import ConversationContext  # noqa: E402
+from ha_nlu.nlu.discourse import (  # noqa: E402
+    DiscourseRole,
+    remember_entities,
+    remember_query_group,
+)
 from ha_nlu.world_model import build_world_model  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -183,6 +189,11 @@ ANCHOR_READING_TWO = EntitySnapshot(
     area_id="schlafzimmer", area_name="Schlafzimmer", floor_id="og", floor_name="Obergeschoss", floor_level=1,
     capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
 )
+ANCHOR_UPSTAIRS_WINDOW = EntitySnapshot(
+    "binary_sensor.schlafzimmer_fenster", "Schlafzimmer Fenster", "binary_sensor", "on",
+    area_id="schlafzimmer", area_name="Schlafzimmer", floor_id="og",
+    floor_name="Obergeschoss", floor_level=1, device_class="window",
+)
 ANCHORS: list[EntitySnapshot] = [
     ANCHOR_LIGHT,
     ANCHOR_CLIMATE,
@@ -194,6 +205,7 @@ ANCHORS: list[EntitySnapshot] = [
     ANCHOR_LIVING_FLOOR,
     ANCHOR_READING_ONE,
     ANCHOR_READING_TWO,
+    ANCHOR_UPSTAIRS_WINDOW,
 ]
 
 
@@ -257,9 +269,6 @@ BENCHMARK_UTTERANCES: list[tuple[str, str]] = [
     ("v9_group_by", "Wie viele Fenster sind pro Etage offen?"),
     ("v9_superlative", "Welcher Raum ist am wärmsten?"),
     ("v9_relational_command", "Mach in allen Räumen mit offenem Fenster das Licht aus."),
-    # This direct-engine benchmark has intentionally no ConversationContext.
-    # It measures frontend/graph cost for a follow-up-shaped utterance; true
-    # multi-turn salience latency belongs to the future dialog benchmark.
     ("context_free_followup_shape", "Und im Schlafzimmer?"),
     ("discourse_reference_shape", "Mach die dort aus"),
     (
@@ -368,6 +377,51 @@ def benchmark_utterance(engine: NluEngine, label: str, text: str, entities: list
     )
 
 
+def benchmark_discourse_followup(
+    engine: NluEngine, entities: list[EntitySnapshot], scale: int
+) -> Stats:
+    """Measure the productive typed-set continuation, not a text-shaped proxy."""
+    world_model = build_world_model(entities, [])
+    first = engine.understand(
+        "Welche Räume haben offene Fenster?", entities, world_model
+    )
+    if first.payload is None or first.payload.command is None:
+        raise RuntimeError("discourse benchmark seed query did not compile")
+    command = first.payload.command
+    query_result = command.parameters.get("query_result")
+    if query_result is None:
+        raise RuntimeError("discourse benchmark seed query has no result")
+    discourse = remember_entities(
+        None, command.entities, role=DiscourseRole.QUERY_RESULT
+    )
+    discourse = remember_query_group(discourse, query_result)
+    context = ConversationContext(
+        last_command=command,
+        last_entities=tuple(command.entities),
+        last_area=command.area,
+        pending_clarification=None,
+        discourse=discourse,
+    )
+    run = lambda: engine.match_query_followup(
+        "Welche davon sind oben?", entities, context, world_model
+    )
+    for _ in range(WARMUP_ITERATIONS):
+        if run() is None:
+            raise RuntimeError("discourse benchmark follow-up did not compile")
+    durations = _time_call(run, ITERATIONS)
+    durations.sort()
+    return Stats(
+        label="v9_discourse_followup",
+        scale=scale,
+        iterations=ITERATIONS,
+        mean_ms=statistics.mean(durations),
+        p50_ms=_percentile(durations, 0.50),
+        p95_ms=_percentile(durations, 0.95),
+        min_ms=min(durations),
+        max_ms=max(durations),
+    )
+
+
 def run_all() -> tuple[Stats, list[Stats]]:
     construction_stats = benchmark_engine_construction()
     engine = NluEngine()
@@ -377,6 +431,7 @@ def run_all() -> tuple[Stats, list[Stats]]:
         entities = generate_entities(scale)
         for label, text in BENCHMARK_UTTERANCES:
             results.append(benchmark_utterance(engine, label, text, entities, scale))
+        results.append(benchmark_discourse_followup(engine, entities, scale))
     return construction_stats, results
 
 

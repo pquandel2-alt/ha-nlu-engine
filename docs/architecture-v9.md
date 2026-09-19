@@ -20,6 +20,8 @@ Evaluator. Einfache V8-Queries verwenden weiterhin `target` und `filter`.
 Komplexe Queries setzen optional einen typisierten `algebra`-Baum aus:
 
 - `SourceExpression`, `StateFilterExpression` und `RelationFilterExpression`
+- `StateDurationFilterExpression` für belegte kontinuierliche Zustände sowie
+  `LiteralSetExpression` für typisierte, live validierte Discourse-Mengen
 - `TraverseExpression` und explizite `QueryTraversal`-Pfade
 - `SetExpression` für Intersection, Union und Difference
 - `AggregateExpression` für COUNT, EXISTS, ANY, ALL sowie typisierte
@@ -37,7 +39,8 @@ Zieltyp explizit.
 bekannten `RelationKind`-Werten. Standardmäßig gilt `asserted_only=True`.
 OBSERVED, CONFIGURED, CONFIRMED_MEMORY und DERIVED sind belegte Kanten;
 STATISTICAL ist keine harte Tatsache. Die Traversal ist auf höchstens acht
-Hops begrenzt (Query-Standard: vier), schützt jeden Pfad gegen Zyklen und
+Hops begrenzt (Query-Standard: vier), begrenzt zusätzlich besuchte Knoten,
+Frontier-Größe und Ergebnispfade, schützt jeden Pfad gegen Zyklen und
 liefert deterministisch sortierte Ergebnisse samt `GraphRelation`-Belegen.
 Outgoing-/Incoming- und Edge-Lookups verwenden die vorhandenen Indizes.
 
@@ -72,12 +75,18 @@ Union, Intersection und Difference operieren auf geerdeten stabilen IDs.
 `DiscourseGroup`: Group-ID, semantischer Typ, Member-IDs, Origin Query,
 Graphfragment, Filter, Relationsprovenienz, Turn und Salienz. Die Gruppe ist
 ein Dialogreferent, kein ausführbares Target-Cache. Aktionen müssen ihre
-Mitglieder gegen einen frischen Live-Snapshot erneut erden.
+Mitglieder gegen einen frischen Live-Snapshot erneut erden. `davon` kann eine
+Raummenge per Floor- oder verschachteltem Zustands-/Relationsfilter weiter
+einschränken; `dort` projiziert Geräte in die aktive Raummenge und
+`alle außer X` bildet Difference auf der aktiven Entitätsmenge. Fehlt beim
+Re-Grounding ein gespeichertes Mitglied, wird nicht mit einem Teilset
+weitergearbeitet.
 
 ## Repair und Temporalität
 
 Entity Repair aus V8 bleibt autoritativ. V9 projiziert zusätzlich eindeutige
-Value Repairs für dieselbe Property und kompatible Unit; der Ersatzwert
+Value Repairs für dieselbe Property und kompatible Unit sowie eindeutige
+Property Repairs bei unverändert belegtem Ort; der Ersatzwert
 überschreibt den alten vollständig. Unvollständige Property Repairs werden
 sicher abgelehnt und übernehmen niemals einen alten, inkompatiblen Wert.
 
@@ -119,20 +128,26 @@ Zwei-Hop-Abfragen, 250 ms für verschachtelte relationale Filter und
 Gruppenreferenzformen, 400 ms für verschachtelte Aggregate, 300 ms für
 Messwert-Superlative und 750 ms für relationale Command-Zielselektion. Der
 Benchmark prüft diese Budgets pro Label; eine Überschreitung verändert nie die
-Semantik.
+Semantik. Der produktive typisierte Discourse-Follow-up wird ebenfalls direkt
+gemessen und bleibt unter dem normalen 100-ms-Gate; Messprotokoll und lokale
+Lastgrenze stehen in `docs/perf/v9-completion.md`.
 
 ## Unterstützte Grenzen
 
 Produktiv sind die typisierte Algebra, bounded Traversal, relationale
-Window/Area/Light-Filter, COUNT/EXISTS, Floor-Grouping, eindeutige
+Device-Class/Area/Domain-Filter, COUNT/EXISTS, Floor-Grouping, eindeutige
 Measurement-Superlative, kompatible Unit-Konvertierung, Area-Vergleiche,
-Set-Algebra, Value Repair, ReasoningTrace und live re-geerdete relationale
-Licht-Commands. Die generischen Typen für ANY/ALL/MIN/MAX/AVG sind vorhanden;
-nur sicher typisierte Eingaben werden ausgewertet.
+Set-Algebra, Target-/Value-/Property-/Temporal-Repair, State Duration,
+ReasoningTrace und live re-geerdete relationale Commands. Die generischen
+Typen für ANY/ALL/MIN/MAX/AVG sind vorhanden; nur sicher typisierte Eingaben
+werden ausgewertet. Der vorhandene Recorder-Pfad beantwortet explizit
+gebundene Verlaufsqueries und meldet fehlenden Recorder-Zugriff transparent.
 
 Noch nicht als unterstützt gelten freie Relationserfindungen, automatische
 Sensorpräferenzen, automatische Mittelwerte, unbekannte Units, unvollständige
-Property Repairs, unbestimmte Dayparts ohne lokale Regel, History-Dauern ohne
-Timestamp/Recorder-Beleg sowie direkte Ausführung gespeicherter Discourse-
-Gruppen. Diese Grenzen führen zu Clarification/AMBIGUOUS/UNSUPPORTED, niemals
+oder domänenübergreifend mehrdeutige Property Repairs, unbestimmte Dayparts
+ohne lokale Regel und Event-History ohne Recorder-Beleg. Gespeicherte
+Discourse-Gruppen werden nie direkt ausgeführt, sondern vor Befehlen gegen
+den aktuellen `WorldModel` neu geerdet. Diese Grenzen führen zu
+Clarification/AMBIGUOUS/UNSUPPORTED, niemals
 zu einer stillen Ersatzsemantik.

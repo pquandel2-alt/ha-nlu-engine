@@ -122,6 +122,23 @@ class ResponseGenerator:
 
         if result.command is not None and result.command.algebra is not None:
             return self._respond_algebra(result)
+        if (
+            result.command is not None
+            and result.command.scope is QueryScope.SINGLE
+            and result.command.filter.state is None
+            and result.command.filter.relational is None
+            and result.command.filter.relationship is None
+            and len(result.entities) == 1
+            and result.entities[0].domain == "sensor"
+            and result.entities[0].unit is not None
+        ):
+            entity = result.entities[0]
+            unit = entity.unit
+            assert unit is not None
+            spoken_unit = {
+                "°C": "Grad", "°F": "Grad", "%": "Prozent",
+            }.get(unit, unit)
+            return f"{entity.state} {spoken_unit}."
 
         return GermanResponseRealizer().realize(
             self.plan(result, context=context, allow_reference=allow_reference)
@@ -132,7 +149,10 @@ class ResponseGenerator:
         """Render typed V9 results without reinterpreting the source text."""
         if result.status is QueryResultStatus.AMBIGUOUS:
             return "Mehrere gleichwertige Messwerte sind möglich. Welchen soll ich verwenden?"
-        if result.status is QueryResultStatus.TARGET_NOT_FOUND:
+        if result.status in {
+            QueryResultStatus.TARGET_NOT_FOUND,
+            QueryResultStatus.UNSUPPORTED,
+        }:
             return "Diese Abfrage kann ich mit den bekannten Fakten nicht sicher auswerten."
         if result.groups:
             return ", ".join(f"{group.label}: {group.value}" for group in result.groups) + "."

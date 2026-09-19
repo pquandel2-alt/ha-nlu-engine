@@ -6,7 +6,37 @@ Checkliste orientiert sich trotzdem an der aktuellen Integration Quality Scale
 und trennt nachweisbar Erledigtes von offenen Arbeiten. Sie ist keine
 Selbstzertifizierung.
 
-Stand: 24. August 2026
+Stand: 19. September 2026
+
+## V9 Completion / 4.76.0
+
+- [x] Query-Algebra bleibt einziger Reasoning-Evaluator
+- [x] relationale Klassen, Kardinalität, Difference und Discourse-Literalsets
+- [x] State Duration nur mit vollständigem `last_changed`-Beleg
+- [x] Event-History ohne Recorder niemals aus aktuellem Zustand abgeleitet
+- [x] Value-/Property-/relative Temporal-Repair behält nur finalen Slot
+- [x] Target Repair bewahrt `REPLACES`-Evidenz und führt nur das neue Ziel aus
+- [x] absolute und relative One-shot-Zeitbefehle nutzen die persistente Automation
+- [x] 159 unabhängige handgeschriebene V9-OOD-Fälle samt Ergebnis-/Safety-Orakel
+- [x] HouseGraph: depth-, visited-node-, frontier- und path-bound
+- [x] Query/Ambiguous/Unsupported bleiben ohne ServicePlan
+- [x] explizite Recorder-Queries nutzen den vorhandenen History-Adapter;
+  nicht belegbare Mengen-History bleibt unsupported
+
+## Abschlussvalidierung 4.76.0
+
+- [x] Gesamtsuite: 3.047 bestanden, 12 übersprungen, 0 fehlgeschlagen
+- [x] Coverage: 87,75 Prozent (17.462/19.899 Zeilen)
+- [x] Language Safety: 252 bestanden
+- [x] Shadow: 3.772 Turns, 0 Divergenzen, 0 Action-Leakage
+- [x] vollständiges Pyright: 0 Fehler; CI-identischer Strict-Scope: 0 Fehler
+- [x] lokaler Schema-Smoke mit echtem Home Assistant 2025.1.4:
+  `HOME_ASSISTANT_AUTOMATION_AND_CALENDAR_SCHEMA_OK`
+- [ ] lokales 5k-Performance-Gate: unter Host-Last ~61/4 CPUs nicht vollständig
+  grün; Discourse-Follow-up p95 84,23 ms, Budgets unverändert
+- [ ] offizieller HA-Stable-Container-Smoke, Hassfest und HACS lokal nicht
+  ausführbar, weil alle drei CI-Jobs eine Container-Runtime benötigen;
+  Ausführung auf dem Release-Commit in GitHub Actions steht aus
 
 ## Bereits erfüllt oder für HomeIntent nicht anwendbar
 
@@ -49,8 +79,9 @@ Stand: 24. August 2026
   Anzahl der bestehenden Tests.
 - Die vielen dynamisch erzeugten Conversation-Antworten sind noch nicht
   vollständig in Home Assistants Übersetzungssystem überführt.
-- Strikte Typprüfung ist für neue hass-freie Kernmodule konfiguriert, aber noch
-  nicht für den gesamten historischen Codebestand fehlerfrei durchgesetzt.
+- Strikte Typprüfung ist für die sicherheits- und semantikkritischen Kernmodule
+  konfiguriert; der vollständige Repository-Scope läuft zusätzlich im normalen
+  Pyright-Modus.
 - Die offiziellen Regeln zu Discovery, Reauthentication, Firmware-Updates,
   Geräteentitäten und Offline-Verfügbarkeit sind für einen lokalen Conversation
   Agent überwiegend nicht anwendbar; eventuelle Ausnahmen müssten in einem
