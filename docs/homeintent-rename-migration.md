@@ -19,7 +19,10 @@ would therefore strand existing installations.
 shim. It contains no NLU, planner, runtime, world model, executor, or delivery
 logic. It forwards setup and the conversation platform to the canonical
 HomeIntent implementation. Its displayed name is “HomeIntent Legacy
-Migration”; it is not a second integration architecture.
+Migration”; it is not a second integration architecture. The shim also carries
+copies of the HomeIntent icons because HACS validates brand assets for every
+compatibility manifest; these are static compatibility assets, not product
+logic or a second brand.
 
 ## Config entries and options
 
