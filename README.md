@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **5.0.0** (V10)
+- Aktuelle Version: **5.0.1** (V10)
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -831,6 +831,15 @@ Bei einem Update über HACS anschließend Home Assistant neu starten. Wenn eine
 ältere Installation ungewöhnliches Verhalten zeigt, die Integration einmal
 neu laden; ein vollständiges Entfernen ist normalerweise nicht erforderlich.
 
+**Hinweis für bestehende Installationen mit der alten Domain `ha_nlu`:**
+Vor 5.0.1 konnte HACS wegen eines Packaging-Fehlers das Legacy-Verzeichnis
+`ha_nlu` statt `homeintent` installieren. Ein normales Update über HACS auf
+5.0.1 (kein Neuhinzufügen des Repositories nötig) plus Neustart genügt, um
+danach zuverlässig `custom_components/homeintent` zu installieren. Bestehende
+`ha_nlu`-Config-Einträge bleiben dabei erhalten und funktionieren über den
+Kompatibilitäts-Shim weiter. Details:
+[`docs/homeintent-rename-migration.md`](docs/homeintent-rename-migration.md).
+
 ## Assist einrichten
 
 1. Öffne die Einstellungen der gewünschten Assist-Pipeline.
@@ -952,11 +961,11 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/homeintent --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 5.0.0:
+Geprüfter Release-Stand von Version 5.0.1:
 
 ```text
-3094 passed, 12 skipped, 0 failed
-86,26 % Gesamt-Coverage (18870/21875 Statements; Terminalanzeige 86 %)
+3108 passed, 12 skipped, 0 failed
+86,26 % Gesamt-Coverage (18871/21877 Statements; Terminalanzeige 86 %)
 70 % Coverage für conversation.py
 ```
 
@@ -982,7 +991,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-5.0.0.json --quiet
+  --check docs/perf/v7-shadow-baseline-5.0.1.json --quiet
 ```
 
 Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die
