@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ha_nlu.nlu.german_morphology import (
+from homeintent.nlu.german_morphology import (
     GrammaticalGender,
     area_gender,
     dative_location_phrase,

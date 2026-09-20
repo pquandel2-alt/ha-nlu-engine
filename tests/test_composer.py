@@ -6,8 +6,8 @@ composed - action/direction/degree have no lexicon candidate table yet
 
 from __future__ import annotations
 
-from ha_nlu.nlu.composer import ComposedPrimitives, SemanticComposer
-from ha_nlu.nlu.primitives import SemanticProperty, SemanticQuantity
+from homeintent.nlu.composer import ComposedPrimitives, SemanticComposer
+from homeintent.nlu.primitives import SemanticProperty, SemanticQuantity
 
 
 def test_compose_single_property_word():

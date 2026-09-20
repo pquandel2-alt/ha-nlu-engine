@@ -1,0 +1,256 @@
+delete_automation:
+  name: Delete automation
+  description: >-
+    Internal service: deletes a HomeIntent-generated automation by id. Used by
+    self-deleting ("einmalig"/"nur einmal") generated automations as their
+    own last action step - not meant to be called directly.
+  fields:
+    automation_id:
+      name: Automation ID
+      description: The id of the automation to delete.
+      required: true
+      selector:
+        text:
+
+record_automation_run:
+  name: Automation-Ausführung erfassen
+  description: Interner Dienst für Automationen mit begrenzter Ausführungszahl.
+  fields:
+    automation_id:
+      name: Automation-ID
+      required: true
+      selector:
+        text:
+    max_runs:
+      name: Maximale Ausführungen
+      description: Im YAML mitgespeicherte Obergrenze für den Startabgleich.
+      required: false
+      selector:
+        number:
+          min: 2
+          max: 10
+          mode: box
+
+enable_automation:
+  name: Automation fortsetzen
+  description: Interner Dienst für einen bestätigten, zeitlich begrenzten Pausenauftrag.
+  fields:
+    automation_id:
+      name: Automation-ID
+      required: true
+      selector:
+        text:
+
+proactive_message:
+  name: Proaktive Agentenmeldung verarbeiten
+  description: >-
+    Erzeugt eine deduplizierte Agentensituation und liefert sie gemäß den
+    Integrationsoptionen per Push und/oder TTS aus.
+  fields:
+    rule_id:
+      name: Regel-ID
+      required: true
+      selector: {text: {}}
+    title:
+      name: Titel
+      required: false
+      selector: {text: {}}
+    message:
+      name: Nachricht
+      required: true
+      selector: {text: {multiline: true}}
+    mode:
+      name: Verhalten
+      required: false
+      default: inform
+      selector:
+        select:
+          options: [inform, ask, auto]
+    source_entity_id:
+      name: Beobachtete Entität
+      required: false
+      selector: {entity: {}}
+    expected_source_state:
+      name: Erwarteter Zustand
+      required: false
+      selector: {text: {}}
+    source_comparator:
+      name: Numerischer Vergleich
+      required: false
+      selector:
+        select:
+          options: [above, below, equal]
+    source_threshold:
+      name: Numerischer Grenzwert
+      required: false
+      selector: {number: {mode: box}}
+    action_domain:
+      name: Aktionsdomain
+      required: false
+      selector: {text: {}}
+    action_service:
+      name: Aktionsservice
+      required: false
+      selector: {text: {}}
+    action_entity_id:
+      name: Aktionsziel
+      required: false
+      selector: {entity: {}}
+    action_data:
+      name: Aktionsdaten als JSON
+      description: >-
+        Nur die für die gewählte Aktion freigegebenen Parameter. Zielangaben
+        wie entity_id, device_id oder area_id sind hier nicht erlaubt.
+      required: false
+      selector: {text: {multiline: true}}
+    cooldown_seconds:
+      name: Cooldown
+      required: false
+      selector: {number: {min: 0, max: 86400, unit_of_measurement: s}}
+    expires_seconds:
+      name: Gültigkeitsdauer
+      required: false
+      selector: {number: {min: 60, max: 604800, unit_of_measurement: s}}
+
+recheck_agent_event:
+  name: Agentensituation erneut prüfen
+  description: Interner Dienst für neustartfeste Snooze-Aufträge.
+  fields:
+    event_id:
+      name: AgentEvent-ID
+      required: true
+      selector: {text: {}}
+
+bind_user_context:
+  name: Benutzer, Person und Push-Ziel verbinden
+  description: >-
+    Speichert eine ausdrücklich bestätigte lokale Zuordnung. Nur durch einen
+    authentifizierten Home-Assistant-Administrator aufrufbar.
+  fields:
+    user_id:
+      name: Home-Assistant-Benutzer-ID
+      required: true
+      selector: {text: {}}
+    person_entity_id:
+      name: Person
+      required: true
+      selector: {entity: {domain: person}}
+    notification_targets:
+      name: Push-Ziele
+      required: true
+      selector: {entity: {domain: notify, multiple: true}}
+    preferred_notification_target:
+      name: Bevorzugtes Push-Ziel
+      required: false
+      selector: {entity: {domain: notify}}
+    confirmed:
+      name: Ausdrücklich bestätigt
+      required: true
+      selector: {boolean: {}}
+
+set_household:
+  name: Haushaltspersonen festlegen
+  description: >-
+    Speichert den bestätigten person.*-Scope für „niemand zuhause“. Nur durch
+    einen authentifizierten Home-Assistant-Administrator aufrufbar.
+  fields:
+    person_entity_ids:
+      name: Haushaltspersonen
+      required: true
+      selector: {entity: {domain: person, multiple: true}}
+    confirmed:
+      name: Ausdrücklich bestätigt
+      required: true
+      selector: {boolean: {}}
+
+save_routine:
+  name: Bestätigte Routine speichern
+  description: >-
+    Speichert eine lokale Routine ausschließlich aus typisierten, ausdrücklich
+    bestätigten Schritten. Freie Templates oder Service-Namen werden nicht akzeptiert.
+  fields:
+    routine_id:
+      name: Routine-ID
+      required: true
+      selector: {text: {}}
+    name:
+      name: Anzeigename
+      required: true
+      selector: {text: {}}
+    owner_user_id:
+      name: Home-Assistant-Benutzer-ID
+      required: true
+      selector: {text: {}}
+    steps:
+      name: Typisierte Schritte
+      description: >-
+        Liste aus entity_id, property (state, brightness oder temperature),
+        value sowie optional step_id, unit und description.
+      required: true
+      selector: {object: {}}
+    confirmed:
+      name: Ausdrücklich bestätigt
+      required: true
+      selector: {boolean: {}}
+
+save_comfort_profile:
+  name: Bestätigtes Komfortprofil speichern
+  description: Speichert ausschließlich ausdrücklich bestätigte lokale Komfortgrenzen.
+  fields:
+    profile_id:
+      name: Profil-ID
+      required: true
+      selector: {text: {}}
+    owner_user_id:
+      name: Home-Assistant-Benutzer-ID
+      required: true
+      selector: {text: {}}
+    area_id:
+      name: Bereichs-ID
+      required: true
+      selector: {text: {}}
+    temperature_min:
+      name: Mindesttemperatur
+      required: false
+      selector: {number: {mode: box}}
+    temperature_max:
+      name: Höchsttemperatur
+      required: false
+      selector: {number: {mode: box}}
+    brightness_min:
+      name: Mindesthelligkeit
+      required: false
+      selector: {number: {min: 0, max: 100, mode: box}}
+    brightness_max:
+      name: Höchsthelligkeit
+      required: false
+      selector: {number: {min: 0, max: 100, mode: box}}
+    color_temperature_kelvin:
+      name: Farbtemperatur
+      required: false
+      selector: {number: {min: 1000, max: 10000, mode: box}}
+    humidity_min:
+      name: Mindestluftfeuchtigkeit
+      required: false
+      selector: {number: {min: 0, max: 100, mode: box}}
+    humidity_max:
+      name: Höchstluftfeuchtigkeit
+      required: false
+      selector: {number: {min: 0, max: 100, mode: box}}
+    cover_position:
+      name: Rollladenposition
+      required: false
+      selector: {number: {min: 0, max: 100, mode: box}}
+    confirmed:
+      name: Ausdrücklich bestätigt
+      required: true
+      selector: {boolean: {}}
+
+delete_monitor_goal:
+  name: Monitor-Ziel löschen
+  description: Löscht ein persistentes HomeIntent-Monitor-Ziel anhand seiner Goal-ID.
+  fields:
+    goal_id:
+      name: Goal-ID
+      required: true
+      selector: {text: {}}

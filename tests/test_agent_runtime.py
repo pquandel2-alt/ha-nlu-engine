@@ -16,9 +16,9 @@ import _ha_stub
 
 _ha_stub.install()
 
-from ha_nlu.agent_event import AgentEventState, AgentMode, StoredServicePlan  # noqa: E402
-from ha_nlu.agent_runtime import ProactiveAgentRuntime  # noqa: E402
-from ha_nlu.const import (  # noqa: E402
+from homeintent.agent_event import AgentEventState, AgentMode, StoredServicePlan  # noqa: E402
+from homeintent.agent_runtime import ProactiveAgentRuntime  # noqa: E402
+from homeintent.const import (  # noqa: E402
     CONF_AGENT_DELIVERY_CHANNELS,
     CONF_AGENT_ENABLED,
     CONF_AGENT_MEDIA_PLAYERS,
@@ -27,8 +27,8 @@ from ha_nlu.const import (  # noqa: E402
     CONF_ADMIN_ONLY_ENTITIES,
     CONF_CONTROL_USER_IDS,
 )
-from ha_nlu.runtime_data import HaNluRuntimeData  # noqa: E402
-from ha_nlu.entities import EntitySnapshot  # noqa: E402
+from homeintent.runtime_data import HomeIntentRuntimeData  # noqa: E402
+from homeintent.entities import EntitySnapshot  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
 from homeassistant.core import HomeAssistant, State  # noqa: E402
 from homeassistant.helpers import entity_registry as er  # noqa: E402
@@ -38,7 +38,7 @@ def _runtime(tmp_path: Path, options: dict | None = None):
     hass = HomeAssistant()
     hass.config.path = lambda *parts: str(tmp_path.joinpath(*parts))
     entry = ConfigEntry(options=options or {})
-    runtime = ProactiveAgentRuntime(hass, entry, HaNluRuntimeData())
+    runtime = ProactiveAgentRuntime(hass, entry, HomeIntentRuntimeData())
     return hass, runtime
 
 
@@ -154,7 +154,7 @@ def test_ask_notification_action_revalidates_and_executes(monkeypatch, tmp_path)
             capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
         )
     ]
-    monkeypatch.setattr("ha_nlu.agent_runtime.build_entity_snapshots", lambda *_: entities)
+    monkeypatch.setattr("homeintent.agent_runtime.build_entity_snapshots", lambda *_: entities)
 
     async def scenario():
         created = await runtime.async_signal({
@@ -188,7 +188,7 @@ def test_critical_ask_requires_authenticated_admin_by_default(monkeypatch, tmp_p
         },
     )
     entities = [EntitySnapshot("lock.front", "Haustür", "lock", "locked")]
-    monkeypatch.setattr("ha_nlu.agent_runtime.build_entity_snapshots", lambda *_: entities)
+    monkeypatch.setattr("homeintent.agent_runtime.build_entity_snapshots", lambda *_: entities)
 
     async def scenario():
         created = await runtime.async_signal({
@@ -224,7 +224,7 @@ def test_authenticated_admin_can_confirm_critical_ask(monkeypatch, tmp_path):
         async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=True))
     )
     entities = [EntitySnapshot("lock.front", "Haustür", "lock", "locked")]
-    monkeypatch.setattr("ha_nlu.agent_runtime.build_entity_snapshots", lambda *_: entities)
+    monkeypatch.setattr("homeintent.agent_runtime.build_entity_snapshots", lambda *_: entities)
 
     async def scenario():
         created = await runtime.async_signal({
@@ -260,7 +260,7 @@ def test_alarm_disarm_push_is_denied_without_authenticated_actor(monkeypatch, tm
             "alarm_control_panel.home", "Alarmanlage", "alarm_control_panel", "armed_away"
         )
     ]
-    monkeypatch.setattr("ha_nlu.agent_runtime.build_entity_snapshots", lambda *_: entities)
+    monkeypatch.setattr("homeintent.agent_runtime.build_entity_snapshots", lambda *_: entities)
 
     async def scenario():
         created = await runtime.async_signal({
@@ -293,7 +293,7 @@ def test_authenticated_non_admin_critical_requires_explicit_opt_in(monkeypatch, 
         async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=False))
     )
     entities = [EntitySnapshot("lock.front", "Haustür", "lock", "locked")]
-    monkeypatch.setattr("ha_nlu.agent_runtime.build_entity_snapshots", lambda *_: entities)
+    monkeypatch.setattr("homeintent.agent_runtime.build_entity_snapshots", lambda *_: entities)
 
     async def scenario():
         created = await runtime.async_signal({
@@ -327,7 +327,7 @@ def test_push_actor_must_match_configured_control_user(monkeypatch, tmp_path):
         async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=False))
     )
     entities = [EntitySnapshot("switch.pump", "Pumpe", "switch", "on")]
-    monkeypatch.setattr("ha_nlu.agent_runtime.build_entity_snapshots", lambda *_: entities)
+    monkeypatch.setattr("homeintent.agent_runtime.build_entity_snapshots", lambda *_: entities)
 
     async def scenario():
         created = await runtime.async_signal({
@@ -367,7 +367,7 @@ def test_missing_push_actor_is_visibly_denied_when_control_allowlist_exists(
         },
     )
     entities = [EntitySnapshot("switch.pump", "Pumpe", "switch", "on")]
-    monkeypatch.setattr("ha_nlu.agent_runtime.build_entity_snapshots", lambda *_: entities)
+    monkeypatch.setattr("homeintent.agent_runtime.build_entity_snapshots", lambda *_: entities)
 
     async def scenario():
         created = await runtime.async_signal({
@@ -408,7 +408,7 @@ def test_foreign_push_actor_is_denied_by_control_allowlist(monkeypatch, tmp_path
         async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=False))
     )
     entities = [EntitySnapshot("switch.pump", "Pumpe", "switch", "on")]
-    monkeypatch.setattr("ha_nlu.agent_runtime.build_entity_snapshots", lambda *_: entities)
+    monkeypatch.setattr("homeintent.agent_runtime.build_entity_snapshots", lambda *_: entities)
 
     async def scenario():
         created = await runtime.async_signal({
@@ -449,7 +449,7 @@ def test_notification_action_from_unconfigured_device_is_ignored(monkeypatch, tm
         device_id="phone-device"
     )
     entities = [EntitySnapshot("switch.pump", "Pumpe", "switch", "on")]
-    monkeypatch.setattr("ha_nlu.agent_runtime.build_entity_snapshots", lambda *_: entities)
+    monkeypatch.setattr("homeintent.agent_runtime.build_entity_snapshots", lambda *_: entities)
 
     async def scenario():
         created = await runtime.async_signal({
@@ -498,7 +498,7 @@ def test_execute_event_cannot_promote_an_inform_event(tmp_path):
 def test_parallel_execute_clicks_call_the_physical_service_once(monkeypatch, tmp_path):
     hass, runtime = _runtime(tmp_path)
     entities = [EntitySnapshot("switch.pump", "Pumpe", "switch", "on")]
-    monkeypatch.setattr("ha_nlu.agent_runtime.build_entity_snapshots", lambda *_: entities)
+    monkeypatch.setattr("homeintent.agent_runtime.build_entity_snapshots", lambda *_: entities)
 
     async def scenario():
         created = await runtime.async_signal({
@@ -536,7 +536,7 @@ def test_service_failure_is_recorded_as_failed_and_reported(monkeypatch, tmp_pat
         },
     )
     entities = [EntitySnapshot("switch.pump", "Pumpe", "switch", "on")]
-    monkeypatch.setattr("ha_nlu.agent_runtime.build_entity_snapshots", lambda *_: entities)
+    monkeypatch.setattr("homeintent.agent_runtime.build_entity_snapshots", lambda *_: entities)
 
     async def scenario():
         created = await runtime.async_signal({
@@ -567,7 +567,7 @@ def test_source_change_between_notification_and_tap_prevents_execution(
     hass, runtime = _runtime(tmp_path)
     hass.states._states["binary_sensor.door"] = State("binary_sensor.door", "on")
     entities = [EntitySnapshot("switch.pump", "Pumpe", "switch", "on")]
-    monkeypatch.setattr("ha_nlu.agent_runtime.build_entity_snapshots", lambda *_: entities)
+    monkeypatch.setattr("homeintent.agent_runtime.build_entity_snapshots", lambda *_: entities)
 
     async def scenario():
         created = await runtime.async_signal({
@@ -618,7 +618,7 @@ def test_recovery_quarantines_persisted_plan_outside_allowlist(tmp_path):
 def test_auto_never_executes_medium_risk_cover_action(monkeypatch, tmp_path):
     hass, runtime = _runtime(tmp_path)
     entities = [EntitySnapshot("cover.blind", "Rollo", "cover", "open")]
-    monkeypatch.setattr("ha_nlu.agent_runtime.build_entity_snapshots", lambda *_: entities)
+    monkeypatch.setattr("homeintent.agent_runtime.build_entity_snapshots", lambda *_: entities)
 
     event = asyncio.run(runtime.async_signal({
         "rule_id": "blind-rule",
@@ -642,7 +642,7 @@ def test_auto_uses_the_same_non_admin_policy_for_gate_and_executor(monkeypatch, 
         tmp_path, {CONF_ADMIN_ONLY_ENTITIES: ["switch.server"]}
     )
     entities = [EntitySnapshot("switch.server", "Server", "switch", "on")]
-    monkeypatch.setattr("ha_nlu.agent_runtime.build_entity_snapshots", lambda *_: entities)
+    monkeypatch.setattr("homeintent.agent_runtime.build_entity_snapshots", lambda *_: entities)
 
     event = asyncio.run(runtime.async_signal({
         "rule_id": "server-rule",
@@ -684,7 +684,7 @@ def test_low_risk_auto_executes_then_pushes_without_stale_buttons(monkeypatch, t
         },
     )
     entities = [EntitySnapshot("switch.pump", "Pumpe", "switch", "on")]
-    monkeypatch.setattr("ha_nlu.agent_runtime.build_entity_snapshots", lambda *_: entities)
+    monkeypatch.setattr("homeintent.agent_runtime.build_entity_snapshots", lambda *_: entities)
 
     event = asyncio.run(runtime.async_signal({
         "rule_id": "auto-pump",
@@ -713,7 +713,7 @@ def test_unique_tts_question_accepts_voice_confirmation(monkeypatch, tmp_path):
         },
     )
     entities = [EntitySnapshot("switch.pump", "Pumpe", "switch", "on")]
-    monkeypatch.setattr("ha_nlu.agent_runtime.build_entity_snapshots", lambda *_: entities)
+    monkeypatch.setattr("homeintent.agent_runtime.build_entity_snapshots", lambda *_: entities)
 
     async def scenario():
         created = await runtime.async_signal({

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ha_nlu.entities import (
+from homeintent.entities import (
     EntitySnapshot,
     ResolveStatus,
     resolve_entities_by_domain,

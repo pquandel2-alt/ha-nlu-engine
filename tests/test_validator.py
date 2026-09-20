@@ -11,11 +11,11 @@ the 9 ValidationError classes. Two groups of tests:
 
 from __future__ import annotations
 
-from ha_nlu.areas import AreaSnapshot
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.command import SemanticCommand
-from ha_nlu.nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
-from ha_nlu.nlu.validator import ValidationError, validate_command
+from homeintent.areas import AreaSnapshot
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.command import SemanticCommand
+from homeintent.nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
+from homeintent.nlu.validator import ValidationError, validate_command
 
 LIGHT_WITH_BRIGHTNESS = EntitySnapshot(
     "light.a", "Lampe A", "light", "off", capabilities=frozenset({"TURN_ON", "TURN_OFF", "BRIGHTNESS"})

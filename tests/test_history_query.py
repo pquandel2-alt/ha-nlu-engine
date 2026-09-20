@@ -5,8 +5,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.history_query import (
+from homeintent.entities import EntitySnapshot
+from homeintent.history_query import (
     HistoryMetric,
     ComparativeHistoryQuery,
     StateHistoryMetric,

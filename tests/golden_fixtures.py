@@ -13,7 +13,7 @@ carry capabilities/attributes for.
 
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
+from homeintent.entities import EntitySnapshot
 
 GOLDEN_ENTITIES: list[EntitySnapshot] = [
     EntitySnapshot(

@@ -1,6 +1,6 @@
-from ha_nlu.nlu.language_frontend import analyse_language
-from ha_nlu.nlu.semantic_graph import SemanticNodeKind, build_semantic_graph
-from ha_nlu.nlu.temporal_semantics import TemporalKind
+from homeintent.nlu.language_frontend import analyse_language
+from homeintent.nlu.semantic_graph import SemanticNodeKind, build_semantic_graph
+from homeintent.nlu.temporal_semantics import TemporalKind
 
 
 def test_delay_and_duration_are_distinct_meanings():

@@ -13,7 +13,7 @@ re-deriving what each field means.
 
 from __future__ import annotations
 
-from ha_nlu.nlu.automation_model import (
+from homeintent.nlu.automation_model import (
     AutomationModel,
     NumericComparator,
     SunEvent,
@@ -22,7 +22,7 @@ from ha_nlu.nlu.automation_model import (
     TriggerType,
     render_automation_tree,
 )
-from ha_nlu.nlu.semantic_state import SemanticState
+from homeintent.nlu.semantic_state import SemanticState
 
 
 def test_trigger_type_covers_all_documented_types():

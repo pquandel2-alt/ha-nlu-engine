@@ -1,12 +1,12 @@
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.discourse import (
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.discourse import (
     DiscourseRole,
     ReferenceStatus,
     remember_entities,
     resolve_reference,
 )
-from ha_nlu.nlu.language_frontend import analyse_language
-from ha_nlu.nlu.semantic_graph import build_semantic_graph
+from homeintent.nlu.language_frontend import analyse_language
+from homeintent.nlu.semantic_graph import build_semantic_graph
 
 
 LIGHT_A = EntitySnapshot(

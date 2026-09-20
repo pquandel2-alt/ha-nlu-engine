@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.context import ConversationContext
-from ha_nlu.nlu.dialog_focus import derive_dialog_focus
-from ha_nlu.nlu.semantic_utterance import SpeechAct, analyse_utterance
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.context import ConversationContext
+from homeintent.nlu.dialog_focus import derive_dialog_focus
+from homeintent.nlu.semantic_utterance import SpeechAct, analyse_utterance
 from test_language_understanding_expansion import ENTITIES
 
 

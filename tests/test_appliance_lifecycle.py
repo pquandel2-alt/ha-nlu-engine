@@ -1,10 +1,10 @@
 from datetime import datetime, timezone
 
-from ha_nlu.appliance_lifecycle import (
+from homeintent.appliance_lifecycle import (
     ApplianceQuestion,
     match_appliance_lifecycle_query,
 )
-from ha_nlu.entities import EntitySnapshot
+from homeintent.entities import EntitySnapshot
 
 
 NOW = datetime(2026, 9, 6, 15, 0, tzinfo=timezone.utc)

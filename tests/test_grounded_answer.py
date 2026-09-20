@@ -1,4 +1,4 @@
-from ha_nlu.nlu.grounded_answer import TruthValue, join_german, render_state_answer
+from homeintent.nlu.grounded_answer import TruthValue, join_german, render_state_answer
 
 
 def test_unknown_evidence_never_becomes_a_negative_answer():

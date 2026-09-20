@@ -7,13 +7,13 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "custom_components"))
 
-from ha_nlu.calendar_management import (  # noqa: E402
+from homeintent.calendar_management import (  # noqa: E402
     CalendarManagementKind,
     flatten_calendar_response,
     parse_calendar_management,
     render_calendar_events,
 )
-from ha_nlu.entities import EntitySnapshot  # noqa: E402
+from homeintent.entities import EntitySnapshot  # noqa: E402
 
 
 NOW = datetime(2026, 8, 24, 12, 0, tzinfo=ZoneInfo("Europe/Berlin"))

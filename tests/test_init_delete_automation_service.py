@@ -1,5 +1,5 @@
-"""Wave 12 ("Einmalige Automation"): ``ha_nlu/__init__.py``'s
-``ha_nlu.delete_automation`` custom service registration - the action step
+"""Wave 12 ("Einmalige Automation"): ``homeintent/__init__.py``'s
+``homeintent.delete_automation`` custom service registration - the action step
 a self-deleting generated automation calls on itself after it fires (see
 ``nlu/ha_automation_generator.py``'s ``generate_ha_automation_config()``
 docstring).
@@ -8,7 +8,7 @@ Uses ``tests/_ha_stub.py``'s fake ``HomeAssistant``/``ConfigEntry`` the same
 way ``tests/test_conversation_automation_toggle.py`` etc. already do -
 registers the service through the real ``async_setup_entry()``, then
 invokes the stored handler directly (mirroring how HA itself would dispatch
-a real ``ha_nlu.delete_automation`` service call), asserting against the
+a real ``homeintent.delete_automation`` service call), asserting against the
 real ``AutomationExecutor``/``automations.yaml`` round trip rather than a
 second reimplementation of ``async_delete_automation()`` (already covered
 in isolation by ``tests/test_automation_executor.py``).
@@ -30,8 +30,8 @@ import _ha_stub  # noqa: E402
 
 _ha_stub.install()
 
-import ha_nlu as ha_nlu_init  # noqa: E402
-from ha_nlu.const import DOMAIN  # noqa: E402
+import homeintent as ha_nlu_init  # noqa: E402
+from homeintent.const import DOMAIN  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
 from homeassistant.core import HomeAssistant, ServiceCall  # noqa: E402
 
@@ -79,6 +79,11 @@ def test_async_setup_entry_registers_the_delete_automation_service(tmp_path):
     assert hass.services.has_service(DOMAIN, "record_automation_run") is True
     assert hass.services.has_service(DOMAIN, "proactive_message") is True
     assert hass.services.has_service(DOMAIN, "recheck_agent_event") is True
+    assert hass.services.has_service(DOMAIN, "bind_user_context") is True
+    assert hass.services.has_service(DOMAIN, "set_household") is True
+    assert hass.services.has_service(DOMAIN, "save_routine") is True
+    assert hass.services.has_service(DOMAIN, "save_comfort_profile") is True
+    assert hass.services.has_service(DOMAIN, "delete_monitor_goal") is True
 
 
 def test_async_setup_entry_uses_configured_context_ttl(tmp_path):
@@ -134,6 +139,11 @@ def test_async_unload_entry_removes_the_service(tmp_path):
     assert hass.services.has_service(DOMAIN, "record_automation_run") is False
     assert hass.services.has_service(DOMAIN, "proactive_message") is False
     assert hass.services.has_service(DOMAIN, "recheck_agent_event") is False
+    assert hass.services.has_service(DOMAIN, "bind_user_context") is False
+    assert hass.services.has_service(DOMAIN, "set_household") is False
+    assert hass.services.has_service(DOMAIN, "save_routine") is False
+    assert hass.services.has_service(DOMAIN, "save_comfort_profile") is False
+    assert hass.services.has_service(DOMAIN, "delete_monitor_goal") is False
 
 
 def test_calling_the_service_deletes_the_matching_automation(monkeypatch, tmp_path):

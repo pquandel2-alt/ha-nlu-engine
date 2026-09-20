@@ -1,6 +1,6 @@
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.risk import RiskLevel, classify_service_plan, requires_confirmation
-from ha_nlu.service_call import ServiceCallPlan
+from homeintent.entities import EntitySnapshot
+from homeintent.risk import RiskLevel, classify_service_plan, requires_confirmation
+from homeintent.service_call import ServiceCallPlan
 
 
 def test_unlock_and_garage_are_critical():

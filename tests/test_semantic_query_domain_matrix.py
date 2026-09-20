@@ -14,8 +14,8 @@ from itertools import product
 
 import pytest
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.semantic_utterance import SpeechAct, analyse_utterance
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.semantic_utterance import SpeechAct, analyse_utterance
 
 
 @dataclass(frozen=True)

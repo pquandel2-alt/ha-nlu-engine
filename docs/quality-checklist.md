@@ -6,7 +6,38 @@ Checkliste orientiert sich trotzdem an der aktuellen Integration Quality Scale
 und trennt nachweisbar Erledigtes von offenen Arbeiten. Sie ist keine
 Selbstzertifizierung.
 
-Stand: 19. September 2026
+Stand: 20. September 2026
+
+## V10 Completion / 5.0.0
+
+- [x] offizielle Projektidentität und kanonische Integration sind `HomeIntent` / `homeintent`
+- [x] `ha_nlu` enthält ausschließlich einen dokumentierten Config-Entry-Kompatibilitätsshim
+- [x] zentrales typisiertes GoalModel trennt GOAL, COMMAND, QUERY und AUTOMATION
+- [x] ein zentraler bounded Planner erzeugt typisierte Abhängigkeitsgraphen und PlanningTrace
+- [x] bestätigte Routinen und Komfortprofile werden lokal persistiert; es gibt kein stilles Lernen
+- [x] Home-Assistant-`person.*`, explizite User↔Person-/Push-Bindings und Household-Scope
+- [x] persistente Monitor Goals mit frischer Triggerzeit-Abfrage, Dedupe, Cooldown und Idempotency-Key
+- [x] erwartete Effekte werden aus frischen Zuständen geprüft; Serviceannahme allein gilt nicht als Erfolg
+- [x] begrenzte GoalRun-Historie und belegbasierte Fehlererklärung ohne erfundene Kausalität
+- [x] strukturierte Planänderungen einschließlich planweiter Exclusions und persistenter Terminierung
+- [x] 150 handgeschriebene V10-Goal-/Planning-OOD-Fälle sowie Metamorphie- und Safety-Tests
+
+## Abschlussvalidierung 5.0.0
+
+- [x] Gesamtsuite: 3.094 bestanden, 12 übersprungen, 0 fehlgeschlagen
+- [x] Coverage: 86,26 Prozent (18.870/21.875 Statements)
+- [x] Language Safety: 252 bestanden
+- [x] Shadow: 3.772 Turns, Baseline unverändert, 0 Action-Leakage
+- [x] Full Pyright einschließlich konfiguriertem Strict-Scope: 0 Fehler, 0 Warnungen
+- [x] Pyflakes und `git diff --check`: grün
+- [x] V10-5k-Performance-Gate lokal grün; höchster gemessener p95 53,245 ms
+- [ ] Hassfest, HACS, Home Assistant Stable Smoke und separater CI-Strict-Befehl:
+  werden auf dem finalen Commit durch GitHub Actions verifiziert
+
+Der lokale V9-5k-Lauf wurde bei einer Hostlast von etwa 54 auf vier CPUs
+ausgeführt und überschritt dadurch mehrere unveränderte 100-ms-Grenzen. Diese
+Messung ist kein grünes Release-Gate und die Budgets wurden nicht angehoben.
+Maßgeblich ist der identische Lauf auf dem unbelasteten GitHub-CI-Runner.
 
 ## V9 Completion / 4.77.0
 
@@ -36,7 +67,7 @@ Stand: 19. September 2026
   gemessener V9-p95 21,55 ms (verschachtelter Filter), produktiver
   Discourse-Follow-up 2,19 ms
 - [x] HA-Stable-Container-Smoke, Hassfest und HACS: grün in
-  [CI-Lauf 35453737883](https://github.com/pquandel2-alt/ha-nlu-engine/actions/runs/35453737883)
+  [CI-Lauf 35453737883](https://github.com/pquandel2-alt/homeintent/actions/runs/35453737883)
 
 Der zusätzliche lokale 5k-Lauf unter einer Host-Last von etwa 61 auf vier
 sichtbaren CPUs war nicht vollständig grün; seine Messwerte werden deshalb

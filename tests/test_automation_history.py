@@ -1,6 +1,6 @@
 import json
 
-from ha_nlu.automation_history import AutomationHistoryStore
+from homeintent.automation_history import AutomationHistoryStore
 
 
 def test_history_is_bounded_and_pop_restores_latest(tmp_path):

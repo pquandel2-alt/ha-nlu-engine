@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from itertools import permutations
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.frame import Comparison
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.frame import Comparison
 
 HEATER = EntitySnapshot(
     "climate.heizung_buero", "Heizung Büro", "climate", "heat",

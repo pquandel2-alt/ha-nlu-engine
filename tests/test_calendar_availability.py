@@ -1,12 +1,12 @@
 from datetime import datetime, timezone
 
-from ha_nlu.calendar_management import (
+from homeintent.calendar_management import (
     CalendarEventSummary,
     CalendarManagementKind,
     parse_calendar_management,
     render_calendar_events,
 )
-from ha_nlu.entities import EntitySnapshot
+from homeintent.entities import EntitySnapshot
 
 
 CALENDAR = EntitySnapshot("calendar.personal", "Privat", "calendar", "on")

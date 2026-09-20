@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ha_nlu.areas import AreaSnapshot
-from ha_nlu.conversation_location import materialize_local_reference
+from homeintent.areas import AreaSnapshot
+from homeintent.conversation_location import materialize_local_reference
 
 
 AREA = AreaSnapshot("wohnzimmer", "Wohnzimmer", aliases=("Stube",))

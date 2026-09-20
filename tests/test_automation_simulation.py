@@ -1,10 +1,10 @@
-from ha_nlu.automation_management import (
+from homeintent.automation_management import (
     AutomationManagementKind,
     parse_automation_management,
 )
-from ha_nlu.automation_simulation import render_automation_simulation, simulate_automation
-from ha_nlu.automation_summary import AutomationSummary
-from ha_nlu.entities import EntitySnapshot
+from homeintent.automation_simulation import render_automation_simulation, simulate_automation
+from homeintent.automation_summary import AutomationSummary
+from homeintent.entities import EntitySnapshot
 
 
 def test_simulation_is_classified_as_read_only_management():

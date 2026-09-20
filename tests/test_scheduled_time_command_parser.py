@@ -7,9 +7,9 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.action_model import ActionType
-from ha_nlu.nlu.automation_model import (
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.action_model import ActionType
+from homeintent.nlu.automation_model import (
     CalendarReference,
     TriggerType,
     resolve_pending_schedule,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ha_nlu.nlu.dialog_focus import derive_dialog_focus
-from ha_nlu.nlu.primitives import SemanticProperty
+from homeintent.nlu.dialog_focus import derive_dialog_focus
+from homeintent.nlu.primitives import SemanticProperty
 
 
 def test_focus_tracks_floor_property_and_candidates(engine):

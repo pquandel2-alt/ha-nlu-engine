@@ -11,10 +11,10 @@ import _ha_stub  # noqa: E402
 
 _ha_stub.install()
 
-import ha_nlu.conversation as ha_conversation  # noqa: E402
-from ha_nlu.automation_wizard import parse_lifetime, starts_automation_wizard  # noqa: E402
-from ha_nlu.conversation import NluConversationEntity  # noqa: E402
-from ha_nlu.entities import EntitySnapshot  # noqa: E402
+import homeintent.conversation as ha_conversation  # noqa: E402
+from homeintent.automation_wizard import parse_lifetime, starts_automation_wizard  # noqa: E402
+from homeintent.conversation import NluConversationEntity  # noqa: E402
+from homeintent.entities import EntitySnapshot  # noqa: E402
 from homeassistant.components.conversation import ConversationInput  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
 from homeassistant.core import HomeAssistant  # noqa: E402

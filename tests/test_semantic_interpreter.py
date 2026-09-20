@@ -1,10 +1,10 @@
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.language_frontend import analyse_language
-from ha_nlu.nlu.parser import ClarificationRequest, ParseResult
-from ha_nlu.nlu.semantic_interpreter import SemanticInterpreter
-from ha_nlu.nlu.understanding import EvidenceKind, EvidencePolarity
-from ha_nlu.nlu.semantic_graph import SemanticNodeKind
-from ha_nlu.nlu.evidence import EVIDENCE_WEIGHTS, explain_candidate
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.language_frontend import analyse_language
+from homeintent.nlu.parser import ClarificationRequest, ParseResult
+from homeintent.nlu.semantic_interpreter import SemanticInterpreter
+from homeintent.nlu.understanding import EvidenceKind, EvidencePolarity
+from homeintent.nlu.semantic_graph import SemanticNodeKind
+from homeintent.nlu.evidence import EVIDENCE_WEIGHTS, explain_candidate
 
 
 ENTITIES = [

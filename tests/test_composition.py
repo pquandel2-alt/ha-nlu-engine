@@ -1,15 +1,15 @@
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.composition import (
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.composition import (
     build_compositional_plan,
     build_document_compositional_plan,
     independent_predicate_clauses,
     project_target,
 )
-from ha_nlu.nlu.language_frontend import analyse_language
-from ha_nlu.nlu.meaning import analyse_turn
-from ha_nlu.nlu.semantic_graph import build_semantic_graph
-from ha_nlu.nlu.semantic_projection import project_independent_predicates
-from ha_nlu.world_model import build_world_model
+from homeintent.nlu.language_frontend import analyse_language
+from homeintent.nlu.meaning import analyse_turn
+from homeintent.nlu.semantic_graph import build_semantic_graph
+from homeintent.nlu.semantic_projection import project_independent_predicates
+from homeintent.world_model import build_world_model
 
 
 LIGHTS = [

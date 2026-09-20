@@ -1,0 +1,63 @@
+"""Typed config-entry owned runtime state."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from collections import deque
+from typing import Any
+
+from .engine import NluEngine
+from .audit_log import AuditTrail
+from .nlu.context import ConversationContextStore
+from .memory import MemoryStore
+from .situation import RoutineStatistics, SituationEvaluator
+from .dialog_manager import DialogManager
+from .effect_monitor import EffectMonitor
+from .adapters import AdapterEvidence
+from .goal_run import GoalRunStore
+from .monitor_goal import MonitorGoalRuntime, MonitorGoalStore
+from .profiles import ProfileStore
+from .user_context import UserContextStore
+from .execution_coordinator import ExecutionCoordinator
+
+
+@dataclass
+class HomeIntentRuntimeData:
+    """State shared by platforms belonging to one integration entry."""
+
+    engine: NluEngine = field(default_factory=NluEngine)
+    context_store: ConversationContextStore = field(
+        default_factory=ConversationContextStore
+    )
+    audit_trail: AuditTrail = field(default_factory=AuditTrail)
+    proactive_agent: Any | None = None
+    situation_runtime: Any | None = None
+    memory: MemoryStore | None = None
+    situation_evaluator: SituationEvaluator = field(default_factory=SituationEvaluator)
+    routine_statistics: dict[str, RoutineStatistics] = field(default_factory=dict)
+    dialog_manager: DialogManager = field(default_factory=DialogManager)
+    document_index: Any | None = None
+    effect_monitor: EffectMonitor = field(default_factory=EffectMonitor)
+    adapter_evidence: deque[AdapterEvidence] = field(
+        default_factory=lambda: deque(maxlen=512)
+    )
+    adapter_runtime: Any | None = None
+    native_timer: Any | None = None
+    user_contexts: UserContextStore | None = None
+    profiles: ProfileStore | None = None
+    goal_runs: GoalRunStore | None = None
+    monitor_goals: MonitorGoalStore | None = None
+    monitor_runtime: MonitorGoalRuntime | None = None
+    execution_coordinator: ExecutionCoordinator = field(default_factory=ExecutionCoordinator)
+
+    def __post_init__(self) -> None:
+        self.context_store.bind_dialog_listener(self._synchronize_dialog)
+
+    def _synchronize_dialog(self, conversation_id: str, pending: object | None) -> None:
+        kind = getattr(pending, "kind", None)
+        payload = getattr(pending, "payload", None)
+        self.dialog_manager.synchronize_pending_payload(
+            conversation_id,
+            getattr(kind, "name", None),
+            payload,
+        )

@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from ha_nlu.calendar_event import (
+from homeintent.calendar_event import (
     CalendarEventDraft,
     build_calendar_event_service_call,
     calendar_event_question,
@@ -14,7 +14,7 @@ from ha_nlu.calendar_event import (
     update_calendar_event_draft,
     writable_calendars,
 )
-from ha_nlu.entities import EntitySnapshot
+from homeintent.entities import EntitySnapshot
 
 
 NOW = datetime(2026, 8, 22, 12, 0, tzinfo=ZoneInfo("Europe/Berlin"))

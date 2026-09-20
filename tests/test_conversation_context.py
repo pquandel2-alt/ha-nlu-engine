@@ -6,9 +6,9 @@ dataclasses and store directly.
 
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.calendar_event import CalendarEventDraft
-from ha_nlu.nlu.context import (
+from homeintent.entities import EntitySnapshot
+from homeintent.calendar_event import CalendarEventDraft
+from homeintent.nlu.context import (
     active_pending_dialog,
     ClarificationRequest,
     ConversationContext,
@@ -18,8 +18,8 @@ from ha_nlu.nlu.context import (
     PendingCalendarEvent,
     PendingDialogKind,
 )
-from ha_nlu.nlu.automation_model import AutomationModel, TriggerModel, TriggerType
-from ha_nlu.dialog_manager import DialogManager, DialogTaskKind
+from homeintent.nlu.automation_model import AutomationModel, TriggerModel, TriggerType
+from homeintent.dialog_manager import DialogManager, DialogTaskKind
 
 LIGHT_WOHNZIMMER = EntitySnapshot("light.wohnzimmer", "Wohnzimmerlicht", "light", "on")
 LIGHT_KUECHE = EntitySnapshot("light.kueche", "Küchenlicht", "light", "on")
@@ -202,9 +202,9 @@ def test_v6_context_fields_default_to_none_for_existing_call_sites():
 
 
 def test_conversation_context_accepts_v6_fields_directly():
-    from ha_nlu.floors import FloorSnapshot
-    from ha_nlu.nlu.primitives import SemanticProperty
-    from ha_nlu.nlu.semantic_state import SemanticState
+    from homeintent.floors import FloorSnapshot
+    from homeintent.nlu.primitives import SemanticProperty
+    from homeintent.nlu.semantic_state import SemanticState
 
     context = ConversationContext(
         last_command=None,

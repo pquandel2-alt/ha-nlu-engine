@@ -2,18 +2,18 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **4.77.0**
+- Aktuelle Version: **5.0.0** (V10)
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
 - Lizenz: **MIT**
-- Website: **[pquandel2-alt.github.io/ha-nlu-engine](https://pquandel2-alt.github.io/ha-nlu-engine/)**
+- Website: **[pquandel2-alt.github.io/homeintent](https://pquandel2-alt.github.io/homeintent/)**
 
-[![HomeIntent in HACS öffnen](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=pquandel2-alt&repository=ha-nlu-engine&category=integration)
-[![GitHub Release](https://img.shields.io/github/v/release/pquandel2-alt/ha-nlu-engine)](https://github.com/pquandel2-alt/ha-nlu-engine/releases/latest)
-[![Website](https://img.shields.io/badge/Website-Live--Demo-5eead4?logo=github&logoColor=white)](https://pquandel2-alt.github.io/ha-nlu-engine/)
+[![HomeIntent in HACS öffnen](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=pquandel2-alt&repository=homeintent&category=integration)
+[![GitHub Release](https://img.shields.io/github/v/release/pquandel2-alt/homeintent)](https://github.com/pquandel2-alt/homeintent/releases/latest)
+[![Website](https://img.shields.io/badge/Website-Live--Demo-5eead4?logo=github&logoColor=white)](https://pquandel2-alt.github.io/homeintent/)
 
-> **[➜ HomeIntent im Browser ansehen](https://pquandel2-alt.github.io/ha-nlu-engine/)** — eine
+> **[➜ HomeIntent im Browser ansehen](https://pquandel2-alt.github.io/homeintent/)** — eine
 > interaktive Übersicht, die Schritt für Schritt zeigt, wie aus einem gesprochenen
 > Satz ein geprüfter Serviceaufruf wird. Ohne Installation.
 
@@ -42,7 +42,34 @@ Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
 
-## Was ist in Version 4.77 neu?
+## Was ist in Version 5.0 / V10 neu?
+
+V10 ergänzt die bestehende V8/V9-Pipeline um typisierte Zielerkennung,
+begrenzte Mehrschrittplanung, Vorbedingungsprüfung, Effektverifikation und
+persistente Monitor-Ziele. Ein Ziel beschreibt das gewünschte Ergebnis und
+ist nicht automatisch ein Serviceaufruf. HomeIntent verwendet weiterhin
+weder Runtime-LLM noch Cloud-NLU und führt ausschließlich geschlossene,
+policy-geprüfte Operatoren aus.
+
+Bestätigte Routinen und Komfortprofile werden lokal gespeichert; unbekannte
+Begriffe wie „Filmabend“ oder „angenehm“ lösen eine Rückfrage statt einer
+Annahme aus. Die bestätigte Konfiguration erfolgt über die typisierten Dienste
+`homeintent.save_routine` und `homeintent.save_comfort_profile`; persistente
+Monitor-Ziele können über `homeintent.delete_monitor_goal` entfernt werden.
+`person.*` bleibt die Anwesenheitsquelle. Zuordnungen von
+Home-Assistant-Benutzer zu Person und Push-Ziel sind explizit. Persistente
+Monitor-Ziele prüfen ihre Bedingungen zum Auslösezeitpunkt frisch, deduplizieren
+Benachrichtigungen und überleben Neustarts. `GoalRun`-Datensätze unterscheiden
+Serviceannahme von beobachteter Wirkung und ermöglichen belegte Antworten auf
+„Warum hat das nicht funktioniert?“.
+
+Die kanonische Integration heißt nun `homeintent`. Bestehende `ha_nlu`-
+Config-Entries und Serviceaufrufe bleiben über einen minimalen, als veraltet
+markierten Shim funktionsfähig. Details stehen in
+[`docs/homeintent-rename-migration.md`](docs/homeintent-rename-migration.md),
+die echte Architektur in [`docs/architecture-v10.md`](docs/architecture-v10.md).
+
+### Version 4.77
 
 Version 4.77 schließt weitere V9-Reasoning-Lücken innerhalb der bestehenden
 V8/V9-Architektur: relationale Klassenprojektion ist nicht mehr auf Fenster
@@ -136,7 +163,7 @@ vollständigen Werte und die Umgebungsgrenze stehen in
 der stabile Home-Assistant-Container-Smoke waren im selben CI-Lauf grün.
 
 Ältere Änderungen stehen in den
-[GitHub-Releases](https://github.com/pquandel2-alt/ha-nlu-engine/releases).
+[GitHub-Releases](https://github.com/pquandel2-alt/homeintent/releases).
 
 ## Wie HomeIntent Sprache versteht
 
@@ -791,14 +818,14 @@ HomeIntent wird derzeit als benutzerdefiniertes HACS-Repository installiert.
 3. Trage ein:
 
    ```text
-   https://github.com/pquandel2-alt/ha-nlu-engine
+   https://github.com/pquandel2-alt/homeintent
    ```
 
 4. Wähle den Typ **Integration**.
-5. Suche nach **HA NLU Engine** und installiere die aktuelle Version.
+5. Suche nach **HomeIntent** und installiere die aktuelle Version.
 6. Starte Home Assistant neu.
 7. Öffne **Einstellungen → Geräte & Dienste → Integration hinzufügen**.
-8. Füge **HA NLU Engine** hinzu.
+8. Füge **HomeIntent** hinzu.
 
 Bei einem Update über HACS anschließend Home Assistant neu starten. Wenn eine
 ältere Installation ungewöhnliches Verhalten zeigt, die Integration einmal
@@ -807,9 +834,9 @@ neu laden; ein vollständiges Entfernen ist normalerweise nicht erforderlich.
 ## Assist einrichten
 
 1. Öffne die Einstellungen der gewünschten Assist-Pipeline.
-2. Wähle **HA NLU Engine** als Conversation Agent.
+2. Wähle **HomeIntent** als Conversation Agent.
 3. Gib die benötigten Entitäten für Assist frei.
-4. Öffne bei Bedarf die Optionen von **HA NLU Engine** für eine feste Auswahl
+4. Öffne bei Bedarf die Optionen von **HomeIntent** für eine feste Auswahl
    und die Sicherheitsrichtlinien.
 
 Ohne feste Auswahl liest HomeIntent die aktuell für Assist freigegebenen
@@ -922,15 +949,15 @@ Weitere Dokumentation:
 ```bash
 python -m pip install --requirement requirements-dev.txt
 python -m pytest -q
-python -m pytest -q --cov=custom_components/ha_nlu --cov-report=term-missing
+python -m pytest -q --cov=custom_components/homeintent --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 4.77.0:
+Geprüfter Release-Stand von Version 5.0.0:
 
 ```text
-3054 passed, 12 skipped, 0 failed
-87,76 % Gesamt-Coverage (17475/19913 Zeilen; Terminalanzeige 88 %)
-77 % Coverage für conversation.py
+3094 passed, 12 skipped, 0 failed
+86,26 % Gesamt-Coverage (18870/21875 Statements; Terminalanzeige 86 %)
+70 % Coverage für conversation.py
 ```
 
 Zusätzlich wurden ausgeführt:
@@ -955,7 +982,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-4.77.0.json --quiet
+  --check docs/perf/v7-shadow-baseline-5.0.0.json --quiet
 ```
 
 Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die
@@ -1002,6 +1029,6 @@ Grundprinzipien:
 - neue Ausdrücke möglichst zentral statt als Satzvarianten modellieren und
 - jedes neue Verhalten mit Tests absichern.
 
-Repository: [github.com/pquandel2-alt/ha-nlu-engine](https://github.com/pquandel2-alt/ha-nlu-engine)
+Repository: [github.com/pquandel2-alt/homeintent](https://github.com/pquandel2-alt/homeintent)
 
 HomeIntent steht unter der [MIT-Lizenz](LICENSE).

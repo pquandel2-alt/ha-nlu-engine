@@ -16,9 +16,9 @@ live (covered by ``tests/test_conversation_automation_delete.py``).
 
 from __future__ import annotations
 
-from ha_nlu.automation_summary import AutomationSummary
-from ha_nlu.engine import AutomationDeletionMatchResult
-from ha_nlu.entities import EntitySnapshot
+from homeintent.automation_summary import AutomationSummary
+from homeintent.engine import AutomationDeletionMatchResult
+from homeintent.entities import EntitySnapshot
 
 KUECHE_LICHT = EntitySnapshot(
     "light.kueche_licht", "Küchenlicht", "light", "on",

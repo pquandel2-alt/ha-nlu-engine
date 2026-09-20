@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from ha_nlu.advanced_queries import match_advanced_query
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.phonetic_correction import phonetic_suggestions
-from ha_nlu.security_control import match_alarm_control
+from homeintent.advanced_queries import match_advanced_query
+from homeintent.entities import EntitySnapshot
+from homeintent.phonetic_correction import phonetic_suggestions
+from homeintent.security_control import match_alarm_control
 
 
 NOW = datetime(2026, 8, 24, 12, tzinfo=timezone.utc)

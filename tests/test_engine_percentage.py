@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from ha_nlu.entities import EntitySnapshot
+from homeintent.entities import EntitySnapshot
 
 
 def test_fahre_rolllade_buro_auf_30_prozent_runter(engine, entities):

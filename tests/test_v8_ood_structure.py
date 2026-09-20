@@ -3,12 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from ha_nlu.nlu.language_frontend import analyse_language
-from ha_nlu.nlu.semantic_graph import build_semantic_graph
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.semantic_interpreter import SemanticInterpreter
-from ha_nlu.nlu.understanding import UnderstandingKind
-from ha_nlu.world_model import build_world_model
+from homeintent.nlu.language_frontend import analyse_language
+from homeintent.nlu.semantic_graph import build_semantic_graph
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.semantic_interpreter import SemanticInterpreter
+from homeintent.nlu.understanding import UnderstandingKind
+from homeintent.world_model import build_world_model
 
 
 CORPUS = json.loads(

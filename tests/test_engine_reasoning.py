@@ -7,7 +7,7 @@ that it drives any response/plan - it doesn't.
 
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
+from homeintent.entities import EntitySnapshot
 
 TWO_ROOM_HOUSE = [
     EntitySnapshot(

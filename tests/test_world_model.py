@@ -10,9 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "custom_components"))
 
-from ha_nlu.devices import DeviceSnapshot  # noqa: E402
-from ha_nlu.entities import EntitySnapshot, build_entity_index  # noqa: E402
-from ha_nlu.world_model import build_world_model  # noqa: E402
+from homeintent.devices import DeviceSnapshot  # noqa: E402
+from homeintent.entities import EntitySnapshot, build_entity_index  # noqa: E402
+from homeintent.world_model import build_world_model  # noqa: E402
 
 LIGHT_WOHNZIMMER = EntitySnapshot(
     "light.wohnzimmer", "Wohnzimmerlicht", "light", "on",

@@ -17,12 +17,12 @@ import _ha_stub  # noqa: E402
 
 _ha_stub.install()
 
-import ha_nlu.conversation as ha_conversation  # noqa: E402
-from ha_nlu.const import SELECTABLE_DOMAINS  # noqa: E402
-from ha_nlu.conversation import NluConversationEntity  # noqa: E402
+import homeintent.conversation as ha_conversation  # noqa: E402
+from homeintent.const import SELECTABLE_DOMAINS  # noqa: E402
+from homeintent.conversation import NluConversationEntity  # noqa: E402
 from _v7_device import understand_device as match_device_control  # noqa: E402
-from ha_nlu.entities import EntitySnapshot  # noqa: E402
-from ha_nlu.nlu.language_frontend import analyse_language  # noqa: E402
+from homeintent.entities import EntitySnapshot  # noqa: E402
+from homeintent.nlu.language_frontend import analyse_language  # noqa: E402
 from homeassistant.components.conversation import ConversationInput  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
 from homeassistant.core import HomeAssistant  # noqa: E402

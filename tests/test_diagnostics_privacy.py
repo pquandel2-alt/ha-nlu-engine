@@ -10,10 +10,10 @@ import _ha_stub  # noqa: E402
 
 _ha_stub.install()
 
-from ha_nlu.diagnostics import async_get_config_entry_diagnostics  # noqa: E402
-from ha_nlu.house_graph import FactProvenance  # noqa: E402
-from ha_nlu.memory import MemoryKind, MemoryStore  # noqa: E402
-from ha_nlu.runtime_data import HaNluRuntimeData  # noqa: E402
+from homeintent.diagnostics import async_get_config_entry_diagnostics  # noqa: E402
+from homeintent.house_graph import FactProvenance  # noqa: E402
+from homeintent.memory import MemoryKind, MemoryStore  # noqa: E402
+from homeintent.runtime_data import HomeIntentRuntimeData  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
 from homeassistant.core import HomeAssistant  # noqa: E402
 
@@ -81,7 +81,7 @@ def test_diagnostics_show_only_redacted_learned_counts(tmp_path):
             person_id="private-user",
         )
     )
-    entry.runtime_data = HaNluRuntimeData(memory=memory)
+    entry.runtime_data = HomeIntentRuntimeData(memory=memory)
     diagnostics = asyncio.run(
         async_get_config_entry_diagnostics(HomeAssistant(), entry)
     )

@@ -8,10 +8,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import pytest
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.engine import NluEngine
-from ha_nlu.devices import DeviceSnapshot
-from ha_nlu.house_graph import (
+from homeintent.entities import EntitySnapshot
+from homeintent.engine import NluEngine
+from homeintent.devices import DeviceSnapshot
+from homeintent.house_graph import (
     ConfidenceClass,
     FactProvenance,
     GraphNode,
@@ -23,15 +23,15 @@ from ha_nlu.house_graph import (
     TraversalStep,
     TraversalLimitExceeded,
 )
-from ha_nlu.nlu.primitives import SemanticProperty
-from ha_nlu.nlu.context import ConversationContext
-from ha_nlu.nlu.discourse import (
+from homeintent.nlu.primitives import SemanticProperty
+from homeintent.nlu.context import ConversationContext
+from homeintent.nlu.discourse import (
     DiscourseRole,
     current_discourse_group,
     remember_entities,
     remember_query_group,
 )
-from ha_nlu.nlu.query_command import (
+from homeintent.nlu.query_command import (
     AggregateExpression,
     AggregateKind,
     CompareExpression,
@@ -58,10 +58,10 @@ from ha_nlu.nlu.query_command import (
     StateDurationFilterExpression,
     ThresholdExpression,
 )
-from ha_nlu.nlu.query_executor import QueryExecutor
-from ha_nlu.nlu.semantic_state import SemanticState
-from ha_nlu.nlu.unit_reasoning import normalize_measurement
-from ha_nlu.world_model import build_world_model
+from homeintent.nlu.query_executor import QueryExecutor
+from homeintent.nlu.semantic_state import SemanticState
+from homeintent.nlu.unit_reasoning import normalize_measurement
+from homeintent.world_model import build_world_model
 
 
 def _entity(

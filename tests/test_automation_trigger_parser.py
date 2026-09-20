@@ -19,13 +19,13 @@ from itertools import permutations
 import pytest
 from hassil import Intents
 
-from ha_nlu.automation_trigger_parser import AUTOMATION_TRIGGER_DIR, AutomationTriggerParser
-from ha_nlu.devices import DeviceSnapshot
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.automation_model import NumericComparator, SunEvent, TriggerType
-from ha_nlu.nlu.parser import ParseContext
-from ha_nlu.nlu.semantic_state import SemanticState
-from ha_nlu.world_model import build_world_model
+from homeintent.automation_trigger_parser import AUTOMATION_TRIGGER_DIR, AutomationTriggerParser
+from homeintent.devices import DeviceSnapshot
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.automation_model import NumericComparator, SunEvent, TriggerType
+from homeintent.nlu.parser import ParseContext
+from homeintent.nlu.semantic_state import SemanticState
+from homeintent.world_model import build_world_model
 
 KUECHE_FENSTER = EntitySnapshot(
     entity_id="binary_sensor.kueche_fenster", friendly_name="Küchenfenster", domain="binary_sensor",

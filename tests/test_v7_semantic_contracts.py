@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from itertools import product
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.understanding import UnderstandingKind
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.understanding import UnderstandingKind
 
 
 ENTITIES = [

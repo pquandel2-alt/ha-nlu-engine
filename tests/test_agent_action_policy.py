@@ -1,5 +1,5 @@
-from ha_nlu.agent_action_policy import validate_agent_service_plan
-from ha_nlu.service_call import ServiceCallPlan
+from homeintent.agent_action_policy import validate_agent_service_plan
+from homeintent.service_call import ServiceCallPlan
 
 
 def test_core_action_accepts_only_its_declared_target_domain():

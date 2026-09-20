@@ -14,16 +14,16 @@ import _ha_stub  # noqa: E402
 
 _ha_stub.install()
 
-from ha_nlu.const import (  # noqa: E402
+from homeintent.const import (  # noqa: E402
     CONF_AGENT_EVENT_CATEGORIES,
     CONF_ROUTINE_DETECTION_ENABLED,
     CONF_ROUTINE_MIN_OBSERVATIONS,
 )
-from ha_nlu.effect_monitor import ExpectedEffect  # noqa: E402
-from ha_nlu.entities import EntitySnapshot  # noqa: E402
-from ha_nlu.event_runtime import SituationRuntime  # noqa: E402
-from ha_nlu.runtime_data import HaNluRuntimeData  # noqa: E402
-from ha_nlu.situation import RoutineStatistics, normalize_state_change  # noqa: E402
+from homeintent.effect_monitor import ExpectedEffect  # noqa: E402
+from homeintent.entities import EntitySnapshot  # noqa: E402
+from homeintent.event_runtime import SituationRuntime  # noqa: E402
+from homeintent.runtime_data import HomeIntentRuntimeData  # noqa: E402
+from homeintent.situation import RoutineStatistics, normalize_state_change  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
 from homeassistant.core import HomeAssistant  # noqa: E402
 
@@ -31,7 +31,7 @@ from homeassistant.core import HomeAssistant  # noqa: E402
 def test_state_event_is_normalized_and_signalled_at_most_once(monkeypatch):
     hass = HomeAssistant()
     agent = SimpleNamespace(async_signal=AsyncMock())
-    runtime_data = HaNluRuntimeData(proactive_agent=agent)
+    runtime_data = HomeIntentRuntimeData(proactive_agent=agent)
     runtime = SituationRuntime(
         hass,
         ConfigEntry(options={CONF_AGENT_EVENT_CATEGORIES: "opening_while_away"}),
@@ -46,7 +46,7 @@ def test_state_event_is_normalized_and_signalled_at_most_once(monkeypatch):
         device_class="window",
     )
     monkeypatch.setattr(
-        "ha_nlu.event_runtime.build_entity_snapshots", lambda *_: [entity]
+        "homeintent.event_runtime.build_entity_snapshots", lambda *_: [entity]
     )
     raw = SimpleNamespace(
         data={
@@ -74,7 +74,7 @@ def test_listener_returns_unsubscribe_callback():
     unsubscribe = lambda: stopped.append(True)
     listen = lambda event_type, callback: unsubscribe
     hass.bus = SimpleNamespace(async_listen=listen)
-    runtime = SituationRuntime(hass, ConfigEntry(), HaNluRuntimeData())
+    runtime = SituationRuntime(hass, ConfigEntry(), HomeIntentRuntimeData())
     stop = runtime.async_start()
     assert callable(stop)
     stop()
@@ -87,10 +87,10 @@ def test_missing_expected_effect_is_inform_only(monkeypatch):
     runtime = SituationRuntime(
         hass,
         ConfigEntry(options={CONF_AGENT_EVENT_CATEGORIES: "expected_effect_missing"}),
-        HaNluRuntimeData(proactive_agent=agent),
+        HomeIntentRuntimeData(proactive_agent=agent),
     )
     entity = EntitySnapshot("light.office", "Bürolicht", "light", "on")
-    monkeypatch.setattr("ha_nlu.event_runtime.build_entity_snapshots", lambda *_: [entity])
+    monkeypatch.setattr("homeintent.event_runtime.build_entity_snapshots", lambda *_: [entity])
     effect = ExpectedEffect(
         "effect_1",
         entity.entity_id,
@@ -110,7 +110,7 @@ def test_missing_expected_effect_is_inform_only(monkeypatch):
 def test_night_opening_explains_presence_quality_and_history(monkeypatch):
     hass = HomeAssistant()
     agent = SimpleNamespace(async_signal=AsyncMock())
-    runtime_data = HaNluRuntimeData(proactive_agent=agent)
+    runtime_data = HomeIntentRuntimeData(proactive_agent=agent)
     entry = ConfigEntry(
         options={
             CONF_AGENT_EVENT_CATEGORIES: "opening_while_away",
@@ -127,7 +127,7 @@ def test_night_opening_explains_presence_quality_and_history(monkeypatch):
         area_id="cellar",
         device_class="window",
     )
-    monkeypatch.setattr("ha_nlu.event_runtime.build_entity_snapshots", lambda *_: [entity])
+    monkeypatch.setattr("homeintent.event_runtime.build_entity_snapshots", lambda *_: [entity])
     stats = runtime_data.routine_statistics.setdefault(
         entity.entity_id,
         RoutineStatistics(minimum_observations=3),
@@ -164,7 +164,7 @@ def test_unoccupied_light_uses_central_decision_for_bounded_ask(monkeypatch):
     runtime = SituationRuntime(
         hass,
         ConfigEntry(options={CONF_AGENT_EVENT_CATEGORIES: "light_unoccupied"}),
-        HaNluRuntimeData(proactive_agent=agent),
+        HomeIntentRuntimeData(proactive_agent=agent),
     )
     light = EntitySnapshot(
         "light.cellar",
@@ -174,7 +174,7 @@ def test_unoccupied_light_uses_central_decision_for_bounded_ask(monkeypatch):
         area_id="cellar",
         capabilities=frozenset({"TURN_OFF"}),
     )
-    monkeypatch.setattr("ha_nlu.event_runtime.build_entity_snapshots", lambda *_: [light])
+    monkeypatch.setattr("homeintent.event_runtime.build_entity_snapshots", lambda *_: [light])
     raw = SimpleNamespace(
         data={
             "entity_id": light.entity_id,

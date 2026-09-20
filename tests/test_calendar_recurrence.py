@@ -2,8 +2,8 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from ha_nlu.calendar_management import CalendarEventSummary
-from ha_nlu.calendar_runtime import async_delete_calendar_event, async_reschedule_calendar_event
+from homeintent.calendar_management import CalendarEventSummary
+from homeintent.calendar_runtime import async_delete_calendar_event, async_reschedule_calendar_event
 
 
 EVENT = CalendarEventSummary(
@@ -19,7 +19,7 @@ def _hass():
 
 
 def test_delete_future_uses_rfc5545_range(monkeypatch):
-    import ha_nlu.calendar_runtime as runtime
+    import homeintent.calendar_runtime as runtime
     hass, entity = _hass()
     monkeypatch.setattr(runtime, "_component", lambda _hass: hass.data["calendar"])
     asyncio.run(async_delete_calendar_event(hass, EVENT, "future"))
@@ -29,7 +29,7 @@ def test_delete_future_uses_rfc5545_range(monkeypatch):
 
 
 def test_reschedule_all_omits_recurrence_instance(monkeypatch):
-    import ha_nlu.calendar_runtime as runtime
+    import homeintent.calendar_runtime as runtime
     from datetime import time
     hass, entity = _hass()
     monkeypatch.setattr(runtime, "_component", lambda _hass: hass.data["calendar"])

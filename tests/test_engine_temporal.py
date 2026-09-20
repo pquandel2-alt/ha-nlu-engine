@@ -9,12 +9,12 @@ scheduling routes may project it into an AutomationModel first.
 
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.frame import TemporalExpression
-from ha_nlu.nlu.language_frontend import analyse_language
-from ha_nlu.nlu.semantic_interpreter import SemanticInterpreter
-from ha_nlu.nlu.understanding import UnderstandingKind
-from ha_nlu.world_model import build_world_model
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.frame import TemporalExpression
+from homeintent.nlu.language_frontend import analyse_language
+from homeintent.nlu.semantic_interpreter import SemanticInterpreter
+from homeintent.nlu.understanding import UnderstandingKind
+from homeintent.world_model import build_world_model
 
 LAMP = EntitySnapshot(
     "light.wohnzimmerlampe", "Wohnzimmerlampe", "light", "on",

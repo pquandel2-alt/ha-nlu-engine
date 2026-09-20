@@ -1,9 +1,9 @@
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.language_frontend import analyse_language
-from ha_nlu.nlu.parser import ParseResult
-from ha_nlu.nlu.semantic_interpreter import SemanticInterpreter
-from ha_nlu.nlu.semantic_graph import SemanticEdgeKind, SemanticNodeKind
-from ha_nlu.nlu.understanding import EvidenceKind
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.language_frontend import analyse_language
+from homeintent.nlu.parser import ParseResult
+from homeintent.nlu.semantic_interpreter import SemanticInterpreter
+from homeintent.nlu.semantic_graph import SemanticEdgeKind, SemanticNodeKind
+from homeintent.nlu.understanding import EvidenceKind
 
 
 ENTITIES = [

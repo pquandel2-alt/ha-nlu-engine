@@ -8,10 +8,10 @@ actually wired in rather than just unit-tested in isolation."""
 
 from __future__ import annotations
 
-from ha_nlu.engine import NluEngine
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.frame import SemanticFrame, TargetReference
-from ha_nlu.nlu.parser import ParseResult
+from homeintent.engine import NluEngine
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.frame import SemanticFrame, TargetReference
+from homeintent.nlu.parser import ParseResult
 
 LIGHT_WITHOUT_BRIGHTNESS = EntitySnapshot("light.a", "Lampe A", "light", "off")
 

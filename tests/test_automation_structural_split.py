@@ -1,10 +1,10 @@
 """Automation clause boundaries come from GermanStructuralAnalysis."""
 
-from ha_nlu.nlu.automation_sentence_split import (
+from homeintent.nlu.automation_sentence_split import (
     split_automation_document,
     structured_automation_condition_clauses,
 )
-from ha_nlu.nlu.language_frontend import analyse_language
+from homeintent.nlu.language_frontend import analyse_language
 
 
 def test_trigger_first_structure_selects_unchanged_source_spans():

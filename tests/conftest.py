@@ -1,7 +1,7 @@
 """Fixtures derived from the curated entity lists and phrase templates in
 ``ha-ai-finetune/generate_training_data.py`` (copied here rather than
 imported across repos, since that script lives in an unrelated project and
-is not a dependency of ha-nlu-engine).
+is not a dependency of homeintent).
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "custom_components"))
 
-from ha_nlu.engine import NluEngine  # noqa: E402
-from ha_nlu.entities import EntitySnapshot  # noqa: E402
+from homeintent.engine import NluEngine  # noqa: E402
+from homeintent.entities import EntitySnapshot  # noqa: E402
 
 LIGHTS = {
     "Treppenlicht": "light.treppen_licht_gruppe",

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import ha_nlu.conversation as conversation
-import ha_nlu.engine as engine
+import homeintent.conversation as conversation
+import homeintent.engine as engine
 
 
 def test_legacy_device_followup_parser_is_not_exported() -> None:

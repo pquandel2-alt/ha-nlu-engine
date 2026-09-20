@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ha_nlu.engine import CommandPlan
-from ha_nlu.entities import EntitySnapshot
+from homeintent.engine import CommandPlan
+from homeintent.entities import EntitySnapshot
 
 
 LIGHTS = [

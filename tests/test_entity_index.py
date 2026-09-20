@@ -9,14 +9,14 @@ scan for the same inputs - scoring equivalence, not just "still passes"."""
 
 from __future__ import annotations
 
-from ha_nlu.entities import (
+from homeintent.entities import (
     EntitySnapshot,
     ResolutionStatus,
     build_entity_index,
     resolve_entity_scored,
 )
-from ha_nlu.nlu.semantic_location import resolve_semantic_location
-from ha_nlu.world_model import build_world_model
+from homeintent.nlu.semantic_location import resolve_semantic_location
+from homeintent.world_model import build_world_model
 
 LIGHT_WOHNZIMMER = EntitySnapshot(
     "light.wohnzimmer", "Wohnzimmerlicht", "light", "on", area_id="wohnzimmer", area_name="Wohnzimmer",

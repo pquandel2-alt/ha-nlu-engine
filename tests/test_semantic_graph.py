@@ -1,11 +1,11 @@
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.language_frontend import analyse_language
-from ha_nlu.nlu.semantic_graph import (
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.language_frontend import analyse_language
+from homeintent.nlu.semantic_graph import (
     SemanticEdgeKind,
     SemanticNodeKind,
     build_semantic_graph,
 )
-from ha_nlu.nlu.semantic_interpreter import SemanticInterpreter
+from homeintent.nlu.semantic_interpreter import SemanticInterpreter
 
 
 def _graph(text: str):

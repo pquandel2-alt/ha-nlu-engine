@@ -7,11 +7,11 @@ to a given command."""
 
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.command import SemanticCommand
-from ha_nlu.nlu.frame import SemanticFrame, TargetReference
-from ha_nlu.nlu.service_mapper import map_to_service_call
-from ha_nlu.service_call import ServiceCallPlan
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.command import SemanticCommand
+from homeintent.nlu.frame import SemanticFrame, TargetReference
+from homeintent.nlu.service_mapper import map_to_service_call
+from homeintent.service_call import ServiceCallPlan
 
 LIGHT = EntitySnapshot("light.a", "Lampe A", "light", "off", capabilities=frozenset({"BRIGHTNESS"}))
 COVER = EntitySnapshot("cover.a", "Rolllade A", "cover", "closed", capabilities=frozenset({"POSITION"}))

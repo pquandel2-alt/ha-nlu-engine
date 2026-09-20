@@ -23,7 +23,8 @@ Fakt und wird bei `asserted_only` nicht zurückgegeben.
 ## Gedächtnis
 
 Das dauerhafte Gedächtnis ist standardmäßig aus. Nach Aktivierung speichert
-`MemoryStore` atomar in `.storage/ha_nlu_memory.sqlite3`. SQLite-Migrationen
+`MemoryStore` atomar in `.storage/homeintent_memory.sqlite3`. Bestehende
+Legacy-Dateien werden beim ersten V10-Start verlustfrei übernommen. SQLite-Migrationen
 werden über `PRAGMA user_version` versioniert; WAL schützt Transaktionen bei
 einem Prozessabbruch.
 

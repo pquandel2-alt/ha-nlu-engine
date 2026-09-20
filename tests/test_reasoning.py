@@ -11,19 +11,19 @@ from __future__ import annotations
 
 import pytest
 
-from ha_nlu.areas import AreaSnapshot
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.context import ConversationContext
-from ha_nlu.nlu.frame import AreaReference, SemanticFrame, TargetReference
-from ha_nlu.nlu.primitives import (
+from homeintent.areas import AreaSnapshot
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.context import ConversationContext
+from homeintent.nlu.frame import AreaReference, SemanticFrame, TargetReference
+from homeintent.nlu.primitives import (
     SemanticAction,
     SemanticDegree,
     SemanticDirection,
     SemanticProperty,
 )
-from ha_nlu.nlu.reasoning import ReasoningEngine, ResolvedSemanticIntent
-from ha_nlu.nlu.semantic_state import SemanticState
-from ha_nlu.floors import FloorSnapshot
+from homeintent.nlu.reasoning import ReasoningEngine, ResolvedSemanticIntent
+from homeintent.nlu.semantic_state import SemanticState
+from homeintent.floors import FloorSnapshot
 
 LIGHT_WOHNZIMMER = EntitySnapshot(
     "light.wohnzimmer", "Wohnzimmerlicht", "light", "on",

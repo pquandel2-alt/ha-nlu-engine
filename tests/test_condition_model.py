@@ -11,8 +11,8 @@ Engine waves can extend ConditionModel without re-deriving what each field means
 
 from __future__ import annotations
 
-from ha_nlu.nlu.automation_model import NumericComparator, SunEvent, TriggerTarget
-from ha_nlu.nlu.condition_model import (
+from homeintent.nlu.automation_model import NumericComparator, SunEvent, TriggerTarget
+from homeintent.nlu.condition_model import (
     ConditionModel,
     ConditionNode,
     ConditionType,
@@ -21,7 +21,7 @@ from ha_nlu.nlu.condition_model import (
     condition_tree_depth,
     render_condition_tree,
 )
-from ha_nlu.nlu.semantic_state import SemanticState
+from homeintent.nlu.semantic_state import SemanticState
 
 
 # ============================================================================

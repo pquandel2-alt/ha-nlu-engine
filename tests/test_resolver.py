@@ -8,7 +8,7 @@ for this rewrite."""
 
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot, ResolutionStatus, resolve_entity_scored
+from homeintent.entities import EntitySnapshot, ResolutionStatus, resolve_entity_scored
 
 
 def test_exact_friendly_name_outscores_contains():

@@ -6,8 +6,8 @@ from itertools import product
 
 import pytest
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.understanding import UnderstandingAuthority
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.understanding import UnderstandingAuthority
 
 
 TARGETS = (

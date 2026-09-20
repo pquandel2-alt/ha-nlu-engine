@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
-from ha_nlu.calendar_management import CalendarManagementKind, parse_calendar_management
-from ha_nlu.entities import EntitySnapshot
+from homeintent.calendar_management import CalendarManagementKind, parse_calendar_management
+from homeintent.entities import EntitySnapshot
 
 
 CALENDAR = EntitySnapshot("calendar.family", "Familie", "calendar", "on")

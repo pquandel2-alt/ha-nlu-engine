@@ -1,11 +1,11 @@
 import pytest
 
-from ha_nlu.engine import NluEngine
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.language_frontend import analyse_language
-from ha_nlu.nlu.semantic_graph import SemanticNodeKind, build_semantic_graph
-from ha_nlu.nlu.understanding import UnderstandingKind
-from ha_nlu.world_model import build_world_model
+from homeintent.engine import NluEngine
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.language_frontend import analyse_language
+from homeintent.nlu.semantic_graph import SemanticNodeKind, build_semantic_graph
+from homeintent.nlu.understanding import UnderstandingKind
+from homeintent.world_model import build_world_model
 
 
 def _meaning_nodes(text: str):

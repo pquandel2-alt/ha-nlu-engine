@@ -5,8 +5,8 @@ style). Covers the window/door vs motion/moisture branching and the
 
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.semantic_state import (
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.semantic_state import (
     SemanticState,
     derive_semantic_state,
     evaluate_semantic_state,

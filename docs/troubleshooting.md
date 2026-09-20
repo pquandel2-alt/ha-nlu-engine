@@ -5,7 +5,7 @@ Gesprächsinhalte oder private Zustände veröffentlicht werden müssen.
 
 ## Ein Satz wird nicht verstanden
 
-1. Prüfen, ob **HA NLU Engine** in der verwendeten Assist-Pipeline ausgewählt
+1. Prüfen, ob **HomeIntent** in der verwendeten Assist-Pipeline ausgewählt
    ist.
 2. Prüfen, ob das Ziel für Assist freigegeben oder in den HomeIntent-Optionen
    ausgewählt ist.
@@ -64,7 +64,7 @@ aktuellen Zustand.
    Ablaufverfolgung erscheint.
 3. Nach einem HACS-Update Home Assistant neu starten; bei großen
    Versionssprüngen die Integration einmal neu laden.
-4. Home-Assistant-Protokolle nach `ha_nlu`, `automation.reload` oder einem
+4. Home-Assistant-Protokolle nach `homeintent`, `automation.reload` oder einem
    Konflikt mit `automations.yaml` durchsuchen.
 
 HomeIntent überschreibt eine gleichzeitig im UI geänderte Datei nicht blind.

@@ -3,7 +3,7 @@ build_world_model() (World Model Wave, 2026-08-13).
 
 Reuses tests/_ha_stub.py's install() (read-only, not modified here) so the
 fake ``homeassistant`` package tree is importable - exactly how
-test_conversation_integration.py already imports ha_nlu.conversation, rather
+test_conversation_integration.py already imports homeintent.conversation, rather
 than re-faking the whole package tree a second time (Regel 6). _ha_stub.py's
 own registry classes are hardcoded to return None (they only exist so
 hass_entities.py's module-level import succeeds); this file supplies real
@@ -27,7 +27,7 @@ import _ha_stub  # noqa: E402
 
 _ha_stub.install()
 
-from ha_nlu import hass_entities  # noqa: E402
+from homeintent import hass_entities  # noqa: E402
 
 
 class _FakeStates:

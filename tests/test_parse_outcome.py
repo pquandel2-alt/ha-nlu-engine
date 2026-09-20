@@ -1,4 +1,4 @@
-from ha_nlu.nlu.parse_outcome import ParseFailureReason, UnderstandingFeedback
+from homeintent.nlu.parse_outcome import ParseFailureReason, UnderstandingFeedback
 
 
 def test_structured_feedback_is_non_actionable():

@@ -29,8 +29,8 @@ and vice versa.
 from __future__ import annotations
 import pytest
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.context import ConversationContext
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.context import ConversationContext
 
 STUDIO_LIGHT = EntitySnapshot(
     "light.studio", "Studio", "light", "off",

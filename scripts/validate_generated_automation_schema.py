@@ -9,11 +9,11 @@ from homeassistant.components.automation.config import PLATFORM_SCHEMA
 from homeassistant.components.calendar import CREATE_EVENT_SCHEMA
 from homeassistant.core import HomeAssistant
 
-from ha_nlu.calendar_event import CalendarEventDraft, build_calendar_event_service_call
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.action_model import ActionModel, ActionType
-from ha_nlu.nlu.automation_model import AutomationModel, TriggerModel, TriggerTarget, TriggerType
-from ha_nlu.nlu.ha_automation_generator import generate_ha_automation_config
+from homeintent.calendar_event import CalendarEventDraft, build_calendar_event_service_call
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.action_model import ActionModel, ActionType
+from homeintent.nlu.automation_model import AutomationModel, TriggerModel, TriggerTarget, TriggerType
+from homeintent.nlu.ha_automation_generator import generate_ha_automation_config
 
 
 entity = EntitySnapshot(

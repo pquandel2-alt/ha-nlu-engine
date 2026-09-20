@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.command import SemanticCommand
-from ha_nlu.nlu.explanation import explain_command, is_explanation_request
-from ha_nlu.nlu.frame import SemanticFrame, TargetReference
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.command import SemanticCommand
+from homeintent.nlu.explanation import explain_command, is_explanation_request
+from homeintent.nlu.frame import SemanticFrame, TargetReference
 
 
 def test_explanation_request_is_meaning_based_but_bounded():

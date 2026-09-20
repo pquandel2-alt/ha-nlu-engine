@@ -11,9 +11,9 @@ from dataclasses import dataclass
 
 import pytest
 
-from ha_nlu.engine import MatchResult, NluEngine
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.capabilities import derive_capabilities
+from homeintent.engine import MatchResult, NluEngine
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.capabilities import derive_capabilities
 
 
 @dataclass(frozen=True)

@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from hassil import TextSlotList
 
-from ha_nlu import parsers
-from ha_nlu.nlu import lexicon
+from homeintent import parsers
+from homeintent.nlu import lexicon
 
 
 def _values(slot_list: TextSlotList) -> list[tuple[str, str]]:
@@ -174,7 +174,7 @@ def test_parsers_reexports_same_slot_list_objects_from_lexicon():
 
 
 def test_semantic_property_candidates_cover_every_color_and_color_temp_word():
-    from ha_nlu.nlu.primitives import SemanticProperty
+    from homeintent.nlu.primitives import SemanticProperty
 
     for word, _ in _values(lexicon._COLOR_SLOT_LIST):
         assert lexicon.SEMANTIC_PROPERTY_CANDIDATES[word] is SemanticProperty.COLOR
@@ -183,7 +183,7 @@ def test_semantic_property_candidates_cover_every_color_and_color_temp_word():
 
 
 def test_semantic_quantity_candidates_all_and_both():
-    from ha_nlu.nlu.primitives import SemanticQuantity, SemanticQuantityKind
+    from homeintent.nlu.primitives import SemanticQuantity, SemanticQuantityKind
 
     assert lexicon.SEMANTIC_QUANTITY_CANDIDATES["alle"] == SemanticQuantity.all()
     assert lexicon.SEMANTIC_QUANTITY_CANDIDATES["nur"] == SemanticQuantity.all()

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from ha_nlu.device_result import DeviceControlResult
-from ha_nlu.engine import NluEngine
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.language_frontend import LanguageDocument
-from ha_nlu.risk import requires_confirmation
+from homeintent.device_result import DeviceControlResult
+from homeintent.engine import NluEngine
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.language_frontend import LanguageDocument
+from homeintent.risk import requires_confirmation
 
 
 def understand_device(

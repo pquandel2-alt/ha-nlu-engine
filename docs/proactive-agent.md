@@ -11,7 +11,7 @@ Laufzeitabhängigkeiten.
 gesprochene Automationsanweisung
   -> bestehende Automation-AST und Validierung
   -> native HA-Automation in automations.yaml
-  -> ha_nlu.proactive_message
+  -> homeintent.proactive_message
   -> AgentEvent (atomare Sidecar-Persistenz)
   -> Deduplizierung, Cooldown und Policy
   -> Push und/oder TTS
@@ -74,7 +74,8 @@ und werden nicht nachträglich auf andere Agentenkanäle umgeroutet.
 
 ## AgentEvent-Lifecycle
 
-Konkrete Situationen werden in `ha_nlu_agent_events.json` atomar gespeichert.
+Konkrete Situationen werden in `homeintent_agent_events.json` atomar gespeichert;
+eine vorhandene Legacy-Datei wird beim ersten V10-Start atomar übernommen.
 Mögliche Zustände sind:
 
 - `ACTIVE`
@@ -156,7 +157,7 @@ fragen`) bleibt eine inhaltsarme Entscheidungshistorie. `ignorieren` und
 `später` unterdrücken ausschließlich Hinweise und können keine
 Aktionsberechtigung freischalten.
 
-Der öffentliche HA-Action-Editor zeigt `ha_nlu.proactive_message` auch für
+Der öffentliche HA-Action-Editor zeigt `homeintent.proactive_message` auch für
 fortgeschrittene Regeln an. Vorgeschlagene Aktionen werden durch eine
 geschlossene Service-Allowlist geprüft; freie `domain.service`-Ausführung ist
 nicht möglich. Derselbe Validator läuft beim Erzeugen, beim Neustart und

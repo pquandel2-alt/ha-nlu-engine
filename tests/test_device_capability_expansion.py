@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from _v7_device import understand_device as match_device_control
-from ha_nlu.entities import EntitySnapshot
+from homeintent.entities import EntitySnapshot
 
 
 def test_climate_preset_is_selected_from_live_capability_list():

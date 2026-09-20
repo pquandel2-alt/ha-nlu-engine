@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from ha_nlu.nlu.meaning import (
+from homeintent.nlu.meaning import (
     CoordinationKind,
     TemporalPerspective,
     analyse_turn,
 )
-from ha_nlu.nlu.semantic_utterance import Polarity, SpeechAct
+from homeintent.nlu.semantic_utterance import Polarity, SpeechAct
 
 
 @pytest.mark.parametrize(

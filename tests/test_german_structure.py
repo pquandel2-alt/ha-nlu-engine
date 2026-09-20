@@ -1,11 +1,11 @@
-from ha_nlu.nlu.german_structure import (
+from homeintent.nlu.german_structure import (
     ArgumentRole,
     ClauseKind,
     NegationKind,
     StructuralRelationKind,
     WordClass,
 )
-from ha_nlu.nlu.language_frontend import analyse_language
+from homeintent.nlu.language_frontend import analyse_language
 
 
 def test_relative_filter_and_exclusion_have_separate_scopes():

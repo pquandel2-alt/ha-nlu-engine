@@ -7,8 +7,8 @@ unchanged as the regression net for this rewrite."""
 
 from __future__ import annotations
 
-from ha_nlu.areas import AreaResolutionStatus, resolve_area_scored
-from ha_nlu.entities import EntitySnapshot
+from homeintent.areas import AreaResolutionStatus, resolve_area_scored
+from homeintent.entities import EntitySnapshot
 
 POLERAUM_COVERS = [
     EntitySnapshot("cover.a", "Rolllade Poleraum links", "cover", "closed", area_id="poleraum", area_name="Poleraum"),

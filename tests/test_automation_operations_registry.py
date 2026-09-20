@@ -1,4 +1,4 @@
-from ha_nlu.nlu.automation_operations import operation_registry_is_consistent
+from homeintent.nlu.automation_operations import operation_registry_is_consistent
 
 
 def test_automation_operation_registry_has_complete_preview_and_risk_drift_guards():

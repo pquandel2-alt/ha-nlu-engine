@@ -1,9 +1,9 @@
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.action_model import ActionModel, ActionType
-from ha_nlu.nlu.automation_model import AutomationModel, TriggerModel, TriggerTarget, TriggerType
-from ha_nlu.nlu.condition_model import ConditionModel, ConditionNode, ConditionType
-from ha_nlu.nlu.ha_automation_generator import generate_ha_automation_config
-from ha_nlu.nlu.semantic_state import SemanticState
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.action_model import ActionModel, ActionType
+from homeintent.nlu.automation_model import AutomationModel, TriggerModel, TriggerTarget, TriggerType
+from homeintent.nlu.condition_model import ConditionModel, ConditionNode, ConditionType
+from homeintent.nlu.ha_automation_generator import generate_ha_automation_config
+from homeintent.nlu.semantic_state import SemanticState
 
 
 WINDOW = EntitySnapshot("binary_sensor.window", "Fenster", "binary_sensor", "off", device_class="window")

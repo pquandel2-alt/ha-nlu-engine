@@ -5,7 +5,7 @@ friendly_name."""
 
 from __future__ import annotations
 
-from ha_nlu.entities import (
+from homeintent.entities import (
     EntityAlias,
     EntitySnapshot,
     ResolveStatus,

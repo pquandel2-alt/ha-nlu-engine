@@ -6,7 +6,7 @@ real HA state."""
 
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
+from homeintent.entities import EntitySnapshot
 
 
 def test_new_fields_default_to_empty_when_omitted():

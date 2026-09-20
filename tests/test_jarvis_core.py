@@ -6,27 +6,27 @@ from pathlib import Path
 
 import pytest
 
-from ha_nlu.adapters import (
+from homeintent.adapters import (
     FrigateMetadataAdapter,
     HomeAssistantSourceAdapter,
     LocalDocumentIndex,
 )
-from ha_nlu.agent_config_validation import (
+from homeintent.agent_config_validation import (
     parse_event_categories,
     validate_documents_directory,
     validate_mqtt_topic,
     validate_quiet_time,
 )
-from ha_nlu.dialog_manager import (
+from homeintent.dialog_manager import (
     DialogManager,
     DialogPriority,
     DialogTaskKind,
 )
-from ha_nlu.document_intent import interpret_document_search
-from ha_nlu.devices import DeviceSnapshot
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.execution_policy import PolicyDecision, PolicyOutcome
-from ha_nlu.house_graph import (
+from homeintent.document_intent import interpret_document_search
+from homeintent.devices import DeviceSnapshot
+from homeintent.entities import EntitySnapshot
+from homeintent.execution_policy import PolicyDecision, PolicyOutcome
+from homeintent.house_graph import (
     ConfidenceClass,
     FactProvenance,
     RelationKind,
@@ -34,27 +34,27 @@ from ha_nlu.house_graph import (
     build_house_graph,
     parse_relation_specs,
 )
-from ha_nlu.goal_intent import interpret_goal
-from ha_nlu.memory import MemoryKind, MemoryStore
-from ha_nlu.memory_intent import MemoryOperation, interpret_memory_intent
-from ha_nlu.nlu.language_frontend import analyse_language
-from ha_nlu.planner import (
+from homeintent.goal_intent import interpret_goal
+from homeintent.memory import MemoryKind, MemoryStore
+from homeintent.memory_intent import MemoryOperation, interpret_memory_intent
+from homeintent.nlu.language_frontend import analyse_language
+from homeintent.planner import (
     Goal,
     GoalKind,
     PlanExecutor,
     PlanStatus,
     materialize_goal,
 )
-from ha_nlu.proactive_decision import ProactiveDecisionEngine
-from ha_nlu.response_planner import (
+from homeintent.proactive_decision import ProactiveDecisionEngine
+from homeintent.response_planner import (
     DialogAct,
     GermanResponseRealizer,
     PersonaStyle,
     ResponsePlan,
     Urgency,
 )
-from ha_nlu.risk import RiskLevel
-from ha_nlu.situation import (
+from homeintent.risk import RiskLevel
+from homeintent.situation import (
     EventQuality,
     EventType,
     NormalizedEvent,
@@ -65,7 +65,7 @@ from ha_nlu.situation import (
     SituationSeverity,
     normalize_state_change,
 )
-from ha_nlu.world_model import build_world_model
+from homeintent.world_model import build_world_model
 
 
 class _ExecutionResult:
@@ -470,8 +470,8 @@ def test_proactive_auto_is_off_without_explicit_allowlist():
     situation = Situation(
         "sit", "light_unoccupied", SituationSeverity.INFO, "Licht an", (), "evt"
     )
-    from ha_nlu.agent_event import AgentMode
-    from ha_nlu.service_call import ServiceCallPlan
+    from homeintent.agent_event import AgentMode
+    from homeintent.service_call import ServiceCallPlan
 
     decision = ProactiveDecisionEngine().decide(
         event,
@@ -505,8 +505,8 @@ def test_proactive_decision_rejects_stale_duplicate_and_unreachable_observations
 
 
 def test_proactive_auto_requires_low_reversible_policy_and_explicit_target():
-    from ha_nlu.agent_event import AgentMode
-    from ha_nlu.service_call import ServiceCallPlan
+    from homeintent.agent_event import AgentMode
+    from homeintent.service_call import ServiceCallPlan
 
     event = NormalizedEvent(
         "evt", EventType.ACTIVATED, "light.floor", "off", "on", NOW,
@@ -655,7 +655,7 @@ def test_planner_stops_after_failed_verification():
         return False
 
     result = asyncio.run(PlanExecutor(refresh, execute, verify).execute(plan, confirmed=True))
-    assert result.status is PlanStatus.STOPPED
+    assert result.status is PlanStatus.FAILED
     assert calls == ["turn_off", "turn_on"]
 
 

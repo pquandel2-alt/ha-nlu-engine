@@ -5,14 +5,14 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from ha_nlu.nlu.domain_operations import (
+from homeintent.nlu.domain_operations import (
     ACTION_EXPRESSIONS,
     DOMAIN_EXPRESSIONS,
     DOMAIN_WORD_ONLY_TERMS,
     DOMAIN_WORDS,
     INTENT_BY_DOMAIN_ACTION,
 )
-from ha_nlu.nlu.semantic_catalog import (
+from homeintent.nlu.semantic_catalog import (
     DEVICE_CLASS_ENTRIES,
     SEMANTIC_RESOLUTION_WORDS,
     MEASUREMENT_PROPERTY_SPECS,
@@ -79,7 +79,7 @@ def test_v7_authority_cohort_has_one_registered_semantic_source():
 
 
 def test_v7_core_imports_vocabulary_through_catalogue_facade():
-    root = Path(__file__).parents[1] / "custom_components" / "ha_nlu" / "nlu"
+    root = Path(__file__).parents[1] / "custom_components" / "homeintent" / "nlu"
     for name in (
         "entity_resolution.py",
         "semantic_compiler.py",

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from ha_nlu.areas import AreaResolveStatus, resolve_area_name
-from ha_nlu.entities import EntitySnapshot
+from homeintent.areas import AreaResolveStatus, resolve_area_name
+from homeintent.entities import EntitySnapshot
 
 POLERAUM_COVERS = [
     EntitySnapshot("cover.a", "Rolllade Poleraum links", "cover", "closed", area_id="poleraum", area_name="Poleraum"),

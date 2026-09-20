@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.action_model import ActionType
-from ha_nlu.nlu.automation_model import AutomationModel, TriggerModel, TriggerType
-from ha_nlu.nlu.ha_automation_generator import generate_ha_automation_config
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.action_model import ActionType
+from homeintent.nlu.automation_model import AutomationModel, TriggerModel, TriggerType
+from homeintent.nlu.ha_automation_generator import generate_ha_automation_config
 
 
 @pytest.fixture

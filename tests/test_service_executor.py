@@ -10,9 +10,9 @@ import _ha_stub  # noqa: E402
 
 _ha_stub.install()
 
-from ha_nlu.entities import EntitySnapshot  # noqa: E402
-from ha_nlu.service_call import ServiceCallPlan  # noqa: E402
-from ha_nlu.service_executor import async_execute_service_plan  # noqa: E402
+from homeintent.entities import EntitySnapshot  # noqa: E402
+from homeintent.service_call import ServiceCallPlan  # noqa: E402
+from homeintent.service_executor import async_execute_service_plan  # noqa: E402
 from homeassistant.core import HomeAssistant  # noqa: E402
 
 

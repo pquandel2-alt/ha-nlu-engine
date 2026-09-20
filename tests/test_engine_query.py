@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from ha_nlu.entities import EntitySnapshot
+from homeintent.entities import EntitySnapshot
 
 DIMMED_LIGHT = EntitySnapshot(
     "light.wohnzimmer_decke", "Wohnzimmer Decke", "light", "on", attributes={"brightness": 128}

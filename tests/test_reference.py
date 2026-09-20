@@ -10,12 +10,12 @@ how ``conversation.py`` chains the two calls.
 from __future__ import annotations
 
 from conftest import POLERAUM_COVERS
-from ha_nlu.areas import AreaSnapshot
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.context import ConversationContext
-from ha_nlu.nlu.discourse import DiscourseRole, remember_entities
-from ha_nlu.nlu.language_frontend import analyse_language
-from ha_nlu.nlu.semantic_graph import build_semantic_graph
+from homeintent.areas import AreaSnapshot
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.context import ConversationContext
+from homeintent.nlu.discourse import DiscourseRole, remember_entities
+from homeintent.nlu.language_frontend import analyse_language
+from homeintent.nlu.semantic_graph import build_semantic_graph
 
 DIMMABLE_LIGHT = EntitySnapshot(
     "light.buerolicht", "Bürolicht", "light", "off",

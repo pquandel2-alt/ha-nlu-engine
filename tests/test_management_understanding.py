@@ -2,12 +2,12 @@
 
 from datetime import datetime, timezone
 
-from ha_nlu.calendar_management import CalendarManagementRequest
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.management_understanding import understand_management
-from ha_nlu.nlu.language_frontend import analyse_language
-from ha_nlu.nlu.understanding import UnderstandingKind
-from ha_nlu.productivity import TodoRequest
+from homeintent.calendar_management import CalendarManagementRequest
+from homeintent.entities import EntitySnapshot
+from homeintent.management_understanding import understand_management
+from homeintent.nlu.language_frontend import analyse_language
+from homeintent.nlu.understanding import UnderstandingKind
+from homeintent.productivity import TodoRequest
 
 
 NOW = datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)

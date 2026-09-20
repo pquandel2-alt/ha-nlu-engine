@@ -1,5 +1,5 @@
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.semantic_dialog import continue_semantic_dialog, start_semantic_dialog
+from homeintent.entities import EntitySnapshot
+from homeintent.semantic_dialog import continue_semantic_dialog, start_semantic_dialog
 
 
 def test_humidifier_missing_value_is_completed_generically():

@@ -1,6 +1,6 @@
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.planner import Goal, GoalKind, StepKind, materialize_goal
-from ha_nlu.risk import RiskLevel
+from homeintent.entities import EntitySnapshot
+from homeintent.planner import Goal, GoalKind, StepKind, materialize_goal
+from homeintent.risk import RiskLevel
 
 
 def test_secure_home_only_closes_observed_open_perimeter():

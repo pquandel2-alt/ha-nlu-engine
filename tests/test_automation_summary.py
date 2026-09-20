@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "custom_components"))
 
-from ha_nlu.automation_summary import AutomationSummary  # noqa: E402
+from homeintent.automation_summary import AutomationSummary  # noqa: E402
 
 
 def test_automation_summary_defaults():

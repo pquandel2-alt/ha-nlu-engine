@@ -3,12 +3,12 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.action_model import ActionType
-from ha_nlu.nlu.automation_model import TriggerType, resolve_pending_schedule
-from ha_nlu.nlu.condition_model import ConditionType
-from ha_nlu.nlu.ha_automation_generator import generate_ha_automation_config
-from ha_nlu.reminder import reminder_automation_text, reminder_quiet_hours
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.action_model import ActionType
+from homeintent.nlu.automation_model import TriggerType, resolve_pending_schedule
+from homeintent.nlu.condition_model import ConditionType
+from homeintent.nlu.ha_automation_generator import generate_ha_automation_config
+from homeintent.reminder import reminder_automation_text, reminder_quiet_hours
 
 
 LIGHT = EntitySnapshot(

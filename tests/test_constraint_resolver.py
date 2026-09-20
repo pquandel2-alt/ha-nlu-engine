@@ -6,8 +6,8 @@ itself."""
 
 from __future__ import annotations
 
-from ha_nlu.nlu.constraint_resolver import Constraints, resolve_candidates
-from ha_nlu.nlu.primitives import SemanticProperty
+from homeintent.nlu.constraint_resolver import Constraints, resolve_candidates
+from homeintent.nlu.primitives import SemanticProperty
 
 
 def test_empty_constraints_matches_every_entity(entities):
@@ -30,7 +30,7 @@ def test_domain_and_area_constraint_combine(quantifier_entities):
 
 
 def test_area_constraint_without_domain_filters_across_domains():
-    from ha_nlu.entities import EntitySnapshot
+    from homeintent.entities import EntitySnapshot
 
     entities = [
         EntitySnapshot("light.a", "Lampe A", "light", "off", area_id="buero"),

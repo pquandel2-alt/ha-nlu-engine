@@ -1,14 +1,14 @@
 {
   "domain": "ha_nlu",
-  "name": "HA NLU Engine",
+  "name": "HomeIntent Legacy Migration",
   "after_dependencies": ["recorder"],
   "codeowners": ["@pquandel2-alt"],
-  "config_flow": true,
+  "config_flow": false,
   "dependencies": ["conversation", "intent"],
-  "documentation": "https://github.com/pquandel2-alt/ha-nlu-engine",
+  "documentation": "https://github.com/pquandel2-alt/homeintent/blob/main/docs/homeintent-rename-migration.md",
   "integration_type": "service",
   "iot_class": "local_push",
-  "issue_tracker": "https://github.com/pquandel2-alt/ha-nlu-engine/issues",
+  "issue_tracker": "https://github.com/pquandel2-alt/homeintent/issues",
   "requirements": [],
-  "version": "4.77.0"
+  "version": "5.0.0"
 }

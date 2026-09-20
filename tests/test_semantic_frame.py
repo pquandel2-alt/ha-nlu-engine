@@ -5,7 +5,7 @@ is purely additive: plan/response_text keep driving behaviour unchanged
 
 from __future__ import annotations
 
-from ha_nlu.nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
+from homeintent.nlu.frame import AreaReference, Quantifier, SemanticFrame, TargetReference
 
 
 def test_single_match_frame_has_resolved_target(engine, entities):
@@ -59,7 +59,7 @@ def test_no_match_returns_none_not_a_frame(engine, entities):
 
 def test_v7_first_match_populates_typed_action_for_migrated_commands(engine, entities):
     """Migrated commands expose their typed semantics through ``match``."""
-    from ha_nlu.nlu.primitives import SemanticAction
+    from homeintent.nlu.primitives import SemanticAction
 
     result = engine.match("Mach Treppenlicht an", entities)
     assert result is not None
@@ -71,7 +71,7 @@ def test_v7_first_match_populates_typed_action_for_migrated_commands(engine, ent
 
 
 def test_semantic_frame_accepts_v6_primitive_fields_directly():
-    from ha_nlu.nlu.primitives import (
+    from homeintent.nlu.primitives import (
         SemanticAction,
         SemanticDegree,
         SemanticDirection,

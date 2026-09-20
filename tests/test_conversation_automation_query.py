@@ -30,10 +30,10 @@ import _ha_stub  # noqa: E402
 
 _ha_stub.install()
 
-import ha_nlu.automation_executor as ha_automation_executor  # noqa: E402
-import ha_nlu.conversation as ha_conversation  # noqa: E402
-from ha_nlu.conversation import NluConversationEntity  # noqa: E402
-from ha_nlu.entities import EntitySnapshot  # noqa: E402
+import homeintent.automation_executor as ha_automation_executor  # noqa: E402
+import homeintent.conversation as ha_conversation  # noqa: E402
+from homeintent.conversation import NluConversationEntity  # noqa: E402
+from homeintent.entities import EntitySnapshot  # noqa: E402
 from homeassistant.components.conversation import ConversationInput  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
 from homeassistant.core import HomeAssistant  # noqa: E402
@@ -367,7 +367,7 @@ def test_existing_automation_can_be_limited_to_three_runs(monkeypatch, tmp_path)
     )
     assert "nur noch 3 Mal" in result.response.speech
     assert automations[0]["actions"][-1] == {
-        "action": "ha_nlu.record_automation_run",
+        "action": "homeintent.record_automation_run",
         "data": {"automation_id": automations[0]["id"], "max_runs": 3},
     }
 

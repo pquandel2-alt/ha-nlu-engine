@@ -1,5 +1,5 @@
-from ha_nlu.nlu.semantic_utterance import SpeechAct
-from ha_nlu.nlu.understanding import UnderstandingKind, UnderstandingOutcome
+from homeintent.nlu.semantic_utterance import SpeechAct
+from homeintent.nlu.understanding import UnderstandingKind, UnderstandingOutcome
 
 
 def test_only_validated_writing_outcomes_are_actionable():

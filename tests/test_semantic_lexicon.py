@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from itertools import permutations
 
-from ha_nlu.nlu.semantic_lexicon import SemanticKind, analyse_semantics
-from ha_nlu.nlu.semantic_state import SemanticState
+from homeintent.nlu.semantic_lexicon import SemanticKind, analyse_semantics
+from homeintent.nlu.semantic_state import SemanticState
 
 
 def test_multiword_meanings_keep_exact_source_spans():

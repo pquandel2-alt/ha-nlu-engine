@@ -1,6 +1,6 @@
-from ha_nlu.nlu.language_frontend import analyse_language
-from ha_nlu.nlu.semantic_utterance import Polarity, SpeechAct
-from ha_nlu.entities import EntitySnapshot
+from homeintent.nlu.language_frontend import analyse_language
+from homeintent.nlu.semantic_utterance import Polarity, SpeechAct
+from homeintent.entities import EntitySnapshot
 
 
 def test_frontend_preserves_original_and_source_spans():

@@ -1,5 +1,5 @@
-from ha_nlu.nlu.evidence import evidence_score
-from ha_nlu.nlu.understanding import (
+from homeintent.nlu.evidence import evidence_score
+from homeintent.nlu.understanding import (
     EvidenceKind,
     MeaningCandidate,
     UnderstandingEvidence,

@@ -3,8 +3,8 @@ hass-free, no engine/hassil involved. Mirrors test_area_resolution.py."""
 
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.floors import FloorResolveStatus, resolve_floor_by_level_keyword, resolve_floor_name
+from homeintent.entities import EntitySnapshot
+from homeintent.floors import FloorResolveStatus, resolve_floor_by_level_keyword, resolve_floor_name
 
 TWO_FLOOR_HOUSE = [
     EntitySnapshot(

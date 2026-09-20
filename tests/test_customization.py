@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ha_nlu.customization import parse_custom_aliases
+from homeintent.customization import parse_custom_aliases
 
 
 def test_custom_aliases_are_grouped_by_entity_and_comments_are_ignored():

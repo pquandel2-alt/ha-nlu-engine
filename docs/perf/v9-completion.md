@@ -57,7 +57,7 @@ dokumentierte GitHub-Actions-Lauf der maßgebliche Performance-Nachweis.
 ## Maßgeblicher Release-Lauf
 
 Der unveränderte Benchmark bestand im
-[GitHub-Actions-Lauf 35453737883](https://github.com/pquandel2-alt/ha-nlu-engine/actions/runs/35453737883)
+[GitHub-Actions-Lauf 35453737883](https://github.com/pquandel2-alt/homeintent/actions/runs/35453737883)
 auf Commit `33fe49b29591c84840648cbc7514ab19546a0870`. Die für V9 relevanten p95-Werte
 bei 5.000 Entities waren:
 

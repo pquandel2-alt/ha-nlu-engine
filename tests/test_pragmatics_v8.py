@@ -1,9 +1,9 @@
-from ha_nlu.nlu.semantic_utterance import (
+from homeintent.nlu.semantic_utterance import (
     PragmaticDisposition,
     analyse_utterance,
 )
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.understanding import UnderstandingKind
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.understanding import UnderstandingKind
 
 
 def test_direct_and_polite_explicit_requests_are_executable():

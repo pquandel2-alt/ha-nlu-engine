@@ -9,7 +9,7 @@ ROOT = Path(__file__).parent.parent
 
 def test_current_release_version_is_consistent_across_main_release_surfaces():
     manifest = json.loads(
-        (ROOT / "custom_components/ha_nlu/manifest.json").read_text(encoding="utf-8")
+        (ROOT / "custom_components/homeintent/manifest.json").read_text(encoding="utf-8")
     )
     version = manifest["version"]
     readme = (ROOT / "README.md").read_text(encoding="utf-8")

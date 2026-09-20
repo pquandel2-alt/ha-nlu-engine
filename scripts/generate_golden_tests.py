@@ -21,8 +21,8 @@ REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT / "custom_components"))
 sys.path.insert(0, str(REPO_ROOT / "tests"))
 
-from ha_nlu.engine import CommandPlan, NluEngine  # noqa: E402
-from ha_nlu.service_call import ServiceCallPlan  # noqa: E402
+from homeintent.engine import CommandPlan, NluEngine  # noqa: E402
+from homeintent.service_call import ServiceCallPlan  # noqa: E402
 from golden_fixtures import GOLDEN_ENTITIES  # noqa: E402
 
 GOLDEN_DIR = REPO_ROOT / "tests" / "golden"

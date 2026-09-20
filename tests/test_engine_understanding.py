@@ -1,12 +1,12 @@
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.parse_outcome import ParseFailureReason
-from ha_nlu.nlu.understanding import (
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.parse_outcome import ParseFailureReason
+from homeintent.nlu.understanding import (
     UnderstandingAuthority,
     UnderstandingKind,
     UnderstandingOutcome,
     compare_outcomes,
 )
-from ha_nlu.nlu.semantic_utterance import SpeechAct
+from homeintent.nlu.semantic_utterance import SpeechAct
 
 
 def test_understand_returns_explicit_command_with_validated_payload(engine, entities):

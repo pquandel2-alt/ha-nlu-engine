@@ -1,10 +1,10 @@
-from ha_nlu.entities import (
+from homeintent.entities import (
     EntityMatchSource,
     EntitySnapshot,
     ResolutionStatus,
     resolve_entity_scored,
 )
-from ha_nlu.nlu.entity_clarification import (
+from homeintent.nlu.entity_clarification import (
     CandidateReplyKind,
     candidate_labels,
     render_candidate_question,

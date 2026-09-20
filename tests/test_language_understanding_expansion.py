@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from itertools import permutations
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.context import ConversationContext
-from ha_nlu.nlu.parse_outcome import ParseFailureReason
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.context import ConversationContext
+from homeintent.nlu.parse_outcome import ParseFailureReason
 
 
 ENTITIES = [

@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from ha_nlu.situation import (
+from homeintent.situation import (
     EventQuality,
     EventType,
     NormalizedEvent,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot, build_entity_index
-from ha_nlu.nlu.entity_resolution import (
+from homeintent.entities import EntitySnapshot, build_entity_index
+from homeintent.nlu.entity_resolution import (
     ResolutionStatus,
     mentioned_entities,
     rank_semantic_targets,

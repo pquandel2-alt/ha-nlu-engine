@@ -6,9 +6,9 @@ from itertools import permutations
 
 import pytest
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.semantic_compiler import SemanticQueryCompiler
-from ha_nlu.nlu.understanding import UnderstandingAuthority
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.semantic_compiler import SemanticQueryCompiler
+from homeintent.nlu.understanding import UnderstandingAuthority
 
 
 WINDOWS = [

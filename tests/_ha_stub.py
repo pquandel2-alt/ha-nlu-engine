@@ -1,9 +1,9 @@
-"""Minimal fake ``homeassistant.*`` module surface so ``ha_nlu.conversation``
+"""Minimal fake ``homeassistant.*`` module surface so ``homeintent.conversation``
 (the real Assist entry point, ``NluConversationEntity._async_handle_message``)
 can be imported and driven directly in tests, without the real
 ``homeassistant`` package installed (it isn't - see ``tests/conftest.py``'s
 own module docstring: every existing test only imports hass-free
-``ha_nlu.*`` modules).
+``homeintent.*`` modules).
 
 HomeIntent v4.2.1 plan, Section 3/23-26: existing tests only ever call
 ``engine.match()`` directly - this stub exists so at least one test can
@@ -21,7 +21,7 @@ device/floor registries), not NLU logic, so re-testing it isn't this
 integration test's job (it's untouched by this plan - see the v4.2.1 audit).
 
 Import this module (for its side effects) *before* importing
-``ha_nlu.conversation`` anywhere in the process - ``sys.modules`` injection
+``homeintent.conversation`` anywhere in the process - ``sys.modules`` injection
 only helps imports that happen after it runs.
 """
 
@@ -109,7 +109,7 @@ def install() -> None:
     # --- homeassistant.config_entries ------------------------------------
 
     class ConfigEntry:
-        def __init__(self, entry_id: str = "test-entry", title: str = "HA NLU Engine",
+        def __init__(self, entry_id: str = "test-entry", title: str = "HomeIntent",
                      options: dict | None = None, data: dict | None = None) -> None:
             self.entry_id = entry_id
             self.title = title
@@ -150,7 +150,7 @@ def install() -> None:
         ``AsyncMock`` every existing test already asserts against
         unchanged, and additionally supports ``async_register``/
         ``async_remove``/``has_service`` (new feature, Wave 12) so
-        ``__init__.py``'s ``ha_nlu.delete_automation`` service registration
+        ``__init__.py``'s ``homeintent.delete_automation`` service registration
         can be exercised directly - tests invoke the stored handler
         themselves (``hass.services._handlers[(domain, service)](call)``),
         the same way HA itself would dispatch a real service call."""

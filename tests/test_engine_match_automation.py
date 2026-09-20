@@ -15,11 +15,11 @@ sub-feature in this repo already follows.
 
 from __future__ import annotations
 
-from ha_nlu.engine import AutomationDraftMatchResult, AutomationMatchResult
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.automation_validator import AutomationValidationError
-from ha_nlu.nlu.action_model import ActionType
-from ha_nlu.nlu.condition_model import ConditionType, LogicalOperator
+from homeintent.engine import AutomationDraftMatchResult, AutomationMatchResult
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.automation_validator import AutomationValidationError
+from homeintent.nlu.action_model import ActionType
+from homeintent.nlu.condition_model import ConditionType, LogicalOperator
 
 KUECHE_FENSTER = EntitySnapshot(
     "binary_sensor.kueche_fenster", "Küchenfenster", "binary_sensor", "off",
@@ -200,7 +200,7 @@ def test_structurally_invalid_automation_surfaces_its_validation_error_not_silen
     # validation_error onto response_text works, independent of whether
     # today's grammars can reach that branch.
     monkeypatch.setattr(
-        "ha_nlu.engine.validate_automation",
+        "homeintent.engine.validate_automation",
         lambda model: AutomationValidationError.INVALID_PARAMETER,
     )
     result = engine.match_automation(
@@ -321,7 +321,7 @@ def test_unresolvable_condition_target_returns_none_never_guesses(engine):
 
 def test_condition_result_is_validated_the_same_way_as_triggers_and_actions(engine, monkeypatch):
     monkeypatch.setattr(
-        "ha_nlu.engine.validate_automation",
+        "homeintent.engine.validate_automation",
         lambda model: AutomationValidationError.INVALID_LOGIC,
     )
     result = engine.match_automation(

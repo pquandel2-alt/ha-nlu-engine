@@ -4,8 +4,8 @@ signal don't get the capability guessed."""
 
 from __future__ import annotations
 
-from ha_nlu.nlu.capabilities import Capability, derive_capabilities, required_capability_for_property
-from ha_nlu.nlu.primitives import SemanticProperty
+from homeintent.nlu.capabilities import Capability, derive_capabilities, required_capability_for_property
+from homeintent.nlu.primitives import SemanticProperty
 
 
 def test_light_without_color_modes_has_only_on_off():

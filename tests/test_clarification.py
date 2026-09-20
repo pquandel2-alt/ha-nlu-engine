@@ -7,9 +7,9 @@ it, and NluEngine.resolve_clarification() completing it from the user's reply.
 
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.parser import ClarificationRequest, ParseContext
-from ha_nlu.nlu.response import NluError
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.parser import ClarificationRequest, ParseContext
+from homeintent.nlu.response import NluError
 
 LIGHT_BUERO_1 = EntitySnapshot(
     "light.buerolicht_1", "Bürolicht", "light", "off",

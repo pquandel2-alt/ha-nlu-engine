@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from ha_nlu.calendar_automation import parse_calendar_automation_draft
-from ha_nlu.engine import NluEngine
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.action_model import ActionType
-from ha_nlu.nlu.automation_model import TriggerType
-from ha_nlu.nlu.condition_model import ConditionType
-from ha_nlu.nlu.ha_automation_generator import generate_ha_automation_config
+from homeintent.calendar_automation import parse_calendar_automation_draft
+from homeintent.engine import NluEngine
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.action_model import ActionType
+from homeintent.nlu.automation_model import TriggerType
+from homeintent.nlu.condition_model import ConditionType
+from homeintent.nlu.ha_automation_generator import generate_ha_automation_config
 
 
 CALENDAR = EntitySnapshot("calendar.familie", "Familienkalender", "calendar", "off")

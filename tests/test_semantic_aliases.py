@@ -1,7 +1,7 @@
 import pytest
 
-from ha_nlu.nlu.primitives import SemanticAction
-from ha_nlu.nlu.semantic_aliases import (
+from homeintent.nlu.primitives import SemanticAction
+from homeintent.nlu.semantic_aliases import (
     ConfirmedSemanticAliasStore,
     SemanticAliasDraft,
     SemanticAliasKind,

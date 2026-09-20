@@ -6,9 +6,9 @@ engine.py/parsers.py (Phase 7 does that) - exercised directly here.
 
 from __future__ import annotations
 
-from ha_nlu.automation_summary import AutomationSummary
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.query_command import (
+from homeintent.automation_summary import AutomationSummary
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.query_command import (
     PropertyOperand,
     QueryCommand,
     QueryFilter,
@@ -21,10 +21,10 @@ from ha_nlu.nlu.query_command import (
     RelationConstraint,
     QueryRelationKind,
 )
-from ha_nlu.nlu.query_executor import QueryExecutor
-from ha_nlu.nlu.primitives import SemanticProperty
-from ha_nlu.nlu.semantic_state import SemanticState
-from ha_nlu.world_model import build_world_model
+from homeintent.nlu.query_executor import QueryExecutor
+from homeintent.nlu.primitives import SemanticProperty
+from homeintent.nlu.semantic_state import SemanticState
+from homeintent.world_model import build_world_model
 
 executor = QueryExecutor()
 

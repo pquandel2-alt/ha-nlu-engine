@@ -17,14 +17,14 @@ from itertools import permutations
 import pytest
 from hassil import Intents
 
-from ha_nlu.automation_condition_parser import AUTOMATION_CONDITION_DIR, AutomationConditionParser
-from ha_nlu.devices import DeviceSnapshot
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.automation_model import NumericComparator, SunEvent
-from ha_nlu.nlu.condition_model import ConditionType, LogicalOperator, condition_tree_depth
-from ha_nlu.nlu.parser import ParseContext
-from ha_nlu.nlu.semantic_state import SemanticState
-from ha_nlu.world_model import build_world_model
+from homeintent.automation_condition_parser import AUTOMATION_CONDITION_DIR, AutomationConditionParser
+from homeintent.devices import DeviceSnapshot
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.automation_model import NumericComparator, SunEvent
+from homeintent.nlu.condition_model import ConditionType, LogicalOperator, condition_tree_depth
+from homeintent.nlu.parser import ParseContext
+from homeintent.nlu.semantic_state import SemanticState
+from homeintent.world_model import build_world_model
 
 # --- Test fixtures: entities and devices for condition parsing ----------
 
@@ -645,7 +645,7 @@ def test_presence_condition_synonyms_parse_consistently(parser, context, text):
 
 def test_render_condition_tree_shows_parsed_tree(parser, context):
     """Parsed condition tree renders via render_condition_tree()."""
-    from ha_nlu.nlu.condition_model import render_condition_tree
+    from homeintent.nlu.condition_model import render_condition_tree
 
     node = parser.parse("Licht an und Tür offen", context)
     assert node is not None
@@ -703,7 +703,7 @@ def test_pronoun_es_refuses_when_remembered_entities_span_multiple_domains(parse
 # ============================================================================
 
 
-from ha_nlu.nlu.condition_model import TimeComparator  # noqa: E402
+from homeintent.nlu.condition_model import TimeComparator  # noqa: E402
 
 
 # ============================================================================
@@ -715,7 +715,7 @@ from ha_nlu.nlu.condition_model import TimeComparator  # noqa: E402
 # engine" style.
 # ============================================================================
 
-from ha_nlu.automation_condition_parser import split_on_top_level_and  # noqa: E402
+from homeintent.automation_condition_parser import split_on_top_level_and  # noqa: E402
 
 
 def test_split_on_top_level_and_finds_the_single_conjunction():

@@ -1,5 +1,5 @@
-from ha_nlu.engine import NluEngine
-from ha_nlu.entities import EntitySnapshot
+from homeintent.engine import NluEngine
+from homeintent.entities import EntitySnapshot
 
 
 def test_two_alternative_state_triggers_are_preserved_with_ids():

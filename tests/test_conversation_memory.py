@@ -13,12 +13,14 @@ import _ha_stub  # noqa: E402
 
 _ha_stub.install()
 
-import ha_nlu.conversation as ha_conversation  # noqa: E402
-from ha_nlu.conversation import NluConversationEntity  # noqa: E402
-from ha_nlu.entities import EntitySnapshot  # noqa: E402
-from ha_nlu.memory import MemoryKind, MemoryStore  # noqa: E402
-from ha_nlu.house_graph import FactProvenance  # noqa: E402
-from ha_nlu.situation import (  # noqa: E402
+import homeintent.conversation as ha_conversation  # noqa: E402
+from homeintent.conversation import NluConversationEntity  # noqa: E402
+from homeintent.entities import EntitySnapshot  # noqa: E402
+from homeintent.memory import MemoryKind, MemoryStore  # noqa: E402
+from homeintent.house_graph import FactProvenance  # noqa: E402
+from homeintent.areas import AreaSnapshot  # noqa: E402
+from homeintent.profiles import ComfortProfile, ProfileStore  # noqa: E402
+from homeintent.situation import (  # noqa: E402
     EventQuality,
     EventType,
     NormalizedEvent,
@@ -180,25 +182,31 @@ def test_forget_all_personal_data_requires_confirmation(monkeypatch, tmp_path):
     assert asyncio.run(store.async_list(person_id="owner")) == ()
 
 
-def test_comfort_request_asks_from_confirmed_preference_before_action(monkeypatch, tmp_path):
+def test_comfort_request_uses_confirmed_profile_before_action(monkeypatch, tmp_path):
     entity = NluConversationEntity(ConfigEntry())
     entity.hass = HomeAssistant()
-    store = MemoryStore(tmp_path / "memory.sqlite", enabled=True)
-    entity._runtime_data.memory = store
+    profiles = ProfileStore(tmp_path / "profiles.json")
     asyncio.run(
-        store.async_remember(
-            MemoryKind.PREFERENCE,
-            {
-                "activity": "television",
-                "brightness_percent": 30,
-                "entity_id": LAMP.entity_id,
-            },
-            provenance=FactProvenance.CONFIRMED_MEMORY,
+        profiles.async_save_comfort_profile(
+            ComfortProfile(
+                "living-comfort", "owner", "living",
+                brightness_min=40, brightness_max=60, confirmed=True,
+            ),
             confirmed=True,
-            person_id="owner",
         )
     )
-    monkeypatch.setattr(ha_conversation, "build_entity_snapshots", lambda *_: [LAMP])
+    entity._runtime_data.profiles = profiles
+    lamp = EntitySnapshot(
+        LAMP.entity_id, LAMP.friendly_name, LAMP.domain, LAMP.state,
+        area_id="living", capabilities=LAMP.capabilities,
+        attributes={"brightness": 10},
+    )
+    monkeypatch.setattr(ha_conversation, "build_entity_snapshots", lambda *_: [lamp])
+    monkeypatch.setattr(
+        ha_conversation,
+        "resolve_conversation_area",
+        lambda *_: AreaSnapshot("living", "Wohnzimmer"),
+    )
 
     async def turn(text: str, user_id: str = "owner"):
         return await entity._async_handle_message(
@@ -212,22 +220,12 @@ def test_comfort_request_asks_from_confirmed_preference_before_action(monkeypatc
 
     proposed = asyncio.run(turn("Mach es hier gemütlicher."))
     assert "Stehlampe" in proposed.response.speech
-    assert "30 Prozent" in proposed.response.speech
+    assert "bestätigten Helligkeitsbereich" in proposed.response.speech
     entity.hass.services.async_call.assert_not_awaited()
 
     wrong_user = asyncio.run(turn("Ja", "guest"))
     assert "anderen Benutzer" in wrong_user.response.speech
     entity.hass.services.async_call.assert_not_awaited()
-
-    confirmed = asyncio.run(turn("Ja"))
-    assert "ausgeführt" in confirmed.response.speech
-    entity.hass.services.async_call.assert_awaited_once_with(
-        "light",
-        "turn_on",
-        {"brightness_pct": 30, "entity_id": LAMP.entity_id},
-        blocking=True,
-    )
-
 
 def test_comfort_request_without_unique_preference_never_acts(monkeypatch, tmp_path):
     entity = NluConversationEntity(ConfigEntry())
@@ -244,8 +242,48 @@ def test_comfort_request_without_unique_preference_never_acts(monkeypatch, tmp_p
             None,
         )
     )
-    assert "konkret" in result.response.speech
-    assert "noch nichts ausgeführt" in result.response.speech
+    assert "keinem eindeutigen Home-Assistant-Bereich" in result.response.speech
+    entity.hass.services.async_call.assert_not_awaited()
+
+
+def test_comfort_profile_definition_requires_explicit_confirmation(monkeypatch, tmp_path):
+    entity = NluConversationEntity(ConfigEntry())
+    entity.hass = HomeAssistant()
+    profiles = ProfileStore(tmp_path / "profiles.json")
+    entity._runtime_data.profiles = profiles
+    monkeypatch.setattr(ha_conversation, "build_entity_snapshots", lambda *_: [LAMP])
+    monkeypatch.setattr(
+        ha_conversation,
+        "resolve_conversation_area",
+        lambda *_: AreaSnapshot("living", "Wohnzimmer"),
+    )
+
+    async def turn(text: str):
+        return await entity._async_handle_message(
+            ConversationInput(
+                text=text,
+                conversation_id="define-comfort",
+                context=SimpleNamespace(user_id="owner"),
+            ),
+            None,
+        )
+
+    question = asyncio.run(turn("Mach es hier gemütlicher."))
+    assert "Was bedeutet angenehm" in question.response.speech
+
+    preview = asyncio.run(
+        turn("Temperatur 21 bis 22 Grad und Licht 40 bis 60 Prozent.")
+    )
+    assert "Temperatur 21 bis 22 Grad" in preview.response.speech
+    assert "Helligkeit 40 bis 60 Prozent" in preview.response.speech
+    assert profiles.comfort(area_id="living", user_id="owner") is None
+
+    confirmed = asyncio.run(turn("Ja"))
+    profile = profiles.comfort(area_id="living", user_id="owner")
+    assert confirmed.response.speech.startswith("Gespeichert")
+    assert profile is not None
+    assert (profile.temperature_min, profile.temperature_max) == (21, 22)
+    assert (profile.brightness_min, profile.brightness_max) == (40, 60)
     entity.hass.services.async_call.assert_not_awaited()
 
 

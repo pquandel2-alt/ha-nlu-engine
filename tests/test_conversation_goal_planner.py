@@ -12,11 +12,17 @@ import _ha_stub  # noqa: E402
 
 _ha_stub.install()
 
-import ha_nlu.conversation as ha_conversation  # noqa: E402
-from ha_nlu.conversation import NluConversationEntity  # noqa: E402
-from ha_nlu.entities import EntitySnapshot  # noqa: E402
-from ha_nlu.house_graph import FactProvenance  # noqa: E402
-from ha_nlu.memory import MemoryKind, MemoryStore  # noqa: E402
+import homeintent.conversation as ha_conversation  # noqa: E402
+from homeintent.conversation import NluConversationEntity  # noqa: E402
+from homeintent.entities import EntitySnapshot  # noqa: E402
+from homeintent.house_graph import FactProvenance  # noqa: E402
+from homeintent.memory import MemoryKind, MemoryStore  # noqa: E402
+from homeintent.goal_model import DesiredState, GoalScope  # noqa: E402
+from homeintent.profiles import (  # noqa: E402
+    ProfileStore,
+    RoutineDefinition,
+    RoutineStepDefinition,
+)
 from homeassistant.components.conversation import ConversationInput  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
 from homeassistant.core import HomeAssistant  # noqa: E402
@@ -34,7 +40,24 @@ LIGHTS = [
 ]
 
 
-def test_prepare_night_materializes_preview_without_action(monkeypatch):
+def _night_routine() -> RoutineDefinition:
+    return RoutineDefinition(
+        "schlafengehen",
+        "Schlafengehen",
+        "owner",
+        tuple(
+            RoutineStepDefinition(
+                entity.entity_id,
+                GoalScope(entity_ids=(entity.entity_id,)),
+                DesiredState("state", "off"),
+            )
+            for entity in LIGHTS
+        ),
+        True,
+    )
+
+
+def test_prepare_night_requires_confirmed_definition(monkeypatch):
     entity = NluConversationEntity(ConfigEntry())
     entity.hass = HomeAssistant()
     monkeypatch.setattr(ha_conversation, "build_entity_snapshots", lambda *_: LIGHTS)
@@ -50,20 +73,60 @@ def test_prepare_night_materializes_preview_without_action(monkeypatch):
         )
 
     preview = asyncio.run(turn("Bereite das Haus für die Nacht vor."))
-    assert "Planvorschau" in preview.response.speech
-    assert "2 geprüfte Aktion" in preview.response.speech
-    entity.hass.services.async_call.assert_not_awaited()
-
-    cancelled = asyncio.run(turn("Nein"))
-    assert "nicht ausgeführt" in cancelled.response.speech
+    assert "Was soll ich" in preview.response.speech
+    assert "ausdrücklichen Bestätigung" in preview.response.speech
     entity.hass.services.async_call.assert_not_awaited()
 
 
-def test_read_only_goal_fails_before_preview(monkeypatch):
+def test_prepare_night_definition_dialog_stores_only_after_confirmation(
+    monkeypatch, tmp_path
+):
+    entity = NluConversationEntity(ConfigEntry())
+    entity.hass = HomeAssistant()
+    profiles = ProfileStore(tmp_path / "profiles.json")
+    entity._runtime_data.profiles = profiles
+    monkeypatch.setattr(ha_conversation, "build_entity_snapshots", lambda *_: LIGHTS)
+
+    async def turn(text: str):
+        return await entity._async_handle_message(
+            ConversationInput(
+                text=text,
+                conversation_id="define-night",
+                context=SimpleNamespace(user_id="owner"),
+            ),
+            None,
+        )
+
+    question = asyncio.run(turn("Bereite das Haus für die Nacht vor."))
+    assert "Was soll ich" in question.response.speech
+    assert profiles.routine("schlafengehen", user_id="owner") is None
+
+    preview = asyncio.run(
+        turn("Schalte das Wohnzimmerlicht aus und schalte das Flurlicht aus.")
+    )
+    assert "Soll ich diese Definition lokal speichern" in preview.response.speech
+    assert profiles.routine("schlafengehen", user_id="owner") is None
+    entity.hass.services.async_call.assert_not_awaited()
+
+    saved = asyncio.run(turn("Ja"))
+    routine = profiles.routine("schlafengehen", user_id="owner")
+    assert saved.response.speech.startswith("Gespeichert")
+    assert routine is not None and len(routine.steps) == 2
+    entity.hass.services.async_call.assert_not_awaited()
+
+    planned = asyncio.run(turn("Bereite das Haus für die Nacht vor."))
+    assert "Planvorschau" in planned.response.speech
+    entity.hass.services.async_call.assert_not_awaited()
+
+
+def test_read_only_goal_fails_before_preview(monkeypatch, tmp_path):
     entity = NluConversationEntity(
         ConfigEntry(options={"read_only_entities": ["light.living"]})
     )
     entity.hass = HomeAssistant()
+    profiles = ProfileStore(tmp_path / "profiles.json")
+    asyncio.run(profiles.async_save_routine(_night_routine(), confirmed=True))
+    entity._runtime_data.profiles = profiles
     monkeypatch.setattr(ha_conversation, "build_entity_snapshots", lambda *_: LIGHTS)
     result = asyncio.run(
         entity._async_handle_message(
@@ -84,6 +147,9 @@ def test_named_procedure_is_confirmed_stored_and_rematerialized(monkeypatch, tmp
     entity.hass = HomeAssistant()
     store = MemoryStore(tmp_path / "memory.sqlite", enabled=True)
     entity._runtime_data.memory = store
+    profiles = ProfileStore(tmp_path / "profiles.json")
+    asyncio.run(profiles.async_save_routine(_night_routine(), confirmed=True))
+    entity._runtime_data.profiles = profiles
     monkeypatch.setattr(ha_conversation, "build_entity_snapshots", lambda *_: LIGHTS)
     monkeypatch.setattr(ha_conversation, "build_device_snapshots", lambda *_: [])
 
@@ -145,6 +211,26 @@ def test_movie_goal_uses_one_confirmed_preference_as_preview(monkeypatch, tmp_pa
             person_id="owner",
         )
     )
+    profiles = ProfileStore(tmp_path / "profiles.json")
+    asyncio.run(
+        profiles.async_save_routine(
+            RoutineDefinition(
+                "filmabend",
+                "Filmabend",
+                "owner",
+                (
+                    RoutineStepDefinition(
+                        "movie-light",
+                        GoalScope(entity_ids=(movie_light.entity_id,)),
+                        DesiredState("brightness", 30, "%"),
+                    ),
+                ),
+                True,
+            ),
+            confirmed=True,
+        )
+    )
+    entity._runtime_data.profiles = profiles
     monkeypatch.setattr(
         ha_conversation, "build_entity_snapshots", lambda *_: [movie_light]
     )

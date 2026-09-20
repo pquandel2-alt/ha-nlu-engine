@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from ha_nlu.entities import EntitySnapshot
+from homeintent.entities import EntitySnapshot
 
 TWO_FLOOR_HOUSE = [
     EntitySnapshot(

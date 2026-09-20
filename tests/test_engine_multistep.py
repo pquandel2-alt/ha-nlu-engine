@@ -11,8 +11,8 @@ sentence (``engine.match()`` returns ``None``), never a partial
 
 from __future__ import annotations
 
-from ha_nlu.engine import CommandPlan, MatchResult
-from ha_nlu.entities import EntitySnapshot
+from homeintent.engine import CommandPlan, MatchResult
+from homeintent.entities import EntitySnapshot
 
 LAMP = EntitySnapshot(
     "light.wohnzimmer", "Wohnzimmerlampe", "light", "off",

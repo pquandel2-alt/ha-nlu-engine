@@ -21,9 +21,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "custom_components"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from ha_nlu.engine import NluEngine  # noqa: E402
-from ha_nlu.entities import EntitySnapshot  # noqa: E402
-from ha_nlu.nlu.understanding import ShadowComparison  # noqa: E402
+from homeintent.engine import NluEngine  # noqa: E402
+from homeintent.entities import EntitySnapshot  # noqa: E402
+from homeintent.nlu.understanding import ShadowComparison  # noqa: E402
 from test_language_eval_corpus import CASES, EVAL_ENTITIES  # noqa: E402
 import test_semantic_domain_matrix as domain_matrix  # noqa: E402
 import test_semantic_paraphrase_matrix as light_matrix  # noqa: E402
@@ -141,7 +141,7 @@ def _payload_summary(payload: object | None) -> object | None:
 def build_report(max_examples: int) -> dict[str, object]:
     engine = NluEngine()
     manifest = json.loads(
-        (ROOT / "custom_components" / "ha_nlu" / "manifest.json").read_text(
+        (ROOT / "custom_components" / "homeintent" / "manifest.json").read_text(
             encoding="utf-8"
         )
     )

@@ -9,7 +9,7 @@ türkis/cyan)."""
 
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
+from homeintent.entities import EntitySnapshot
 
 DIMMABLE_LIGHT = EntitySnapshot(
     "light.dimmbar", "Dimmbare Lampe", "light", "off",

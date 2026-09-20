@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "custom_components"))
 
-from ha_nlu.devices import DeviceSnapshot  # noqa: E402
+from homeintent.devices import DeviceSnapshot  # noqa: E402
 
 
 def test_device_snapshot_defaults():

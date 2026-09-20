@@ -15,13 +15,13 @@ from __future__ import annotations
 import pytest
 from hassil import Intents
 
-from ha_nlu.automation_action_parser import AUTOMATION_ACTION_DIR, AutomationActionParser
-from ha_nlu.automation_condition_parser import AUTOMATION_CONDITION_DIR, AutomationConditionParser
-from ha_nlu.devices import DeviceSnapshot
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.action_model import ActionGroup, ActionModel, ActionType, ExecutionMode
-from ha_nlu.nlu.parser import ParseContext
-from ha_nlu.world_model import build_world_model
+from homeintent.automation_action_parser import AUTOMATION_ACTION_DIR, AutomationActionParser
+from homeintent.automation_condition_parser import AUTOMATION_CONDITION_DIR, AutomationConditionParser
+from homeintent.devices import DeviceSnapshot
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.action_model import ActionGroup, ActionModel, ActionType, ExecutionMode
+from homeintent.nlu.parser import ParseContext
+from homeintent.world_model import build_world_model
 
 # --- Test fixtures: entities and devices for action parsing --------------
 

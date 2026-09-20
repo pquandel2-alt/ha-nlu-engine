@@ -15,8 +15,8 @@ HassClimateIncreaseTemperature/HassClimateDecreaseTemperature vocabulary
 
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.context import ConversationContext
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.context import ConversationContext
 
 DIMMABLE_LIGHT = EntitySnapshot(
     "light.buerolicht", "Bürolicht", "light", "off",

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.execution_policy import (
+from homeintent.entities import EntitySnapshot
+from homeintent.execution_policy import (
     PolicyOutcome,
     evaluate_service_plan,
     validate_automation_action_targets,
 )
-from ha_nlu.service_call import ServiceCallPlan
-from ha_nlu.nlu.context import PendingServiceConfirmation
+from homeintent.service_call import ServiceCallPlan
+from homeintent.nlu.context import PendingServiceConfirmation
 
 
 def test_critical_action_can_be_restricted_to_admins():

@@ -8,7 +8,7 @@ service to defer to (unlike fan speed in Phase 16)."""
 
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
+from homeintent.entities import EntitySnapshot
 
 HEATER = EntitySnapshot(
     "climate.heizung_buero", "Heizung Büro", "climate", "heat",

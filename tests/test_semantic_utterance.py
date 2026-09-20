@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ha_nlu.nlu.semantic_utterance import (
+from homeintent.nlu.semantic_utterance import (
     ClauseRole,
     Modality,
     Polarity,

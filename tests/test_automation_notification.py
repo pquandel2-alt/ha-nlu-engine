@@ -11,12 +11,12 @@ once wrapped in the rest of ``match_automation()``.
 
 from __future__ import annotations
 
-from ha_nlu.automation_notification import (
+from homeintent.automation_notification import (
     notification_action_from_request,
     resolve_notify_target,
 )
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.action_model import ActionType
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.action_model import ActionType
 
 NOTIFY_PHILIPP = EntitySnapshot(
     "notify.mobile_app_philipp", "Philipp Handy", "notify", "unknown"

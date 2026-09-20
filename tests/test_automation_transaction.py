@@ -18,12 +18,12 @@ import _ha_stub  # noqa: E402
 
 _ha_stub.install()
 
-from ha_nlu.automation_executor import AutomationExecutor  # noqa: E402
-from ha_nlu.automation_metadata_store import (  # noqa: E402
+from homeintent.automation_executor import AutomationExecutor  # noqa: E402
+from homeintent.automation_metadata_store import (  # noqa: E402
     AutomationMetadata,
     AutomationMetadataStore,
 )
-from ha_nlu.automation_transaction import (  # noqa: E402
+from homeintent.automation_transaction import (  # noqa: E402
     ConcurrentAutomationUpdateError,
     TRANSACTION_JOURNAL_FILENAME,
 )
@@ -281,7 +281,7 @@ def test_existing_homeintent_automation_can_be_limited_transactionally(tmp_path)
 
     automation = _read_yaml(tmp_path / "automations.yaml")[0]
     assert automation["actions"][-1] == {
-        "action": "ha_nlu.record_automation_run",
+        "action": "homeintent.record_automation_run",
         "data": {"automation_id": automation_id, "max_runs": 3},
     }
     metadata = asyncio.run(store.async_load_all())[automation_id]

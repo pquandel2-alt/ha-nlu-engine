@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from ha_nlu.engine import NluEngine
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.query_command import QueryCommand, QueryRelationKind
-from ha_nlu.nlu.understanding import UnderstandingKind
-from ha_nlu.world_model import build_world_model
+from homeintent.engine import NluEngine
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.query_command import QueryCommand, QueryRelationKind
+from homeintent.nlu.understanding import UnderstandingKind
+from homeintent.world_model import build_world_model
 
 
 def _temperature(entity_id: str, name: str, value: str, unit: str = "°C") -> EntitySnapshot:

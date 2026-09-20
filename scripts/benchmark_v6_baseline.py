@@ -18,7 +18,7 @@ meaningfully mockable/measurable from this repo in isolation, so it is
 out of scope here (documented as a scope boundary, not an oversight).
 
 Run with:
-    source /home/philipp/ha-nlu-engine-venv/bin/activate
+    source /home/philipp/homeintent-venv/bin/activate
     python scripts/benchmark_v6_baseline.py
 """
 
@@ -35,15 +35,15 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT / "custom_components"))
 
-from ha_nlu.engine import NluEngine  # noqa: E402
-from ha_nlu.entities import EntitySnapshot  # noqa: E402
-from ha_nlu.nlu.context import ConversationContext  # noqa: E402
-from ha_nlu.nlu.discourse import (  # noqa: E402
+from homeintent.engine import NluEngine  # noqa: E402
+from homeintent.entities import EntitySnapshot  # noqa: E402
+from homeintent.nlu.context import ConversationContext  # noqa: E402
+from homeintent.nlu.discourse import (  # noqa: E402
     DiscourseRole,
     remember_entities,
     remember_query_group,
 )
-from ha_nlu.world_model import build_world_model  # noqa: E402
+from homeintent.world_model import build_world_model  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Synthetic entity generation

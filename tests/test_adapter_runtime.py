@@ -12,8 +12,8 @@ import _ha_stub  # noqa: E402
 
 _ha_stub.install()
 
-from ha_nlu.adapters import FrigateMetadataAdapter, StructuredAdapterRuntime  # noqa: E402
-from ha_nlu.const import CONF_HA_SOURCES_ENABLED  # noqa: E402
+from homeintent.adapters import FrigateMetadataAdapter, StructuredAdapterRuntime  # noqa: E402
+from homeintent.const import CONF_HA_SOURCES_ENABLED  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
 from homeassistant.core import HomeAssistant  # noqa: E402
 

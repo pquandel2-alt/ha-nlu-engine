@@ -16,9 +16,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.action_model import ActionGroup, ActionModel, ActionType, ExecutionMode
-from ha_nlu.nlu.automation_model import (
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.action_model import ActionGroup, ActionModel, ActionType, ExecutionMode
+from homeintent.nlu.automation_model import (
     AutomationModel,
     NumericComparator,
     SunEvent,
@@ -26,13 +26,13 @@ from ha_nlu.nlu.automation_model import (
     TriggerTarget,
     TriggerType,
 )
-from ha_nlu.nlu.condition_model import ConditionModel, ConditionNode, ConditionType, LogicalOperator, TimeComparator
-from ha_nlu.nlu.ha_automation_generator import (
+from homeintent.nlu.condition_model import ConditionModel, ConditionNode, ConditionType, LogicalOperator, TimeComparator
+from homeintent.nlu.ha_automation_generator import (
     GenerationError,
     generate_ha_automation_config,
     resolve_automation_action_entity_ids,
 )
-from ha_nlu.nlu.semantic_state import SemanticState
+from homeintent.nlu.semantic_state import SemanticState
 
 KUECHE_FENSTER = EntitySnapshot(
     "binary_sensor.kueche_fenster", "Küchenfenster", "binary_sensor", "off",
@@ -518,7 +518,7 @@ def test_targetless_notify_with_stable_automation_id_uses_agent_runtime():
     assert result.error is None
     assert result.config is not None
     assert result.config["actions"] == [{
-        "action": "ha_nlu.proactive_message",
+        "action": "homeintent.proactive_message",
         "data": {
             "rule_id": "stable-rule-id",
             "title": "HomeIntent",
@@ -727,7 +727,7 @@ def test_once_false_appends_no_delete_action():
     model = _model(_trigger())
     result = generate_ha_automation_config(model, ALL_ENTITIES)
     assert result.error is None
-    assert all(a.get("action") != "ha_nlu.delete_automation" for a in result.config["actions"])
+    assert all(a.get("action") != "homeintent.delete_automation" for a in result.config["actions"])
 
 
 def test_once_true_appends_the_self_delete_action_as_the_last_step():
@@ -740,7 +740,7 @@ def test_once_true_appends_the_self_delete_action_as_the_last_step():
     result = generate_ha_automation_config(model, ALL_ENTITIES, automation_id="abc123")
     assert result.error is None
     assert result.config["actions"][-1] == {
-        "action": "ha_nlu.delete_automation",
+        "action": "homeintent.delete_automation",
         "data": {"automation_id": "abc123"},
     }
     # The automation's own real action(s) still run first, unaffected.

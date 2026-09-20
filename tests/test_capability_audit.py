@@ -2,9 +2,9 @@
 
 import pytest
 
-from ha_nlu.capability_audit import audit_capabilities, match_capability_audit_query
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.language_frontend import analyse_language
+from homeintent.capability_audit import audit_capabilities, match_capability_audit_query
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.language_frontend import analyse_language
 
 
 ENTITIES = [

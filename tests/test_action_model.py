@@ -10,10 +10,10 @@ the render_action_step() debug output.
 
 from __future__ import annotations
 
-from ha_nlu.nlu.action_model import ActionGroup, ActionModel, ActionType, ExecutionMode, render_action_step
-from ha_nlu.nlu.automation_model import TriggerTarget
-from ha_nlu.nlu.condition_model import ConditionModel, ConditionNode, ConditionType
-from ha_nlu.nlu.semantic_state import SemanticState
+from homeintent.nlu.action_model import ActionGroup, ActionModel, ActionType, ExecutionMode, render_action_step
+from homeintent.nlu.automation_model import TriggerTarget
+from homeintent.nlu.condition_model import ConditionModel, ConditionNode, ConditionType
+from homeintent.nlu.semantic_state import SemanticState
 
 
 # ============================================================================

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from ha_nlu.nlu.primitives import (
+from homeintent.nlu.primitives import (
     NumericUnit,
     NumericValue,
     SemanticAction,
@@ -140,7 +140,7 @@ def test_numeric_value_equality_by_value():
 
 
 def test_semantic_frame_bridges_legacy_numeric_parameter():
-    from ha_nlu.nlu.frame import SemanticFrame
+    from homeintent.nlu.frame import SemanticFrame
 
     frame = SemanticFrame(
         intent="HassSetPercentage",

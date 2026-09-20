@@ -6,7 +6,7 @@ V4.1) a fixed set of German filler particles."""
 
 from __future__ import annotations
 
-from ha_nlu.nlu.normalize import normalize
+from homeintent.nlu.normalize import normalize
 
 
 def test_collapses_repeated_whitespace_and_strips():

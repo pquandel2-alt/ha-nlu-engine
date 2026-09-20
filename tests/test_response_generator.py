@@ -11,11 +11,11 @@ source.
 
 from __future__ import annotations
 
-from ha_nlu.areas import AreaSnapshot
-from ha_nlu.automation_summary import AutomationSummary
-from ha_nlu.devices import DeviceSnapshot
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.query_command import (
+from homeintent.areas import AreaSnapshot
+from homeintent.automation_summary import AutomationSummary
+from homeintent.devices import DeviceSnapshot
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.query_command import (
     QueryCommand,
     QueryFilter,
     QueryResult,
@@ -24,9 +24,9 @@ from ha_nlu.nlu.query_command import (
     QueryTarget,
     QueryTargetKind,
 )
-from ha_nlu.nlu.response_generator import ResponseGenerator
-from ha_nlu.response_planner import QueryAnswerKind
-from ha_nlu.nlu.semantic_state import SemanticState
+from homeintent.nlu.response_generator import ResponseGenerator
+from homeintent.response_planner import QueryAnswerKind
+from homeintent.nlu.semantic_state import SemanticState
 
 respond = ResponseGenerator().respond
 

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from ha_nlu.engine import NluEngine
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.understanding import UnderstandingAuthority
-from ha_nlu.service_call import REGISTERED_OPERATION_INTENT
+from homeintent.engine import NluEngine
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.understanding import UnderstandingAuthority
+from homeintent.service_call import REGISTERED_OPERATION_INTENT
 
 
 ENTITIES = [

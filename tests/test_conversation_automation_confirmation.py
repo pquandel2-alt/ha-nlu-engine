@@ -37,14 +37,14 @@ import _ha_stub  # noqa: E402
 
 _ha_stub.install()
 
-import ha_nlu.conversation as ha_conversation  # noqa: E402
-from ha_nlu.conversation import (  # noqa: E402
+import homeintent.conversation as ha_conversation  # noqa: E402
+from homeintent.conversation import (  # noqa: E402
     AUTOMATION_CANCELLED_TEXT,
     AUTOMATION_CONFIRMATION_UNCLEAR_TEXT,
     AUTOMATION_CREATED_TEXT,
     NluConversationEntity,
 )
-from ha_nlu.entities import EntitySnapshot  # noqa: E402
+from homeintent.entities import EntitySnapshot  # noqa: E402
 from homeassistant.components.conversation import ConversationInput  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
 from homeassistant.core import HomeAssistant  # noqa: E402
@@ -94,7 +94,7 @@ def _automations_yaml(tmp_path: Path) -> list[dict]:
 
 
 def _metadata_json(tmp_path: Path) -> dict:
-    path = tmp_path / "ha_nlu_automation_metadata.json"
+    path = tmp_path / "homeintent_automation_metadata.json"
     if not path.exists():
         return {}
     with open(path, encoding="utf-8") as handle:

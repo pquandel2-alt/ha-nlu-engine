@@ -33,10 +33,10 @@ import _ha_stub  # noqa: E402
 
 _ha_stub.install()
 
-import ha_nlu.automation_executor as automation_executor  # noqa: E402
-import ha_nlu.automation_metadata_store as automation_metadata_store  # noqa: E402
-import ha_nlu.automation_transaction as automation_transaction  # noqa: E402
-from ha_nlu.automation_executor import AutomationExecutor  # noqa: E402
+import homeintent.automation_executor as automation_executor  # noqa: E402
+import homeintent.automation_metadata_store as automation_metadata_store  # noqa: E402
+import homeintent.automation_transaction as automation_transaction  # noqa: E402
+from homeintent.automation_executor import AutomationExecutor  # noqa: E402
 
 SAMPLE_CONFIG = {
     "alias": "Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht ein.",
@@ -247,7 +247,7 @@ def test_a_successful_creation_records_schedule_metadata():
 
     metadata_write_mock.assert_called_once()
     written_path, written_json = metadata_write_mock.call_args.args
-    assert written_path == "/config/ha_nlu_automation_metadata.json"
+    assert written_path == "/config/homeintent_automation_metadata.json"
     entries = json.loads(written_json)
     assert set(entries) == {automation_id}
     entry = entries[automation_id]
@@ -630,7 +630,7 @@ def test_replace_actions_preserves_trigger_conditions_delay_and_housekeeping():
         "actions": [
             {"delay": {"seconds": 30}},
             {"action": "light.turn_on", "target": {"entity_id": "light.old"}},
-            {"action": "ha_nlu.delete_automation", "data": {"automation_id": "abc123"}},
+            {"action": "homeintent.delete_automation", "data": {"automation_id": "abc123"}},
         ],
     }
     with (
@@ -765,7 +765,7 @@ def test_every_created_automation_is_assigned_to_the_homeintent_category():
     category_registry = automation_executor.cr.async_get(hass)
     categories = list(category_registry.async_list_categories(scope="automation"))
     assert [(category.name, category.category_id) for category in categories] == [
-        ("Homeintent", "category-1")
+        ("HomeIntent", "category-1")
     ]
 
     entity_registry = automation_executor.er.async_get(hass)

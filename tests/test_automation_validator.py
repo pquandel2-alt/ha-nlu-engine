@@ -11,17 +11,17 @@ through a hassil parser.
 
 from __future__ import annotations
 
-from ha_nlu.nlu.action_model import ActionGroup, ActionModel, ActionType, ExecutionMode
-from ha_nlu.nlu.automation_model import (
+from homeintent.nlu.action_model import ActionGroup, ActionModel, ActionType, ExecutionMode
+from homeintent.nlu.automation_model import (
     AutomationModel,
     NumericComparator,
     TriggerModel,
     TriggerTarget,
     TriggerType,
 )
-from ha_nlu.nlu.automation_validator import AutomationValidationError, validate_automation
-from ha_nlu.nlu.condition_model import ConditionModel, ConditionNode, ConditionType, LogicalOperator
-from ha_nlu.nlu.semantic_state import SemanticState
+from homeintent.nlu.automation_validator import AutomationValidationError, validate_automation
+from homeintent.nlu.condition_model import ConditionModel, ConditionNode, ConditionType, LogicalOperator
+from homeintent.nlu.semantic_state import SemanticState
 
 KUECHE_FENSTER_TARGET = TriggerTarget(domain="binary_sensor", device_class="window", area_id="kueche")
 WOHNZIMMER_LICHT_TARGET = TriggerTarget(domain="light", area_id="wohnzimmer")
@@ -131,7 +131,7 @@ def test_time_trigger_second_out_of_range_is_invalid_time():
 
 
 def test_time_condition_minute_out_of_range_is_invalid_time():
-    from ha_nlu.nlu.condition_model import TimeComparator
+    from homeintent.nlu.condition_model import TimeComparator
 
     bad_condition = ConditionNode(
         condition=ConditionModel(type=ConditionType.TIME, time_hour=10, time_minute=60, time_comparator=TimeComparator.AFTER)

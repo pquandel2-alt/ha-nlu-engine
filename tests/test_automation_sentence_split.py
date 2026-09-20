@@ -7,7 +7,7 @@ only).
 
 from __future__ import annotations
 
-from ha_nlu.nlu.automation_sentence_split import split_trigger_action
+from homeintent.nlu.automation_sentence_split import split_trigger_action
 
 
 def test_splits_simple_trigger_and_action():

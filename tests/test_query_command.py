@@ -11,9 +11,9 @@ can build on them without re-deriving what fields mean.
 
 from __future__ import annotations
 
-from ha_nlu.areas import AreaSnapshot
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.query_command import (
+from homeintent.areas import AreaSnapshot
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.query_command import (
     QueryCommand,
     QueryFilter,
     QueryResult,
@@ -21,7 +21,7 @@ from ha_nlu.nlu.query_command import (
     QueryScope,
     QueryTarget,
 )
-from ha_nlu.nlu.semantic_state import SemanticState
+from homeintent.nlu.semantic_state import SemanticState
 
 
 def test_query_target_defaults_to_no_device_class_area_or_entity():

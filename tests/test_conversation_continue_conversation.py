@@ -31,13 +31,13 @@ import _ha_stub  # noqa: E402
 
 _ha_stub.install()
 
-import ha_nlu.conversation as ha_conversation  # noqa: E402
-from ha_nlu.conversation import (  # noqa: E402
+import homeintent.conversation as ha_conversation  # noqa: E402
+from homeintent.conversation import (  # noqa: E402
     _CONTINUE_CONVERSATION_KINDS,
     NluConversationEntity,
 )
-from ha_nlu.entities import EntitySnapshot  # noqa: E402
-from ha_nlu.nlu.context import PendingDialogKind  # noqa: E402
+from homeintent.entities import EntitySnapshot  # noqa: E402
+from homeintent.nlu.context import PendingDialogKind  # noqa: E402
 from homeassistant.components.conversation import ConversationInput  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
 from homeassistant.core import HomeAssistant  # noqa: E402

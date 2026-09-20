@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.service_call import ServiceCallPlan
-from ha_nlu.undo import build_undo_plan, is_undo_request
+from homeintent.entities import EntitySnapshot
+from homeintent.service_call import ServiceCallPlan
+from homeintent.undo import build_undo_plan, is_undo_request
 
 
 def test_undo_request_is_deliberately_narrow():

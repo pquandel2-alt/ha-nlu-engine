@@ -6,8 +6,8 @@ tests only pin down the new command field."""
 
 from __future__ import annotations
 
-from ha_nlu.areas import AreaSnapshot
-from ha_nlu.nlu.command import SemanticCommand
+from homeintent.areas import AreaSnapshot
+from homeintent.nlu.command import SemanticCommand
 
 
 def test_single_match_command_has_resolved_entity(engine, entities):

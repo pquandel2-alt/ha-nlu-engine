@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.context import ConversationContext
-from ha_nlu.nlu.dialog_focus import derive_dialog_focus
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.context import ConversationContext
+from homeintent.nlu.dialog_focus import derive_dialog_focus
 
 
 def _context(result):

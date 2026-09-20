@@ -7,8 +7,8 @@ from that result."""
 
 from __future__ import annotations
 
-from ha_nlu.nlu.parser import IntentParser, ParseContext, ParseResult
-from ha_nlu.parsers import PercentageParser, QuantifierParser, SingleTargetParser
+from homeintent.nlu.parser import IntentParser, ParseContext, ParseResult
+from homeintent.parsers import PercentageParser, QuantifierParser, SingleTargetParser
 
 
 def test_parsers_conform_to_intent_parser_protocol(engine):

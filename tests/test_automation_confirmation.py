@@ -9,7 +9,7 @@ directly" style tests/test_automation_validator.py already established.
 
 from __future__ import annotations
 
-from ha_nlu.nlu.automation_confirmation import ConfirmationReply, classify_confirmation_reply
+from homeintent.nlu.automation_confirmation import ConfirmationReply, classify_confirmation_reply
 
 
 # ============================================================================

@@ -1,4 +1,4 @@
-from ha_nlu.response_planner import (
+from homeintent.response_planner import (
     DialogAct,
     GermanResponseRealizer,
     PersonaStyle,

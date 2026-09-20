@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from ha_nlu.automation_action_edit import (
+from homeintent.automation_action_edit import (
     action_edit_operation,
     homeintent_candidates,
     is_action_edit_request,
     select_candidate_reply,
 )
-from ha_nlu.automation_summary import AutomationSummary
+from homeintent.automation_summary import AutomationSummary
 
 
 FIRST = AutomationSummary(

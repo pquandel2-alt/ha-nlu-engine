@@ -1,5 +1,5 @@
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.query_target import mentioned_entities, resolve_query_targets
+from homeintent.entities import EntitySnapshot
+from homeintent.query_target import mentioned_entities, resolve_query_targets
 
 
 def test_query_target_composes_domain_and_area_independent_of_name_order():

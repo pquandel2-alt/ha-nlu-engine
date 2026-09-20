@@ -7,7 +7,7 @@ no invented step size."""
 
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
+from homeintent.entities import EntitySnapshot
 
 # percentage_step=20.0 -> a 5-speed fan (100 / 20 = 5 steps), so "Stufe 3"
 # should compute to 60%.

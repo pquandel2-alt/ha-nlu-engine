@@ -13,11 +13,11 @@ the ``SemanticCommand`` that becomes the next turn's context, exactly how
 
 from __future__ import annotations
 
-from ha_nlu.devices import DeviceSnapshot
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.context import ConversationContext
-from ha_nlu.nlu.dialog_focus import derive_dialog_focus
-from ha_nlu.world_model import build_world_model
+from homeintent.devices import DeviceSnapshot
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.context import ConversationContext
+from homeintent.nlu.dialog_focus import derive_dialog_focus
+from homeintent.world_model import build_world_model
 
 WOHNZIMMER_TEMP = EntitySnapshot(
     "sensor.wohnzimmer_temp", "Wohnzimmer Temperatur", "sensor", "21.5",

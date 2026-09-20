@@ -1,7 +1,7 @@
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.language_frontend import analyse_language
-from ha_nlu.nlu.semantic_interpreter import SemanticInterpreter
-from ha_nlu.nlu.semantic_snapshot import build_semantic_snapshot
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.language_frontend import analyse_language
+from homeintent.nlu.semantic_interpreter import SemanticInterpreter
+from homeintent.nlu.semantic_snapshot import build_semantic_snapshot
 
 
 def test_snapshot_covers_every_understanding_stage(engine):

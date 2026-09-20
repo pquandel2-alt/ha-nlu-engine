@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from ha_nlu.automation_management import (
+from homeintent.automation_management import (
     AutomationManagementKind,
     parse_automation_management,
     select_automation_management,
 )
-from ha_nlu.automation_summary import AutomationSummary
-from ha_nlu.entities import EntitySnapshot
+from homeintent.automation_summary import AutomationSummary
+from homeintent.entities import EntitySnapshot
 
 ROLLLADE = EntitySnapshot(
     "cover.buero_rollladen", "Büro Rollladen", "cover", "closed",

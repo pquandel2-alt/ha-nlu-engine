@@ -1,9 +1,9 @@
-from ha_nlu.nlu.language_frontend import analyse_language
-from ha_nlu.nlu.repair_semantics import repair_sequences
-from ha_nlu.nlu.semantic_graph import SemanticEdgeKind, build_semantic_graph
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.world_model import build_world_model
-from ha_nlu.house_graph import RelationKind, RelationSpec
+from homeintent.nlu.language_frontend import analyse_language
+from homeintent.nlu.repair_semantics import repair_sequences
+from homeintent.nlu.semantic_graph import SemanticEdgeKind, build_semantic_graph
+from homeintent.entities import EntitySnapshot
+from homeintent.world_model import build_world_model
+from homeintent.house_graph import RelationKind, RelationSpec
 
 
 KITCHEN = EntitySnapshot(

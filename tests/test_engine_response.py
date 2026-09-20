@@ -5,8 +5,8 @@ docstring) - these tests exercise the engine method directly."""
 
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.response import NluError
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.response import NluError
 
 HEATER = EntitySnapshot(
     "climate.heizung_buero", "Heizung Büro", "climate", "heat",

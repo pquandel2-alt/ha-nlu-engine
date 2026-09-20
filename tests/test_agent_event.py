@@ -12,8 +12,8 @@ import _ha_stub
 
 _ha_stub.install()
 
-from ha_nlu.agent_event import AgentEvent, AgentEventState, AgentMode, StoredServicePlan  # noqa: E402
-from ha_nlu.agent_event_store import AgentEventStore  # noqa: E402
+from homeintent.agent_event import AgentEvent, AgentEventState, AgentMode, StoredServicePlan  # noqa: E402
+from homeintent.agent_event_store import AgentEventStore  # noqa: E402
 from homeassistant.core import HomeAssistant  # noqa: E402
 
 

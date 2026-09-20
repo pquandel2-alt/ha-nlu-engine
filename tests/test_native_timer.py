@@ -12,13 +12,13 @@ import pytest
 
 _ha_stub.install()
 
-from ha_nlu.const import (
+from homeintent.const import (
     CONF_AGENT_MEDIA_PLAYERS,
     CONF_AGENT_TTS_ENTITY,
     CONF_TIMER_CHIME_MEDIA_ID,
 )
-from ha_nlu.native_timer import NativeTimerRuntime, NativeTimerUnavailableError
-from ha_nlu.productivity import TimerOperation, TimerRequest
+from homeintent.native_timer import NativeTimerRuntime, NativeTimerUnavailableError
+from homeintent.productivity import TimerOperation, TimerRequest
 from homeassistant.components.conversation import ConversationInput
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -47,7 +47,7 @@ def test_named_start_is_delegated_to_native_ha_intent(monkeypatch):
     assert speech == "Timer „Nudeln“ für 5 Minuten und 30 Sekunden gestartet."
     assert handle.await_args.args[:4] == (
         runtime._hass,
-        "ha_nlu",
+        "homeintent",
         "HassStartTimer",
         {
             "minutes": {"value": 5},
@@ -154,7 +154,7 @@ def test_start_registers_and_unload_removes_synthetic_handler(monkeypatch):
     stop()
 
     assert captured["hass"] is hass
-    assert captured["device_id"] == "ha_nlu:test-entry"
+    assert captured["device_id"] == "homeintent:test-entry"
     assert callable(captured["handler"])
     unregister.assert_called_once_with()
 
@@ -237,7 +237,7 @@ def test_route_prefers_native_source_and_can_use_configured_fallback(monkeypatch
     monkeypatch.setitem(sys.modules, "homeassistant.components.intent", fake_intent_component)
 
     assert asyncio.run(runtime._route_device("native")) == "native"
-    assert asyncio.run(runtime._route_device("phone")) == "ha_nlu:test-entry"
+    assert asyncio.run(runtime._route_device("phone")) == "homeintent:test-entry"
 
 
 def test_zero_duration_is_rejected_before_native_intent(monkeypatch):

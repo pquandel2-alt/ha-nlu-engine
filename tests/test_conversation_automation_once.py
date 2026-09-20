@@ -3,7 +3,7 @@ trip for a fire-once, self-deleting automation, exercised through the real
 ``NluConversationEntity._async_handle_message()`` orchestration - not a
 second reimplementation of ``engine.py``'s ``_AUTOMATION_ONCE_RE`` detection,
 ``ha_automation_generator.py``'s self-delete action injection, or
-``ha_nlu/__init__.py``'s ``ha_nlu.delete_automation`` service handler (each
+``homeintent/__init__.py``'s ``homeintent.delete_automation`` service handler (each
 already has its own dedicated unit test file; this file's job is to prove
 the whole live pipeline wires them together correctly turn-to-turn, for both
 a state-based and a time-based trigger - the user explicitly asked for both,
@@ -12,8 +12,8 @@ not just time-based).
 Reuses the exact ``_ha_stub``/``_make_entity``/``_run``/``_automations_yaml``
 harness ``tests/test_conversation_automation_delete.py`` already established
 (Regel 6). The self-delete service handler is invoked directly via
-``ha_nlu._async_delete_automation()`` (the real production function, same
-one ``__init__.py`` registers as the ``ha_nlu.delete_automation`` service) to
+``homeintent._async_delete_automation()`` (the real production function, same
+one ``__init__.py`` registers as the ``homeintent.delete_automation`` service) to
 simulate the generated automation's action step firing, since this test
 harness has no real HA automation/trigger engine to actually fire the
 automation end-to-end.
@@ -35,10 +35,10 @@ import _ha_stub  # noqa: E402
 
 _ha_stub.install()
 
-import ha_nlu as ha_nlu_init  # noqa: E402
-import ha_nlu.conversation as ha_conversation  # noqa: E402
-from ha_nlu.conversation import AUTOMATION_CREATED_TEXT, NluConversationEntity  # noqa: E402
-from ha_nlu.entities import EntitySnapshot  # noqa: E402
+import homeintent as ha_nlu_init  # noqa: E402
+import homeintent.conversation as ha_conversation  # noqa: E402
+from homeintent.conversation import AUTOMATION_CREATED_TEXT, NluConversationEntity  # noqa: E402
+from homeintent.entities import EntitySnapshot  # noqa: E402
 from homeassistant.components.conversation import ConversationInput  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
 from homeassistant.core import HomeAssistant, ServiceCall  # noqa: E402
@@ -131,7 +131,7 @@ def test_confirming_a_state_based_once_automation_appends_the_matching_self_dele
     assert len(automations) == 1
     automation = automations[0]
     assert automation["actions"][-1] == {
-        "action": "ha_nlu.delete_automation",
+        "action": "homeintent.delete_automation",
         "data": {"automation_id": automation["id"]},
     }
     # The turn-on action is still present ahead of the self-delete step.
@@ -152,7 +152,7 @@ def test_confirming_a_time_based_once_automation_also_appends_the_self_delete_ac
     automation = automations[0]
     assert automation["triggers"][0]["trigger"] == "time"
     assert automation["actions"][-1] == {
-        "action": "ha_nlu.delete_automation",
+        "action": "homeintent.delete_automation",
         "data": {"automation_id": automation["id"]},
     }
 
@@ -167,7 +167,7 @@ def test_confirming_an_ordinary_automation_appends_no_self_delete_action(monkeyp
     automations = _automations_yaml(tmp_path)
     assert len(automations) == 1
     assert all(
-        action.get("action") != "ha_nlu.delete_automation" for action in automations[0]["actions"]
+        action.get("action") != "homeintent.delete_automation" for action in automations[0]["actions"]
     )
 
 
@@ -205,7 +205,7 @@ def test_firing_the_self_delete_action_never_touches_an_unrelated_ordinary_autom
     _run(entity, "Ja", conversation_id="once")
     automations_before = _automations_yaml(tmp_path)
     assert len(automations_before) == 2
-    once_id = next(a["id"] for a in automations_before if a["actions"][-1].get("action") == "ha_nlu.delete_automation")
+    once_id = next(a["id"] for a in automations_before if a["actions"][-1].get("action") == "homeintent.delete_automation")
 
     asyncio.run(
         ha_nlu_init._async_delete_automation(entity.hass, ServiceCall({"automation_id": once_id}))
@@ -213,7 +213,7 @@ def test_firing_the_self_delete_action_never_touches_an_unrelated_ordinary_autom
 
     remaining = _automations_yaml(tmp_path)
     assert len(remaining) == 1
-    assert remaining[0]["actions"][-1].get("action") != "ha_nlu.delete_automation"
+    assert remaining[0]["actions"][-1].get("action") != "homeintent.delete_automation"
 
 
 def test_an_ordinary_automation_is_never_auto_removed_because_it_has_no_self_delete_action(
@@ -277,14 +277,14 @@ def test_relative_time_countdown_starts_at_confirmation_and_is_date_guarded(
         "data": {"position": 30},
     }
     assert automation["actions"][-1] == {
-        "action": "ha_nlu.delete_automation",
+        "action": "homeintent.delete_automation",
         "data": {"automation_id": automation["id"]},
     }
     entity.hass.services.async_call.assert_awaited_once_with(
         "automation", "reload", {}, blocking=True
     )
     categories = list(cr.async_get(entity.hass).async_list_categories(scope="automation"))
-    assert len(categories) == 1 and categories[0].name == "Homeintent"
+    assert len(categories) == 1 and categories[0].name == "HomeIntent"
     entity_id = er.async_get(entity.hass).async_get_entity_id(
         "automation", "automation", automation["id"]
     )
@@ -351,6 +351,6 @@ def test_bounded_automation_records_runs_instead_of_deleting_after_first(
 
     automation = _automations_yaml(tmp_path)[0]
     assert automation["actions"][-1] == {
-        "action": "ha_nlu.record_automation_run",
+        "action": "homeintent.record_automation_run",
         "data": {"automation_id": automation["id"], "max_runs": 3},
     }

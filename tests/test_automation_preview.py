@@ -13,9 +13,9 @@ docstring: never re-resolves, never guesses a new entity).
 
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.action_model import ActionGroup, ActionModel, ActionType, ExecutionMode
-from ha_nlu.nlu.automation_model import (
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.action_model import ActionGroup, ActionModel, ActionType, ExecutionMode
+from homeintent.nlu.automation_model import (
     AutomationModel,
     NumericComparator,
     SunEvent,
@@ -23,9 +23,9 @@ from ha_nlu.nlu.automation_model import (
     TriggerTarget,
     TriggerType,
 )
-from ha_nlu.nlu.automation_preview import render_automation_preview
-from ha_nlu.nlu.condition_model import ConditionModel, ConditionNode, ConditionType, LogicalOperator, TimeComparator
-from ha_nlu.nlu.semantic_state import SemanticState
+from homeintent.nlu.automation_preview import render_automation_preview
+from homeintent.nlu.condition_model import ConditionModel, ConditionNode, ConditionType, LogicalOperator, TimeComparator
+from homeintent.nlu.semantic_state import SemanticState
 
 KUECHE_FENSTER = EntitySnapshot(
     "binary_sensor.kueche_fenster", "Küchenfenster", "binary_sensor", "off",

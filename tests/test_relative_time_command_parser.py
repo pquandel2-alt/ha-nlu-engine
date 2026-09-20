@@ -5,9 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.action_model import ActionType
-from ha_nlu.nlu.automation_model import TriggerType, resolve_relative_schedule
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.action_model import ActionType
+from homeintent.nlu.automation_model import TriggerType, resolve_relative_schedule
 
 
 ENTITIES = [

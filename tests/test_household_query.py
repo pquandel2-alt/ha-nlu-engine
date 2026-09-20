@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.household_query import match_household_query
-from ha_nlu.nlu.language_frontend import analyse_language
+from homeintent.entities import EntitySnapshot
+from homeintent.household_query import match_household_query
+from homeintent.nlu.language_frontend import analyse_language
 
 
 NOW = datetime(2026, 8, 26, 14, 7, tzinfo=timezone.utc)

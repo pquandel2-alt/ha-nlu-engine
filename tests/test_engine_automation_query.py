@@ -16,9 +16,9 @@ the real, gated read into this method live (covered by
 
 from __future__ import annotations
 
-from ha_nlu.automation_summary import AutomationSummary
-from ha_nlu.engine import MatchResult
-from ha_nlu.entities import EntitySnapshot
+from homeintent.automation_summary import AutomationSummary
+from homeintent.engine import MatchResult
+from homeintent.entities import EntitySnapshot
 
 KUECHE_LICHT = EntitySnapshot(
     "light.kueche_licht", "Küchenlicht", "light", "on",

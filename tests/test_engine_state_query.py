@@ -13,9 +13,9 @@ boundary that motivated this session's regex changes.
 
 from __future__ import annotations
 
-from ha_nlu.entities import EntitySnapshot
-from ha_nlu.nlu.query_command import QueryCommand, QueryScope
-from ha_nlu.nlu.semantic_state import SemanticState
+from homeintent.entities import EntitySnapshot
+from homeintent.nlu.query_command import QueryCommand, QueryScope
+from homeintent.nlu.semantic_state import SemanticState
 
 FENSTER_KELLER = EntitySnapshot(
     "binary_sensor.fenster_keller", "Fenster Keller", "binary_sensor", "on",
@@ -721,8 +721,8 @@ SCHREIBTISCHLAMPE_BUERO = EntitySnapshot(
 
 
 def _world_model_with_buero_device():
-    from ha_nlu.devices import DeviceSnapshot
-    from ha_nlu.world_model import build_world_model
+    from homeintent.devices import DeviceSnapshot
+    from homeintent.world_model import build_world_model
 
     device = DeviceSnapshot(
         device_id="device.schreibtischlampe", name="Schreibtischlampe",
@@ -829,8 +829,8 @@ FERNSEHER_BUERO = EntitySnapshot(
 
 
 def _world_model_with_state_filtered_devices():
-    from ha_nlu.devices import DeviceSnapshot
-    from ha_nlu.world_model import build_world_model
+    from homeintent.devices import DeviceSnapshot
+    from homeintent.world_model import build_world_model
 
     entities = [LAMPE_BUERO, STECKDOSE_BUERO_A, STECKDOSE_BUERO_B, FERNSEHER_BUERO]
     devices = [
@@ -864,8 +864,8 @@ def test_device_query_state_filter_lists_devices_with_at_least_one_matching_enti
 
 def test_device_query_state_filter_empty_is_a_normal_answer(engine):
     entities = [FERNSEHER_BUERO]
-    from ha_nlu.devices import DeviceSnapshot
-    from ha_nlu.world_model import build_world_model
+    from homeintent.devices import DeviceSnapshot
+    from homeintent.world_model import build_world_model
 
     world_model = build_world_model(
         entities,
