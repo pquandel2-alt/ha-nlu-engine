@@ -1,5 +1,5 @@
 [run]
-source = custom_components/ha_nlu
+source = custom_components/homeintent
 
 [report]
 # Historical direct-language implementations are not part of the production
