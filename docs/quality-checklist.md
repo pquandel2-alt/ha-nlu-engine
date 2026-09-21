@@ -45,8 +45,9 @@ Stand: 21. September 2026
 - [x] Full Pyright einschließlich konfiguriertem Strict-Scope: 0 Fehler, 0 Warnungen
 - [x] Pyflakes und `git diff --check`: grün
 - [x] V10-5k-Performance-Gate lokal grün; höchster gemessener p95 45,820 ms
-- [ ] Finaler 5.0.2-CI-Lauf mit Hassfest, HACS, Home Assistant Stable Smoke,
-  Python 3.12/3.13 und separatem CI-Strict-Befehl: vor Tagging verpflichtend
+- [x] Vollständiger 5.0.2-CI-Lauf mit Hassfest, HACS, Home Assistant Stable
+  Smoke, Python 3.12/3.13 und separatem CI-Strict-Befehl: grün in
+  [CI-Lauf 35565156452](https://github.com/pquandel2-alt/homeintent/actions/runs/35565156452)
 
 Der lokale V9-5k-Lauf wurde bei einer Hostlast von etwa 54 auf vier CPUs
 ausgeführt und überschritt dadurch mehrere unveränderte 100-ms-Grenzen. Diese
