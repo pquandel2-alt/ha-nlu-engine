@@ -39,6 +39,10 @@ _LOGGER = logging.getLogger(__name__)
 
 NOTIFICATION_ACTION_EVENT = "mobile_app_notification_action"
 ACTION_PREFIXES = {
+    "HOMEINTENT_EXECUTE_": "execute",
+    "HOMEINTENT_IGNORE_": "ignore",
+    "HOMEINTENT_SNOOZE_": "snooze",
+    # Input-only compatibility for buttons in notifications created before 5.0.2.
     "HA_NLU_EXECUTE_": "execute",
     "HA_NLU_IGNORE_": "ignore",
     "HA_NLU_SNOOZE_": "snooze",

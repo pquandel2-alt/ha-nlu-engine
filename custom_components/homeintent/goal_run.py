@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Mapping, Sequence, cast
 
 from .goal_model import GoalModel
+from .goal_model import GoalKind
 
 
 class GoalRunStatus(StrEnum):
@@ -166,6 +167,30 @@ class GoalRun:
         )
 
 
+@dataclass(frozen=True)
+class GoalRunQuery:
+    """Typed, composable selection over the bounded GoalRun history."""
+
+    user_id: str | None = None
+    person_entity_id: str | None = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    failed_only: bool = False
+    goal_kind: GoalKind | None = None
+    routine_id: str | None = None
+    goal_id: str | None = None
+    run_id: str | None = None
+    entity_id: str | None = None
+    status: GoalRunStatus | None = None
+
+
+@dataclass(frozen=True)
+class GoalRunClarification:
+    run_ids: tuple[str, ...]
+    labels: tuple[str, ...]
+    requested_by_user_id: str | None
+
+
 class GoalRunStore:
     def __init__(self, path: str | Path, *, limit: int = 100) -> None:
         self.path = Path(path)
@@ -182,6 +207,11 @@ class GoalRunStore:
     async def async_list(self) -> tuple[GoalRun, ...]:
         return tuple(await asyncio.to_thread(self._read))
 
+    async def async_query(self, query: GoalRunQuery) -> tuple[GoalRun, ...]:
+        """Return matching runs in chronological order after one store read."""
+        runs = await self.async_list()
+        return tuple(item for item in runs if _matches_query(item, query))
+
     async def async_latest(
         self,
         *,
@@ -189,20 +219,9 @@ class GoalRunStore:
         goal_id: str | None = None,
         failed_only: bool = False,
     ) -> GoalRun | None:
-        runs = await self.async_list()
-        matches = [
-            item for item in runs
-            if (user_id is None or item.user_id == user_id)
-            and (goal_id is None or item.goal_id == goal_id)
-            and (
-                not failed_only
-                or item.status not in {
-                    GoalRunStatus.SUCCESS,
-                    GoalRunStatus.SCHEDULED,
-                    GoalRunStatus.RUNNING,
-                }
-            )
-        ]
+        matches = await self.async_query(
+            GoalRunQuery(user_id=user_id, goal_id=goal_id, failed_only=failed_only)
+        )
         return matches[-1] if matches else None
 
     async def async_seen_idempotency_key(self, key: str) -> bool:
@@ -385,8 +404,64 @@ def _text(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _matches_query(run: GoalRun, query: GoalRunQuery) -> bool:
+    if query.user_id is not None and run.user_id != query.user_id:
+        return False
+    if query.person_entity_id is not None and run.person_entity_id != query.person_entity_id:
+        return False
+    if query.goal_id is not None and run.goal_id != query.goal_id:
+        return False
+    if query.run_id is not None and run.run_id != query.run_id:
+        return False
+    if query.goal_kind is not None and run.goal.kind is not query.goal_kind:
+        return False
+    if query.routine_id is not None and run.goal.routine_id != query.routine_id:
+        return False
+    if query.status is not None and run.status is not query.status:
+        return False
+    if query.failed_only and run.status in {
+        GoalRunStatus.SUCCESS,
+        GoalRunStatus.SCHEDULED,
+        GoalRunStatus.RUNNING,
+        GoalRunStatus.PENDING,
+    }:
+        return False
+    if query.entity_id is not None and query.entity_id not in _run_entity_ids(run):
+        return False
+    try:
+        created = datetime.fromisoformat(run.created_at)
+    except ValueError:
+        return False
+    try:
+        if query.start_time is not None and created < query.start_time:
+            return False
+        if query.end_time is not None and created >= query.end_time:
+            return False
+    except TypeError:
+        # Old malformed/naive timestamps cannot be assigned safely to an HA
+        # local-time window, so they are ignored instead of guessed.
+        return False
+    return True
+
+
+def _run_entity_ids(run: GoalRun) -> frozenset[str]:
+    return frozenset(
+        (
+            *run.selected_targets,
+            *run.goal.scope.entity_ids,
+            *(entity_id for step in run.steps for entity_id in step.selected_targets),
+            *(
+                verification.entity_id
+                for step in run.steps
+                for verification in step.verification
+            ),
+        )
+    )
+
+
 __all__ = (
     "CausalityLevel", "FailureCode", "FailureExplanation", "GoalRun",
+    "GoalRunClarification", "GoalRunQuery",
     "GoalRunStatus", "GoalRunStore", "NotificationRecord", "StepExecutionRecord",
     "VerificationRecord", "explain_goal_run",
 )

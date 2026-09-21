@@ -35,7 +35,7 @@ import _ha_stub  # noqa: E402
 
 _ha_stub.install()
 
-import homeintent as ha_nlu_init  # noqa: E402
+import homeintent as homeintent_init  # noqa: E402
 import homeintent.conversation as ha_conversation  # noqa: E402
 from homeintent.conversation import AUTOMATION_CREATED_TEXT, NluConversationEntity  # noqa: E402
 from homeintent.entities import EntitySnapshot  # noqa: E402
@@ -184,7 +184,7 @@ def test_firing_the_self_delete_action_removes_the_once_automation_and_reloads(
     entity.hass.services.async_call.reset_mock()
 
     asyncio.run(
-        ha_nlu_init._async_delete_automation(
+        homeintent_init._async_delete_automation(
             entity.hass, ServiceCall({"automation_id": automation_id})
         )
     )
@@ -208,7 +208,7 @@ def test_firing_the_self_delete_action_never_touches_an_unrelated_ordinary_autom
     once_id = next(a["id"] for a in automations_before if a["actions"][-1].get("action") == "homeintent.delete_automation")
 
     asyncio.run(
-        ha_nlu_init._async_delete_automation(entity.hass, ServiceCall({"automation_id": once_id}))
+        homeintent_init._async_delete_automation(entity.hass, ServiceCall({"automation_id": once_id}))
     )
 
     remaining = _automations_yaml(tmp_path)

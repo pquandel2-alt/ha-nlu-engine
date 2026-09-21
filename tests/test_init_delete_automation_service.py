@@ -19,8 +19,10 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
 import yaml as pyyaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "custom_components"))
@@ -30,10 +32,10 @@ import _ha_stub  # noqa: E402
 
 _ha_stub.install()
 
-import homeintent as ha_nlu_init  # noqa: E402
+import homeintent as homeintent_init  # noqa: E402
 from homeintent.const import DOMAIN  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
-from homeassistant.core import HomeAssistant, ServiceCall  # noqa: E402
+from homeassistant.core import HomeAssistant, ServiceCall, State  # noqa: E402
 
 
 def _make_hass(tmp_path: Path) -> HomeAssistant:
@@ -73,7 +75,7 @@ def test_async_setup_entry_registers_the_delete_automation_service(tmp_path):
     hass = _make_hass(tmp_path)
     entry = ConfigEntry()
 
-    asyncio.run(ha_nlu_init.async_setup_entry(hass, entry))
+    asyncio.run(homeintent_init.async_setup_entry(hass, entry))
 
     assert hass.services.has_service(DOMAIN, "delete_automation") is True
     assert hass.services.has_service(DOMAIN, "record_automation_run") is True
@@ -90,18 +92,72 @@ def test_async_setup_entry_uses_configured_context_ttl(tmp_path):
     hass = _make_hass(tmp_path)
     entry = ConfigEntry(options={"context_ttl_seconds": 90})
 
-    asyncio.run(ha_nlu_init.async_setup_entry(hass, entry))
+    asyncio.run(homeintent_init.async_setup_entry(hass, entry))
 
     assert entry.runtime_data.context_store._ttl_seconds == 90.0
+
+
+def test_bind_user_context_accepts_exact_notify_entity_and_service(tmp_path):
+    hass = _make_hass(tmp_path)
+    entry = ConfigEntry()
+    hass.auth = SimpleNamespace(
+        async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=True))
+    )
+    hass.states._states["person.owner"] = State("person.owner", "home")
+    hass.states._states["notify.owner"] = State("notify.owner", "unknown")
+    hass.services.async_register("notify", "mobile_app_owner", AsyncMock())
+    asyncio.run(homeintent_init.async_setup_entry(hass, entry))
+    handler = hass.services._handlers[(DOMAIN, "bind_user_context")]
+    call = ServiceCall({
+        "user_id": "owner",
+        "person_entity_id": "person.owner",
+        "notification_targets": ["notify.owner"],
+        "notification_services": ["notify.mobile_app_owner"],
+        "preferred_notification_service": "notify.mobile_app_owner",
+        "confirmed": True,
+    })
+    call.context = SimpleNamespace(user_id="admin")
+
+    asyncio.run(handler(call))
+
+    binding = entry.runtime_data.user_contexts.resolve_notification_targets(
+        "person.owner"
+    )
+    assert binding.status.value == "resolved"
+    assert [target.target_id for target in binding.targets] == [
+        "notify.mobile_app_owner"
+    ]
+    assert binding.targets[0].kind.value == "service"
+
+
+def test_bind_user_context_rejects_unregistered_notify_service(tmp_path):
+    hass = _make_hass(tmp_path)
+    entry = ConfigEntry()
+    hass.auth = SimpleNamespace(
+        async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=True))
+    )
+    hass.states._states["person.owner"] = State("person.owner", "home")
+    asyncio.run(homeintent_init.async_setup_entry(hass, entry))
+    handler = hass.services._handlers[(DOMAIN, "bind_user_context")]
+    call = ServiceCall({
+        "user_id": "owner",
+        "person_entity_id": "person.owner",
+        "notification_services": ["notify.mobile_app_missing"],
+        "confirmed": True,
+    })
+    call.context = SimpleNamespace(user_id="admin")
+
+    with pytest.raises(ValueError, match="existing notify"):
+        asyncio.run(handler(call))
 
 
 def test_async_setup_entry_does_not_double_register_the_service(tmp_path):
     hass = _make_hass(tmp_path)
     entry = ConfigEntry()
 
-    asyncio.run(ha_nlu_init.async_setup_entry(hass, entry))
+    asyncio.run(homeintent_init.async_setup_entry(hass, entry))
     handler_after_first = hass.services._handlers[(DOMAIN, "delete_automation")]
-    asyncio.run(ha_nlu_init.async_setup_entry(hass, entry))
+    asyncio.run(homeintent_init.async_setup_entry(hass, entry))
     handler_after_second = hass.services._handlers[(DOMAIN, "delete_automation")]
 
     assert handler_after_first is handler_after_second
@@ -115,11 +171,11 @@ def test_setup_schedules_expired_automation_reconciliation_when_reload_exists(
     hass.services.async_register("automation", "reload", AsyncMock())
     cleanup = AsyncMock()
     monkeypatch.setattr(
-        ha_nlu_init, "_async_cleanup_expired_scheduled_automations", cleanup
+        homeintent_init, "_async_cleanup_expired_scheduled_automations", cleanup
     )
 
     async def scenario() -> None:
-        await ha_nlu_init.async_setup_entry(hass, entry)
+        await homeintent_init.async_setup_entry(hass, entry)
         await asyncio.gather(*hass._tasks)
 
     asyncio.run(scenario())
@@ -130,10 +186,10 @@ def test_setup_schedules_expired_automation_reconciliation_when_reload_exists(
 def test_async_unload_entry_removes_the_service(tmp_path):
     hass = _make_hass(tmp_path)
     entry = ConfigEntry()
-    asyncio.run(ha_nlu_init.async_setup_entry(hass, entry))
+    asyncio.run(homeintent_init.async_setup_entry(hass, entry))
     assert hass.services.has_service(DOMAIN, "delete_automation") is True
 
-    asyncio.run(ha_nlu_init.async_unload_entry(hass, entry))
+    asyncio.run(homeintent_init.async_unload_entry(hass, entry))
 
     assert hass.services.has_service(DOMAIN, "delete_automation") is False
     assert hass.services.has_service(DOMAIN, "record_automation_run") is False
@@ -149,7 +205,7 @@ def test_async_unload_entry_removes_the_service(tmp_path):
 def test_calling_the_service_deletes_the_matching_automation(monkeypatch, tmp_path):
     hass = _make_hass(tmp_path)
     entry = ConfigEntry()
-    asyncio.run(ha_nlu_init.async_setup_entry(hass, entry))
+    asyncio.run(homeintent_init.async_setup_entry(hass, entry))
     _write_automations_yaml(
         tmp_path,
         [
@@ -159,7 +215,7 @@ def test_calling_the_service_deletes_the_matching_automation(monkeypatch, tmp_pa
     )
 
     handler = hass.services._handlers[(DOMAIN, "delete_automation")]
-    monkeypatch.setattr(ha_nlu_init, "SELF_DELETE_GRACE_SECONDS", 0)
+    monkeypatch.setattr(homeintent_init, "SELF_DELETE_GRACE_SECONDS", 0)
     asyncio.run(_call_service_and_wait(hass, handler, ServiceCall({"automation_id": "delete-me"})))
 
     remaining = _automations_yaml(tmp_path)
@@ -170,14 +226,14 @@ def test_calling_the_service_deletes_the_matching_automation(monkeypatch, tmp_pa
 def test_calling_the_service_for_an_already_gone_automation_id_does_not_raise(monkeypatch, tmp_path):
     hass = _make_hass(tmp_path)
     entry = ConfigEntry()
-    asyncio.run(ha_nlu_init.async_setup_entry(hass, entry))
+    asyncio.run(homeintent_init.async_setup_entry(hass, entry))
     _write_automations_yaml(tmp_path, [{"id": "still-here", "alias": "x", "triggers": [], "actions": []}])
 
     handler = hass.services._handlers[(DOMAIN, "delete_automation")]
     # Must not raise even though "already-gone" was never in the file -
     # the documented ValueError race is swallowed (see __init__.py's
     # _async_delete_automation docstring).
-    monkeypatch.setattr(ha_nlu_init, "SELF_DELETE_GRACE_SECONDS", 0)
+    monkeypatch.setattr(homeintent_init, "SELF_DELETE_GRACE_SECONDS", 0)
     asyncio.run(_call_service_and_wait(hass, handler, ServiceCall({"automation_id": "already-gone"})))
 
     remaining = _automations_yaml(tmp_path)
@@ -187,7 +243,7 @@ def test_calling_the_service_for_an_already_gone_automation_id_does_not_raise(mo
 def test_calling_the_service_without_an_automation_id_is_a_no_op(tmp_path):
     hass = _make_hass(tmp_path)
     entry = ConfigEntry()
-    asyncio.run(ha_nlu_init.async_setup_entry(hass, entry))
+    asyncio.run(homeintent_init.async_setup_entry(hass, entry))
     _write_automations_yaml(tmp_path, [{"id": "still-here", "alias": "x", "triggers": [], "actions": []}])
 
     handler = hass.services._handlers[(DOMAIN, "delete_automation")]
@@ -203,16 +259,16 @@ def test_service_handler_returns_before_the_delete_starts(monkeypatch, tmp_path)
     entry = ConfigEntry()
 
     async def scenario() -> None:
-        await ha_nlu_init.async_setup_entry(hass, entry)
+        await homeintent_init.async_setup_entry(hass, entry)
         delete_started = asyncio.Event()
 
         async def record_delete(_hass, _automation_id):
             delete_started.set()
 
         monkeypatch.setattr(
-            ha_nlu_init, "_async_delete_automation_by_id", record_delete
+            homeintent_init, "_async_delete_automation_by_id", record_delete
         )
-        monkeypatch.setattr(ha_nlu_init, "SELF_DELETE_GRACE_SECONDS", 0)
+        monkeypatch.setattr(homeintent_init, "SELF_DELETE_GRACE_SECONDS", 0)
         handler = hass.services._handlers[(DOMAIN, "delete_automation")]
 
         await handler(ServiceCall({"automation_id": "delete-me"}))
@@ -232,13 +288,13 @@ def test_delayed_self_delete_retries_transient_failures(monkeypatch):
         side_effect=[RuntimeError("reload 1"), RuntimeError("reload 2"), None]
     )
     sleep = AsyncMock()
-    monkeypatch.setattr(ha_nlu_init, "_async_delete_automation_by_id", delete)
-    monkeypatch.setattr(ha_nlu_init.asyncio, "sleep", sleep)
-    monkeypatch.setattr(ha_nlu_init, "SELF_DELETE_GRACE_SECONDS", 0.1)
-    monkeypatch.setattr(ha_nlu_init, "SELF_DELETE_RETRY_SECONDS", (1.0, 5.0))
+    monkeypatch.setattr(homeintent_init, "_async_delete_automation_by_id", delete)
+    monkeypatch.setattr(homeintent_init.asyncio, "sleep", sleep)
+    monkeypatch.setattr(homeintent_init, "SELF_DELETE_GRACE_SECONDS", 0.1)
+    monkeypatch.setattr(homeintent_init, "SELF_DELETE_RETRY_SECONDS", (1.0, 5.0))
 
     asyncio.run(
-        ha_nlu_init._async_delete_automation_after_action(hass, "retry-me")
+        homeintent_init._async_delete_automation_after_action(hass, "retry-me")
     )
 
     assert delete.await_count == 3

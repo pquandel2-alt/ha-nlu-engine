@@ -53,6 +53,7 @@ def interpret_goal(
     document: LanguageDocument,
     *,
     current_user_id: str | None = None,
+    conversation_id: str | None = None,
     current_person_entity_id: str | None = None,
     voice_area_id: str | None = None,
     household_person_ids: Iterable[str] = (),
@@ -63,12 +64,26 @@ def interpret_goal(
     provenance = GoalProvenance(
         document.source_text,
         current_user_id,
+        conversation_id,
         semantic_graph_ref=_semantic_reference(document),
     )
     goal_id = f"goal_{uuid.uuid4().hex}"
 
     if _is_failure_explanation(words):
-        return GoalModel(GoalKind.EXPLAIN_FAILURE, goal_id=goal_id, provenance=provenance)
+        routine_id = _routine_name(words)
+        monitor_hint = bool(words & {"meldung", "benachrichtigung", "push", "fensterwarnung"})
+        parameters: dict[str, object] = {"failed_only": not monitor_hint}
+        if routine_id is not None:
+            parameters["routine_id"] = routine_id
+        if monitor_hint:
+            parameters["goal_kind"] = GoalKind.MONITOR_AND_NOTIFY.value
+        return GoalModel(
+            GoalKind.EXPLAIN_FAILURE,
+            parameters,
+            goal_id=goal_id,
+            routine_id=routine_id,
+            provenance=provenance,
+        )
 
     monitor = _monitor_goal(
         words,
@@ -279,7 +294,10 @@ def _is_failure_explanation(words: frozenset[str]) -> bool:
     negative_delivery = bool(words & {"keine", "nicht", "nie"}) and bool(
         words & {"meldung", "benachrichtigung", "push", "ausgeloest"}
     )
-    return (asks_why and failure_language) or negative_delivery
+    failed_state = asks_why and "nicht" in words and bool(
+        words & {"ging", "ginge", "blieb", "war", "wurde", "aus", "an"}
+    )
+    return (asks_why and failure_language) or negative_delivery or failed_state
 
 
 def _temperature_value(document: LanguageDocument) -> float | None:

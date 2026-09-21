@@ -27,7 +27,7 @@ from .goal_run import (
     GoalRunStore,
     NotificationRecord,
 )
-from .user_context import BindingStatus, UserContextStore
+from .user_context import BindingStatus, NotificationTargetKind, UserContextStore
 
 
 class NotificationCategory(StrEnum):
@@ -43,6 +43,7 @@ class NotificationCategory(StrEnum):
 class NotificationModel:
     recipient_person_id: str
     target_id: str
+    target_kind: NotificationTargetKind | None
     category: NotificationCategory
     severity: NotificationSeverity
     entity_ids: tuple[str, ...]
@@ -235,24 +236,31 @@ class MonitorGoalRuntime:
         notifications: list[NotificationRecord] = []
         names = tuple(item.friendly_name for item in matching)
         areas = tuple(dict.fromkeys(item.area_name for item in matching if item.area_name))
-        for person_id in recipients:
-            binding = self.user_contexts.resolve_notification_targets(person_id)
-            if binding.status is not BindingStatus.RESOLVED:
-                code = (
-                    FailureCode.NOTIFICATION_TARGET_AMBIGUOUS
-                    if binding.status is BindingStatus.AMBIGUOUS
-                    else FailureCode.NOTIFICATION_TARGET_MISSING
-                )
-                failed = replace(
-                    run, updated_at=now.isoformat(), status=GoalRunStatus.FAILURE,
-                    failures=(code,), evidence=(binding.reason or code.value,),
-                )
-                await self.run_store.async_append(failed)
-                return failed
+        bindings = tuple(
+            (person_id, self.user_contexts.resolve_notification_targets(person_id))
+            for person_id in recipients
+        )
+        unresolved = next(
+            (binding for _person_id, binding in bindings if binding.status is not BindingStatus.RESOLVED),
+            None,
+        )
+        if unresolved is not None:
+            code = (
+                FailureCode.NOTIFICATION_TARGET_AMBIGUOUS
+                if unresolved.status is BindingStatus.AMBIGUOUS
+                else FailureCode.NOTIFICATION_TARGET_MISSING
+            )
+            failed = replace(
+                run, updated_at=now.isoformat(), status=GoalRunStatus.FAILURE,
+                failures=(code,), evidence=(unresolved.reason or code.value,),
+            )
+            await self.run_store.async_append(failed)
+            return failed
+        for person_id, binding in bindings:
             for target in binding.targets:
                 dedupe = f"{dedupe_base}:{category.value}:{person_id}:{target.target_id}"
                 model = NotificationModel(
-                    person_id, target.target_id, category,
+                    person_id, target.target_id, target.kind, category,
                     goal.notification_severity, tuple(item.entity_id for item in matching),
                     names, areas, now.isoformat(), goal.goal_id, run.run_id, dedupe,
                 )

@@ -24,6 +24,8 @@ class DialogTaskKind(StrEnum):
     PLAN_CONFIRMATION = "plan_confirmation"
     ROUTINE_DEFINITION = "routine_definition"
     ALIAS_CONFIRMATION = "alias_confirmation"
+    GOAL_SEMANTIC_CLARIFICATION = "goal_semantic_clarification"
+    GOAL_RUN_CLARIFICATION = "goal_run_clarification"
 
 
 class DialogPriority(IntEnum):

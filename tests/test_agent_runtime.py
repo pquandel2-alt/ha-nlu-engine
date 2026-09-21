@@ -102,7 +102,7 @@ def test_notification_ignore_acknowledges_event(tmp_path):
         created = await runtime.async_signal({"rule_id": "door", "message": "Offen"})
         assert created is not None
         await runtime.async_handle_notification_action(
-            SimpleNamespace(data={"action": f"HA_NLU_IGNORE_{created.event_id}"})
+            SimpleNamespace(data={"action": f"HOMEINTENT_IGNORE_{created.event_id}"})
         )
         return (await runtime._store.async_load_all())[created.event_id]
 
@@ -168,7 +168,7 @@ def test_ask_notification_action_revalidates_and_executes(monkeypatch, tmp_path)
         assert created is not None
         hass.services.async_call.reset_mock()
         await runtime.async_handle_notification_action(
-            SimpleNamespace(data={"action": f"HA_NLU_EXECUTE_{created.event_id}"})
+            SimpleNamespace(data={"action": f"HOMEINTENT_EXECUTE_{created.event_id}"})
         )
         return (await runtime._store.async_load_all())[created.event_id]
 
@@ -202,7 +202,7 @@ def test_critical_ask_requires_authenticated_admin_by_default(monkeypatch, tmp_p
         assert created is not None
         hass.services.async_call.reset_mock()
         await runtime.async_handle_notification_action(
-            SimpleNamespace(data={"action": f"HA_NLU_EXECUTE_{created.event_id}"})
+            SimpleNamespace(data={"action": f"HOMEINTENT_EXECUTE_{created.event_id}"})
         )
         return (await runtime._store.async_load_all())[created.event_id]
 
@@ -239,7 +239,7 @@ def test_authenticated_admin_can_confirm_critical_ask(monkeypatch, tmp_path):
         hass.services.async_call.reset_mock()
         await runtime.async_handle_notification_action(
             SimpleNamespace(
-                data={"action": f"HA_NLU_EXECUTE_{created.event_id}"},
+                data={"action": f"HOMEINTENT_EXECUTE_{created.event_id}"},
                 context=SimpleNamespace(user_id="owner"),
             )
         )
@@ -275,7 +275,7 @@ def test_alarm_disarm_push_is_denied_without_authenticated_actor(monkeypatch, tm
         assert created is not None
         hass.services.async_call.reset_mock()
         await runtime.async_handle_notification_action(
-            SimpleNamespace(data={"action": f"HA_NLU_EXECUTE_{created.event_id}"})
+            SimpleNamespace(data={"action": f"HOMEINTENT_EXECUTE_{created.event_id}"})
         )
         return (await runtime._store.async_load_all())[created.event_id]
 
@@ -308,7 +308,7 @@ def test_authenticated_non_admin_critical_requires_explicit_opt_in(monkeypatch, 
         hass.services.async_call.reset_mock()
         await runtime.async_handle_notification_action(
             SimpleNamespace(
-                data={"action": f"HA_NLU_EXECUTE_{created.event_id}"},
+                data={"action": f"HOMEINTENT_EXECUTE_{created.event_id}"},
                 context=SimpleNamespace(user_id="resident"),
             )
         )
@@ -342,7 +342,7 @@ def test_push_actor_must_match_configured_control_user(monkeypatch, tmp_path):
         hass.services.async_call.reset_mock()
         await runtime.async_handle_notification_action(
             SimpleNamespace(
-                data={"action": f"HA_NLU_EXECUTE_{created.event_id}"},
+                data={"action": f"HOMEINTENT_EXECUTE_{created.event_id}"},
                 context=SimpleNamespace(user_id="owner"),
             )
         )
@@ -381,7 +381,7 @@ def test_missing_push_actor_is_visibly_denied_when_control_allowlist_exists(
         assert created is not None
         hass.services.async_call.reset_mock()
         await runtime.async_handle_notification_action(
-            SimpleNamespace(data={"action": f"HA_NLU_EXECUTE_{created.event_id}"})
+            SimpleNamespace(data={"action": f"HOMEINTENT_EXECUTE_{created.event_id}"})
         )
         return (await runtime._store.async_load_all())[created.event_id]
 
@@ -423,7 +423,7 @@ def test_foreign_push_actor_is_denied_by_control_allowlist(monkeypatch, tmp_path
         hass.services.async_call.reset_mock()
         await runtime.async_handle_notification_action(
             SimpleNamespace(
-                data={"action": f"HA_NLU_EXECUTE_{created.event_id}"},
+                data={"action": f"HOMEINTENT_EXECUTE_{created.event_id}"},
                 context=SimpleNamespace(user_id="guest"),
             )
         )
@@ -466,7 +466,7 @@ def test_notification_action_from_unconfigured_device_is_ignored(monkeypatch, tm
         await runtime.async_handle_notification_action(
             SimpleNamespace(
                 data={
-                    "action": f"HA_NLU_EXECUTE_{created.event_id}",
+                    "action": f"HOMEINTENT_EXECUTE_{created.event_id}",
                     "device_id": "other-device",
                 }
             )
@@ -486,7 +486,7 @@ def test_execute_event_cannot_promote_an_inform_event(tmp_path):
         assert created is not None
         hass.services.async_call.reset_mock()
         await runtime.async_handle_notification_action(
-            SimpleNamespace(data={"action": f"HA_NLU_EXECUTE_{created.event_id}"})
+            SimpleNamespace(data={"action": f"HOMEINTENT_EXECUTE_{created.event_id}"})
         )
         return (await runtime._store.async_load_all())[created.event_id]
 
@@ -512,7 +512,7 @@ def test_parallel_execute_clicks_call_the_physical_service_once(monkeypatch, tmp
         assert created is not None
         hass.services.async_call.reset_mock()
         action = SimpleNamespace(
-            data={"action": f"HA_NLU_EXECUTE_{created.event_id}"}
+            data={"action": f"HOMEINTENT_EXECUTE_{created.event_id}"}
         )
         await asyncio.gather(
             runtime.async_handle_notification_action(action),
@@ -551,7 +551,7 @@ def test_service_failure_is_recorded_as_failed_and_reported(monkeypatch, tmp_pat
         hass.services.async_call.reset_mock()
         hass.services.async_call.side_effect = [RuntimeError("service unavailable"), None]
         await runtime.async_handle_notification_action(
-            SimpleNamespace(data={"action": f"HA_NLU_EXECUTE_{created.event_id}"})
+            SimpleNamespace(data={"action": f"HOMEINTENT_EXECUTE_{created.event_id}"})
         )
         return (await runtime._store.async_load_all())[created.event_id]
 
@@ -584,7 +584,7 @@ def test_source_change_between_notification_and_tap_prevents_execution(
         hass.states._states["binary_sensor.door"] = State("binary_sensor.door", "off")
         hass.services.async_call.reset_mock()
         await runtime.async_handle_notification_action(
-            SimpleNamespace(data={"action": f"HA_NLU_EXECUTE_{created.event_id}"})
+            SimpleNamespace(data={"action": f"HOMEINTENT_EXECUTE_{created.event_id}"})
         )
         return (await runtime._store.async_load_all())[created.event_id]
 
@@ -747,7 +747,7 @@ def test_snooze_uses_durable_helper_and_rechecks_original_conditions(tmp_path):
         assert created is not None
         hass.services.async_call.reset_mock()
         await runtime.async_handle_notification_action(
-            SimpleNamespace(data={"action": f"HA_NLU_SNOOZE_{created.event_id}"})
+            SimpleNamespace(data={"action": f"HOMEINTENT_SNOOZE_{created.event_id}"})
         )
         snoozed = (await runtime._store.async_load_all())[created.event_id]
         hass.services.async_call.reset_mock()

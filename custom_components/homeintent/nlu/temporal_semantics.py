@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, time, timedelta
 from enum import Enum, auto
 from typing import Sequence
 
@@ -57,7 +58,7 @@ _WEEKDAYS = frozenset({
     "montag", "dienstag", "mittwoch", "donnerstag", "freitag",
     "samstag", "sonntag",
 })
-_DATES = frozenset({"heute", "morgen", "uebermorgen", "gestern"})
+_DATES = frozenset({"heute", "morgen", "uebermorgen", "gestern", "vorgestern"})
 _SUN_EVENTS = frozenset({"sonnenaufgang", "sonnenuntergang"})
 _NON_TEMPORAL_NACH_COMPLEMENTS = frozenset(
     {"oben", "unten", "links", "rechts", "vorne", "hinten", "hause"}
@@ -126,4 +127,95 @@ def analyse_temporal_semantics(
             and other.token_end > item.token_end
             for other in found
         )
+    )
+
+
+@dataclass(frozen=True)
+class TemporalWindow:
+    """One half-open local-time interval used by historical queries."""
+
+    start: datetime
+    end: datetime
+    label: str
+
+
+def resolve_history_window(
+    tokens: Sequence[StructuralToken], now: datetime
+) -> TemporalWindow | None:
+    """Resolve supported German history phrases in Home Assistant local time.
+
+    ``now`` must be the timezone-aware value supplied by Home Assistant.  The
+    returned bounds retain that timezone and are half-open, so a local day is
+    always ``[local midnight, next local midnight)`` even across UTC offsets.
+    This lives beside the temporal scanner to keep one temporal authority.
+    """
+    if now.tzinfo is None:
+        raise ValueError("Historical time resolution requires local timezone data")
+    words = tuple(token.canonical for token in tokens)
+    text = " ".join(words)
+    midnight = datetime.combine(now.date(), time.min, tzinfo=now.tzinfo)
+
+    if "letzte nacht" in text:
+        return TemporalWindow(
+            midnight - timedelta(hours=4), midnight + timedelta(hours=6), "letzte Nacht"
+        )
+
+    offset: int | None = None
+    label = ""
+    if "vorgestern" in words:
+        offset, label = -2, "vorgestern"
+    elif "gestern" in words:
+        offset, label = -1, "gestern"
+    elif "heute" in words:
+        offset, label = 0, "heute"
+    if offset is None:
+        return None
+
+    start = midnight + timedelta(days=offset)
+    end = start + timedelta(days=1)
+    # Phrase-level precedence prevents the DATE token ``morgen`` in
+    # ``heute Morgen`` from being mistaken for tomorrow.
+    if "morgen" in words and ("heute" in words or "gestern" in words):
+        return TemporalWindow(
+            start + timedelta(hours=5), start + timedelta(hours=12), f"{label} Morgen"
+        )
+    if "abend" in words:
+        return TemporalWindow(
+            start + timedelta(hours=18), end, f"{label} Abend"
+        )
+    return TemporalWindow(start, end, label)
+
+
+def resolve_scheduled_datetime(
+    expressions: Sequence[TemporalExpression], now: datetime
+) -> datetime | None:
+    """Resolve a supported date plus clock time against HA's local clock."""
+    if now.tzinfo is None:
+        raise ValueError("Scheduling requires local timezone data")
+    clock = next(
+        (item.value for item in expressions if item.kind is TemporalKind.ABSOLUTE_TIME),
+        None,
+    )
+    if clock is None:
+        return None
+    hour_text, minute_text = clock.split(":", 1)
+    date_value = next(
+        (item.value for item in expressions if item.kind is TemporalKind.DATE),
+        None,
+    )
+    day_offset = (
+        {"heute": 0, "morgen": 1, "uebermorgen": 2}.get(date_value)
+        if date_value is not None
+        else None
+    )
+    if day_offset is None:
+        target = now.replace(
+            hour=int(hour_text), minute=int(minute_text), second=0, microsecond=0
+        )
+        return target if target > now else target + timedelta(days=1)
+    target_date = now.date() + timedelta(days=day_offset)
+    return datetime.combine(
+        target_date,
+        time(int(hour_text), int(minute_text)),
+        tzinfo=now.tzinfo,
     )

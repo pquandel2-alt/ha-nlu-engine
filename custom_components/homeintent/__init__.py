@@ -156,6 +156,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def _deliver_monitor(model, rendered) -> bool:
         return await delivery.async_deliver_typed_notification(
             model.target_id,
+            target_kind=model.target_kind,
             title=rendered.title,
             message=rendered.message,
             dedupe_key=model.dedupe_key,
@@ -275,32 +276,65 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             user_id = call.data.get("user_id")
             person_entity_id = call.data.get("person_entity_id")
             targets = call.data.get("notification_targets", ())
+            service_targets = call.data.get("notification_services", ())
             preferred_target = call.data.get("preferred_notification_target")
+            preferred_service = call.data.get("preferred_notification_service")
             if not isinstance(user_id, str) or not isinstance(person_entity_id, str):
                 raise ValueError("user_id and person_entity_id are required")
             if not isinstance(targets, (list, tuple)) or any(
                 not isinstance(item, str) for item in targets
             ):
                 raise ValueError("notification_targets must be a list of notify.* ids")
+            if not isinstance(service_targets, (list, tuple)) or any(
+                not isinstance(item, str) for item in service_targets
+            ):
+                raise ValueError("notification_services must be a list of notify.* service ids")
             if hass.states.get(person_entity_id) is None or not person_entity_id.startswith("person."):
                 raise ValueError("person_entity_id must reference an existing person.* entity")
-            from .user_context import NotificationTarget
+            from .user_context import NotificationTarget, NotificationTargetKind
 
-            notification_targets = tuple(
+            entity_notification_targets = tuple(
                 NotificationTarget(
                     item,
+                    NotificationTargetKind.ENTITY,
                     preferred=(item == preferred_target),
                 )
                 for item in targets
-                if item.startswith("notify.")
+                if item.startswith("notify.") and hass.states.get(item) is not None
             )
-            if len(notification_targets) != len(targets):
-                raise ValueError("Every notification target must be a notify.* entity")
+            if len(entity_notification_targets) != len(targets):
+                raise ValueError("Every notification target must be an existing notify.* entity")
+            service_notification_targets = tuple(
+                NotificationTarget(
+                    item,
+                    NotificationTargetKind.SERVICE,
+                    preferred=(item == preferred_service),
+                )
+                for item in service_targets
+                if item.startswith("notify.")
+                and hass.services.has_service("notify", item.partition(".")[2])
+            )
+            if len(service_notification_targets) != len(service_targets):
+                raise ValueError("Every notification service must be an existing notify.* service")
+            notification_targets = (
+                *entity_notification_targets,
+                *service_notification_targets,
+            )
+            preferred_values = tuple(
+                item for item in (preferred_target, preferred_service) if item is not None
+            )
+            if any(
+                not isinstance(item, str)
+                or item not in {target.target_id for target in notification_targets}
+                for item in preferred_values
+            ) or len(preferred_values) > 1:
+                raise ValueError("The preferred notification target must identify exactly one bound target")
             await user_contexts.async_set_user(
                 user_id,
                 person_entity_id=person_entity_id,
                 notification_targets=notification_targets,
                 confirmed=bool(call.data.get("confirmed", False)),
+                allow_shared_person=bool(call.data.get("allow_shared_person", False)),
             )
 
         hass.services.async_register(

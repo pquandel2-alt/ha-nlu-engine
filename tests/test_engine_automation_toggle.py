@@ -38,7 +38,7 @@ ENTITIES = [KUECHE_LICHT, BUERO_LICHT_1, BUERO_LICHT_2]
 
 KUECHE_AUTOMATION = AutomationSummary(
     automation_id="a1",
-    alias="ha_nlu_a1",
+    alias="homeintent_a1",
     source_text="Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht ein.",
     referenced_entity_ids=frozenset({"light.kueche_licht"}),
 )

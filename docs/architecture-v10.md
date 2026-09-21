@@ -28,8 +28,18 @@ the V8 semantic analysis. It contains no service name.
 clause structure, speech act, and temporal expressions. It is not a fallback
 parser and cannot execute. In particular, a requested result such as “um 7
 Uhr 21 Grad haben” becomes a deadline goal. A concrete “um 7 Uhr den Sollwert
-setzen” remains an action. Without a configured thermal model HomeIntent asks
+setzen“ remains an action. Without a configured thermal model HomeIntent asks
 which meaning is intended and never invents a preheating time.
+
+The question is represented as a typed
+`GOAL_SEMANTIC_CLARIFICATION` task containing the complete original
+`GoalModel`, requesting user, conversation ID, area, desired temperature,
+deadline, provenance, and the two closed choices `SETPOINT_AT_TIME` and
+`ACHIEVE_BY_DEADLINE`. A follow-up such as „Ersteres“ is interpreted only in
+that open task. The setpoint choice materializes through the sole planner,
+validator, execution policy, confirmation, and persistent date-bound one-shot
+automation path. The deadline choice creates no service or automation while
+no confirmed thermal model exists.
 
 ## Planner and PlanModel
 
@@ -92,6 +102,14 @@ not occur. If Recorder data, a matching monitor goal, or an unambiguous time
 range is missing, the cause remains unknown. Missing evidence is never
 replaced with a guess.
 
+Historical selection is centralized in typed `GoalRunQuery` filtering over
+the bounded store. It composes user/person, half-open local-HA-time bounds,
+status, goal kind, routine, goal/run ID, and concrete entity. Supported history
+windows include today, yesterday, the day before yesterday, morning/evening,
+and last night. An explicit yesterday window is applied before recency, so a
+newer run from today cannot displace it. Multiple plausible runs create a
+typed clarification task; no latest-wins shortcut chooses among them.
+
 ## Persons and presence
 
 Home Assistant `person.*` entities are the only presence authority. The local
@@ -105,9 +123,18 @@ No person-to-device name similarity is used. An explicitly spoken configured
 person name is grounded only when exactly one `person.*` entity matches.
 “ich” is unresolved until the authenticated HA
 user is linked. Multiple push targets without exactly one preferred target
-remain ambiguous. A separately confirmed household scope defines “niemand
-zuhause”; arbitrary guest/test persons and device trackers are excluded.
+remain ambiguous. A separately confirmed household scope defines „niemand
+zuhause“; arbitrary guest/test persons and device trackers are excluded.
 Zones use HA person states and configured HA zones rather than a new geofence.
+
+Notification targets carry a typed kind. `ENTITY` is delivered to the exact
+bound `notify.*` entity through `notify.send_message`; `SERVICE` invokes the
+exact registered classic `notify.<service>` action (including Companion App
+services). Bindings are validated against the corresponding live registry.
+There is no name inference and no broadcast fallback for missing or ambiguous
+goal-notification targets. This follows Home Assistant's documented split
+between [`notify.send_message` for notify entities and legacy notify
+actions](https://www.home-assistant.io/integrations/notify/).
 
 ## Monitor goals and proactive notifications
 
@@ -155,3 +182,7 @@ not utterances, notification bodies, person IDs, or movement history. There is
 no runtime LLM, cloud NLU, model download, external profile transfer, or silent
 learning. Unsupported, ambiguous, unsafe, or insufficiently evidenced goals
 end in clarification or a typed failure, never a best-effort action.
+
+Version 5.0.2 is the V10 completion/hardening release. This architecture is
+frozen as **V10 COMPLETE**; later architectural expansion belongs to a
+separate V11 project and is not implied by this document.

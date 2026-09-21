@@ -135,6 +135,10 @@ class ProfileStore:
 
 
 def _validate_comfort(profile: ComfortProfile) -> None:
+    if profile.temperature_min is not None and not 5 <= profile.temperature_min <= 35:
+        raise ValueError("Invalid temperature range")
+    if profile.temperature_max is not None and not 5 <= profile.temperature_max <= 35:
+        raise ValueError("Invalid temperature range")
     if profile.temperature_min is not None and profile.temperature_max is not None:
         if profile.temperature_min > profile.temperature_max:
             raise ValueError("Invalid temperature range")

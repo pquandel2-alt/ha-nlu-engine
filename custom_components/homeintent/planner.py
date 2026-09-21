@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
 from typing import Awaitable, Callable, Iterable, Mapping, Protocol, Sequence, cast
 
 from .agent_action_policy import validate_agent_service_plan
-from .entities import EntitySnapshot
+from .entities import EntitySnapshot, normalize_for_compare
 from .execution_policy import PolicyOutcome, evaluate_service_plan
 from .goal_model import DesiredState, GoalKind, GoalModel, GoalScope
 from .profiles import ComfortProfile, RoutineDefinition, RoutineStepDefinition
@@ -86,6 +87,7 @@ class PlanStep:
     operator_id: str | None = None
     idempotent: bool = False
     execute_at_local_time: str | None = None
+    scheduled_for: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -125,6 +127,10 @@ def materialize_goal(
 ) -> MaterializedPlan:
     """Materialize legacy bounded goals through the central policy path."""
     snapshots = tuple(entities)
+    if goal.kind is GoalKind.SCHEDULED:
+        return _materialize_scheduled_setpoint(
+            goal, snapshots, options, is_admin, user_id, limits
+        )
     by_id = {entity.entity_id: entity for entity in snapshots}
     requested = goal.parameters.get("entity_ids", ())
     requested_items = cast(Sequence[object], requested) if isinstance(requested, (list, tuple)) else ()
@@ -221,6 +227,77 @@ def materialize_goal(
         f"plan_{uuid.uuid4().hex}", goal, tuple(steps), aggregate, True,
         f"{len(steps) - 1} geprüfte Aktion(en), Gesamtrisiko {aggregate.name.lower()}.",
         _trace(goal, snapshots, tuple(selected), tuple(skipped), limits),
+    )
+    validate_plan_graph(plan, limits=limits)
+    return plan
+
+
+def _materialize_scheduled_setpoint(
+    goal: GoalModel,
+    snapshots: tuple[EntitySnapshot, ...],
+    options: Mapping[str, object],
+    is_admin: bool,
+    user_id: str | None,
+    limits: PlanningLimits,
+) -> MaterializedPlan:
+    """Build one scheduled setpoint through the normal policy boundary."""
+    if (
+        goal.temporal is None
+        or goal.temporal.must_be_achieved_by_deadline
+        or goal.temporal.execute_at is None
+    ):
+        raise ValueError("Die Semantik des Temperaturziels ist noch nicht geklärt")
+    if len(goal.desired_states) != 1:
+        raise ValueError("Das terminierte Ziel benötigt genau einen Zielzustand")
+    area = normalize_for_compare(goal.scope.area_id or "")
+    candidates = tuple(
+        entity
+        for entity in snapshots
+        if entity.domain == (goal.scope.domain or "climate")
+        and (
+            not area
+            or area == normalize_for_compare(entity.area_id or "")
+            or area == normalize_for_compare(entity.area_name or "")
+        )
+    )
+    if len(candidates) != 1:
+        raise ValueError("Für den Raum ist keine eindeutige Heizung festgelegt")
+    entity = candidates[0]
+    desired = goal.desired_states[0]
+    action, effect = _action_for_desired_state(entity, desired)
+    _validate_action(action, snapshots, options, is_admin, user_id)
+    check = PlanStep(
+        "check-fresh-state",
+        StepKind.CHECK,
+        "Aktuelle Zustände, Verfügbarkeit und Fähigkeiten prüfen",
+        invariants=("fresh_snapshot", "capability_checked", "policy_checked"),
+    )
+    target = goal.temporal.execute_at
+    step = PlanStep(
+        "scheduled-setpoint",
+        StepKind.ACTION,
+        f"{entity.friendly_name} zum geplanten Zeitpunkt auf {desired.value:g} Grad setzen"
+        if isinstance(desired.value, (int, float))
+        else f"{entity.friendly_name} zum geplanten Zeitpunkt anpassen",
+        preconditions=("entity_available", "capability_checked"),
+        effects=(effect,),
+        dependencies=(check.step_id,),
+        action=action,
+        risk=classify_service_plan(action, snapshots),
+        verification={entity.entity_id: _verification_value(desired)},
+        operator_id=_operator_id(action.domain, action.service),
+        idempotent=_is_idempotent(action),
+        execute_at_local_time=target.strftime("%H:%M"),
+        scheduled_for=target,
+    )
+    plan = MaterializedPlan(
+        f"plan_{uuid.uuid4().hex}",
+        goal,
+        (check, step),
+        step.risk,
+        True,
+        f"Der Sollwert wird einmalig am {target.date().isoformat()} um {target:%H:%M} Uhr gesetzt.",
+        _trace(goal, snapshots, (step.operator_id or "",), (), limits),
     )
     validate_plan_graph(plan, limits=limits)
     return plan

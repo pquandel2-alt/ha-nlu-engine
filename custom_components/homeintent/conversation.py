@@ -21,7 +21,7 @@ import re
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Literal, Sequence
 
 from homeassistant.components import conversation
 from homeassistant.components.conversation import ConversationEntityFeature
@@ -123,10 +123,19 @@ from .management_dialogs import (
 )
 from .house_graph import FactProvenance, HouseGraph, parse_relation_specs
 from .goal_intent import interpret_goal
-from .goal_model import DesiredState, GoalKind as V10GoalKind, GoalScope
+from .goal_model import (
+    DesiredState,
+    GoalKind as V10GoalKind,
+    GoalScope,
+    GoalSemanticChoice,
+    PendingGoalSemanticClarification,
+    TemporalGoal,
+)
 from .goal_run import (
     FailureCode,
     GoalRun,
+    GoalRunClarification,
+    GoalRunQuery,
     GoalRunStatus,
     StepExecutionRecord,
     VerificationRecord,
@@ -149,6 +158,7 @@ from .planner import (
     observed_effect,
 )
 from .monitor_goal import MonitorRecord
+from .nlu.temporal_semantics import resolve_history_window, resolve_scheduled_datetime
 from .plan_modification import apply_plan_modification
 from .profiles import ComfortProfile, RoutineDefinition, RoutineStepDefinition
 from .user_context import BindingStatus
@@ -1941,6 +1951,7 @@ class NluConversationEntity(
         goal = interpret_goal(
             language_document,
             current_user_id=actor_id,
+            conversation_id=conversation_id,
             voice_area_id=area_id,
         )
         if goal is None:
@@ -1996,6 +2007,90 @@ class NluConversationEntity(
         manager = self._runtime_data.dialog_manager
         conversation_id = user_input.conversation_id
         active = manager.active(conversation_id)
+        if (
+            active is not None
+            and active.kind is DialogTaskKind.GOAL_RUN_CLARIFICATION
+            and isinstance(active.payload, GoalRunClarification)
+        ):
+            actor_id = conversation_user_id(user_input)
+            pending_runs = active.payload
+            if pending_runs.requested_by_user_id != actor_id:
+                response.async_set_speech("Diese Verlaufs-Rückfrage gehört zu einem anderen Benutzer.")
+                return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+            selected_id = _select_goal_run_reply(
+                language_document, pending_runs.run_ids, pending_runs.labels
+            )
+            if selected_id is None:
+                response.async_set_speech(
+                    "Bitte nenne eines der Ziele: " + _german_goal_labels(pending_runs.labels) + "."
+                )
+                return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+            store = self._runtime_data.goal_runs
+            matches = (
+                await store.async_query(GoalRunQuery(user_id=actor_id, run_id=selected_id))
+                if store is not None
+                else ()
+            )
+            manager.cancel(conversation_id, active.task_id)
+            response.async_set_speech(explain_goal_run(matches[-1] if matches else None).message)
+            return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+
+        if (
+            active is not None
+            and active.kind is DialogTaskKind.GOAL_SEMANTIC_CLARIFICATION
+            and isinstance(active.payload, PendingGoalSemanticClarification)
+        ):
+            actor_id = conversation_user_id(user_input)
+            pending_goal = active.payload
+            if pending_goal.requested_by_user_id != actor_id:
+                response.async_set_speech("Diese Ziel-Rückfrage gehört zu einem anderen Benutzer.")
+                return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+            choice = _goal_semantic_choice(language_document)
+            if choice is None or choice not in pending_goal.choices:
+                response.async_set_speech(
+                    "Bitte wähle eindeutig: Sollwert zum Zeitpunkt setzen oder bis dahin erreichen."
+                )
+                return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+            manager.cancel(conversation_id, active.task_id)
+            if choice is GoalSemanticChoice.ACHIEVE_BY_DEADLINE:
+                response.async_set_speech(
+                    "Für dieses Ergebnisziel fehlt mir ein bestätigtes thermisches Modell. "
+                    "Ich kann den Sollwert zu einem festen Zeitpunkt setzen oder du konfigurierst ein Modell für diesen Raum."
+                )
+                return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+            original_document = analyse_language(
+                pending_goal.goal.provenance.source_utterance, entities
+            )
+            scheduled_for = resolve_scheduled_datetime(
+                original_document.temporal, dt_util.now()
+            )
+            if scheduled_for is None:
+                response.async_set_speech(
+                    "Der geplante Zeitpunkt ist nicht mehr vollständig. Ich habe nichts geplant."
+                )
+                return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+            clarified = replace(
+                pending_goal.goal,
+                temporal=TemporalGoal(
+                    execute_at=scheduled_for,
+                    day_part=scheduled_for.strftime("%Y-%m-%d %H:%M"),
+                    must_be_achieved_by_deadline=False,
+                ),
+                failure_handling="report",
+            )
+            try:
+                plan = materialize_goal(
+                    clarified,
+                    entities,
+                    options=self.entry.options,
+                    is_admin=await user_is_admin(self.hass, user_input),
+                    user_id=actor_id,
+                )
+            except (PermissionError, ValueError) as err:
+                response.async_set_speech(f"Ich kann dafür keinen sicheren Plan erstellen: {err}")
+                return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+            return self._stage_goal_plan(user_input, response, plan, actor_id)
+
         if active is not None and active.kind is DialogTaskKind.ROUTINE_DEFINITION:
             actor_id = conversation_user_id(user_input)
             if active.requested_by_user_id != actor_id:
@@ -2171,11 +2266,15 @@ class NluConversationEntity(
                         except (TypeError, ValueError):
                             return _ScheduledOutcome(False, "Der geplante Zeitpunkt ist ungültig.")
                         now = dt_util.now()
-                        scheduled_for = now.replace(
-                            hour=hour, minute=minute, second=0, microsecond=0
-                        )
-                        if scheduled_for <= now:
-                            scheduled_for += timedelta(days=1)
+                        scheduled_for = step.scheduled_for
+                        if scheduled_for is None:
+                            scheduled_for = now.replace(
+                                hour=hour, minute=minute, second=0, microsecond=0
+                            )
+                            if scheduled_for <= now:
+                                scheduled_for += timedelta(days=1)
+                        elif scheduled_for <= now:
+                            return _ScheduledOutcome(False, "Der geplante Zeitpunkt liegt bereits in der Vergangenheit.")
                         automation_id = uuid.uuid4().hex
                         model = AutomationModel(
                             triggers=(TriggerModel(
@@ -2375,6 +2474,7 @@ class NluConversationEntity(
         goal = interpret_goal(
             language_document,
             current_user_id=actor_id,
+            conversation_id=conversation_id,
             current_person_entity_id=person_id,
             voice_area_id=area.area_id if area is not None else None,
             household_person_ids=household,
@@ -2392,12 +2492,57 @@ class NluConversationEntity(
             # explanations handle anaphoric/general failure questions only.
             if parse_automation_management(user_input.text) is not None:
                 return None
+            if actor_id is None:
+                response.async_set_speech(
+                    "Ohne eindeutige Home-Assistant-Benutzerzuordnung kann ich keinen "
+                    "persönlichen Zielverlauf erklären."
+                )
+                return conversation.ConversationResult(
+                    response=response, conversation_id=conversation_id
+                )
             store = self._runtime_data.goal_runs
-            run = await store.async_latest(user_id=actor_id) if store else None
+            window = resolve_history_window(language_document.tokens, dt_util.now())
+            goal_kind_value = goal.parameters.get("goal_kind")
+            goal_kind = None
+            if isinstance(goal_kind_value, str):
+                try:
+                    goal_kind = V10GoalKind(goal_kind_value)
+                except ValueError:
+                    goal_kind = None
+            entity_id = _mentioned_goal_run_entity(language_document, entities)
+            query = GoalRunQuery(
+                user_id=actor_id,
+                start_time=window.start if window is not None else None,
+                end_time=window.end if window is not None else None,
+                failed_only=goal.parameters.get("failed_only") is not False,
+                goal_kind=goal_kind,
+                routine_id=goal.routine_id,
+                entity_id=entity_id,
+            )
+            matches = await store.async_query(query) if store else ()
+            if window is not None and len(matches) > 1:
+                labels = tuple(_goal_run_label(item) for item in matches)
+                manager.create(
+                    conversation_id,
+                    "goal-run-clarification",
+                    DialogTaskKind.GOAL_RUN_CLARIFICATION,
+                    DialogPriority.SELECTION,
+                    candidates=tuple(item.run_id for item in matches),
+                    reason="Mehrere historische Ziele passen zum genannten Zeitraum.",
+                    requested_by_user_id=actor_id,
+                    payload=GoalRunClarification(
+                        tuple(item.run_id for item in matches), labels, actor_id
+                    ),
+                )
+                response.async_set_speech(
+                    f"{window.label.capitalize()} sind {_german_count(len(matches))} passende Ziele fehlgeschlagen: "
+                    + _german_goal_labels(labels)
+                    + ". Welches meinst du?"
+                )
+                return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+            run = matches[-1] if matches else None
             explanation = explain_goal_run(run)
-            if run is None and "gestern" in {
-                token.canonical for token in language_document.tokens if token.is_word
-            }:
+            if run is None and window is not None and window.label.startswith("gestern"):
                 records = (
                     await self._runtime_data.monitor_goals.async_load()
                     if self._runtime_data.monitor_goals is not None
@@ -2414,13 +2559,11 @@ class NluConversationEntity(
                 if len(candidates) == 1:
                     trigger = candidates[0].trigger
                     assert trigger is not None and trigger.person_entity_id is not None
-                    end = dt_util.now().replace(hour=0, minute=0, second=0, microsecond=0)
-                    start = end - timedelta(days=1)
                     evidence = await async_get_transition_evidence(
                         self.hass,
                         trigger.person_entity_id,
-                        start=start,
-                        end=end,
+                        start=window.start,
+                        end=window.end,
                         from_state=trigger.from_state or "home",
                         to_state=trigger.to_state or "not_home",
                     )
@@ -2484,6 +2627,25 @@ class NluConversationEntity(
             return conversation.ConversationResult(response=response, conversation_id=conversation_id)
 
         if goal.kind is V10GoalKind.SCHEDULED and goal.temporal is not None and goal.temporal.must_be_achieved_by_deadline:
+            manager.create(
+                conversation_id,
+                "goal-semantic-clarification",
+                DialogTaskKind.GOAL_SEMANTIC_CLARIFICATION,
+                DialogPriority.SELECTION,
+                slots={
+                    "goal_id": goal.goal_id,
+                    "area_id": goal.scope.area_id,
+                    "desired_states": goal.desired_states,
+                    "temporal": goal.temporal,
+                },
+                missing_slots=("goal_semantic_choice",),
+                candidates=tuple(item.value for item in GoalSemanticChoice),
+                reason="Ein Temperatur-Ergebnisziel muss semantisch geklärt werden.",
+                requested_by_user_id=actor_id,
+                payload=PendingGoalSemanticClarification(
+                    goal, actor_id, conversation_id
+                ),
+            )
             response.async_set_speech(
                 "Soll die Heizung zu diesem Zeitpunkt auf den Zielwert gestellt werden oder soll der Raum ihn dann bereits erreicht haben? Ohne bestätigtes thermisches Modell kann ich keine Vorheizzeit garantieren."
             )
@@ -5630,7 +5792,7 @@ def _scheduled_action_model(plan: ServiceCallPlan) -> ActionModel | None:
     target = TriggerTarget(
         domain=entity_ids[0].partition(".")[0],
         entity_id=entity_ids[0] if len(entity_ids) == 1 else None,
-        entity_ids=entity_ids,
+        entity_ids=entity_ids if len(entity_ids) > 1 else (),
     )
     if plan.service == "set_temperature" and plan.domain == "climate":
         value = plan.data.get("temperature")
@@ -5642,3 +5804,86 @@ def _scheduled_action_model(plan: ServiceCallPlan) -> ActionModel | None:
             target=target,
         )
     return None
+
+
+def _goal_semantic_choice(document: LanguageDocument) -> GoalSemanticChoice | None:
+    words = frozenset(token.canonical for token in document.tokens if token.is_word)
+    normalized = document.normalized_text.casefold()
+    if words & {"ersteres", "erstes"}:
+        return GoalSemanticChoice.SETPOINT_AT_TIME
+    if words & {"zweiteres", "zweites"}:
+        return GoalSemanticChoice.ACHIEVE_BY_DEADLINE
+    setpoint = bool(words & {"sollwert", "einstellen", "setz", "setzen", "stell"}) and bool(
+        words & {"dann", "zeitpunkt", "uhr", "einfach"}
+    )
+    achieved = bool(words & {"erreicht", "warm", "sein", "haben"}) and bool(
+        words & {"bis", "dahin", "schon"}
+    )
+    if setpoint and not achieved:
+        return GoalSemanticChoice.SETPOINT_AT_TIME
+    if achieved and not setpoint:
+        return GoalSemanticChoice.ACHIEVE_BY_DEADLINE
+    if "zum zeitpunkt" in normalized:
+        return GoalSemanticChoice.SETPOINT_AT_TIME
+    return None
+
+
+def _mentioned_goal_run_entity(
+    document: LanguageDocument, entities: Sequence[EntitySnapshot]
+) -> str | None:
+    normalized = normalize_for_compare(document.source_text)
+    matches = {
+        entity.entity_id
+        for entity in entities
+        if any(
+            candidate and candidate in normalized
+            for candidate in (
+                normalize_for_compare(entity.friendly_name),
+                normalize_for_compare(entity.entity_id.partition(".")[2]),
+            )
+        )
+    }
+    return next(iter(matches)) if len(matches) == 1 else None
+
+
+def _goal_run_label(run: GoalRun) -> str:
+    if run.goal.routine_id:
+        return run.goal.routine_id.replace("_", " ").capitalize()
+    labels = {
+        V10GoalKind.MONITOR_AND_NOTIFY: "Monitor-Ziel",
+        V10GoalKind.SCHEDULED: "terminiertes Ziel",
+        V10GoalKind.COMFORT: "Komfortziel",
+    }
+    return labels.get(run.goal.kind, run.source_utterance.strip() or run.goal.kind.value)
+
+
+def _german_goal_labels(labels: Sequence[str]) -> str:
+    values = tuple(dict.fromkeys(labels))
+    if not values:
+        return "keine benannten Ziele"
+    if len(values) == 1:
+        return values[0]
+    return ", ".join(values[:-1]) + " und " + values[-1]
+
+
+def _german_count(value: int) -> str:
+    return {2: "zwei", 3: "drei"}.get(value, str(value))
+
+
+def _select_goal_run_reply(
+    document: LanguageDocument,
+    run_ids: Sequence[str],
+    labels: Sequence[str],
+) -> str | None:
+    words = frozenset(token.canonical for token in document.tokens if token.is_word)
+    if words & {"erstes", "ersteres", "erste"} and run_ids:
+        return run_ids[0]
+    if words & {"zweites", "zweiteres", "zweite"} and len(run_ids) >= 2:
+        return run_ids[1]
+    normalized = normalize_for_compare(document.source_text)
+    matches = {
+        run_id
+        for run_id, label in zip(run_ids, labels, strict=True)
+        if normalize_for_compare(label) in normalized
+    }
+    return next(iter(matches)) if len(matches) == 1 else None

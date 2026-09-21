@@ -100,6 +100,13 @@ integration temporarily registers deprecated forwarding services for the old
 namespace. Each call logs a migration warning and enters the same canonical
 handler and policy path. No new output generates an old service name.
 
+Beginning with 5.0.2, newly generated notification buttons likewise use only
+`HOMEINTENT_EXECUTE_*`, `HOMEINTENT_IGNORE_*`, and `HOMEINTENT_SNOOZE_*`.
+Previously delivered notifications can still send the deprecated
+`HA_NLU_EXECUTE_*`, `HA_NLU_IGNORE_*`, and `HA_NLU_SNOOZE_*` action IDs into
+the canonical runtime. Those strings are input-only compatibility; HomeIntent
+never emits them for a new notification.
+
 Users can migrate YAML/UI actions mechanically:
 
 ```

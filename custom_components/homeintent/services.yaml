@@ -136,13 +136,32 @@ bind_user_context:
       required: true
       selector: {entity: {domain: person}}
     notification_targets:
-      name: Push-Ziele
-      required: true
+      name: Push-Ziel-Entities
+      description: Exakte notify.*-Entities; Zustellung erfolgt mit notify.send_message.
+      required: false
+      default: []
       selector: {entity: {domain: notify, multiple: true}}
     preferred_notification_target:
       name: Bevorzugtes Push-Ziel
       required: false
       selector: {entity: {domain: notify}}
+    notification_services:
+      name: Klassische Push-Services
+      description: >-
+        Exakte klassische Notify-Services, zum Beispiel
+        notify.mobile_app_iphone_von_philipp. Keine Namensableitung.
+      required: false
+      default: []
+      selector: {text: {multiple: true}}
+    preferred_notification_service:
+      name: Bevorzugter klassischer Push-Service
+      required: false
+      selector: {text: {}}
+    allow_shared_person:
+      name: Dieselbe Person explizit mit mehreren Benutzern verbinden
+      required: false
+      default: false
+      selector: {boolean: {}}
     confirmed:
       name: Ausdrücklich bestätigt
       required: true

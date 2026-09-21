@@ -20,6 +20,7 @@ from .const import (
     CONF_AGENT_QUIET_END,
     CONF_AGENT_QUIET_START,
 )
+from .user_context import NotificationTargetKind
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,9 +79,9 @@ class AgentDelivery:
             AgentEventState.SNOOZED,
         }
         actions = [] if not interactive else [
-            {"action": f"HA_NLU_IGNORE_{event.event_id}", "title": "Ignorieren"},
+            {"action": f"HOMEINTENT_IGNORE_{event.event_id}", "title": "Ignorieren"},
             {
-                "action": f"HA_NLU_SNOOZE_{event.event_id}",
+                "action": f"HOMEINTENT_SNOOZE_{event.event_id}",
                 "title": "In 30 Minuten erinnern",
             },
         ]
@@ -92,7 +93,7 @@ class AgentDelivery:
             actions.insert(
                 0,
                 {
-                    "action": f"HA_NLU_EXECUTE_{event.event_id}",
+                    "action": f"HOMEINTENT_EXECUTE_{event.event_id}",
                     "title": "Ausführen",
                 },
             )
@@ -127,6 +128,7 @@ class AgentDelivery:
         self,
         target_id: str,
         *,
+        target_kind: NotificationTargetKind | None = None,
         title: str,
         message: str,
         dedupe_key: str,
@@ -152,14 +154,26 @@ class AgentDelivery:
                 "run_id": run_id,
             },
         }
-        # Explicit mobile-app notify targets are historically HA services,
-        # while newer notify entities use notify.send_message. Both remain
-        # exact bindings; neither path broadcasts or derives a target name.
-        if self._hass.services.has_service("notify", service):
+        # Explicit service and entity bindings never fall back to a broadcast.
+        # ``None`` is limited to schema-v1 records and is resolved only from
+        # the live entity/service registries, never from a person's name.
+        if target_kind is NotificationTargetKind.SERVICE:
+            if not self._hass.services.has_service("notify", service):
+                raise ValueError("The explicitly bound notify service is unavailable")
             await self._hass.services.async_call(
                 "notify", service, payload, blocking=True
             )
             return True
+        if target_kind is None:
+            has_service = self._hass.services.has_service("notify", service)
+            has_entity = self._hass.states.get(target_id) is not None
+            if has_service == has_entity:
+                raise ValueError("Legacy notify target is missing or ambiguous; bind its kind explicitly")
+            if has_service:
+                await self._hass.services.async_call(
+                    "notify", service, payload, blocking=True
+                )
+                return True
         await self._hass.services.async_call(
             "notify",
             "send_message",

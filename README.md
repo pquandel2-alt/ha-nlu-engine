@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **5.0.1** (V10)
+- Aktuelle Version: **5.0.2** (V10, abgeschlossen und eingefroren)
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -62,6 +62,16 @@ Monitor-Ziele prüfen ihre Bedingungen zum Auslösezeitpunkt frisch, deduplizier
 Benachrichtigungen und überleben Neustarts. `GoalRun`-Datensätze unterscheiden
 Serviceannahme von beobachteter Wirkung und ermöglichen belegte Antworten auf
 „Warum hat das nicht funktioniert?“.
+
+Version 5.0.2 schließt das V10-Hardening ab: historische Erklärungen verwenden
+lokale, halb offene Zeitfenster und fragen bei mehreren passenden GoalRuns
+nach. Temperatur-Ergebnisziele behalten ihr vollständiges `GoalModel` in einem
+konversationsgebundenen Dialogzustand; „Sollwert zum Zeitpunkt“ nutzt nach
+Bestätigung die bestehende persistente One-Shot-Automation, während „bis dahin
+erreichen“ ohne bestätigtes thermisches Modell sicher stoppt. Push-Bindings
+unterscheiden exakte Notify-Entities (`notify.send_message`) von expliziten
+klassischen `notify.mobile_app_*`-Services und senden bei fehlender oder
+mehrdeutiger Zuordnung niemals als Broadcast.
 
 Die kanonische Integration heißt nun `homeintent`. Bestehende `ha_nlu`-
 Config-Entries und Serviceaufrufe bleiben über einen minimalen, als veraltet
@@ -961,12 +971,12 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/homeintent --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 5.0.1:
+Geprüfter Release-Stand von Version 5.0.2:
 
 ```text
-3108 passed, 12 skipped, 0 failed
-86,26 % Gesamt-Coverage (18871/21877 Statements; Terminalanzeige 86 %)
-70 % Coverage für conversation.py
+3137 passed, 12 skipped, 0 failed
+86,98 % Gesamt-Coverage (19280/22167 Statements; Terminalanzeige 87 %)
+73 % Coverage für conversation.py
 ```
 
 Zusätzlich wurden ausgeführt:
@@ -991,7 +1001,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-5.0.1.json --quiet
+  --check docs/perf/v7-shadow-baseline-5.0.2.json --quiet
 ```
 
 Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die

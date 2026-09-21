@@ -60,6 +60,11 @@ class NotificationSeverity(StrEnum):
     CRITICAL = "critical"
 
 
+class GoalSemanticChoice(StrEnum):
+    SETPOINT_AT_TIME = "setpoint_at_time"
+    ACHIEVE_BY_DEADLINE = "achieve_by_deadline"
+
+
 @dataclass(frozen=True)
 class GoalScope:
     entity_ids: tuple[str, ...] = ()
@@ -317,6 +322,19 @@ class GoalModel:
         )
 
 
+@dataclass(frozen=True)
+class PendingGoalSemanticClarification:
+    """Complete authority for one open goal-semantics choice."""
+
+    goal: GoalModel
+    requested_by_user_id: str | None
+    conversation_id: str
+    choices: tuple[GoalSemanticChoice, ...] = (
+        GoalSemanticChoice.SETPOINT_AT_TIME,
+        GoalSemanticChoice.ACHIEVE_BY_DEADLINE,
+    )
+
+
 def _scope_dict(scope: GoalScope) -> dict[str, object]:
     return {
         "entity_ids": list(scope.entity_ids),
@@ -384,6 +402,7 @@ def _datetime(value: object) -> datetime | None:
 __all__ = (
     "DeliveryChannel", "DesiredState", "GoalCondition", "GoalKind",
     "GoalLifecycle", "GoalModel", "GoalProvenance", "GoalScope",
+    "GoalSemanticChoice", "PendingGoalSemanticClarification",
     "GoalTrigger", "IntentClass", "NotificationSeverity", "SuccessCriterion",
     "TemporalGoal",
 )

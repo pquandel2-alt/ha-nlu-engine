@@ -364,7 +364,7 @@ KUECHE_LICHT = EntitySnapshot("light.kueche_licht", "Küchenlicht", "light", "of
 
 KUECHE_AUTOMATION_WITH_SOURCE = AutomationSummary(
     automation_id="a1",
-    alias="ha_nlu_a1",
+    alias="homeintent_a1",
     source_text="Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht ein.",
     referenced_entity_ids=frozenset({"light.kueche_licht"}),
 )

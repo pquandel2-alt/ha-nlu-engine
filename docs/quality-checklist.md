@@ -6,12 +6,13 @@ Checkliste orientiert sich trotzdem an der aktuellen Integration Quality Scale
 und trennt nachweisbar Erledigtes von offenen Arbeiten. Sie ist keine
 Selbstzertifizierung.
 
-Stand: 20. September 2026
+Stand: 21. September 2026
 
-## V10 Completion / 5.0.0
+## V10 Completion / 5.0.2
 
 - [x] offizielle Projektidentität und kanonische Integration sind `HomeIntent` / `homeintent`
-- [x] `ha_nlu` enthält ausschließlich einen dokumentierten Config-Entry-Kompatibilitätsshim
+- [x] `legacy/ha_nlu` enthält ausschließlich den dokumentierten
+  Config-Entry-Kompatibilitätsshim; unter `custom_components/` ist nur HomeIntent
 - [x] zentrales typisiertes GoalModel trennt GOAL, COMMAND, QUERY und AUTOMATION
 - [x] ein zentraler bounded Planner erzeugt typisierte Abhängigkeitsgraphen und PlanningTrace
 - [x] bestätigte Routinen und Komfortprofile werden lokal persistiert; es gibt kein stilles Lernen
@@ -19,21 +20,33 @@ Stand: 20. September 2026
 - [x] persistente Monitor Goals mit frischer Triggerzeit-Abfrage, Dedupe, Cooldown und Idempotency-Key
 - [x] erwartete Effekte werden aus frischen Zuständen geprüft; Serviceannahme allein gilt nicht als Erfolg
 - [x] begrenzte GoalRun-Historie und belegbasierte Fehlererklärung ohne erfundene Kausalität
+- [x] typisierte historische GoalRun-Selektion nach lokaler HA-Zeit, User,
+  Status, Routine, GoalKind und Entity; mehrere Treffer führen zur Rückfrage
+- [x] typisierter Temperatur-Semantikdialog bewahrt das ursprüngliche GoalModel;
+  Setpoint nutzt den persistenten One-Shot-Pfad, Deadline ohne Modell stoppt
+- [x] exakte Push-Bindings unterscheiden Notify-Entity und klassischen
+  Notify-Service; Missing/Ambiguous besitzen keinen Broadcast-Fallback
+- [x] neue Notification Actions verwenden nur `HOMEINTENT_*`; `HA_NLU_*`
+  bleibt ausschließlich eingehende Legacy-Kompatibilität
+- [x] ExecutionCoordinator-, Monitor-, UserContext- und Profile-Grenzen sind
+  mit gezielten Konflikt-, Restart-, Dedupe-, Binding- und Persistenztests gehärtet
 - [x] strukturierte Planänderungen einschließlich planweiter Exclusions und persistenter Terminierung
-- [x] 150 handgeschriebene V10-Goal-/Planning-OOD-Fälle sowie Metamorphie- und Safety-Tests
+- [x] 160 handgeschriebene V10-Goal-/Planning-OOD-Fälle sowie Metamorphie- und Safety-Tests
 
-## Abschlussvalidierung 5.0.0
+## Abschlussvalidierung 5.0.2
 
-- [x] Gesamtsuite: 3.094 bestanden, 12 übersprungen, 0 fehlgeschlagen
-- [x] Coverage: 86,26 Prozent (18.870/21.875 Statements)
+- [x] Gesamtsuite: 3.137 bestanden, 12 übersprungen, 0 fehlgeschlagen
+- [x] Coverage: 86,98 Prozent (19.280/22.167 Statements; Terminalanzeige 87 Prozent)
+- [x] Modul-Coverage: ExecutionCoordinator 100,00 %, MonitorGoal 88,28 %,
+  UserContext 90,67 %, Profiles 92,81 %, GoalRun 89,26 %, GoalIntent 86,77 %,
+  Planner 86,88 %
 - [x] Language Safety: 252 bestanden
 - [x] Shadow: 3.772 Turns, Baseline unverändert, 0 Action-Leakage
 - [x] Full Pyright einschließlich konfiguriertem Strict-Scope: 0 Fehler, 0 Warnungen
 - [x] Pyflakes und `git diff --check`: grün
-- [x] V10-5k-Performance-Gate lokal grün; höchster gemessener p95 53,245 ms
-- [x] Hassfest, HACS, Home Assistant Stable Smoke, Python 3.12/3.13 und
-  separater CI-Strict-Befehl: grün in
-  [CI-Lauf 35510003882](https://github.com/pquandel2-alt/homeintent/actions/runs/35510003882)
+- [x] V10-5k-Performance-Gate lokal grün; höchster gemessener p95 45,820 ms
+- [ ] Finaler 5.0.2-CI-Lauf mit Hassfest, HACS, Home Assistant Stable Smoke,
+  Python 3.12/3.13 und separatem CI-Strict-Befehl: vor Tagging verpflichtend
 
 Der lokale V9-5k-Lauf wurde bei einer Hostlast von etwa 54 auf vier CPUs
 ausgeführt und überschritt dadurch mehrere unveränderte 100-ms-Grenzen. Diese

@@ -18,9 +18,15 @@ class BindingStatus(StrEnum):
     AMBIGUOUS = "ambiguous"
 
 
+class NotificationTargetKind(StrEnum):
+    ENTITY = "entity"
+    SERVICE = "service"
+
+
 @dataclass(frozen=True)
 class NotificationTarget:
     target_id: str
+    kind: NotificationTargetKind | None = None
     channel: str = "push"
     label: str = ""
     preferred: bool = False
@@ -69,6 +75,7 @@ class UserContextStore:
                 targets = tuple(
                     NotificationTarget(
                         str(item.get("target_id", "")),
+                        _target_kind(item.get("kind")),
                         str(item.get("channel", "push")),
                         str(item.get("label", "")),
                         bool(item.get("preferred", False)),
@@ -97,6 +104,7 @@ class UserContextStore:
         person_entity_id: str | None,
         notification_targets: Sequence[NotificationTarget] = (),
         confirmed: bool,
+        allow_shared_person: bool = False,
     ) -> UserContext:
         if not confirmed:
             raise ValueError("User/person bindings require explicit confirmation")
@@ -104,6 +112,19 @@ class UserContextStore:
             raise ValueError("A Home Assistant user id is required")
         if person_entity_id is not None and not person_entity_id.startswith("person."):
             raise ValueError("Presence bindings must reference person.*")
+        if (
+            person_entity_id is not None
+            and not allow_shared_person
+            and any(
+                value.ha_user_id != user_id
+                and value.person_entity_id == person_entity_id
+                for value in self._users.values()
+            )
+        ):
+            raise ValueError("This person is already explicitly bound to another user")
+        for target in notification_targets:
+            if not target.target_id.startswith("notify."):
+                raise ValueError("Notification targets must be exact notify.* ids")
         context = UserContext(user_id, person_entity_id, tuple(notification_targets))
         async with self._lock:
             self._users[user_id] = context
@@ -219,7 +240,15 @@ def _empty_users() -> dict[str, UserContext]:
     return {}
 
 
+def _target_kind(value: object) -> NotificationTargetKind | None:
+    try:
+        return NotificationTargetKind(str(value)) if value is not None else None
+    except ValueError:
+        return None
+
+
 __all__ = (
     "BindingResult", "BindingStatus", "HouseholdContext", "NotificationTarget",
+    "NotificationTargetKind",
     "UserContext", "UserContextStore",
 )
