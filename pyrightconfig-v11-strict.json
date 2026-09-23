@@ -1,0 +1,23 @@
+{
+  "include": [
+    "custom_components/homeintent/learning_policy.py",
+    "custom_components/homeintent/experience.py",
+    "custom_components/homeintent/experience_store.py",
+    "custom_components/homeintent/model_registry.py",
+    "custom_components/homeintent/prediction.py",
+    "custom_components/homeintent/thermal_model.py",
+    "custom_components/homeintent/statistical_models.py",
+    "custom_components/homeintent/preferences.py",
+    "custom_components/homeintent/habit_discovery.py",
+    "custom_components/homeintent/predictive_house_model.py",
+    "custom_components/homeintent/adaptive_planning.py",
+    "custom_components/homeintent/learning_manager.py",
+    "custom_components/homeintent/learning_intent.py",
+    "custom_components/homeintent/learning_dialog.py",
+    "custom_components/homeintent/thermal_tracker.py"
+  ],
+  "exclude": ["tests"],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "strict",
+  "reportMissingImports": false
+}

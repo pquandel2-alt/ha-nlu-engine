@@ -78,6 +78,12 @@ from .const import (
     CONF_MAX_ACTION_TARGETS,
     CONF_MEMORY_ENABLED,
     CONF_MEMORY_RETENTION_DAYS,
+    CONF_EXPERIENCE_LEARNING_ENABLED,
+    CONF_PREDICTIVE_MODELS_ENABLED,
+    CONF_HABIT_DISCOVERY_ENABLED,
+    CONF_PROACTIVE_SUGGESTIONS_ENABLED,
+    CONF_LEARNING_RETENTION_COUNT,
+    CONF_MINIMUM_PREDICTION_CONFIDENCE,
     CONF_PERSONA_STYLE,
     CONF_READ_ONLY_ENTITIES,
     CONF_SELECTED_ENTITIES,
@@ -126,6 +132,10 @@ class HomeIntentConfigFlow(_DomainConfigFlow, domain=DOMAIN):
             data={},
             options={
                 CONF_MEMORY_ENABLED: False,
+                CONF_EXPERIENCE_LEARNING_ENABLED: False,
+                CONF_PREDICTIVE_MODELS_ENABLED: False,
+                CONF_HABIT_DISCOVERY_ENABLED: False,
+                CONF_PROACTIVE_SUGGESTIONS_ENABLED: False,
                 CONF_ROUTINE_DETECTION_ENABLED: False,
                 CONF_AGENT_AUTO_ENABLED: False,
                 CONF_AGENT_AUTO_ENTITY_IDS: [],
@@ -316,6 +326,30 @@ class HomeIntentOptionsFlow(OptionsFlow):
                         CONF_MEMORY_RETENTION_DAYS,
                         default=defaults.get(CONF_MEMORY_RETENTION_DAYS, 90),
                     ): vol.All(vol.Coerce(int), vol.Range(min=1, max=3650)),
+                    vol.Optional(
+                        CONF_EXPERIENCE_LEARNING_ENABLED,
+                        default=defaults.get(CONF_EXPERIENCE_LEARNING_ENABLED, False),
+                    ): bool,
+                    vol.Optional(
+                        CONF_PREDICTIVE_MODELS_ENABLED,
+                        default=defaults.get(CONF_PREDICTIVE_MODELS_ENABLED, False),
+                    ): bool,
+                    vol.Optional(
+                        CONF_HABIT_DISCOVERY_ENABLED,
+                        default=defaults.get(CONF_HABIT_DISCOVERY_ENABLED, False),
+                    ): bool,
+                    vol.Optional(
+                        CONF_PROACTIVE_SUGGESTIONS_ENABLED,
+                        default=defaults.get(CONF_PROACTIVE_SUGGESTIONS_ENABLED, False),
+                    ): bool,
+                    vol.Optional(
+                        CONF_LEARNING_RETENTION_COUNT,
+                        default=defaults.get(CONF_LEARNING_RETENTION_COUNT, 5000),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=100, max=20000)),
+                    vol.Optional(
+                        CONF_MINIMUM_PREDICTION_CONFIDENCE,
+                        default=defaults.get(CONF_MINIMUM_PREDICTION_CONFIDENCE, 0.75),
+                    ): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=1.0)),
                     vol.Optional(
                         CONF_PERSONA_STYLE,
                         default=defaults.get(CONF_PERSONA_STYLE, "neutral"),

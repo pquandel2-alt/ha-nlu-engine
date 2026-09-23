@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,16 +24,35 @@ from .const import (
     CONF_DOCUMENTS_ENABLED,
     CONF_MEMORY_ENABLED,
     CONF_MEMORY_RETENTION_DAYS,
+    CONF_EXPERIENCE_LEARNING_ENABLED,
+    CONF_PREDICTIVE_MODELS_ENABLED,
+    CONF_HABIT_DISCOVERY_ENABLED,
+    CONF_PROACTIVE_SUGGESTIONS_ENABLED,
+    CONF_LEARNING_RETENTION_COUNT,
+    CONF_MINIMUM_PREDICTION_CONFIDENCE,
     DOMAIN,
 )
 from .memory import MemoryKind, MemoryStore
-from .goal_run import GoalRunStore
+from .goal_run import GoalRun, GoalRunStore
 from .monitor_goal import MonitorGoalRuntime, MonitorGoalStore
 from .nlu.context import ConversationContextStore
 from .profiles import ProfileStore
 from .runtime_data import HomeIntentRuntimeData
 from .storage_migration import resolve_storage_path
 from .user_context import UserContextStore
+from .experience_store import ExperienceStore
+from .learning_manager import LearningManager
+from .learning_policy import LearningMode, LearningPolicy
+from .model_registry import ModelRegistry
+from .predictive_house_model import PredictiveHouseModel
+from .prediction import PredictionStatus
+from .service_call import ServiceCallPlan
+from .thermal_tracker import ThermalExperienceTracker
+from .statistical_models import evaluate_latency_anomaly
+from .thermal_deadline import (
+    ThermalDeadlineCheckpoint,
+    async_process_thermal_checkpoint,
+)
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -52,6 +72,7 @@ SERVICE_SET_HOUSEHOLD = "set_household"
 SERVICE_SAVE_ROUTINE = "save_routine"
 SERVICE_SAVE_COMFORT_PROFILE = "save_comfort_profile"
 SERVICE_DELETE_MONITOR_GOAL = "delete_monitor_goal"
+SERVICE_THERMAL_DEADLINE_CHECKPOINT = "thermal_deadline_checkpoint"
 LEGACY_DOMAIN = "ha_nlu"
 
 # A self-deleting automation must finish the service action that requested
@@ -92,6 +113,46 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     monitor_goals = MonitorGoalStore(
         _storage_path(hass, "homeintent_monitor_goals.json", "ha_nlu_monitor_goals.json")
     )
+    learning_enabled = bool(entry.options.get(CONF_EXPERIENCE_LEARNING_ENABLED, False))
+    suggestions_enabled = bool(entry.options.get(CONF_PROACTIVE_SUGGESTIONS_ENABLED, False))
+    configured_confidence = entry.options.get(CONF_MINIMUM_PREDICTION_CONFIDENCE, 0.75)
+    minimum_confidence = (
+        float(configured_confidence)
+        if isinstance(configured_confidence, (int, float))
+        and 0.5 <= configured_confidence <= 1.0 else 0.75
+    )
+    configured_count = entry.options.get(CONF_LEARNING_RETENTION_COUNT, 5_000)
+    retention_count = (
+        configured_count if isinstance(configured_count, int)
+        and 100 <= configured_count <= 20_000 else 5_000
+    )
+    learning_policy = LearningPolicy(
+        experience_limit=retention_count,
+        retention_days=retention_days,
+        minimum_planning_confidence=minimum_confidence,
+        learning_mode=(LearningMode.ASK if learning_enabled and suggestions_enabled
+                       else LearningMode.SILENT_LEARN if learning_enabled
+                       else LearningMode.OFF),
+        predictive_models_enabled=bool(
+            entry.options.get(CONF_PREDICTIVE_MODELS_ENABLED, False)
+        ),
+        habit_discovery_enabled=bool(
+            entry.options.get(CONF_HABIT_DISCOVERY_ENABLED, False)
+        ),
+    )
+    experiences = ExperienceStore(
+        _storage_path(hass, "homeintent_experiences.json", "ha_nlu_experiences.json"),
+        learning_policy,
+    )
+    learned_models = ModelRegistry(
+        _storage_path(hass, "homeintent_models.json", "ha_nlu_models.json"),
+        learning_policy,
+    )
+    predictive_house = PredictiveHouseModel(learning_policy)
+    learning_manager = LearningManager(
+        experiences, learned_models, predictive_house, learning_policy
+    )
+    thermal_tracker = ThermalExperienceTracker(learning_manager)
     entry.runtime_data = HomeIntentRuntimeData(
         context_store=ConversationContextStore(ttl_seconds=context_ttl),
         memory=memory,
@@ -99,10 +160,54 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         profiles=profile_store,
         goal_runs=goal_runs,
         monitor_goals=monitor_goals,
+        learning_policy=learning_policy,
+        experiences=experiences,
+        learned_models=learned_models,
+        predictive_house=predictive_house,
+        learning_manager=learning_manager,
+        thermal_tracker=thermal_tracker,
     )
+    def _learned_effect_timeout(plan: ServiceCallPlan) -> timedelta | None:
+        entity_ids = (
+            (plan.entity_id,) if isinstance(plan.entity_id, str)
+            else tuple(plan.entity_id)
+        )
+        operator_id = f"{plan.domain}.{plan.service}".upper().replace(".", "_")
+        upper_bounds: list[float] = []
+        for entity_id in entity_ids:
+            prediction = predictive_house.predict_effect_latency(operator_id, entity_id)
+            if (
+                prediction.status is PredictionStatus.OK
+                and prediction.uncertainty is not None
+            ):
+                timing = predictive_house.effect_timing_model(operator_id, entity_id)
+                if timing is not None:
+                    upper_bounds.append(
+                        evaluate_latency_anomaly(timing, float("inf")).threshold_seconds
+                    )
+        return timedelta(seconds=max(upper_bounds)) if upper_bounds else None
+
+    entry.runtime_data.effect_monitor.set_timeout_resolver(_learned_effect_timeout)
+    def _observe_accepted_action(plan: ServiceCallPlan, occurred_at) -> None:
+        from .hass_entities import build_entity_snapshots
+
+        thermal_tracker.observe_action(
+            plan, tuple(build_entity_snapshots(hass, entry)), occurred_at=occurred_at
+        )
+
+    entry.runtime_data.effect_monitor.set_action_observer(_observe_accepted_action)
+    async def _queue_learning(run: GoalRun) -> None:
+        thermal_tracker.associate_goal_run(run)
+        hass.async_create_task(
+            learning_manager.async_observe_goal_run(run),
+            name=f"HomeIntent learn GoalRun {run.run_id}",
+        )
+
+    goal_runs.add_append_listener(_queue_learning)
     await memory.async_initialize()
     await user_contexts.async_load()
     await profile_store.async_load()
+    await learning_manager.async_restore_models()
     if memory.enabled:
         await memory.async_apply_retention(
             {kind: retention_days for kind in MemoryKind}
@@ -149,8 +254,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     proactive_agent = ProactiveAgentRuntime(hass, entry, entry.runtime_data)
     entry.runtime_data.proactive_agent = proactive_agent
     entry.async_on_unload(proactive_agent.async_start())
-    from .hass_entities import build_entity_snapshots
-
     delivery = AgentDelivery(hass)
 
     async def _deliver_monitor(model, rendered) -> bool:
@@ -166,6 +269,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     async def _fresh_entities():
+        from .hass_entities import build_entity_snapshots
+
         return build_entity_snapshots(hass, entry)
 
     entry.runtime_data.monitor_runtime = MonitorGoalRuntime(
@@ -267,6 +372,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         _register_legacy_service(
             hass, SERVICE_RECHECK_AGENT_EVENT, _handle_recheck_agent_event
+        )
+
+    if not hass.services.has_service(DOMAIN, SERVICE_THERMAL_DEADLINE_CHECKPOINT):
+
+        async def _handle_thermal_deadline_checkpoint(call: ServiceCall) -> None:
+            checkpoint = ThermalDeadlineCheckpoint.from_service_data(call.data)
+            if checkpoint is None:
+                _LOGGER.warning("Rejected invalid thermal deadline checkpoint")
+                return
+            from .hass_entities import build_entity_snapshots
+
+            snapshots = tuple(build_entity_snapshots(hass, entry))
+            now = datetime.now(timezone.utc)
+            result = await async_process_thermal_checkpoint(
+                checkpoint, snapshots, thermal_tracker, goal_runs, now=now
+            )
+            if result is None and checkpoint.phase.value == "final":
+                _LOGGER.warning(
+                    "Thermal final checkpoint has no GoalRun for %s",
+                    checkpoint.goal_id,
+                )
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_THERMAL_DEADLINE_CHECKPOINT,
+            _handle_thermal_deadline_checkpoint,
         )
 
     if not hass.services.has_service(DOMAIN, SERVICE_BIND_USER_CONTEXT):
@@ -479,6 +610,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, SERVICE_PROACTIVE_MESSAGE)
     if unloaded and hass.services.has_service(DOMAIN, SERVICE_RECHECK_AGENT_EVENT):
         hass.services.async_remove(DOMAIN, SERVICE_RECHECK_AGENT_EVENT)
+    if unloaded and hass.services.has_service(
+        DOMAIN, SERVICE_THERMAL_DEADLINE_CHECKPOINT
+    ):
+        hass.services.async_remove(DOMAIN, SERVICE_THERMAL_DEADLINE_CHECKPOINT)
     if unloaded:
         for service in (
             SERVICE_BIND_USER_CONTEXT,

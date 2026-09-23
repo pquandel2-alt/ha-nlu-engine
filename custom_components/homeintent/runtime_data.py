@@ -19,6 +19,12 @@ from .monitor_goal import MonitorGoalRuntime, MonitorGoalStore
 from .profiles import ProfileStore
 from .user_context import UserContextStore
 from .execution_coordinator import ExecutionCoordinator
+from .experience_store import ExperienceStore
+from .learning_manager import LearningManager
+from .learning_policy import LearningPolicy
+from .model_registry import ModelRegistry
+from .predictive_house_model import PredictiveHouseModel
+from .thermal_tracker import ThermalExperienceTracker
 
 
 @dataclass
@@ -49,6 +55,12 @@ class HomeIntentRuntimeData:
     monitor_goals: MonitorGoalStore | None = None
     monitor_runtime: MonitorGoalRuntime | None = None
     execution_coordinator: ExecutionCoordinator = field(default_factory=ExecutionCoordinator)
+    learning_policy: LearningPolicy | None = None
+    experiences: ExperienceStore | None = None
+    learned_models: ModelRegistry | None = None
+    predictive_house: PredictiveHouseModel | None = None
+    learning_manager: LearningManager | None = None
+    thermal_tracker: ThermalExperienceTracker | None = None
 
     def __post_init__(self) -> None:
         self.context_store.bind_dialog_listener(self._synchronize_dialog)

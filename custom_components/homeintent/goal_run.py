@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
-from typing import Mapping, Sequence, cast
+from typing import Awaitable, Callable, Mapping, Sequence, cast
 
 from .goal_model import GoalModel
 from .goal_model import GoalKind
@@ -196,6 +196,12 @@ class GoalRunStore:
         self.path = Path(path)
         self.limit = max(1, min(limit, 1000))
         self._lock = asyncio.Lock()
+        self._append_listeners: list[Callable[[GoalRun], Awaitable[None]]] = []
+
+    def add_append_listener(
+        self, listener: Callable[[GoalRun], Awaitable[None]]
+    ) -> None:
+        self._append_listeners.append(listener)
 
     async def async_append(self, run: GoalRun) -> None:
         async with self._lock:
@@ -203,6 +209,8 @@ class GoalRunStore:
             runs = [item for item in runs if item.run_id != run.run_id]
             runs.append(run)
             await asyncio.to_thread(self._write, runs[-self.limit:])
+        for listener in tuple(self._append_listeners):
+            await listener(run)
 
     async def async_list(self) -> tuple[GoalRun, ...]:
         return tuple(await asyncio.to_thread(self._read))

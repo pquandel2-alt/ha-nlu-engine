@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -12,6 +13,9 @@ from .entities import normalize_for_compare
 from .service_call import ServiceCallPlan
 
 
+_LOGGER = logging.getLogger(__name__)
+
+
 @dataclass(frozen=True)
 class ExpectedEffect:
     effect_id: str
@@ -19,32 +23,65 @@ class ExpectedEffect:
     expected_state: str
     registered_at: datetime
     deadline: datetime
+    operator_id: str | None = None
 
 
 ExpiredHandler = Callable[[ExpectedEffect], Awaitable[None]]
+TimeoutResolver = Callable[[ServiceCallPlan], timedelta | None]
+ActionObserver = Callable[[ServiceCallPlan, datetime], None]
 
 
 class EffectMonitor:
     """Track observable effects; it never retries or performs an action."""
 
-    def __init__(self, *, timeout: timedelta = timedelta(seconds=10)) -> None:
+    def __init__(
+        self,
+        *,
+        timeout: timedelta = timedelta(seconds=10),
+        absolute_max_timeout: timedelta = timedelta(minutes=10),
+    ) -> None:
         self.timeout = timeout
+        self.absolute_max_timeout = max(timeout, absolute_max_timeout)
         self._pending: dict[str, ExpectedEffect] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._handler: ExpiredHandler | None = None
+        self._timeout_resolver: TimeoutResolver | None = None
+        self._action_observer: ActionObserver | None = None
 
     def set_expired_handler(self, handler: ExpiredHandler | None) -> None:
         self._handler = handler
 
+    def set_timeout_resolver(self, resolver: TimeoutResolver | None) -> None:
+        """Install advisory timing; the absolute deadline remains authoritative."""
+        self._timeout_resolver = resolver
+
+    def set_action_observer(self, observer: ActionObserver | None) -> None:
+        """Observe accepted actions without granting execution authority."""
+        self._action_observer = observer
+
     def register(
         self, plan: ServiceCallPlan, *, now: datetime | None = None
     ) -> tuple[ExpectedEffect, ...]:
-        expected = _expected_state(plan)
-        if expected is None:
-            return ()
         current = now or datetime.now(timezone.utc)
         if current.tzinfo is None:
             raise ValueError("Wirkungsprüfung benötigt eine Zeitzone")
+        if self._action_observer is not None:
+            try:
+                self._action_observer(plan, current)
+            except Exception:  # noqa: BLE001 - advisory learning cannot break execution
+                _LOGGER.exception("HomeIntent action observation failed")
+        expected = _expected_state(plan)
+        if expected is None:
+            return ()
+        resolved_timeout = (
+            self._timeout_resolver(plan) if self._timeout_resolver is not None else None
+        )
+        effective_timeout = self.timeout
+        if resolved_timeout is not None:
+            effective_timeout = min(
+                max(timedelta(milliseconds=100), resolved_timeout),
+                self.absolute_max_timeout,
+            )
         entity_ids = (
             (plan.entity_id,)
             if isinstance(plan.entity_id, str)
@@ -57,7 +94,8 @@ class EffectMonitor:
                 entity_id,
                 expected,
                 current,
-                current + self.timeout,
+                current + effective_timeout,
+                f"{plan.domain}.{plan.service}".upper().replace(".", "_"),
             )
             previous = next(
                 (
@@ -138,4 +176,4 @@ def _expected_state(plan: ServiceCallPlan) -> str | None:
     }.get(plan.service)
 
 
-__all__ = ("EffectMonitor", "ExpectedEffect")
+__all__ = ("ActionObserver", "EffectMonitor", "ExpectedEffect", "TimeoutResolver")

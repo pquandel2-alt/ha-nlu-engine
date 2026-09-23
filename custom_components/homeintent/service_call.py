@@ -22,7 +22,7 @@ class ServiceCallPlan:
     domain: str
     service: str
     entity_id: str | list[str]
-    data: dict = field(default_factory=dict)
+    data: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

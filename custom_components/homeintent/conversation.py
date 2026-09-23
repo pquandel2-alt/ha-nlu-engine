@@ -16,6 +16,7 @@ default conversation agent does it.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import re
 import uuid
@@ -32,7 +33,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .automation_executor import AutomationExecutor
-from .alias_learning import AliasLearningDraft, append_alias_rule, parse_alias_learning
+from .alias_learning import (
+    AliasLearningDraft,
+    append_alias_rule,
+    parse_alias_learning,
+    remove_alias_rule,
+)
 from .agent_action_policy import validate_agent_service_plan
 from .automation_action_edit import (
     action_edit_operation,
@@ -143,6 +149,17 @@ from .goal_run import (
 )
 from .memory import MemoryKind
 from .memory_intent import MemoryOperation, interpret_memory_intent
+from .learning_intent import LearningOperation, interpret_learning_request
+from .learning_dialog import LearningDialogOperation, LearningDialogPayload
+from .model_registry import (
+    LearnedKind,
+    LearnedModel,
+    ModelHealth,
+    explain_learned_model,
+)
+from .learning_policy import KnowledgeState
+from .habit_discovery import routine_from_habit_model
+from .predictive_house_model import PredictiveHouseModel
 from .management_understanding import understand_management
 from .planner import (
     Goal,
@@ -157,6 +174,15 @@ from .planner import (
     materialize_routine,
     observed_effect,
 )
+from .adaptive_planning import AdaptivePlanningAdvice, advise_deadline_goal
+from .thermal_deadline import (
+    ThermalCheckpointPhase,
+    ThermalDeadlineCheckpoint,
+    append_start_checkpoint,
+    checkpoint_automation_config,
+)
+from .nlu.primitives import SemanticProperty
+from .nlu.unit_reasoning import normalize_measurement
 from .monitor_goal import MonitorRecord
 from .nlu.temporal_semantics import resolve_history_window, resolve_scheduled_datetime
 from .plan_modification import apply_plan_modification
@@ -545,6 +571,16 @@ class NluConversationEntity(
         # can resolve device-/area-level data - see docs/architecture-v7.md.
         entities = build_entity_snapshots(self.hass, self.entry)
         devices = build_device_snapshots(self.hass, self.entry)
+        pending = self._context_store.get(user_input.conversation_id)
+        conversation_area = resolve_conversation_area(self.hass, user_input)
+        entities = await self._async_apply_confirmed_preferences(
+            entities,
+            area_id=(conversation_area.area_id if conversation_area is not None else None),
+            user_id=conversation_user_id(user_input),
+        )
+        # Preferences only add a confirmed contextual alias to the existing
+        # snapshots. Rebuild the same authoritative NOW view; no second
+        # resolver or WorldModel is introduced.
         self._world_model = assemble_world_model(entities, devices)
         try:
             configured_relations = parse_relation_specs(
@@ -557,8 +593,6 @@ class NluConversationEntity(
             # Invalid migrated configuration never weakens language safety.
             self._house_graph = self._world_model.build_house_graph()
         self._world_model = self._world_model.with_house_graph(self._house_graph)
-        pending = self._context_store.get(user_input.conversation_id)
-        conversation_area = resolve_conversation_area(self.hass, user_input)
         understanding_context = UnderstandingContext(source_area=conversation_area)
         localized_text = materialize_local_reference(
             user_input.text, conversation_area
@@ -750,13 +784,7 @@ class NluConversationEntity(
                 response.async_set_speech("Bitte antworte mit Ja oder Nein.")
             else:
                 try:
-                    aliases = append_alias_rule(
-                        self.entry.options.get(CONF_CUSTOM_ALIASES), draft
-                    )
-                    self.hass.config_entries.async_update_entry(
-                        self.entry,
-                        options={**self.entry.options, CONF_CUSTOM_ALIASES: aliases},
-                    )
+                    await self._async_confirm_alias_learning(draft, actor_id)
                 except ValueError as err:
                     response.async_set_speech(str(err))
                 else:
@@ -799,6 +827,11 @@ class NluConversationEntity(
             )
             if document_result is not None:
                 return document_result
+            learning_result = await self._async_handle_learning_turn(
+                user_input, response, language_document
+            )
+            if learning_result is not None:
+                return learning_result
             plan_result = await self._async_handle_goal_turn(
                 user_input, response, language_document, entities, direct_understanding
             )
@@ -840,12 +873,8 @@ class NluConversationEntity(
                 response.async_set_speech("Bitte antworte mit Ja oder Nein.")
             else:
                 try:
-                    aliases = append_alias_rule(
-                        self.entry.options.get(CONF_CUSTOM_ALIASES), draft
-                    )
-                    self.hass.config_entries.async_update_entry(
-                        self.entry,
-                        options={**self.entry.options, CONF_CUSTOM_ALIASES: aliases},
+                    await self._async_confirm_alias_learning(
+                        draft, conversation_user_id(user_input)
                     )
                 except ValueError as err:
                     response.async_set_speech(str(err))
@@ -1264,6 +1293,20 @@ class NluConversationEntity(
                     else:
                         result = None
                     if result is not None:
+                        learning_manager = self._runtime_data.learning_manager
+                        actor_id = conversation_user_id(user_input)
+                        if (
+                            learning_manager is not None
+                            and actor_id is not None
+                            and clarification.pending_target is not None
+                        ):
+                            await learning_manager.async_observe_preference_selection(
+                                user_id=actor_id,
+                                concept=clarification.pending_target,
+                                area_id=current.area_id,
+                                entity_id=current.entity_id,
+                                observed_at=dt_util.utcnow(),
+                            )
                         self._context_store.clear(user_input.conversation_id)
                     else:
                         self._context_store.clear(user_input.conversation_id)
@@ -2053,11 +2096,39 @@ class NluConversationEntity(
                 return conversation.ConversationResult(response=response, conversation_id=conversation_id)
             manager.cancel(conversation_id, active.task_id)
             if choice is GoalSemanticChoice.ACHIEVE_BY_DEADLINE:
-                response.async_set_speech(
-                    "Für dieses Ergebnisziel fehlt mir ein bestätigtes thermisches Modell. "
-                    "Ich kann den Sollwert zu einem festen Zeitpunkt setzen oder du konfigurierst ein Modell für diesen Raum."
+                original_document = analyse_language(
+                    pending_goal.goal.provenance.source_utterance, entities
                 )
-                return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+                deadline = resolve_scheduled_datetime(
+                    original_document.temporal, dt_util.now()
+                )
+                goal_for_advice = (
+                    replace(
+                        pending_goal.goal,
+                        temporal=replace(pending_goal.goal.temporal, deadline=deadline),
+                    )
+                    if pending_goal.goal.temporal is not None and deadline is not None
+                    else pending_goal.goal
+                )
+                advice = _thermal_advice_for_goal(
+                    goal_for_advice, entities, self._runtime_data.predictive_house
+                )
+                if advice is None:
+                    response.async_set_speech(
+                        "Für dieses Ergebnisziel fehlt mir ein ausreichend validiertes thermisches Modell. "
+                        "Ich kann den Sollwert zu einem festen Zeitpunkt setzen oder du sammelst weitere belegte Heizvorgänge."
+                    )
+                    return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+                try:
+                    plan = materialize_goal(
+                        goal_for_advice, entities, options=self.entry.options,
+                        is_admin=await user_is_admin(self.hass, user_input),
+                        user_id=actor_id, adaptive_advice=advice,
+                    )
+                except (PermissionError, ValueError) as err:
+                    response.async_set_speech(f"Ich kann dafür keinen sicheren Plan erstellen: {err}")
+                    return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+                return self._stage_goal_plan(user_input, response, plan, actor_id)
             original_document = analyse_language(
                 pending_goal.goal.provenance.source_utterance, entities
             )
@@ -2305,16 +2376,92 @@ class NluConversationEntity(
                                 False,
                                 "Der terminierte Schritt konnte nicht sicher erzeugt werden.",
                             )
+                        automation_configs: list[tuple[str, dict[str, object], datetime]] = [
+                            (automation_id, generation.config, scheduled_for)
+                        ]
+                        advice = stored_plan.adaptive_advice
+                        if advice is not None:
+                            area_id = stored_plan.goal.scope.area_id
+                            thermal_model = (
+                                self._runtime_data.predictive_house.thermal_model(area_id)
+                                if self._runtime_data.predictive_house is not None
+                                and area_id is not None else None
+                            )
+                            target_value = action.data.get("temperature")
+                            climate_id = (
+                                action.entity_id
+                                if isinstance(action.entity_id, str) else None
+                            )
+                            if (
+                                thermal_model is None or climate_id is None
+                                or not isinstance(target_value, (int, float))
+                                or thermal_model.model_id != advice.model_id
+                            ):
+                                return _ScheduledOutcome(
+                                    False,
+                                    "Die thermische Modellbindung ist nicht mehr eindeutig.",
+                                )
+                            base_checkpoint = ThermalDeadlineCheckpoint(
+                                ThermalCheckpointPhase.START,
+                                stored_plan.goal.goal_id,
+                                thermal_model.binding.area_id,
+                                climate_id,
+                                thermal_model.binding.temperature_entity_id,
+                                float(target_value),
+                                advice.model_id,
+                                advice.predicted_duration.total_seconds(),
+                                advice.uncertainty_buffer.total_seconds(),
+                            )
+                            enriched = append_start_checkpoint(
+                                generation.config, base_checkpoint
+                            )
+                            if enriched is None:
+                                return _ScheduledOutcome(
+                                    False, "Die thermische Startprüfung konnte nicht geplant werden."
+                                )
+                            automation_configs[0] = (automation_id, enriched, scheduled_for)
+                            for phase, checkpoint_at in (
+                                (ThermalCheckpointPhase.INTERMEDIATE,
+                                 advice.intermediate_check_at),
+                                (ThermalCheckpointPhase.FINAL,
+                                 advice.final_verification_at),
+                            ):
+                                checkpoint_id = uuid.uuid4().hex
+                                checkpoint_config = checkpoint_automation_config(
+                                    replace(base_checkpoint, phase=phase),
+                                    scheduled_for=checkpoint_at,
+                                    automation_id=checkpoint_id,
+                                )
+                                if checkpoint_config is None:
+                                    return _ScheduledOutcome(
+                                        False, "Ein thermischer Prüfzeitpunkt ist ungültig."
+                                    )
+                                automation_configs.append(
+                                    (checkpoint_id, checkpoint_config, checkpoint_at)
+                                )
                         if self._automation_executor is None:
                             self._automation_executor = AutomationExecutor(self.hass)
+                        created_ids: list[str] = []
                         try:
-                            await self._automation_executor.async_create_automation(
-                                generation.config,
-                                automation_id=automation_id,
-                                scheduled_for=scheduled_for,
-                                once=True,
-                            )
+                            for created_id, config, execute_at in automation_configs:
+                                await self._automation_executor.async_create_automation(
+                                    config,
+                                    automation_id=created_id,
+                                    scheduled_for=execute_at,
+                                    once=True,
+                                )
+                                created_ids.append(created_id)
                         except Exception as err:  # noqa: BLE001 - transactional executor reports heterogeneous HA/I/O failures
+                            for created_id in reversed(created_ids):
+                                try:
+                                    await self._automation_executor.async_delete_automation(
+                                        created_id
+                                    )
+                                except Exception:  # noqa: BLE001 - best-effort multi-object rollback
+                                    _LOGGER.exception(
+                                        "Could not roll back thermal checkpoint %s",
+                                        created_id,
+                                    )
                             return _ScheduledOutcome(False, str(err))
                         return _ScheduledOutcome(True)
 
@@ -2627,6 +2774,27 @@ class NluConversationEntity(
             return conversation.ConversationResult(response=response, conversation_id=conversation_id)
 
         if goal.kind is V10GoalKind.SCHEDULED and goal.temporal is not None and goal.temporal.must_be_achieved_by_deadline:
+            resolved_deadline = resolve_scheduled_datetime(
+                language_document.temporal, dt_util.now()
+            )
+            goal_for_advice = (
+                replace(goal, temporal=replace(goal.temporal, deadline=resolved_deadline))
+                if resolved_deadline is not None else goal
+            )
+            advice = _thermal_advice_for_goal(
+                goal_for_advice, entities, self._runtime_data.predictive_house
+            )
+            if advice is not None:
+                try:
+                    plan = materialize_goal(
+                        goal_for_advice, entities, options=self.entry.options,
+                        is_admin=await user_is_admin(self.hass, user_input),
+                        user_id=actor_id, adaptive_advice=advice,
+                    )
+                except (PermissionError, ValueError) as err:
+                    response.async_set_speech(f"Ich kann dafür keinen sicheren Plan erstellen: {err}")
+                    return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+                return self._stage_goal_plan(user_input, response, plan, actor_id)
             manager.create(
                 conversation_id,
                 "goal-semantic-clarification",
@@ -2804,6 +2972,375 @@ class NluConversationEntity(
         return conversation.ConversationResult(
             response=response, conversation_id=user_input.conversation_id
         )
+
+    async def _async_handle_learning_turn(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        language_document: LanguageDocument,
+    ) -> conversation.ConversationResult | None:
+        """Review/explain/delete V11 knowledge without exposing raw history."""
+        registry = self._runtime_data.learned_models
+        if registry is None:
+            return None
+        manager = self._runtime_data.dialog_manager
+        conversation_id = user_input.conversation_id
+        actor_id = conversation_user_id(user_input)
+        active = manager.active(conversation_id)
+        if (
+            active is not None
+            and active.kind is DialogTaskKind.PREFERENCE_CONFIRMATION
+            and isinstance(active.payload, LearningDialogPayload)
+        ):
+            if active.requested_by_user_id != actor_id:
+                response.async_set_speech("Diese Präferenzrückfrage gehört zu einem anderen Benutzer.")
+                return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+            model = (
+                await registry.async_get(active.payload.preference_id)
+                if active.payload.preference_id is not None else None
+            )
+            reply = classify_confirmation_reply(language_document.source_text)
+            if reply is ConfirmationReply.NO:
+                if model is not None:
+                    await registry.async_upsert(replace(
+                        model,
+                        parameters={**model.parameters, "suggestion_status": "rejected"},
+                        model_version=model.model_version + 1,
+                    ))
+                manager.cancel(conversation_id)
+                response.async_set_speech(
+                    "In Ordnung. Die beobachtete Auswahl bleibt unverbindlich."
+                )
+            elif reply is not ConfirmationReply.YES:
+                response.async_set_speech("Bitte antworte eindeutig mit Ja oder Nein.")
+            elif model is None or actor_id is None:
+                manager.cancel(conversation_id)
+                response.async_set_speech("Der Präferenzkandidat ist nicht mehr verfügbar.")
+            else:
+                await registry.async_upsert(replace(
+                    model, knowledge_state=KnowledgeState.CONFIRMED,
+                    parameters={**model.parameters, "suggestion_status": "accepted"},
+                    model_version=model.model_version + 1,
+                    confirmed_by=actor_id,
+                ))
+                manager.cancel(conversation_id)
+                response.async_set_speech(
+                    "Gespeichert. Diese Präferenz gilt nur im bestätigten Kontext."
+                )
+            return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+        if (
+            active is not None
+            and active.kind is DialogTaskKind.HABIT_SUGGESTION
+            and isinstance(active.payload, LearningDialogPayload)
+        ):
+            if active.requested_by_user_id != actor_id:
+                response.async_set_speech("Diese Gewohnheitsrückfrage gehört zu einem anderen Benutzer.")
+                return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+            model = (
+                await registry.async_get(active.payload.habit_id)
+                if active.payload.habit_id is not None else None
+            )
+            reply = classify_confirmation_reply(language_document.source_text)
+            if reply is ConfirmationReply.NO:
+                if model is not None:
+                    await registry.async_upsert(replace(
+                        model,
+                        parameters={**model.parameters, "suggestion_status": "rejected"},
+                        model_version=model.model_version + 1,
+                    ))
+                manager.cancel(conversation_id)
+                response.async_set_speech(
+                    "In Ordnung. Dieses unveränderte Muster schlage ich nicht erneut vor."
+                )
+            elif reply is not ConfirmationReply.YES:
+                response.async_set_speech("Bitte antworte eindeutig mit Ja oder Nein.")
+            elif model is None or actor_id is None:
+                manager.cancel(conversation_id)
+                response.async_set_speech("Der Gewohnheitskandidat ist nicht mehr verfügbar.")
+            else:
+                routine = routine_from_habit_model(model, actor_id)
+                if routine is None:
+                    manager.cancel(conversation_id)
+                    response.async_set_speech(
+                        "Aus dem Kandidaten lässt sich keine sichere typisierte Routine bilden."
+                    )
+                else:
+                    await registry.async_upsert(replace(
+                        model,
+                        parameters={**model.parameters, "suggestion_status": "accepted"},
+                        model_version=model.model_version + 1,
+                    ))
+                    manager.create(
+                        conversation_id, "habit-routine-preview",
+                        DialogTaskKind.ROUTINE_DEFINITION,
+                        DialogPriority.CONFIRMATION,
+                        slots={"routine_id": routine.routine_id, "routine": routine},
+                        reason="Ein bestätigter Habit-Kandidat wartet als V10-Routine auf Bestätigung.",
+                        requested_by_user_id=actor_id,
+                    )
+                    preview = "; ".join(step.description for step in routine.steps)
+                    response.async_set_speech(
+                        f"Routinenvorschau {routine.name}: {preview}. Soll ich diese V10-Routine speichern?"
+                    )
+            return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+        if (
+            active is not None
+            and active.kind is DialogTaskKind.MODEL_RESET_CONFIRMATION
+            and isinstance(active.payload, LearningDialogPayload)
+        ):
+            if active.requested_by_user_id is not None and active.requested_by_user_id != actor_id:
+                response.async_set_speech("Diese Lernrückfrage gehört zu einem anderen Benutzer.")
+            else:
+                reply = classify_confirmation_reply(language_document.source_text)
+                if reply is ConfirmationReply.YES:
+                    model_id = active.payload.model_id
+                    if active.payload.operation is LearningDialogOperation.DELETE_MODEL and model_id is not None:
+                        model = await registry.async_get(model_id)
+                        deleted = int(await registry.async_delete(model_id, suppress=True))
+                        predictive = self._runtime_data.predictive_house
+                        if predictive is not None:
+                            predictive.forget(model_id)
+                        preference_entity_id = (
+                            model.parameters.get("entity_id")
+                            if model is not None else None
+                        )
+                        if (
+                            model is not None
+                            and model.kind is LearnedKind.PREFERENCE
+                            and model.context.get("area_id") is None
+                            and isinstance(preference_entity_id, str)
+                        ):
+                            aliases = remove_alias_rule(
+                                self.entry.options.get(CONF_CUSTOM_ALIASES),
+                                alias=model.subject,
+                                entity_id=preference_entity_id,
+                            )
+                            self.hass.config_entries.async_update_entry(
+                                self.entry,
+                                options={**self.entry.options, CONF_CUSTOM_ALIASES: aliases},
+                            )
+                    else:
+                        models_before_reset = await registry.async_list()
+                        deleted = await registry.async_reset()
+                        predictive = self._runtime_data.predictive_house
+                        if predictive is not None:
+                            predictive.clear()
+                        aliases: object = self.entry.options.get(CONF_CUSTOM_ALIASES)
+                        for model in models_before_reset:
+                            preference_entity_id = model.parameters.get("entity_id")
+                            if (
+                                model.kind is LearnedKind.PREFERENCE
+                                and model.context.get("area_id") is None
+                                and isinstance(preference_entity_id, str)
+                            ):
+                                aliases = remove_alias_rule(
+                                    aliases, alias=model.subject,
+                                    entity_id=preference_entity_id,
+                                )
+                        if aliases != self.entry.options.get(CONF_CUSTOM_ALIASES):
+                            self.hass.config_entries.async_update_entry(
+                                self.entry,
+                                options={**self.entry.options, CONF_CUSTOM_ALIASES: aliases},
+                            )
+                    response.async_set_speech(
+                        f"{deleted} gelernte Modelle wurden gelöscht und für alte Evidenz unterdrückt."
+                    )
+                    manager.cancel(conversation_id)
+                elif reply is ConfirmationReply.NO:
+                    manager.cancel(conversation_id)
+                    response.async_set_speech("Abgebrochen. Es wurde kein gelerntes Modell gelöscht.")
+                else:
+                    response.async_set_speech("Bitte antworte eindeutig mit Ja oder Nein.")
+            return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+
+        request = interpret_learning_request(language_document.source_text)
+        if request is None:
+            return None
+        models = await registry.async_list()
+        matched = tuple(item for item in models if _model_matches_hint(item, request.subject_hint))
+        if request.operation is LearningOperation.LIST:
+            if not matched:
+                response.async_set_speech("Dazu ist kein aktives gelerntes Wissen gespeichert.")
+            else:
+                habit = next((
+                    item for item in matched
+                    if item.kind is LearnedKind.HABIT
+                    and item.health is ModelHealth.VALID
+                    and item.parameters.get("suggestion_status") == "new"
+                ), None)
+                policy = self._runtime_data.learning_policy
+                preference = next((
+                    item for item in matched
+                    if item.kind is LearnedKind.PREFERENCE
+                    and item.knowledge_state is KnowledgeState.INFERRED
+                    and item.parameters.get("suggestion_status") == "new"
+                ), None)
+                if preference is not None and policy is not None and policy.suggestions_enabled:
+                    await registry.async_upsert(replace(
+                        preference,
+                        parameters={**preference.parameters, "suggestion_status": "shown"},
+                        model_version=preference.model_version + 1,
+                    ))
+                    manager.create(
+                        conversation_id, "preference-suggestion",
+                        DialogTaskKind.PREFERENCE_CONFIRMATION,
+                        DialogPriority.CONFIRMATION,
+                        reason="Eine statistische Auswahl benötigt ausdrückliche Autorität.",
+                        requested_by_user_id=actor_id,
+                        payload=LearningDialogPayload(
+                            LearningDialogOperation.CONFIRM_PREFERENCE,
+                            preference_id=preference.model_id,
+                            requested_by_user_id=actor_id,
+                        ),
+                    )
+                    response.async_set_speech(
+                        f"In {preference.parameters.get('support_count', 0)} von "
+                        f"{preference.sample_count} bestätigten Auswahlen hast du "
+                        f"{preference.parameters.get('entity_id')} gewählt. "
+                        f"Soll das in diesem Kontext dein Standard für {preference.subject} sein?"
+                    )
+                elif habit is not None and policy is not None and policy.suggestions_enabled:
+                    await registry.async_upsert(replace(
+                        habit,
+                        parameters={**habit.parameters, "suggestion_status": "shown"},
+                        model_version=habit.model_version + 1,
+                    ))
+                    manager.create(
+                        conversation_id, "habit-suggestion",
+                        DialogTaskKind.HABIT_SUGGESTION,
+                        DialogPriority.CONFIRMATION,
+                        reason="Ein belegter Ablauf kann nur nach Zustimmung zur Routine werden.",
+                        requested_by_user_id=actor_id,
+                        payload=LearningDialogPayload(
+                            LearningDialogOperation.ACCEPT_HABIT,
+                            habit_id=habit.model_id,
+                            requested_by_user_id=actor_id,
+                        ),
+                    )
+                    response.async_set_speech(
+                        f"Du führst {habit.parameters.get('time_band', habit.context.get('time_band', 'regelmäßig'))} "
+                        f"häufig dieselbe Folge aus ({habit.sample_count} Belege). "
+                        "Soll ich daraus eine Routine vorschlagen?"
+                    )
+                else:
+                    descriptions = "; ".join(_learned_model_summary(item) for item in matched[:5])
+                    response.async_set_speech(descriptions)
+        elif request.operation is LearningOperation.EXPLAIN:
+            if len(matched) != 1:
+                response.async_set_speech("Dazu ist kein einzelnes belegtes Modell eindeutig.")
+            else:
+                response.async_set_speech(explain_learned_model(matched[0]))
+        elif request.operation is LearningOperation.RESET:
+            if actor_id is None or not await user_is_admin(self.hass, user_input):
+                response.async_set_speech("Alle Lernmodelle darf nur ein authentifizierter Administrator zurücksetzen.")
+            else:
+                manager.create(
+                    conversation_id, "learning-reset",
+                    DialogTaskKind.MODEL_RESET_CONFIRMATION, DialogPriority.SAFETY,
+                    reason="Alle lokalen Lernmodelle sollen persistent gelöscht werden.",
+                    requested_by_user_id=actor_id,
+                    payload=LearningDialogPayload(
+                        LearningDialogOperation.RESET_MODELS,
+                        requested_by_user_id=actor_id,
+                    ),
+                )
+                response.async_set_speech("Soll ich wirklich alle lokalen Lernmodelle zurücksetzen?")
+        else:
+            if len(matched) != 1:
+                response.async_set_speech("Das zu löschende Modell ist nicht eindeutig.")
+            else:
+                manager.create(
+                    conversation_id, "learning-delete-model",
+                    DialogTaskKind.MODEL_RESET_CONFIRMATION, DialogPriority.SAFETY,
+                    reason="Ein gelerntes Modell soll persistent gelöscht werden.",
+                    requested_by_user_id=actor_id,
+                    payload=LearningDialogPayload(
+                        LearningDialogOperation.DELETE_MODEL,
+                        model_id=matched[0].model_id,
+                        requested_by_user_id=actor_id,
+                    ),
+                )
+                response.async_set_speech(
+                    f"Soll ich das Modell {matched[0].model_id} wirklich löschen?"
+                )
+        return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+
+    async def _async_confirm_alias_learning(
+        self, draft: AliasLearningDraft, actor_id: str | None
+    ) -> None:
+        """Commit an explicit teaching turn to its existing authority path."""
+        if draft.area_id is None:
+            aliases = append_alias_rule(
+                self.entry.options.get(CONF_CUSTOM_ALIASES), draft
+            )
+            self.hass.config_entries.async_update_entry(
+                self.entry,
+                options={**self.entry.options, CONF_CUSTOM_ALIASES: aliases},
+            )
+        registry = self._runtime_data.learned_models
+        if registry is None or actor_id is None:
+            return
+        now = dt_util.utcnow()
+        signature = hashlib.sha256(
+            f"{actor_id}\0{draft.area_id or '*'}\0{draft.alias.casefold()}".encode()
+        ).hexdigest()[:24]
+        model_id = f"preference:{signature}"
+        existing = await registry.async_get(model_id)
+        await registry.async_upsert(LearnedModel(
+            model_id, LearnedKind.PREFERENCE, draft.alias,
+            {
+                "user_id": actor_id,
+                **({"area_id": draft.area_id} if draft.area_id is not None else {}),
+            },
+            {
+                **(dict(existing.parameters) if existing is not None else {}),
+                "entity_id": draft.entity_id,
+                "entity_name": draft.entity_name,
+                "suggestion_status": "accepted",
+            },
+            KnowledgeState.CONFIRMED,
+            existing.confidence if existing is not None else 1.0,
+            existing.sample_count if existing is not None else 1,
+            existing.first_observed if existing is not None else now, now,
+            (*existing.provenance, "explicit_user_feedback")
+            if existing is not None else ("explicit_user_feedback",),
+            existing.model_version + 1 if existing is not None else 1,
+            health=ModelHealth.VALID,
+            confirmed_by=actor_id,
+        ))
+
+    async def _async_apply_confirmed_preferences(
+        self,
+        entities: list[EntitySnapshot],
+        *,
+        area_id: str | None,
+        user_id: str | None,
+    ) -> list[EntitySnapshot]:
+        """Expose confirmed preferences as aliases only in their exact context."""
+        registry = self._runtime_data.learned_models
+        if registry is None or user_id is None:
+            return entities
+        models = await registry.async_list(kind=LearnedKind.PREFERENCE)
+        aliases_by_entity: dict[str, list[str]] = {}
+        for model in models:
+            if model.knowledge_state is not KnowledgeState.CONFIRMED:
+                continue
+            if model.context.get("user_id") != user_id:
+                continue
+            model_area = model.context.get("area_id")
+            if model_area is not None and model_area != area_id:
+                continue
+            entity_id = model.parameters.get("entity_id")
+            if isinstance(entity_id, str):
+                aliases_by_entity.setdefault(entity_id, []).append(model.subject)
+        return [
+            replace(
+                item,
+                aliases=tuple(dict.fromkeys((*item.aliases, *aliases_by_entity[item.entity_id]))),
+            )
+            if item.entity_id in aliases_by_entity else item
+            for item in entities
+        ]
 
     async def _async_handle_memory_turn(
         self,
@@ -5855,6 +6392,91 @@ def _goal_run_label(run: GoalRun) -> str:
         V10GoalKind.COMFORT: "Komfortziel",
     }
     return labels.get(run.goal.kind, run.source_utterance.strip() or run.goal.kind.value)
+
+
+def _model_matches_hint(model: LearnedModel, hint: str | None) -> bool:
+    if hint is None:
+        return True
+    searchable = " ".join(
+        (model.model_id, model.subject, *(str(value) for value in model.context.values()))
+    ).casefold()
+    aliases = {
+        "heizung": ("thermal", "climate", "heizung"),
+        "garage": ("garage", "cover"),
+        "licht": ("light", "licht", "lampe"),
+        "lampe": ("light", "licht", "lampe"),
+        "morgenroutine": ("habit", "morning", "morgen"),
+    }
+    return any(term in searchable for term in aliases.get(hint, (hint,)))
+
+
+def _thermal_advice_for_goal(
+    goal: Goal,
+    entities: Sequence[EntitySnapshot],
+    predictive_house: PredictiveHouseModel | None,
+) -> AdaptivePlanningAdvice | None:
+    """Use only an installed model's exact confirmed measurement binding."""
+    if predictive_house is None or goal.scope.area_id is None or not goal.desired_states:
+        return None
+    model = predictive_house.thermal_model(goal.scope.area_id)
+    if model is None or not model.binding.confirmed:
+        return None
+    by_id = {item.entity_id: item for item in entities}
+    temperature = by_id.get(model.binding.temperature_entity_id)
+    if temperature is None or temperature.state in {"unknown", "unavailable"}:
+        return None
+    try:
+        raw_current = float(temperature.state)
+    except ValueError:
+        return None
+    normalized_current = normalize_measurement(
+        raw_current, temperature.unit, SemanticProperty.TEMPERATURE
+    )
+    if normalized_current is None:
+        return None
+    desired = goal.desired_states[0]
+    if desired.property_name != "temperature" or not isinstance(desired.value, (int, float)):
+        return None
+    normalized_target = normalize_measurement(
+        float(desired.value), desired.unit, SemanticProperty.TEMPERATURE
+    )
+    if normalized_target is None:
+        return None
+    outdoor_value: float | None = None
+    outdoor_id = model.binding.outdoor_temperature_entity_id
+    if outdoor_id is not None:
+        outdoor = by_id.get(outdoor_id)
+        if outdoor is None or outdoor.state in {"unknown", "unavailable"}:
+            return None
+        try:
+            raw_outdoor = float(outdoor.state)
+        except ValueError:
+            return None
+        normalized_outdoor = normalize_measurement(
+            raw_outdoor, outdoor.unit, SemanticProperty.TEMPERATURE
+        )
+        if normalized_outdoor is None:
+            return None
+        outdoor_value = normalized_outdoor.value
+    prediction = predictive_house.predict_thermal(
+        goal.scope.area_id, current_celsius=normalized_current.value,
+        target_celsius=normalized_target.value, outdoor_celsius=outdoor_value,
+        now=dt_util.now(),
+    )
+    return advise_deadline_goal(goal, prediction)
+
+
+def _learned_model_summary(model: LearnedModel) -> str:
+    state = {
+        "observed": "beobachtet",
+        "inferred": "vermutet",
+        "confirmed": "bestätigt",
+    }[model.knowledge_state.value]
+    return (
+        f"{model.kind.value} für {model.subject}: {state}, "
+        f"{model.sample_count} Belege, Konfidenz {model.confidence:.2f}, "
+        f"Status {model.health.value}"
+    )
 
 
 def _german_goal_labels(labels: Sequence[str]) -> str:

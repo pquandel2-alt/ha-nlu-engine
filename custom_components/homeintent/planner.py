@@ -8,6 +8,8 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Awaitable, Callable, Iterable, Mapping, Protocol, Sequence, cast
 
+from .adaptive_planning import AdaptivePlanningAdvice, apply_advice
+
 from .agent_action_policy import validate_agent_service_plan
 from .entities import EntitySnapshot, normalize_for_compare
 from .execution_policy import PolicyOutcome, evaluate_service_plan
@@ -99,6 +101,7 @@ class MaterializedPlan:
     requires_confirmation: bool
     summary: str
     trace: PlanningTrace | None = None
+    adaptive_advice: AdaptivePlanningAdvice | None = None
 
 
 @dataclass(frozen=True)
@@ -124,12 +127,15 @@ def materialize_goal(
     is_admin: bool,
     user_id: str | None,
     limits: PlanningLimits = PlanningLimits(),
+    adaptive_advice: AdaptivePlanningAdvice | None = None,
 ) -> MaterializedPlan:
     """Materialize legacy bounded goals through the central policy path."""
+    goal = apply_advice(goal, adaptive_advice)
     snapshots = tuple(entities)
     if goal.kind is GoalKind.SCHEDULED:
         return _materialize_scheduled_setpoint(
-            goal, snapshots, options, is_admin, user_id, limits
+            goal, snapshots, options, is_admin, user_id, limits,
+            adaptive_advice=adaptive_advice,
         )
     by_id = {entity.entity_id: entity for entity in snapshots}
     requested = goal.parameters.get("entity_ids", ())
@@ -239,6 +245,8 @@ def _materialize_scheduled_setpoint(
     is_admin: bool,
     user_id: str | None,
     limits: PlanningLimits,
+    *,
+    adaptive_advice: AdaptivePlanningAdvice | None = None,
 ) -> MaterializedPlan:
     """Build one scheduled setpoint through the normal policy boundary."""
     if (
@@ -298,6 +306,7 @@ def _materialize_scheduled_setpoint(
         True,
         f"Der Sollwert wird einmalig am {target.date().isoformat()} um {target:%H:%M} Uhr gesetzt.",
         _trace(goal, snapshots, (step.operator_id or "",), (), limits),
+        adaptive_advice,
     )
     validate_plan_graph(plan, limits=limits)
     return plan

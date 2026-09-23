@@ -24,6 +24,7 @@ from .effect_monitor import ExpectedEffect
 from .proactive_decision import ProactiveDecisionEngine
 from .runtime_data import HomeIntentRuntimeData
 from .service_call import ServiceCallPlan
+from .statistical_models import evaluate_latency_anomaly
 from .response_planner import (
     DialogAct,
     GermanResponseRealizer,
@@ -81,6 +82,15 @@ class SituationRuntime:
         if not isinstance(entity_id, str) or new_state is None:
             return
         entities = build_entity_snapshots(self._hass, self._entry)
+        thermal_tracker = self._runtime_data.thermal_tracker
+        if thermal_tracker is not None:
+            try:
+                await thermal_tracker.async_observe_states(
+                    tuple(entities),
+                    occurred_at=getattr(raw_event, "time_fired", None) or dt_util.utcnow(),
+                )
+            except Exception:  # noqa: BLE001 - learning must not break HA event flow
+                _LOGGER.exception("HomeIntent thermal experience update failed")
         entity = next((item for item in entities if item.entity_id == entity_id), None)
         if entity is None:
             return
@@ -232,15 +242,34 @@ class SituationRuntime:
         )
         if entity is None or entity.state in {"unknown", "unavailable"}:
             return
+        facts = [
+            f"Erwarteter Zustand: {effect.expected_state}",
+            f"Beobachteter Zustand: {entity.state}",
+            "Die Aktion wird nicht automatisch wiederholt.",
+        ]
+        summary = "Die erwartete Gerätewirkung wurde nicht beobachtet."
+        predictive = self._runtime_data.predictive_house
+        if predictive is not None and effect.operator_id is not None:
+            timing = predictive.effect_timing_model(
+                effect.operator_id, effect.entity_id
+            )
+            if timing is not None:
+                elapsed = max(
+                    0.0, (dt_util.utcnow() - effect.registered_at).total_seconds()
+                )
+                anomaly = evaluate_latency_anomaly(timing, elapsed)
+                if anomaly.anomalous:
+                    summary = "Das Gerät reagiert ungewöhnlich langsam."
+                    facts.insert(
+                        0,
+                        f"Normaler Median: {timing.median_seconds:.1f} s; "
+                        f"robuste Anomaliegrenze: {anomaly.threshold_seconds:.1f} s",
+                    )
         await self._signal(
             effect.entity_id,
             "expected_effect_missing",
-            "Die erwartete Gerätewirkung wurde nicht beobachtet.",
-            (
-                f"Erwarteter Zustand: {effect.expected_state}",
-                f"Beobachteter Zustand: {entity.state}",
-                "Die Aktion wird nicht automatisch wiederholt.",
-            ),
+            summary,
+            tuple(facts),
             entity.state,
             critical=False,
             mode=AgentMode.INFORM,

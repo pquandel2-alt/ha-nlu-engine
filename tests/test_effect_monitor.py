@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -91,6 +91,41 @@ def test_executor_registers_only_successful_known_effect():
         )
         assert not failed.executed
         assert monitor.pending[0].expected_state == "off"
+        await monitor.async_close()
+
+    asyncio.run(scenario())
+
+
+def test_learned_timeout_is_advisory_and_capped():
+    async def scenario():
+        now = datetime.now(timezone.utc)
+        monitor = EffectMonitor(
+            timeout=timedelta(seconds=10),
+            absolute_max_timeout=timedelta(seconds=40),
+        )
+        monitor.set_timeout_resolver(lambda _plan: timedelta(minutes=5))
+        effects = monitor.register(
+            ServiceCallPlan("cover", "close_cover", "cover.garage"), now=now
+        )
+        assert effects[0].deadline - now == timedelta(seconds=40)
+        monitor.set_timeout_resolver(None)
+        await monitor.async_close()
+
+    asyncio.run(scenario())
+
+
+def test_advisory_action_observer_cannot_break_effect_registration():
+    async def scenario():
+        monitor = EffectMonitor()
+
+        def fail_observation(_plan, _occurred_at):
+            raise RuntimeError("learning failed")
+
+        monitor.set_action_observer(fail_observation)
+        effects = monitor.register(
+            ServiceCallPlan("light", "turn_on", "light.a")
+        )
+        assert len(effects) == 1
         await monitor.async_close()
 
     asyncio.run(scenario())

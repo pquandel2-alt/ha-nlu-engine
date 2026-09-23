@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **5.0.2** (V10, abgeschlossen und eingefroren)
+- Aktuelle Version: **6.0.0** (V11)
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -41,6 +41,27 @@ HomeIntent benötigt für die Sprachverarbeitung:
 Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
+
+## Was ist in Version 6.0 / V11 neu?
+
+V11 ergänzt V10 um eine vollständig lokale Advisory- und Lernschicht. Aus
+verifizierten `GoalRun`-Wirkungen entstehen kompakte, bounded Experiences;
+transparente Modelle lernen Effektzeiten, Zuverlässigkeit und thermische
+Raumdauern. Vorhersagen enthalten Konfidenz, Unsicherheitsintervall,
+Sample-Anzahl, Modellalter und Herkunft. Nur ausreichend validierte Modelle
+dürfen den vorhandenen V10-Planner zeitlich beraten. Validator,
+ExecutionPolicy, Bestätigung und Executor bleiben unverändert autoritativ.
+
+Präferenzen bleiben bis zur ausdrücklichen Bestätigung `INFERRED`.
+Gewohnheiten werden nur als deduplizierte Kandidaten vorgeschlagen und niemals
+automatisch aktiviert. Persönliche Profile werden nicht gemittelt; Konflikte
+führen ohne bestätigtes gemeinsames Profil zu einer Rückfrage. Lernen,
+Vorhersagen, Gewohnheitserkennung und Vorschläge sind getrennt konfigurierbar
+und standardmäßig deaktiviert. Es gibt keinen `AUTO_EXECUTE`-Lernmodus.
+
+Die technische Architektur, Schwellen, Invalidierung, Driftregeln,
+Datenschutzgrenzen und Safety-Invarianten stehen in
+[`docs/architecture-v11.md`](docs/architecture-v11.md).
 
 ## Was ist in Version 5.0 / V10 neu?
 
@@ -971,12 +992,12 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/homeintent --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 5.0.2:
+Geprüfter Release-Stand von Version 6.0.0:
 
 ```text
-3137 passed, 12 skipped, 0 failed
-86,98 % Gesamt-Coverage (19280/22167 Statements; Terminalanzeige 87 %)
-73 % Coverage für conversation.py
+3186 passed, 12 skipped, 0 failed
+87,08 % Gesamt-Coverage (20952/24061 Statements; Terminalanzeige 87 %)
+72 % Coverage für conversation.py
 ```
 
 Zusätzlich wurden ausgeführt:
@@ -1001,7 +1022,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-5.0.2.json --quiet
+  --check docs/perf/v7-shadow-baseline-6.0.0.json --quiet
 ```
 
 Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die

@@ -121,6 +121,49 @@ recheck_agent_event:
       required: true
       selector: {text: {}}
 
+thermal_deadline_checkpoint:
+  name: Thermischen Zielzeitpunkt prüfen
+  description: >-
+    Interner, rein beobachtender Dienst für persistente Start-, Zwischen- und
+    Endprüfungen eines bestätigten thermischen Ergebnisziels.
+  fields:
+    phase:
+      name: Prüfphase
+      required: true
+      selector: {select: {options: [start, intermediate, final]}}
+    goal_id:
+      name: Goal-ID
+      required: true
+      selector: {text: {}}
+    area_id:
+      name: Bereichs-ID
+      required: true
+      selector: {text: {}}
+    climate_entity_id:
+      name: Climate-Entität
+      required: true
+      selector: {entity: {domain: climate}}
+    measurement_entity_id:
+      name: Messentität
+      required: true
+      selector: {entity: {domain: sensor}}
+    target_value:
+      name: Zielwert
+      required: true
+      selector: {number: {mode: box}}
+    model_id:
+      name: Modell-ID
+      required: true
+      selector: {text: {}}
+    predicted_duration_seconds:
+      name: Vorhersagedauer
+      required: true
+      selector: {number: {min: 0, unit_of_measurement: s, mode: box}}
+    uncertainty_buffer_seconds:
+      name: Unsicherheitsreserve
+      required: true
+      selector: {number: {min: 0, unit_of_measurement: s, mode: box}}
+
 bind_user_context:
   name: Benutzer, Person und Push-Ziel verbinden
   description: >-

@@ -37,7 +37,7 @@ jobs:
         if: matrix.python-version == '3.12'
         run: >-
           python scripts/v7_shadow_report.py
-          --check docs/perf/v7-shadow-baseline-5.0.2.json
+          --check docs/perf/v7-shadow-baseline-6.0.0.json
           --quiet
       - name: V9-Latenzbudget bei großer Registry prüfen
         if: matrix.python-version == '3.12'
@@ -54,6 +54,12 @@ jobs:
           python scripts/benchmark_v10.py
           --registry-size 5000
           --iterations 30
+          --max-p95-ms 100
+      - name: V11 Lern-/Vorhersagebudgets prüfen
+        if: matrix.python-version == '3.12'
+        run: >-
+          python scripts/benchmark_v11.py
+          --iterations 1000
           --max-p95-ms 100
       - name: Tests mit Coverage ausführen
         if: matrix.python-version == '3.12'
@@ -149,6 +155,9 @@ jobs:
           custom_components/homeintent/retry_policy.py
           custom_components/homeintent/execution_coordinator.py
           custom_components/homeintent/storage_migration.py
+      - name: V11 Pyright-Strict-Scope absichern
+        if: matrix.python-version == '3.12'
+        run: python -m pyright --project pyrightconfig-v11-strict.json
       - name: Statische Importprüfung
         run: python -m pyflakes custom_components tests scripts
 

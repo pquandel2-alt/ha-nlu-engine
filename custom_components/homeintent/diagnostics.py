@@ -25,6 +25,12 @@ from .const import (
     CONF_CONTEXT_TTL_SECONDS,
     CONF_MEMORY_ENABLED,
     CONF_MEMORY_RETENTION_DAYS,
+    CONF_EXPERIENCE_LEARNING_ENABLED,
+    CONF_PREDICTIVE_MODELS_ENABLED,
+    CONF_HABIT_DISCOVERY_ENABLED,
+    CONF_PROACTIVE_SUGGESTIONS_ENABLED,
+    CONF_LEARNING_RETENTION_COUNT,
+    CONF_MINIMUM_PREDICTION_CONFIDENCE,
     CONF_PERSONA_STYLE,
     CONF_ROUTINE_DETECTION_ENABLED,
     CONF_ROUTINE_MIN_OBSERVATIONS,
@@ -102,6 +108,13 @@ async def async_get_config_entry_diagnostics(
     run_records = await goal_runs.async_list() if goal_runs is not None else ()
     monitor_goals = getattr(runtime_data, "monitor_goals", None)
     monitor_records = await monitor_goals.async_load() if monitor_goals is not None else ()
+    experiences = getattr(runtime_data, "experiences", None)
+    experience_records = await experiences.async_list() if experiences is not None else ()
+    learned_models = getattr(runtime_data, "learned_models", None)
+    learned_summary = (
+        await learned_models.async_redacted_summary()
+        if learned_models is not None else {"model_count": 0}
+    )
     run_status_counts: dict[str, int] = {}
     verification_failure_count = 0
     for run in run_records:
@@ -152,6 +165,26 @@ async def async_get_config_entry_diagnostics(
         ),
         "memory_enabled": entry.options.get(CONF_MEMORY_ENABLED, False),
         "memory_retention_days": entry.options.get(CONF_MEMORY_RETENTION_DAYS, 90),
+        "experience_learning_enabled": entry.options.get(
+            CONF_EXPERIENCE_LEARNING_ENABLED, False
+        ),
+        "predictive_models_enabled": entry.options.get(
+            CONF_PREDICTIVE_MODELS_ENABLED, False
+        ),
+        "habit_discovery_enabled": entry.options.get(
+            CONF_HABIT_DISCOVERY_ENABLED, False
+        ),
+        "proactive_suggestions_enabled": entry.options.get(
+            CONF_PROACTIVE_SUGGESTIONS_ENABLED, False
+        ),
+        "learning_retention_count": entry.options.get(
+            CONF_LEARNING_RETENTION_COUNT, 5000
+        ),
+        "minimum_prediction_confidence": entry.options.get(
+            CONF_MINIMUM_PREDICTION_CONFIDENCE, 0.75
+        ),
+        "experience_count": len(experience_records),
+        "learned_models": learned_summary,
         "persona_style": entry.options.get(CONF_PERSONA_STYLE, "neutral"),
         "banter_level": entry.options.get(CONF_BANTER_LEVEL, 0),
         "routine_detection_enabled": entry.options.get(

@@ -26,6 +26,11 @@ class DialogTaskKind(StrEnum):
     ALIAS_CONFIRMATION = "alias_confirmation"
     GOAL_SEMANTIC_CLARIFICATION = "goal_semantic_clarification"
     GOAL_RUN_CLARIFICATION = "goal_run_clarification"
+    LEARNING_CONFIRMATION = "learning_confirmation"
+    HABIT_SUGGESTION = "habit_suggestion"
+    PREFERENCE_CONFIRMATION = "preference_confirmation"
+    MODEL_RESET_CONFIRMATION = "model_reset_confirmation"
+    CONFLICT_RESOLUTION = "conflict_resolution"
 
 
 class DialogPriority(IntEnum):
