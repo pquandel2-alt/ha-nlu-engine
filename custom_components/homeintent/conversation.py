@@ -1299,6 +1299,7 @@ class NluConversationEntity(
                             learning_manager is not None
                             and actor_id is not None
                             and clarification.pending_target is not None
+                            and current is not None
                         ):
                             await learning_manager.async_observe_preference_selection(
                                 user_id=actor_id,
