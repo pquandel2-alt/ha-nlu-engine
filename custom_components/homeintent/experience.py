@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Mapping, cast
 
-from .goal_run import GoalRun, GoalRunStatus
+from .goal_run import EffectEvidenceState, GoalRun, GoalRunStatus
 
 
 FeatureValue = str | float | int | bool
@@ -56,6 +56,7 @@ class ExperienceEffect:
     observed: str | float | int | bool | None
     latency_seconds: float | None
     success: bool
+    evidence_state: EffectEvidenceState = EffectEvidenceState.UNVERIFIED
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,7 @@ class ExperienceRecord:
                 "observed": self.effect.observed,
                 "latency_seconds": self.effect.latency_seconds,
                 "success": self.effect.success,
+                "evidence_state": self.effect.evidence_state.value,
             },
             "evidence": list(self.evidence),
             "provenance": self.provenance.value,
@@ -114,6 +116,23 @@ class ExperienceRecord:
         timestamp = datetime.fromisoformat(str(raw["timestamp"]))
         if timestamp.tzinfo is None:
             raise ValueError("experience timestamp must be timezone-aware")
+        quality = ExperienceQuality(str(raw.get("quality", "invalid")))
+        observed = _feature(effect.get("observed"))
+        success = bool(effect.get("success", False))
+        raw_evidence_state = effect.get("evidence_state")
+        if isinstance(raw_evidence_state, str):
+            evidence_state = EffectEvidenceState(raw_evidence_state)
+        elif quality is ExperienceQuality.INVALID:
+            evidence_state = EffectEvidenceState.INVALID
+        elif quality is ExperienceQuality.PARTIAL:
+            evidence_state = EffectEvidenceState.UNVERIFIED
+        elif observed is not None:
+            evidence_state = (
+                EffectEvidenceState.VERIFIED_SUCCESS
+                if success else EffectEvidenceState.VERIFIED_FAILURE
+            )
+        else:
+            evidence_state = EffectEvidenceState.UNVERIFIED
         return cls(
             str(raw["experience_id"]), timestamp, str(raw["goal_id"]),
             str(raw["run_id"]),
@@ -132,13 +151,13 @@ class ExperienceRecord:
             ),
             _features(raw.get("before")), _features(raw.get("after")),
             ExperienceEffect(
-                _feature(effect.get("expected")), _feature(effect.get("observed")),
+                _feature(effect.get("expected")), observed,
                 _optional_float(effect.get("latency_seconds")),
-                bool(effect.get("success", False)),
+                success, evidence_state,
             ),
             _strings(raw.get("evidence")),
             ExperienceProvenance(str(raw.get("provenance", "goal_run"))),
-            ExperienceQuality(str(raw.get("quality", "invalid"))),
+            quality,
         )
 
 
@@ -165,18 +184,18 @@ def extract_goal_run_experiences(run: GoalRun) -> tuple[ExperienceRecord, ...]:
                     observed_at = None
             latency = None
             try:
-                executed_at = (
-                    datetime.fromisoformat(step.executed_at)
-                    if step.executed_at is not None else None
+                accepted_at = (
+                    datetime.fromisoformat(step.service_accepted_at)
+                    if step.service_accepted_at is not None else None
                 )
                 if (
                     observed_at is not None
-                    and executed_at is not None
-                    and executed_at.tzinfo is not None
+                    and observed_at.tzinfo is not None
+                    and accepted_at is not None
+                    and accepted_at.tzinfo is not None
+                    and observed_at >= accepted_at
                 ):
-                    latency = max(
-                        0.0, (observed_at - executed_at).total_seconds()
-                    )
+                    latency = (observed_at - accepted_at).total_seconds()
             except (ValueError, TypeError):
                 pass
             success = bool(verification.success) if verification is not None else False
@@ -187,6 +206,15 @@ def extract_goal_run_experiences(run: GoalRun) -> tuple[ExperienceRecord, ...]:
             )
             expected = verification.expected if verification is not None else None
             observed = verification.observed if verification is not None else None
+            evidence_state = (
+                EffectEvidenceState.INVALID
+                if run.status is GoalRunStatus.CANCELLED
+                else EffectEvidenceState.UNVERIFIED
+                if verification is None or verification.observed is None
+                else EffectEvidenceState.VERIFIED_SUCCESS
+                if verification.success
+                else EffectEvidenceState.VERIFIED_FAILURE
+            )
             digest = hashlib.sha256(
                 f"{run.run_id}\0{step.step_id}\0{target}".encode()
             ).hexdigest()[:24]
@@ -200,7 +228,7 @@ def extract_goal_run_experiences(run: GoalRun) -> tuple[ExperienceRecord, ...]:
                 ),
                 ExperienceAction(step.operator_id, target),
                 {}, {"state": observed} if observed is not None else {},
-                ExperienceEffect(expected, observed, latency, success),
+                ExperienceEffect(expected, observed, latency, success, evidence_state),
                 (f"goal_run:{run.run_id}", f"step:{step.step_id}"),
                 ExperienceProvenance.GOAL_RUN,
                 quality if run.status is not GoalRunStatus.CANCELLED else ExperienceQuality.INVALID,

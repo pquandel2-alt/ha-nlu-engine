@@ -8,7 +8,7 @@ from datetime import datetime
 
 from .experience import ExperienceQuality, extract_goal_run_experiences
 from .experience_store import ExperienceStore
-from .goal_run import GoalRun, GoalRunStatus
+from .goal_run import EffectEvidenceState, GoalRun, GoalRunStatus
 from .learning_policy import KnowledgeState, LearningPolicy
 from .model_registry import (
     LearnedKind,
@@ -79,7 +79,8 @@ class LearningManager:
                 self.predictive_house.install_effect_timing(EffectTimingModel(
                     model.model_id, operator, model.subject, model.sample_count,
                     median or 0.0, p90 or 0.0, p95 or 0.0, mad or 0.0,
-                    model.confidence,
+                    model.confidence, model.first_observed, model.last_observed,
+                    model.expires_at,
                 ))
         elif model.kind is LearnedKind.RELIABILITY:
             operator = model.context.get("operator_id")
@@ -89,7 +90,8 @@ class LearningManager:
                 self.predictive_house.install_reliability(ReliabilityStatistic(
                     model.model_id, operator, model.subject, successes,
                     model.sample_count - successes, model.sample_count, rate,
-                    model.confidence,
+                    model.confidence, model.first_observed, model.last_observed,
+                    model.expires_at,
                 ))
 
     def _deactivate_learned_model(self, model_id: str) -> None:
@@ -267,9 +269,16 @@ class LearningManager:
         extracted = extract_goal_run_experiences(run)
         if not extracted:
             return
-        await self.experiences.async_extend(extracted)
+        if await self.experiences.async_extend(extracted) == 0:
+            return
         await self._async_update_habits(run)
         all_records = await self.experiences.async_list()
+        await self.models.async_gc_tombstones(
+            oldest_retained_evidence_at=(
+                min(item.timestamp for item in all_records)
+                if all_records else None
+            )
+        )
         for record in extracted:
             key_records = tuple(
                 item for item in all_records
@@ -277,7 +286,17 @@ class LearningManager:
                 and item.action.target_id == record.action.target_id
                 and item.quality is not ExperienceQuality.INVALID
             )
-            outcomes = tuple(item.effect.success for item in key_records)
+            verified_records = tuple(
+                item for item in key_records
+                if item.effect.evidence_state in {
+                    EffectEvidenceState.VERIFIED_SUCCESS,
+                    EffectEvidenceState.VERIFIED_FAILURE,
+                }
+            )
+            outcomes = tuple(
+                item.effect.evidence_state is EffectEvidenceState.VERIFIED_SUCCESS
+                for item in verified_records
+            )
             reliability = train_reliability(
                 record.action.operator_id, record.action.target_id, outcomes
             )
@@ -288,18 +307,25 @@ class LearningManager:
                     {"operator_id": record.action.operator_id},
                     {"success_rate": reliability.success_rate},
                     KnowledgeState.OBSERVED, reliability.confidence,
-                    reliability.sample_count, key_records[0].timestamp,
-                    key_records[-1].timestamp,
-                    tuple(item.experience_id for item in key_records[-100:]),
+                    reliability.sample_count, verified_records[0].timestamp,
+                    verified_records[-1].timestamp,
+                    tuple(item.experience_id for item in verified_records[-100:]),
                     health=(ModelHealth.VALID
                             if reliability.sample_count >= self.policy.usable_model_samples
                             and reliability.confidence
                             >= self.policy.minimum_planning_confidence
                             else ModelHealth.LOW_CONFIDENCE),
+                    expires_at=(verified_records[-1].timestamp
+                                + self.policy.stale_model_age),
                 ))
+            timing_records = tuple(
+                item for item in key_records
+                if item.effect.evidence_state is EffectEvidenceState.VERIFIED_SUCCESS
+                and item.effect.latency_seconds is not None
+            )
             durations = tuple(
-                item.effect.latency_seconds for item in key_records
-                if item.effect.success and item.effect.latency_seconds is not None
+                item.effect.latency_seconds for item in timing_records
+                if item.effect.latency_seconds is not None
             )
             timing = train_effect_timing(
                 record.action.operator_id, record.action.target_id,
@@ -316,12 +342,14 @@ class LearningManager:
                  "p95_seconds": timing.p95_seconds,
                  "mad_seconds": timing.mad_seconds},
                 KnowledgeState.OBSERVED, timing.confidence,
-                timing.sample_count, key_records[0].timestamp,
-                key_records[-1].timestamp,
-                tuple(item.experience_id for item in key_records[-100:]),
+                timing.sample_count, timing_records[0].timestamp,
+                timing_records[-1].timestamp,
+                tuple(item.experience_id for item in timing_records[-100:]),
                 health=(ModelHealth.VALID
                         if timing.sample_count >= self.policy.usable_model_samples
                         else ModelHealth.LOW_CONFIDENCE),
+                expires_at=(timing_records[-1].timestamp
+                            + self.policy.stale_model_age),
             ))
 
     async def _async_update_habits(self, run: GoalRun) -> None:
@@ -359,10 +387,15 @@ class LearningManager:
         signature = hashlib.sha256(
             repr((run.user_id, time_band, sequence)).encode()
         ).hexdigest()[:24]
+        sequence_family = hashlib.sha256(
+            repr(tuple(item.partition("@")[0] for item in sequence)).encode()
+        ).hexdigest()[:16]
         model_id = f"habit:{signature}"
         sequence_text = "|".join(sequence)
         found = False
         for model in existing:
+            if model.context.get("sequence_family") != sequence_family:
+                continue
             matches = model.model_id == model_id
             found = found or matches
             samples = model.sample_count + int(matches)
@@ -392,7 +425,8 @@ class LearningManager:
         if found:
             return
         opportunities = max(
-            (int(model.parameters.get("opportunity_count", 0)) for model in existing),
+            (int(model.parameters.get("opportunity_count", 0)) for model in existing
+             if model.context.get("sequence_family") == sequence_family),
             default=0,
         ) + 1
         support = 1.0 / opportunities
@@ -402,7 +436,8 @@ class LearningManager:
         )
         await self.models.async_upsert(LearnedModel(
             model_id, LearnedKind.HABIT, run.user_id,
-            {"time_band": time_band, "weekday": observed_at.weekday()},
+            {"time_band": time_band, "weekday": observed_at.weekday(),
+             "sequence_family": sequence_family},
             {
                 "sequence": sequence_text,
                 "opportunity_count": opportunities,

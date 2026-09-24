@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +16,7 @@ _ha_stub.install()
 
 import homeintent.conversation as ha_conversation  # noqa: E402
 from homeintent.conversation import NluConversationEntity  # noqa: E402
+from homeintent.conversation_location import AreaSnapshot  # noqa: E402
 from homeintent.automation_executor import AutomationExecutor  # noqa: E402
 from homeintent.entities import EntitySnapshot  # noqa: E402
 from homeintent.experience_store import ExperienceStore  # noqa: E402
@@ -28,14 +30,18 @@ from homeintent.goal_run import (  # noqa: E402
 )
 from homeintent.learning_manager import LearningManager  # noqa: E402
 from homeintent.learning_policy import LearningMode, LearningPolicy  # noqa: E402
-from homeintent.model_registry import LearnedKind, ModelRegistry  # noqa: E402
+from homeintent.model_registry import (  # noqa: E402
+    LearnedKind, LearnedModel, ModelHealth, ModelRegistry,
+)
+from homeintent.learning_policy import KnowledgeState  # noqa: E402
 from homeintent.predictive_house_model import PredictiveHouseModel  # noqa: E402
 from homeintent.thermal_model import (  # noqa: E402
     ThermalBinding,
     ThermalObservation,
     train_thermal_model,
 )
-from homeintent.profiles import ProfileStore  # noqa: E402
+from homeintent.profiles import ComfortProfile, ProfileStore  # noqa: E402
+from homeintent.user_context import UserContextStore  # noqa: E402
 from homeassistant.components.conversation import ConversationInput  # noqa: E402
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
 from homeassistant.core import HomeAssistant  # noqa: E402
@@ -117,6 +123,115 @@ def test_inferred_preference_requires_dialog_confirmation(tmp_path, monkeypatch)
     assert after.confirmed_by == "philipp"
     agent.hass.services.async_call.assert_not_awaited()
 
+
+def test_multi_user_preference_conflict_live_path_clarifies_and_shared_profile(
+    tmp_path, monkeypatch,
+):
+    agent, _learning, _registry = _agent(tmp_path, monkeypatch)
+    profiles = agent._runtime_data.profiles
+    assert profiles is not None
+    asyncio.run(profiles.async_save_comfort_profile(ComfortProfile(
+        "comfort:philipp:living", "philipp", "living", 21, 21,
+        confirmed=True,
+    ), confirmed=True))
+    asyncio.run(profiles.async_save_comfort_profile(ComfortProfile(
+        "comfort:julia:living", "julia", "living", 23, 23,
+        confirmed=True,
+    ), confirmed=True))
+    users = UserContextStore(tmp_path / "users.json")
+    asyncio.run(users.async_set_user(
+        "philipp", person_entity_id="person.philipp", confirmed=True
+    ))
+    asyncio.run(users.async_set_user(
+        "julia", person_entity_id="person.julia", confirmed=True
+    ))
+    agent._runtime_data.user_contexts = users
+    climate = EntitySnapshot(
+        "climate.living", "Wohnzimmerheizung", "climate", "heat",
+        area_id="living", area_name="Wohnzimmer",
+        capabilities=frozenset({"SET_TEMPERATURE"}),
+        attributes={"temperature": 19.0},
+    )
+    people = [
+        EntitySnapshot("person.philipp", "Philipp", "person", "home"),
+        EntitySnapshot("person.julia", "Julia", "person", "not_home"),
+    ]
+    monkeypatch.setattr(
+        ha_conversation, "build_entity_snapshots", lambda *_: [climate, *people]
+    )
+    monkeypatch.setattr(
+        ha_conversation, "resolve_conversation_area",
+        lambda *_: AreaSnapshot("living", "Wohnzimmer"),
+    )
+    philipp_only = _turn(agent, "Mach es hier gemütlicher.", "philipp-comfort")
+    assert "Planvorschau" in philipp_only.response.speech
+    philipp_plan = agent._runtime_data.dialog_manager.active("philipp-comfort").slots["plan"]
+    assert philipp_plan.steps[-1].action.data["temperature"] == 21
+    people[:] = [
+        replace(people[0], state="not_home"), replace(people[1], state="home")
+    ]
+    julia_only = _turn(agent, "Mach es hier gemütlicher.", "julia-comfort")
+    assert "Planvorschau" in julia_only.response.speech
+    julia_plan = agent._runtime_data.dialog_manager.active("julia-comfort").slots["plan"]
+    assert julia_plan.steps[-1].action.data["temperature"] == 23
+    people[:] = [replace(people[0], state="home"), people[1]]
+    conflict = _turn(agent, "Mach es hier gemütlicher.", "multi-comfort")
+    assert "unterschiedliche" in conflict.response.speech
+    agent.hass.services.async_call.assert_not_awaited()
+
+    shared = _turn(
+        agent, "Wenn wir beide da sind, nimm 22 Grad", "multi-comfort"
+    )
+    assert shared.response.speech.startswith("Gespeichert")
+    selected = profiles.shared_comfort(
+        area_id="living", user_ids=("philipp", "julia")
+    )
+    assert selected is not None
+    assert selected.temperature_min == selected.temperature_max == 22
+    agent.hass.services.async_call.assert_not_awaited()
+
+    later = _turn(agent, "Mach es hier gemütlicher.", "multi-comfort-later")
+    assert "Planvorschau" in later.response.speech
+    agent.hass.services.async_call.assert_not_awaited()
+
+
+def test_confirmed_preference_stays_user_area_and_live_entity_scoped(
+    tmp_path, monkeypatch,
+):
+    agent, _learning, registry = _agent(tmp_path, monkeypatch)
+    model = LearnedModel(
+        "preference:lamp", LearnedKind.PREFERENCE, "Lampe",
+        {"user_id": "philipp", "area_id": "living"},
+        {"entity_id": "light.floor"}, KnowledgeState.CONFIRMED, 1.0, 10,
+        NOW, NOW, ("explicit_user_feedback",), health=ModelHealth.VALID,
+        confirmed_by="philipp",
+    )
+    asyncio.run(registry.async_upsert(model))
+    floor = EntitySnapshot(
+        "light.floor", "Stehlampe", "light", "on", area_id="living",
+        capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+    )
+    same = asyncio.run(agent._async_apply_confirmed_preferences(
+        [floor], area_id="living", user_id="philipp"
+    ))
+    assert "Lampe" in same[0].aliases
+    other_user = asyncio.run(agent._async_apply_confirmed_preferences(
+        [floor], area_id="living", user_id="julia"
+    ))
+    assert "Lampe" not in other_user[0].aliases
+    other_area = asyncio.run(agent._async_apply_confirmed_preferences(
+        [floor], area_id="kitchen", user_id="philipp"
+    ))
+    assert "Lampe" not in other_area[0].aliases
+    moved = asyncio.run(agent._async_apply_confirmed_preferences(
+        [replace(floor, area_id="kitchen")],
+        area_id="living", user_id="philipp",
+    ))
+    assert "Lampe" not in moved[0].aliases
+    removed = asyncio.run(agent._async_apply_confirmed_preferences(
+        [], area_id="living", user_id="philipp"
+    ))
+    assert removed == []
 
 def test_habit_acceptance_enters_v10_routine_confirmation_only(tmp_path, monkeypatch):
     agent, learning, registry = _agent(tmp_path, monkeypatch)

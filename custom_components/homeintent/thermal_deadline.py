@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import hmac
+import json
+import os
+import tempfile
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import Mapping
+from pathlib import Path
+from typing import Mapping, cast
 
 from .entities import EntitySnapshot
 from .goal_run import (
     FailureCode,
+    GoalRun,
     GoalRunStatus,
     GoalRunStore,
     StepExecutionRecord,
@@ -19,12 +27,31 @@ from .nlu.primitives import SemanticProperty
 from .nlu.unit_reasoning import normalize_measurement
 from .service_call import ServiceCallPlan
 from .thermal_tracker import ThermalExperienceTracker
+from .prediction import PredictionStatus
 
 
 class ThermalCheckpointPhase(StrEnum):
     START = "start"
     INTERMEDIATE = "intermediate"
     FINAL = "final"
+
+
+class ThermalCheckpointStatus(StrEnum):
+    ON_TRACK = "on_track"
+    LIKELY_LATE = "likely_late"
+    TARGET_ALREADY_REACHED = "target_already_reached"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+    MODEL_INVALID = "model_invalid"
+
+
+@dataclass(frozen=True)
+class ThermalCheckpointResult:
+    status: ThermalCheckpointStatus
+    measured_celsius: float | None
+    target_celsius: float
+    predicted_completion: datetime | None
+    model_id: str
+    device_service_calls: int = 0
 
 
 @dataclass(frozen=True)
@@ -40,6 +67,11 @@ class ThermalDeadlineCheckpoint:
     model_id: str
     predicted_duration_seconds: float
     uncertainty_buffer_seconds: float
+    checkpoint_id: str = ""
+    token: str = ""
+    run_id: str = ""
+    scheduled_for: str | None = None
+    deadline: str | None = None
 
     def to_service_data(self) -> dict[str, str | float]:
         return {
@@ -52,6 +84,11 @@ class ThermalDeadlineCheckpoint:
             "model_id": self.model_id,
             "predicted_duration_seconds": self.predicted_duration_seconds,
             "uncertainty_buffer_seconds": self.uncertainty_buffer_seconds,
+            "checkpoint_id": self.checkpoint_id,
+            "token": self.token,
+            "run_id": self.run_id,
+            "scheduled_for": self.scheduled_for or "",
+            "deadline": self.deadline or "",
         }
 
     @classmethod
@@ -91,7 +128,166 @@ class ThermalDeadlineCheckpoint:
             model_id=texts[4],
             predicted_duration_seconds=duration,
             uncertainty_buffer_seconds=buffer,
+            checkpoint_id=str(raw.get("checkpoint_id", "")),
+            token=str(raw.get("token", "")),
+            run_id=str(raw.get("run_id", "")),
+            scheduled_for=_optional_text(raw.get("scheduled_for")),
+            deadline=_optional_text(raw.get("deadline")),
         )
+
+
+@dataclass(frozen=True)
+class PendingThermalCheckpoint:
+    checkpoint_id: str
+    token_hash: str
+    goal_id: str
+    run_id: str
+    phase: ThermalCheckpointPhase
+    model_id: str
+    climate_entity_id: str
+    measurement_entity_id: str
+    scheduled_for: datetime
+    deadline: datetime
+    consumed: bool = False
+
+
+class PendingThermalCheckpointStore:
+    """Bounded authority for one-shot internal checkpoint calls."""
+
+    def __init__(self, path: str | Path, *, limit: int = 100) -> None:
+        self.path = Path(path)
+        self.limit = max(1, min(limit, 1000))
+        self._lock = asyncio.Lock()
+
+    async def async_register(
+        self, checkpoint: ThermalDeadlineCheckpoint, *, scheduled_for: datetime,
+        deadline: datetime,
+    ) -> bool:
+        if (
+            not checkpoint.checkpoint_id or not checkpoint.token
+            or not checkpoint.run_id or scheduled_for.tzinfo is None
+            or deadline.tzinfo is None
+        ):
+            return False
+        record = PendingThermalCheckpoint(
+            checkpoint.checkpoint_id, _token_hash(checkpoint.token),
+            checkpoint.goal_id, checkpoint.run_id, checkpoint.phase,
+            checkpoint.model_id, checkpoint.climate_entity_id,
+            checkpoint.measurement_entity_id, scheduled_for, deadline,
+        )
+        async with self._lock:
+            records = await asyncio.to_thread(self._read)
+            records[record.checkpoint_id] = record
+            bounded = dict(sorted(
+                records.items(), key=lambda item: item[1].scheduled_for
+            )[-self.limit:])
+            await asyncio.to_thread(self._write, bounded)
+        return True
+
+    async def async_consume(
+        self, checkpoint: ThermalDeadlineCheckpoint, *, now: datetime
+    ) -> bool:
+        if now.tzinfo is None:
+            return False
+        requested_schedule = _aware_datetime(checkpoint.scheduled_for)
+        requested_deadline = _aware_datetime(checkpoint.deadline)
+        async with self._lock:
+            records = await asyncio.to_thread(self._read)
+            record = records.get(checkpoint.checkpoint_id)
+            valid = (
+                record is not None and not record.consumed
+                and hmac.compare_digest(record.token_hash, _token_hash(checkpoint.token))
+                and record.goal_id == checkpoint.goal_id
+                and record.run_id == checkpoint.run_id
+                and record.phase is checkpoint.phase
+                and record.model_id == checkpoint.model_id
+                and record.climate_entity_id == checkpoint.climate_entity_id
+                and record.measurement_entity_id == checkpoint.measurement_entity_id
+                and requested_schedule == record.scheduled_for
+                and requested_deadline == record.deadline
+                and now <= record.deadline + timedelta(minutes=10)
+            )
+            if not valid or record is None:
+                return False
+            records[record.checkpoint_id] = replace(record, consumed=True)
+            await asyncio.to_thread(self._write, records)
+            return True
+
+    async def async_delete(self, checkpoint_id: str) -> None:
+        async with self._lock:
+            records = await asyncio.to_thread(self._read)
+            if records.pop(checkpoint_id, None) is not None:
+                await asyncio.to_thread(self._write, records)
+
+    def _read(self) -> dict[str, PendingThermalCheckpoint]:
+        try:
+            raw: object = json.loads(self.path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return {}
+        if not isinstance(raw, dict):
+            return {}
+        document = cast(Mapping[str, object], raw)
+        if document.get("schema_version") != 1:
+            return {}
+        result: dict[str, PendingThermalCheckpoint] = {}
+        values = document.get("checkpoints")
+        if not isinstance(values, list):
+            return result
+        for value in cast(list[object], values):
+            if not isinstance(value, dict):
+                continue
+            document_item = cast(Mapping[str, object], value)
+            try:
+                checkpoint_item = PendingThermalCheckpoint(
+                    str(document_item["checkpoint_id"]),
+                    str(document_item["token_hash"]),
+                    str(document_item["goal_id"]), str(document_item["run_id"]),
+                    ThermalCheckpointPhase(str(document_item["phase"])),
+                    str(document_item["model_id"]),
+                    str(document_item["climate_entity_id"]),
+                    str(document_item["measurement_entity_id"]),
+                    datetime.fromisoformat(str(document_item["scheduled_for"])),
+                    datetime.fromisoformat(str(document_item["deadline"])),
+                    bool(document_item.get("consumed", False)),
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+            if (
+                checkpoint_item.scheduled_for.tzinfo is not None
+                and checkpoint_item.deadline.tzinfo is not None
+            ):
+                result[checkpoint_item.checkpoint_id] = checkpoint_item
+        return result
+
+    def _write(self, records: Mapping[str, PendingThermalCheckpoint]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=".homeintent_checkpoints_", dir=str(self.path.parent)
+        )
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                json.dump({"schema_version": 1, "checkpoints": [{
+                    "checkpoint_id": item.checkpoint_id,
+                    "token_hash": item.token_hash,
+                    "goal_id": item.goal_id,
+                    "run_id": item.run_id,
+                    "phase": item.phase.value,
+                    "model_id": item.model_id,
+                    "climate_entity_id": item.climate_entity_id,
+                    "measurement_entity_id": item.measurement_entity_id,
+                    "scheduled_for": item.scheduled_for.isoformat(),
+                    "deadline": item.deadline.isoformat(),
+                    "consumed": item.consumed,
+                } for item in records.values()]}, handle, sort_keys=True)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self.path)
+        except Exception:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+            raise
 
 
 def checkpoint_service_action(
@@ -113,10 +309,14 @@ def append_start_checkpoint(
     raw_actions = config.get("actions")
     if not isinstance(raw_actions, list) or not raw_actions:
         return None
-    actions = list(raw_actions)
+    actions = list(cast(list[object], raw_actions))
     insertion = len(actions)
     last = actions[-1]
-    if isinstance(last, Mapping) and last.get("action") == "homeintent.delete_automation":
+    if (
+        isinstance(last, Mapping)
+        and cast(Mapping[str, object], last).get("action")
+        == "homeintent.delete_automation"
+    ):
         insertion -= 1
     actions.insert(insertion, checkpoint_service_action(checkpoint))
     return {**config, "actions": actions}
@@ -166,7 +366,7 @@ async def async_process_thermal_checkpoint(
     goal_runs: GoalRunStore,
     *,
     now: datetime,
-) -> bool | None:
+) -> bool | ThermalCheckpointResult | None:
     """Observe one checkpoint and finalize the existing scheduled GoalRun."""
     if now.tzinfo is None:
         raise ValueError("Thermal checkpoint timestamps require a timezone")
@@ -179,7 +379,7 @@ async def async_process_thermal_checkpoint(
             snapshots,
             occurred_at=now,
         )
-        scheduled = await goal_runs.async_latest(goal_id=checkpoint.goal_id)
+        scheduled = await _checkpoint_run(goal_runs, checkpoint)
         if scheduled is not None:
             tracker.associate_goal_run(scheduled)
             await goal_runs.async_append(replace(
@@ -190,14 +390,79 @@ async def async_process_thermal_checkpoint(
             ))
         return None
     if checkpoint.phase is ThermalCheckpointPhase.INTERMEDIATE:
-        # This checkpoint is intentionally observation-only. State-event
-        # tracking continues; no corrective setpoint is authorized.
-        return None
+        sensor = next((item for item in snapshots
+                       if item.entity_id == checkpoint.measurement_entity_id), None)
+        climate = next((item for item in snapshots
+                        if item.entity_id == checkpoint.climate_entity_id), None)
+        measured = _snapshot_temperature(sensor)
+        target = checkpoint.target_value
+        status = ThermalCheckpointStatus.INSUFFICIENT_EVIDENCE
+        eta: datetime | None = None
+        model = tracker.predictive_house.thermal_model(checkpoint.area_id)
+        current_setpoint = (
+            _finite_number(climate.attributes.get("temperature"))
+            if climate is not None else None
+        )
+        if measured is not None and measured >= target - 0.1:
+            status = ThermalCheckpointStatus.TARGET_ALREADY_REACHED
+            eta = now
+        elif (
+            current_setpoint is not None
+            and abs(current_setpoint - target) > 0.1
+        ):
+            status = ThermalCheckpointStatus.MODEL_INVALID
+        elif model is None or model.model_id != checkpoint.model_id:
+            status = ThermalCheckpointStatus.INSUFFICIENT_EVIDENCE
+        elif measured is not None:
+            outdoor = (
+                next((item for item in snapshots
+                      if item.entity_id
+                      == model.binding.outdoor_temperature_entity_id), None)
+                if model.binding.outdoor_temperature_entity_id is not None else None
+            )
+            prediction = tracker.predictive_house.predict_thermal(
+                checkpoint.area_id, current_celsius=measured,
+                target_celsius=target,
+                outdoor_celsius=_snapshot_temperature(outdoor), now=now,
+            )
+            if prediction.status is PredictionStatus.OK and prediction.value is not None:
+                eta = now + timedelta(seconds=prediction.value)
+                deadline = _aware_datetime(checkpoint.deadline)
+                status = (
+                    ThermalCheckpointStatus.LIKELY_LATE
+                    if deadline is not None and eta > deadline
+                    else ThermalCheckpointStatus.ON_TRACK
+                )
+            elif prediction.status in {
+                PredictionStatus.MODEL_INVALID,
+                PredictionStatus.MODEL_UNRELIABLE,
+                PredictionStatus.DRIFT_DETECTED,
+                PredictionStatus.STALE_MODEL,
+                PredictionStatus.OUT_OF_DISTRIBUTION,
+            }:
+                status = ThermalCheckpointStatus.MODEL_INVALID
+        scheduled = await _checkpoint_run(goal_runs, checkpoint)
+        if scheduled is not None:
+            evidence = (
+                "thermal_checkpoint:intermediate",
+                f"thermal_measured_celsius={measured:g}" if measured is not None else "thermal_measured_celsius=unavailable",
+                f"thermal_target_celsius={target:g}",
+                f"thermal_checkpoint_status={status.value}",
+                f"thermal_checkpoint_model={checkpoint.model_id}",
+                f"thermal_checkpoint_eta={eta.isoformat()}" if eta is not None else "thermal_checkpoint_eta=unavailable",
+            )
+            await goal_runs.async_append(replace(
+                scheduled, updated_at=now.isoformat(),
+                evidence=(*scheduled.evidence, *evidence)[-100:],
+            ))
+        return ThermalCheckpointResult(
+            status, measured, target, eta, checkpoint.model_id
+        )
 
     await tracker.async_finalize(
         checkpoint.climate_entity_id, snapshots, occurred_at=now
     )
-    scheduled = await goal_runs.async_latest(goal_id=checkpoint.goal_id)
+    scheduled = await _checkpoint_run(goal_runs, checkpoint)
     if scheduled is None:
         return None
     sensor = next(
@@ -274,8 +539,50 @@ def _finite_number(value: object) -> float | None:
     return result if result == result and abs(result) != float("inf") else None
 
 
+async def _checkpoint_run(
+    goal_runs: GoalRunStore, checkpoint: ThermalDeadlineCheckpoint
+) -> GoalRun | None:
+    """Resolve the exact authenticated run; never fall back to another run."""
+    return next((
+        item for item in reversed(await goal_runs.async_list())
+        if item.run_id == checkpoint.run_id and item.goal_id == checkpoint.goal_id
+    ), None)
+
+
+def _optional_text(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _aware_datetime(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        result = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return result if result.tzinfo is not None else None
+
+
+def _snapshot_temperature(entity: EntitySnapshot | None) -> float | None:
+    if entity is None or entity.state in {"unknown", "unavailable"}:
+        return None
+    try:
+        normalized = normalize_measurement(
+            float(entity.state), entity.unit, SemanticProperty.TEMPERATURE
+        )
+    except ValueError:
+        return None
+    return normalized.value if normalized is not None else None
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 __all__ = (
-    "ThermalCheckpointPhase", "ThermalDeadlineCheckpoint",
+    "PendingThermalCheckpoint", "PendingThermalCheckpointStore",
+    "ThermalCheckpointPhase", "ThermalCheckpointResult",
+    "ThermalCheckpointStatus", "ThermalDeadlineCheckpoint",
     "async_process_thermal_checkpoint",
     "append_start_checkpoint", "checkpoint_automation_config",
     "checkpoint_service_action",

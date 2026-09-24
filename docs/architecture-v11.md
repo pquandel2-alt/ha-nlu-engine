@@ -38,11 +38,17 @@ conversation transcripts. `extract_goal_run_experiences()` consumes completed
 V10 run evidence. Thermal cycles use the same record with normalized Celsius
 features and exact measurement IDs.
 
-Effect latency is measured from the individual `StepExecutionRecord.executed_at`
-timestamp to that step's verified observation, never from the start of the
-whole `GoalRun`. Older or malformed runs without both timezone-aware timestamps
-retain `latency_seconds=None`; unknown timing evidence is not converted into a
-failure or an invented duration.
+Effect latency is measured from `StepExecutionRecord.service_accepted_at` to
+the verified observation, never from the pre-call attempt or GoalRun start.
+`attempted_at` records the attempt; `executed_at` remains readable for
+compatibility. Old records containing only the ambiguous `executed_at`, and
+missing, naive, malformed or reversed timestamps, produce no latency.
+
+`EffectEvidenceState` is the reliability authority: `VERIFIED_SUCCESS`,
+`VERIFIED_FAILURE`, `UNVERIFIED` or `INVALID`. The compatibility success Boolean
+does not define the denominator. Partial, cancelled and never-verified actions
+therefore cannot silently reduce reliability. Old records migrate
+conservatively from quality, observation and success without rewriting history.
 
 `ExperienceStore` is a schema-versioned JSON store. Writes use a same-directory
 temporary file, `fsync` and atomic replace. IDs deduplicate records; count and
@@ -56,8 +62,14 @@ Every learned item is `OBSERVED`, `INFERRED` or `CONFIRMED`. A number in
 `ModelRegistry` is the single schema-versioned store for thermal, timing,
 reliability, preference, habit, duration, energy and battery models. It records
 scope, parameters, sample count, validation metrics, provenance, version,
-health and invalidation reason. Persistent tombstones prevent a deleted model
-from being silently rebuilt from old evidence.
+health and invalidation reason. Timestamped tombstones prevent a deleted model
+from being silently rebuilt from old evidence. Ordinary `FORGET` tombstones are
+collectable only after all evidence at or before their `source_cutoff` has left
+retention. The bounded learning pass performs this conservative GC using the
+oldest globally retained Experience timestamp. Evidence created after deletion
+may form a new model only after that cutoff is safe to collect; retained old
+evidence can never recreate it. Rejected-habit suppression is durable. Legacy string tombstones load
+conservatively as durable because their deletion chronology cannot be proven.
 
 Every upsert returns an explicit `STORED`, `SUPPRESSED` or `REJECTED` result.
 The registry owns the bound in-memory prediction view lifecycle under the same
@@ -99,7 +111,7 @@ read-only future-estimate facade. Every `PredictionResult` includes status,
 value, interval, confidence, model ID/version, sample count, based-on time,
 validity, training range, input feature names and a factual explanation.
 Statuses include insufficient data, low confidence, stale, incompatible,
-unreliable, invalid and drift detected.
+unreliable, invalid, drift detected and `OUT_OF_DISTRIBUTION`.
 
 ## Thermal model
 
@@ -116,10 +128,18 @@ stores one compact terminal record. It never subscribes to arbitrary history.
 
 Training rejects missing/naive/reversed timestamps, unsuccessful service
 calls, missed targets, open-window cycles, measurement-source changes,
-concurrent actions, implausible deltas and durations. The deterministic model
-uses fixed-order least squares over temperature delta and, only with at least
-15 complete samples, outdoor temperature gap. It reports MAE, median residual,
-MAD and p90 absolute residual. There is no random state.
+unexpected thermostat setpoint/HVAC-mode changes, ambiguous control ownership,
+implausible deltas and durations. A known accepted HomeIntent operation is not
+mistaken for an external override. Outdoor input comes only from the exact
+configured binding; multiple friendly candidates are never guessed.
+
+The deterministic model uses fixed-order least squares. Once the central
+minimum is met, the oldest 80% train and newest 20% validate. Training
+residuals and holdout MAE/median/p90 are stored separately. A non-positive
+temperature-delta coefficient invalidates the model. Persisted training
+domains include delta, start temperature and optional outdoor-gap ranges.
+Only the central 10% extrapolation margin is allowed; unsupported inputs return
+`OUT_OF_DISTRIBUTION` and cannot produce adaptive advice.
 
 Deadline planning is enabled only for `PredictionStatus.OK`. The start time is:
 
@@ -137,19 +157,34 @@ After confirmation, the existing V10 one-shot automation performs the
 setpoint action. V11 adds one typed observation-only start marker and two
 separate date-guarded one-shots at the model-derived intermediate time and
 the original deadline. Keeping the checks separate makes them restart-safe.
-The final checkpoint reads the confirmed measurement binding, changes the
+The intermediate checkpoint rereads measurement, target, deadline and model
+health. It reports `ON_TRACK`, `LIKELY_LATE`, `TARGET_ALREADY_REACHED`,
+`INSUFFICIENT_EVIDENCE` or `MODEL_INVALID`, and refreshes ETA when usable. It
+records bounded evidence but performs zero device calls. The final checkpoint reads the confirmed measurement binding, changes the
 same scheduled `GoalRun` to `SUCCESS` or `FAILURE`, and closes the compact
 thermal Experience. If the start marker was not observed (for example because
 the climate service failed and stopped the automation), the final check does
 not attribute the room state causally to that action and records a service
-failure. No checkpoint can change the setpoint or invoke a device service.
+failure. Every generated checkpoint has an opaque ID and strong token backed
+by a persistent pending record. The service validates token, goal/run, phase,
+model, entities, expiry and consumption, so forged/replayed calls cannot alter
+GoalRun or Experience. No checkpoint can change a setpoint or invoke a device
+service.
+
+Only bounded active-cycle metadata is persisted. Startup restores a cycle only
+while young, uncontaminated, linked to a sensible GoalRun and still compatible
+with existing entities, binding, HVAC mode and setpoint. Restore executes no
+action.
 
 Runtime forecast correction may replace an ETA and warn about likely delay;
 it never raises a setpoint or expands authority.
 
 ## Effect timing, reliability and anomalies
 
-Effect timing uses median, p90, p95 and MAD. Adaptive verification selects a
+Effect timing uses median, p90, p95 and MAD. Timing and reliability models use
+the central stale age through first/last observation and expiry metadata. Stale
+timing cannot change EffectMonitor timeout; stale reliability has no planning
+authority. New verified evidence refreshes them. Adaptive verification selects a
 learned deadline only within the configured absolute maximum. Reliability records
 verified successes and failures with a Wilson-width confidence measure. It is
 a plan-ranking signal only between semantically and policy-equivalent plans.
@@ -167,9 +202,14 @@ candidates and suggestions. Only explicit confirmation creates authority in
 the existing memory/profile path. An inferred preference never hides a risky
 ambiguity.
 
-Personal preferences remain separate. With multiple present users, V11 uses
-an explicitly confirmed shared preference or configured owner policy; the
-default is clarification. Values are never averaged implicitly.
+Personal preferences remain separate by exact user, concept and area/context.
+The live comfort path derives presence only from confirmed HA-user ↔ `person.*`
+bindings and current `person.*` states, then calls the typed conflict resolver.
+One present user gets that user's profile. Conflicting present users get a
+clarification; a confirmed shared answer is scoped to the exact area and user
+set. Owner priority is never the default and values are never averaged.
+Removed/moved targets lose authority; temporary unavailability follows normal
+entity availability semantics without rewriting the preference.
 
 ## Habit discovery and suggestions
 
@@ -182,7 +222,9 @@ evidence range and suggestion status. It explicitly has
 `creates_automation=False`.
 
 Statuses are `NEW`, `SHOWN`, `ACCEPTED`, `REJECTED`, `SNOOZED`, `EXPIRED`.
-Rejected signatures are suppressed. Acceptance only starts the existing V10
+Opportunities are comparable only within the same user, time band and typed
+sequence family. Unrelated single actions or another action family do not
+dilute support. Rejected signatures are durably suppressed. Acceptance only starts the existing V10
 RoutineDefinition preview/confirmation pipeline; it does not activate a
 routine.
 
@@ -203,8 +245,9 @@ traversal remains `asserted_only=True`.
 
 Conversation management supports learned-model summaries, evidence-based
 explanations and model deletion/reset. Explanations show model ID/version,
-sample count, training range, confidence and validation metrics—not internal
-reasoning. Whole-registry reset is administrator-only and confirmation-bound.
+sample count, training range, heuristic confidence and validation metrics—not
+internal reasoning. Confidence is a quality score, not a calibrated
+probability, and is never worded as “87% probability”. Whole-registry reset is administrator-only and confirmation-bound.
 Deletes are persistent and tombstoned; the in-memory predictive view is also
 evicted immediately.
 
@@ -213,8 +256,15 @@ evicted immediately.
 All data stays local. V11 stores no camera/face data, full movement trace,
 arbitrary state dump or external export. Source utterances are not copied into
 experiences. Learning runs from bounded GoalRun callbacks scheduled through
-Home Assistant and has no unmanaged process. Model updates are incremental or
-explicit bounded rebuilds, not per-sensor-event full retraining.
+Home Assistant and has no unmanaged process. Duplicate experience IDs stop a
+second model update. Config-entry runtime owns tasks and the listener; unload
+removes the listener, cancels/joins work, and rebuild exceptions are logged
+without breaking conversation. Model updates are incremental or bounded.
+
+`LearnedKind.DURATION`, `ENERGY` and `BATTERY_TREND` are schema placeholders,
+not predictive implementations. Existing point-in-time/history sensor queries
+remain supported, while predictive “normally/how long until empty” questions
+receive an explicit no-model answer.
 
 Ordinary lookups are dictionary/one bounded-file operations. V11 has a
 separate benchmark gate with a 100 ms p95 ceiling. Existing V8/V9/V10 gates
@@ -225,7 +275,9 @@ and HACS packaging remain unchanged; `custom_components/` contains only
 
 - inferred habit → no `ServiceCallPlan` and no automation;
 - inferred preference → no authoritative risky disambiguation;
-- low-confidence/stale/drifted prediction → no deadline start;
+- low-confidence/stale/drifted/out-of-distribution prediction → no deadline start;
+- unverified effect → excluded from reliability;
+- intermediate/forged/restored thermal observation → zero device calls;
 - statistical graph edge → not asserted;
 - anomaly → observation/warning only;
 - learned timeout → capped by absolute policy deadline;

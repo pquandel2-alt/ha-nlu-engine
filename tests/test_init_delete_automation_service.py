@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -34,6 +36,10 @@ _ha_stub.install()
 
 import homeintent as homeintent_init  # noqa: E402
 from homeintent.const import DOMAIN  # noqa: E402
+from homeintent.thermal_deadline import (  # noqa: E402
+    ThermalCheckpointPhase,
+    ThermalDeadlineCheckpoint,
+)
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
 from homeassistant.core import HomeAssistant, ServiceCall, State  # noqa: E402
 
@@ -200,6 +206,57 @@ def test_async_unload_entry_removes_the_service(tmp_path):
     assert hass.services.has_service(DOMAIN, "save_routine") is False
     assert hass.services.has_service(DOMAIN, "save_comfort_profile") is False
     assert hass.services.has_service(DOMAIN, "delete_monitor_goal") is False
+
+
+def test_learning_tasks_are_cleaned_up_on_unload(tmp_path):
+    hass = _make_hass(tmp_path)
+    entry = ConfigEntry()
+
+    async def scenario() -> None:
+        await homeintent_init.async_setup_entry(hass, entry)
+        await asyncio.gather(*hass._tasks)
+        blocker = asyncio.Event()
+        task = asyncio.create_task(blocker.wait())
+        entry.runtime_data.learning_tasks.add(task)
+        assert entry.runtime_data.remove_learning_listener is not None
+        assert entry.runtime_data.goal_runs._append_listeners
+        await homeintent_init.async_unload_entry(hass, entry)
+        assert task.cancelled()
+        assert entry.runtime_data.learning_tasks == set()
+        assert entry.runtime_data.remove_learning_listener is None
+        assert entry.runtime_data.goal_runs._append_listeners == []
+
+    asyncio.run(scenario())
+
+
+def test_forged_thermal_checkpoint_changes_no_authoritative_state(tmp_path):
+    hass = _make_hass(tmp_path)
+    entry = ConfigEntry()
+
+    async def scenario() -> None:
+        await homeintent_init.async_setup_entry(hass, entry)
+        if hass._tasks:
+            await asyncio.gather(*hass._tasks)
+        now = datetime.now(timezone.utc)
+        checkpoint = ThermalDeadlineCheckpoint(
+            ThermalCheckpointPhase.INTERMEDIATE, "goal", "living",
+            "climate.living", "sensor.living", 21, "thermal:living",
+            1800, 300, "checkpoint", "secret", "run",
+            now.isoformat(), (now + timedelta(hours=1)).isoformat(),
+        )
+        assert await entry.runtime_data.thermal_checkpoints.async_register(
+            checkpoint, scheduled_for=now, deadline=now + timedelta(hours=1)
+        )
+        before_runs = await entry.runtime_data.goal_runs.async_list()
+        before_experiences = await entry.runtime_data.experiences.async_list()
+        hass.services.async_call.reset_mock()
+        handler = hass.services._handlers[(DOMAIN, "thermal_deadline_checkpoint")]
+        await handler(ServiceCall(replace(checkpoint, token="forged").to_service_data()))
+        assert await entry.runtime_data.goal_runs.async_list() == before_runs
+        assert await entry.runtime_data.experiences.async_list() == before_experiences
+        assert hass.services.async_call.await_count == 0
+
+    asyncio.run(scenario())
 
 
 def test_calling_the_service_deletes_the_matching_automation(monkeypatch, tmp_path):

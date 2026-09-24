@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import datetime
 from statistics import median
 
 from .learning_policy import LearningPolicy
@@ -20,6 +21,9 @@ class EffectTimingModel:
     p95_seconds: float
     mad_seconds: float
     confidence: float
+    first_observed: datetime | None = None
+    last_observed: datetime | None = None
+    expires_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -32,6 +36,9 @@ class ReliabilityStatistic:
     sample_count: int
     success_rate: float
     confidence: float
+    first_observed: datetime | None = None
+    last_observed: datetime | None = None
+    expires_at: datetime | None = None
 
 
 @dataclass(frozen=True)

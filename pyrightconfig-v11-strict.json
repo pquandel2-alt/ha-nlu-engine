@@ -14,6 +14,7 @@
     "custom_components/homeintent/learning_manager.py",
     "custom_components/homeintent/learning_intent.py",
     "custom_components/homeintent/learning_dialog.py",
+    "custom_components/homeintent/thermal_deadline.py",
     "custom_components/homeintent/thermal_tracker.py"
   ],
   "exclude": ["tests"],

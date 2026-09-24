@@ -127,6 +127,18 @@ thermal_deadline_checkpoint:
     Interner, rein beobachtender Dienst für persistente Start-, Zwischen- und
     Endprüfungen eines bestätigten thermischen Ergebnisziels.
   fields:
+    checkpoint_id:
+      name: Checkpoint-ID
+      required: true
+      selector: {text: {}}
+    token:
+      name: Checkpoint-Token
+      required: true
+      selector: {text: {}}
+    run_id:
+      name: GoalRun-ID
+      required: true
+      selector: {text: {}}
     phase:
       name: Prüfphase
       required: true
@@ -163,6 +175,14 @@ thermal_deadline_checkpoint:
       name: Unsicherheitsreserve
       required: true
       selector: {number: {min: 0, unit_of_measurement: s, mode: box}}
+    scheduled_for:
+      name: Geplanter Prüfzeitpunkt
+      required: true
+      selector: {text: {}}
+    deadline:
+      name: Zielzeitpunkt
+      required: true
+      selector: {text: {}}
 
 bind_user_context:
   name: Benutzer, Person und Push-Ziel verbinden

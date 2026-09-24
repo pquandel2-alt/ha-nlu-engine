@@ -17,6 +17,7 @@ class PredictionStatus(StrEnum):
     MODEL_UNRELIABLE = "model_unreliable"
     MODEL_INVALID = "model_invalid"
     DRIFT_DETECTED = "drift_detected"
+    OUT_OF_DISTRIBUTION = "out_of_distribution"
 
 
 T = TypeVar("T", float, int, str, bool)

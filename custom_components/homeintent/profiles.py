@@ -44,6 +44,7 @@ class ComfortProfile:
     humidity_max: float | None = None
     cover_position: int | None = None
     confirmed: bool = False
+    household_user_ids: tuple[str, ...] = ()
 
 
 class ProfileStore:
@@ -101,6 +102,28 @@ class ProfileStore:
             item for item in self._comfort.values()
             if item.confirmed and item.area_id == area_id and item.owner_user_id == user_id
         ]
+        return matches[0] if len(matches) == 1 else None
+
+    def comfort_profiles(
+        self, *, area_id: str, user_ids: tuple[str, ...]
+    ) -> tuple[ComfortProfile, ...]:
+        users = set(user_ids)
+        return tuple(
+            item for item in self._comfort.values()
+            if item.confirmed and item.area_id == area_id
+            and not item.household_user_ids and item.owner_user_id in users
+        )
+
+    def shared_comfort(
+        self, *, area_id: str, user_ids: tuple[str, ...]
+    ) -> ComfortProfile | None:
+        exact = tuple(sorted(set(user_ids)))
+        matches = tuple(
+            item for item in self._comfort.values()
+            if item.confirmed and item.area_id == area_id
+            and tuple(sorted(item.household_user_ids)) == exact
+            and len(exact) > 1
+        )
         return matches[0] if len(matches) == 1 else None
 
     def _read(self) -> dict[str, object]:
@@ -210,6 +233,7 @@ def _comfort_dict(value: ComfortProfile) -> dict[str, object]:
         "humidity_max": value.humidity_max,
         "cover_position": value.cover_position,
         "confirmed": value.confirmed,
+        "household_user_ids": list(value.household_user_ids),
     }
 
 
@@ -222,6 +246,7 @@ def _comfort_from(raw: Mapping[str, object]) -> ComfortProfile | None:
             _integer(raw.get("color_temperature_kelvin")),
             _number(raw.get("humidity_min")), _number(raw.get("humidity_max")),
             _integer(raw.get("cover_position")), bool(raw.get("confirmed", False)),
+            _strings(raw.get("household_user_ids")),
         )
         _validate_comfort(value)
         return value

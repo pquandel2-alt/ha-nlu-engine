@@ -46,6 +46,10 @@ class LearningPolicy:
     drift_window: int = 5
     drift_residual_minutes: float = 15.0
     maximum_effect_timeout: timedelta = timedelta(minutes=10)
+    thermal_extrapolation_margin_ratio: float = 0.10
+    thermal_minimum_holdout_samples: int = 10
+    thermal_holdout_fraction: float = 0.20
+    maximum_thermal_cycle_duration: timedelta = timedelta(hours=12)
     learning_mode: LearningMode = LearningMode.OFF
     predictive_models_enabled: bool = False
     habit_discovery_enabled: bool = False
@@ -63,6 +67,10 @@ class LearningPolicy:
     @property
     def retention(self) -> timedelta:
         return timedelta(days=max(1, self.retention_days))
+
+    @property
+    def stale_model_age(self) -> timedelta:
+        return timedelta(days=max(1, self.stale_model_days))
 
     def confidence_band(self, confidence: float) -> ConfidenceBand:
         value = max(0.0, min(1.0, confidence))

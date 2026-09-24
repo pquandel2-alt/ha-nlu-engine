@@ -50,6 +50,7 @@ from .service_call import ServiceCallPlan
 from .thermal_tracker import ThermalExperienceTracker
 from .statistical_models import evaluate_latency_anomaly
 from .thermal_deadline import (
+    PendingThermalCheckpointStore,
     ThermalDeadlineCheckpoint,
     async_process_thermal_checkpoint,
 )
@@ -152,7 +153,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     learning_manager = LearningManager(
         experiences, learned_models, predictive_house, learning_policy
     )
-    thermal_tracker = ThermalExperienceTracker(learning_manager)
+    thermal_tracker = ThermalExperienceTracker(
+        learning_manager,
+        state_path=_storage_path(
+            hass, "homeintent_thermal_cycles.json", "ha_nlu_thermal_cycles.json"
+        ),
+    )
+    thermal_checkpoints = PendingThermalCheckpointStore(
+        _storage_path(
+            hass, "homeintent_thermal_checkpoints.json",
+            "ha_nlu_thermal_checkpoints.json",
+        )
+    )
     entry.runtime_data = HomeIntentRuntimeData(
         context_store=ConversationContextStore(ttl_seconds=context_ttl),
         memory=memory,
@@ -166,6 +178,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         predictive_house=predictive_house,
         learning_manager=learning_manager,
         thermal_tracker=thermal_tracker,
+        thermal_checkpoints=thermal_checkpoints,
     )
     def _learned_effect_timeout(plan: ServiceCallPlan) -> timedelta | None:
         entity_ids = (
@@ -198,16 +211,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.runtime_data.effect_monitor.set_action_observer(_observe_accepted_action)
     async def _queue_learning(run: GoalRun) -> None:
         thermal_tracker.associate_goal_run(run)
-        hass.async_create_task(
+        task = hass.async_create_task(
             learning_manager.async_observe_goal_run(run),
             name=f"HomeIntent learn GoalRun {run.run_id}",
         )
+        entry.runtime_data.learning_tasks.add(task)
+        def _learning_done(done: asyncio.Task[None]) -> None:
+            entry.runtime_data.learning_tasks.discard(done)
+            if not done.cancelled() and done.exception() is not None:
+                error = done.exception()
+                assert error is not None
+                _LOGGER.error(
+                    "HomeIntent GoalRun learning failed for %s",
+                    run.run_id,
+                    exc_info=(type(error), error, error.__traceback__),
+                )
+        task.add_done_callback(_learning_done)
 
-    goal_runs.add_append_listener(_queue_learning)
+    entry.runtime_data.remove_learning_listener = goal_runs.add_append_listener(
+        _queue_learning
+    )
     await memory.async_initialize()
     await user_contexts.async_load()
     await profile_store.async_load()
     await learning_manager.async_restore_models()
+    from .hass_entities import build_entity_snapshots
+    await thermal_tracker.async_restore(
+        tuple(build_entity_snapshots(hass, entry)), goal_runs,
+        now=datetime.now(timezone.utc),
+    )
     if memory.enabled:
         await memory.async_apply_retention(
             {kind: retention_days for kind in MemoryKind}
@@ -385,6 +417,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             snapshots = tuple(build_entity_snapshots(hass, entry))
             now = datetime.now(timezone.utc)
+            if not await thermal_checkpoints.async_consume(checkpoint, now=now):
+                _LOGGER.warning("Rejected unauthenticated thermal deadline checkpoint")
+                return
             result = await async_process_thermal_checkpoint(
                 checkpoint, snapshots, thermal_tracker, goal_runs, now=now
             )
@@ -599,6 +634,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
+        if entry.runtime_data.remove_learning_listener is not None:
+            entry.runtime_data.remove_learning_listener()
+            entry.runtime_data.remove_learning_listener = None
+        for task in tuple(entry.runtime_data.learning_tasks):
+            task.cancel()
+        if entry.runtime_data.learning_tasks:
+            await asyncio.gather(
+                *entry.runtime_data.learning_tasks, return_exceptions=True
+            )
+        entry.runtime_data.learning_tasks.clear()
         await entry.runtime_data.effect_monitor.async_close()
     if unloaded and hass.services.has_service(DOMAIN, SERVICE_DELETE_AUTOMATION):
         hass.services.async_remove(DOMAIN, SERVICE_DELETE_AUTOMATION)

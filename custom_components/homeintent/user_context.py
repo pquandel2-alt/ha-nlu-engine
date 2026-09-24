@@ -192,6 +192,14 @@ class UserContextStore:
             return None
         return all(states[person] != "home" for person in self._household.person_entity_ids)
 
+    def present_user_ids(self, states: Mapping[str, str]) -> tuple[str, ...]:
+        """Resolve presence only through explicit HA-user/person bindings."""
+        return tuple(sorted(
+            user_id for user_id, context in self._users.items()
+            if context.person_entity_id is not None
+            and states.get(context.person_entity_id) == "home"
+        ))
+
     def _read(self) -> dict[str, object]:
         try:
             value = json.loads(self.path.read_text(encoding="utf-8"))

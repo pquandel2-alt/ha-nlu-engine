@@ -143,6 +143,7 @@ def test_goal_run_extractor_uses_verified_features_only():
             (VerificationRecord("light.a", "on", "on", True,
                                 observed_at=(NOW + timedelta(seconds=3)).isoformat()),),
             executed_at=(NOW + timedelta(seconds=1)).isoformat(),
+            service_accepted_at=(NOW + timedelta(seconds=1)).isoformat(),
         ),), (), GoalRunStatus.SUCCESS,
     )
     records = extract_goal_run_experiences(run)
@@ -164,6 +165,7 @@ def test_goal_run_extractor_uses_each_step_execution_time_and_never_run_start():
                     observed_at=(NOW + timedelta(seconds=3)).isoformat(),
                 ),),
                 executed_at=(NOW + timedelta(seconds=2)).isoformat(),
+                service_accepted_at=(NOW + timedelta(seconds=2)).isoformat(),
             ),
             StepExecutionRecord(
                 "second", "light.turn_on", ("light.b",), (), True,
@@ -172,6 +174,7 @@ def test_goal_run_extractor_uses_each_step_execution_time_and_never_run_start():
                     observed_at=(NOW + timedelta(seconds=22)).isoformat(),
                 ),),
                 executed_at=(NOW + timedelta(seconds=20)).isoformat(),
+                service_accepted_at=(NOW + timedelta(seconds=20)).isoformat(),
             ),
         ),
         (), GoalRunStatus.SUCCESS,
@@ -183,7 +186,9 @@ def test_goal_run_extractor_uses_each_step_execution_time_and_never_run_start():
 
     legacy = replace(
         run,
-        steps=(replace(run.steps[1], executed_at=None),),
+        steps=(replace(
+            run.steps[1], executed_at=None, service_accepted_at=None
+        ),),
     )
     assert extract_goal_run_experiences(legacy)[0].effect.latency_seconds is None
 
@@ -357,7 +362,13 @@ def test_multi_user_conflict_never_averages_and_shared_confirmation_resolves():
     conflict = resolve_preferences((philipp, julia), present_user_ids=("philipp", "julia"))
     assert conflict.requires_clarification and conflict.value is None
     shared = LearnedPreference(
-        "shared", PreferenceContext("household", "comfort", area_id="living_room"),
+        "shared",
+        PreferenceContext(
+                "household",
+                "comfort",
+                area_id="living_room",
+                presence_set=("julia", "philipp"),
+        ),
         "22", KnowledgeState.CONFIRMED, 1.0, 1, 1, "philipp",
     )
     assert resolve_preferences(
@@ -523,7 +534,7 @@ def test_thermal_all_prediction_health_statuses_and_outdoor_feature():
         (replace(base, drift_detected=True), PredictionStatus.DRIFT_DETECTED),
         (replace(base, updated_at=NOW - timedelta(days=181)), PredictionStatus.STALE_MODEL),
         (replace(base, sample_count=10), PredictionStatus.LOW_CONFIDENCE),
-        (replace(base, mae_seconds=901), PredictionStatus.MODEL_UNRELIABLE),
+        (replace(base, validation_mae_seconds=901), PredictionStatus.MODEL_UNRELIABLE),
         (replace(base, confidence=0.5), PredictionStatus.LOW_CONFIDENCE),
     )
     for model, expected in cases:
@@ -649,11 +660,16 @@ def test_learning_manager_goalrun_models_thermal_update_and_restart(tmp_path):
                     observed_at=(started + timedelta(seconds=1 + index % 3)).isoformat(),
                 ),),
                 executed_at=started.isoformat(),
+                service_accepted_at=started.isoformat(),
             ),), (), GoalRunStatus.SUCCESS,
         )
         asyncio.run(manager.async_observe_goal_run(run))
-    assert house.predict_effect_latency("light.turn_on", "light.a").status is PredictionStatus.OK
-    assert house.predict_reliability("light.turn_on", "light.a").value == 1.0
+    assert house.predict_effect_latency(
+        "light.turn_on", "light.a", now=NOW + timedelta(minutes=15)
+    ).status is PredictionStatus.OK
+    assert house.predict_reliability(
+        "light.turn_on", "light.a", now=NOW + timedelta(minutes=2)
+    ).value == 1.0
     binding = ThermalBinding(
         "living_room", "sensor.living_temperature", "climate.living_room", confirmed=True
     )
@@ -667,8 +683,12 @@ def test_learning_manager_goalrun_models_thermal_update_and_restart(tmp_path):
     restarted = LearningManager(experiences, registry, restarted_house, policy)
     asyncio.run(restarted.async_restore_models())
     assert restarted_house.thermal_model("living_room") is not None
-    assert restarted_house.predict_effect_latency("light.turn_on", "light.a").value is not None
-    assert restarted_house.predict_reliability("light.turn_on", "light.a").value == 1.0
+    assert restarted_house.predict_effect_latency(
+        "light.turn_on", "light.a", now=NOW + timedelta(minutes=15)
+    ).value is not None
+    assert restarted_house.predict_reliability(
+        "light.turn_on", "light.a", now=NOW + timedelta(minutes=15)
+    ).value == 1.0
     disabled = LearningManager(
         experiences, registry, PredictiveHouseModel(replace(policy, predictive_models_enabled=False)),
         replace(policy, predictive_models_enabled=False),
@@ -700,6 +720,7 @@ def test_tombstoned_effect_and_reliability_models_cannot_reactivate_or_restore(t
                     observed_at=(started + timedelta(seconds=2)).isoformat(),
                 ),),
                 executed_at=started.isoformat(),
+                service_accepted_at=started.isoformat(),
             ),), (), GoalRunStatus.SUCCESS,
         )
 
@@ -708,7 +729,9 @@ def test_tombstoned_effect_and_reliability_models_cannot_reactivate_or_restore(t
     timing_id = "effect_latency:light.turn_on:light.a"
     reliability_id = "reliability:light.turn_on:light.a"
     assert house.effect_timing_model("light.turn_on", "light.a") is not None
-    assert house.predict_reliability("light.turn_on", "light.a").value == 1.0
+    assert house.predict_reliability(
+        "light.turn_on", "light.a", now=NOW + timedelta(minutes=2)
+    ).value == 1.0
 
     assert asyncio.run(registry.async_delete(timing_id, suppress=True))
     assert asyncio.run(registry.async_delete(reliability_id, suppress=True))
@@ -813,6 +836,7 @@ def test_reset_tombstones_block_retraining_from_retained_old_evidence(tmp_path):
                     "light.a", "on", "on", True,
                     observed_at=(started + timedelta(seconds=1)).isoformat(),
                 ),), executed_at=started.isoformat(),
+                service_accepted_at=started.isoformat(),
             ),), (), GoalRunStatus.SUCCESS,
         )
         asyncio.run(manager.async_observe_goal_run(run))
@@ -1059,7 +1083,7 @@ def test_thermal_tracker_safe_guards_and_contamination_paths(tmp_path):
 
     tracker.observe_action(good, (climate, sensor), occurred_at=NOW)
     tracker.observe_action(good, (climate, sensor), occurred_at=NOW + timedelta(seconds=1))
-    assert tracker.active[0].concurrent_action
+    assert not tracker.active[0].concurrent_action
     window = EntitySnapshot(
         "binary_sensor.window", "Fenster", "binary_sensor", "on",
         area_id="living_room", device_class="window",
@@ -1144,6 +1168,7 @@ def test_persistent_thermal_checkpoint_finalizes_goalrun_and_experience(tmp_path
     start = ThermalDeadlineCheckpoint(
         ThermalCheckpointPhase.START, "warm", "living_room", "climate.living",
         "sensor.temp", 21, "thermal:living_room", 2_820, 480,
+        run_id=scheduled.run_id,
     )
     asyncio.run(async_process_thermal_checkpoint(
         start, (climate, sensor), tracker, runs, now=NOW
@@ -1175,7 +1200,7 @@ def test_persistent_thermal_checkpoint_finalizes_goalrun_and_experience(tmp_path
     no_start_result = asyncio.run(async_process_thermal_checkpoint(
         replace(
             start, phase=ThermalCheckpointPhase.FINAL,
-            goal_id="warm-no-start",
+            goal_id="warm-no-start", run_id=missing_start.run_id,
         ),
         (climate, replace(sensor, state="21")), tracker, runs,
         now=NOW + timedelta(hours=2),

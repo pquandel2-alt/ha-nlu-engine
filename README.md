@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **6.0.1** (V11)
+- Aktuelle Version: **6.0.2** (V11)
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -44,12 +44,14 @@ nach oder führt nichts aus.
 
 ## Was ist in Version 6.0 / V11 neu?
 
-Version 6.0.1 schließt das V11-Integritäts-Hardening ab: Persistente
-Modell-Tombstones sind nun auch für die aktive In-Memory-Vorhersageansicht
-atomar maßgeblich. Effektlatenzen verwenden außerdem den Ausführungszeitpunkt
-des jeweiligen Planschritts statt des Starts eines mehrstufigen GoalRuns.
-Historische Runs ohne belastbaren Step-Zeitstempel erzeugen keine geschätzte
-Latenz.
+Version 6.0.1 führte persistente, auch für die aktive In-Memory-Ansicht
+maßgebliche Modell-Tombstones und schrittspezifische Ausführungszeiten ein.
+Version 6.0.2 schließt das V11-Integritäts-Hardening ab und präzisiert diese Semantik:
+Effektlatenz beginnt erst mit der bestätigten Serviceannahme. Unverifizierte,
+zeitlich widersprüchliche oder nur mit dem historischen mehrdeutigen
+`executed_at` belegte Vorgänge werden weder als Null-Latenz noch als Fehler
+gelernt. Die Zuverlässigkeitsstatistik zählt ausschließlich verifizierte
+Erfolge und verifizierte Fehlschläge.
 
 V11 ergänzt V10 um eine vollständig lokale Advisory- und Lernschicht. Aus
 verifizierten `GoalRun`-Wirkungen entstehen kompakte, bounded Experiences;
@@ -65,6 +67,37 @@ automatisch aktiviert. Persönliche Profile werden nicht gemittelt; Konflikte
 führen ohne bestätigtes gemeinsames Profil zu einer Rückfrage. Lernen,
 Vorhersagen, Gewohnheitserkennung und Vorschläge sind getrennt konfigurierbar
 und standardmäßig deaktiviert. Es gibt keinen `AUTO_EXECUTE`-Lernmodus.
+
+Thermische Modelle speichern ihren Trainingsbereich und prüfen neue Eingaben
+auf `OUT_OF_DISTRIBUTION`. Bei genügend Daten entscheidet eine chronologische
+Holdout-Validierung über die Planungsfreigabe. Externe Sollwert- oder
+HVAC-Änderungen kontaminieren einen Heizzyklus; die Probe wird dann verworfen.
+Zwischenprüfungen berechnen eine neue ETA und erkennen Verzögerungen, führen
+aber keinen Gerätedienst aus. Persistierte aktive Lernzyklen werden nach einem
+Neustart nur als Beobachtungszustand und nur bei weiterhin kompatiblem
+Steuerkontext wiederhergestellt. Checkpoints besitzen eine persistierte,
+einmalig konsumierbare kryptografische Identität.
+
+Mehrbenutzer-Komfortprofile bleiben exakt nach Benutzer, Bereich und Konzept
+getrennt. Bei mehreren anwesenden Personen und abweichenden Werten fragt der
+Live-Dialog nach; ein gemeinsamer Wert gilt erst nach Bestätigung und nur für
+die konkrete Personengruppe. Bestätigte Entitätspräferenzen verlieren ihre
+Auflösungsautorität, wenn das Ziel entfernt oder in einen unpassenden Bereich
+verschoben wurde. Gewohnheits-Support verwendet nur vergleichbare
+Gelegenheiten derselben Sequenzfamilie; Ablehnungen bleiben dauerhaft
+unterdrückt.
+
+Zeitgestempelte Forget-Tombstones werden erst bereinigt, wenn die bounded
+Experience-Retention garantiert keine Evidenz bis zu ihrem Lösch-Cutoff mehr
+enthält. Erst danach darf neue Evidenz nach dem Löschen wieder ein Modell mit
+derselben ID bilden; abgelehnte Gewohnheiten verwenden dagegen eine dauerhafte
+Suppression.
+
+Die Modellkonfidenz ist ein Qualitätswert und keine kalibrierte
+Wahrscheinlichkeit. `DURATION`, `ENERGY` und `BATTERY_TREND` sind derzeit nur
+Schemaslots, keine implementierten Vorhersagemodelle. Fragen nach normalem
+Verbrauch, Gerätelaufzeit oder Batterieentladung erhalten ohne reales Modell
+eine ausdrückliche Keine-Modell-Antwort.
 
 Die technische Architektur, Schwellen, Invalidierung, Driftregeln,
 Datenschutzgrenzen und Safety-Invarianten stehen in
@@ -999,11 +1032,11 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/homeintent --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 6.0.1:
+Geprüfter Release-Stand von Version 6.0.2:
 
 ```text
-3191 passed, 12 skipped, 0 failed
-87,08 % Gesamt-Coverage (20952/24061 Statements; Terminalanzeige 87 %)
+3215 passed, 12 skipped, 0 failed
+87 % Gesamt-Coverage
 72 % Coverage für conversation.py
 ```
 
@@ -1029,7 +1062,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-6.0.1.json --quiet
+  --check docs/perf/v7-shadow-baseline-6.0.2.json --quiet
 ```
 
 Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die

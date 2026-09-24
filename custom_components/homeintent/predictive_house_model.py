@@ -71,14 +71,26 @@ class PredictiveHouseModel:
         )
 
     def predict_effect_latency(
-        self, operator_id: str, entity_id: str
+        self, operator_id: str, entity_id: str, *, now: datetime | None = None
     ) -> PredictionResult[float]:
         model = self._timing.get((operator_id, entity_id))
-        now = datetime.now(timezone.utc)
+        current = now or datetime.now(timezone.utc)
         if model is None:
             return PredictionResult(PredictionStatus.INSUFFICIENT_DATA, None, None,
-                                    0.0, None, None, 0, now, None, None, (),
+                                    0.0, None, None, 0, current, None, None, (),
                                     "Keine Timing-Evidenz.")
+        valid_until = model.expires_at or (
+            model.last_observed + self.policy.stale_model_age
+            if model.last_observed is not None else None
+        )
+        if valid_until is not None and current > valid_until:
+            return PredictionResult(
+                PredictionStatus.STALE_MODEL, None, None, model.confidence,
+                model.model_id, 1, model.sample_count, current, valid_until,
+                _training_range(model.first_observed, model.last_observed),
+                ("operator_id", "entity_id"),
+                "Das Timing-Modell ist älter als die zentrale Gültigkeitsgrenze.",
+            )
         status = (
             PredictionStatus.OK
             if self.policy.permits_planning(model.confidence, model.sample_count)
@@ -87,18 +99,33 @@ class PredictiveHouseModel:
         return PredictionResult(
             status, model.median_seconds,
             (max(0.0, model.median_seconds - 3 * model.mad_seconds), model.p95_seconds),
-            model.confidence, model.model_id, 1, model.sample_count, now, None,
-            None, ("operator_id", "entity_id"),
+            model.confidence, model.model_id, 1, model.sample_count, current,
+            valid_until, _training_range(model.first_observed, model.last_observed),
+            ("operator_id", "entity_id"),
             f"Median {model.median_seconds:.1f}s, p95 {model.p95_seconds:.1f}s.",
         )
 
-    def predict_reliability(self, operator_id: str, entity_id: str) -> PredictionResult[float]:
+    def predict_reliability(
+        self, operator_id: str, entity_id: str, *, now: datetime | None = None
+    ) -> PredictionResult[float]:
         model = self._reliability.get((operator_id, entity_id))
-        now = datetime.now(timezone.utc)
+        current = now or datetime.now(timezone.utc)
         if model is None:
             return PredictionResult(PredictionStatus.INSUFFICIENT_DATA, None, None,
-                                    0.0, None, None, 0, now, None, None, (),
+                                    0.0, None, None, 0, current, None, None, (),
                                     "Keine Reliability-Evidenz.")
+        valid_until = model.expires_at or (
+            model.last_observed + self.policy.stale_model_age
+            if model.last_observed is not None else None
+        )
+        if valid_until is not None and current > valid_until:
+            return PredictionResult(
+                PredictionStatus.STALE_MODEL, None, None, model.confidence,
+                model.model_id, 1, model.sample_count, current, valid_until,
+                _training_range(model.first_observed, model.last_observed),
+                ("operator_id", "entity_id"),
+                "Das Reliability-Modell ist älter als die zentrale Gültigkeitsgrenze.",
+            )
         status = (
             PredictionStatus.OK
             if self.policy.permits_planning(model.confidence, model.sample_count)
@@ -106,10 +133,18 @@ class PredictiveHouseModel:
         )
         return PredictionResult(
             status, model.success_rate, None, model.confidence,
-            model.model_id, 1, model.sample_count, now, None, None,
+            model.model_id, 1, model.sample_count, current, valid_until,
+            _training_range(model.first_observed, model.last_observed),
             ("operator_id", "entity_id"),
             f"{model.success_count} von {model.sample_count} Wirkungen verifiziert.",
         )
+
+
+
+def _training_range(
+    first: datetime | None, last: datetime | None
+) -> tuple[datetime, datetime] | None:
+    return (first, last) if first is not None and last is not None else None
 
 
 __all__ = ("PredictiveHouseModel",)

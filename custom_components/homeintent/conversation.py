@@ -19,6 +19,7 @@ import asyncio
 import hashlib
 import logging
 import re
+import secrets
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -155,10 +156,14 @@ from .model_registry import (
     LearnedKind,
     LearnedModel,
     ModelHealth,
+    SuppressionKind,
     explain_learned_model,
 )
 from .learning_policy import KnowledgeState
 from .habit_discovery import routine_from_habit_model
+from .preferences import (
+    LearnedPreference, PreferenceContext, resolve_preferences,
+)
 from .predictive_house_model import PredictiveHouseModel
 from .management_understanding import understand_management
 from .planner import (
@@ -176,6 +181,7 @@ from .planner import (
 )
 from .adaptive_planning import AdaptivePlanningAdvice, advise_deadline_goal
 from .thermal_deadline import (
+    PendingThermalCheckpointStore,
     ThermalCheckpointPhase,
     ThermalDeadlineCheckpoint,
     append_start_checkpoint,
@@ -1846,6 +1852,49 @@ class NluConversationEntity(
         manager = self._runtime_data.dialog_manager
         conversation_id = user_input.conversation_id
         active = manager.active(conversation_id)
+        if (
+            active is not None
+            and active.kind is DialogTaskKind.CONFLICT_RESOLUTION
+            and active.task_id == "comfort-household-conflict"
+        ):
+            actor_id = conversation_user_id(user_input)
+            stored_area = active.slots.get("area_id")
+            raw_users = active.slots.get("present_user_ids")
+            users = tuple(
+                item for item in raw_users if isinstance(item, str)
+            ) if isinstance(raw_users, tuple) else ()
+            draft = (
+                _comfort_profile_from_document(
+                    language_document, stored_area, actor_id
+                )
+                if isinstance(stored_area, str) and actor_id is not None
+                else None
+            )
+            if draft is None or len(users) < 2 or self._runtime_data.profiles is None:
+                response.async_set_speech(
+                    "Bitte nenne einen konkreten gemeinsamen Temperaturwert in Grad."
+                )
+            else:
+                shared = replace(
+                    draft,
+                    profile_id=("comfort:shared:" + hashlib.sha256(
+                        repr((stored_area, tuple(sorted(users)))).encode()
+                    ).hexdigest()[:24]),
+                    owner_user_id="shared",
+                    confirmed=True,
+                    household_user_ids=tuple(sorted(users)),
+                )
+                await self._runtime_data.profiles.async_save_comfort_profile(
+                    shared, confirmed=True
+                )
+                manager.cancel(conversation_id)
+                response.async_set_speech(
+                    "Gespeichert. Dieses gemeinsame Komfortprofil gilt nur für "
+                    "diesen Bereich und genau diese anwesende Benutzergruppe."
+                )
+            return conversation.ConversationResult(
+                response=response, conversation_id=conversation_id
+            )
         if active is not None and active.kind is DialogTaskKind.COMFORT_PROFILE_DEFINITION:
             actor_id = conversation_user_id(user_input)
             if active.requested_by_user_id != actor_id:
@@ -1963,11 +2012,74 @@ class NluConversationEntity(
         manager.cancel(conversation_id)
         actor_id = conversation_user_id(user_input)
         profiles = self._runtime_data.profiles
-        profile = (
-            profiles.comfort(area_id=area_id, user_id=actor_id)
-            if profiles is not None and actor_id is not None and area_id is not None
-            else None
-        )
+        profile: ComfortProfile | None = None
+        if profiles is not None and actor_id is not None and area_id is not None:
+            states = {item.entity_id: item.state for item in entities}
+            present_user_ids = (
+                self._runtime_data.user_contexts.present_user_ids(states)
+                if self._runtime_data.user_contexts is not None else ()
+            )
+            if not present_user_ids:
+                present_user_ids = (actor_id,)
+            candidates = profiles.comfort_profiles(
+                area_id=area_id, user_ids=present_user_ids
+            )
+            shared = profiles.shared_comfort(
+                area_id=area_id, user_ids=present_user_ids
+            )
+            typed = tuple(
+                LearnedPreference(
+                    item.profile_id,
+                    PreferenceContext(
+                        item.owner_user_id, "comfortable_environment", area_id,
+                        presence_set=present_user_ids,
+                    ),
+                    _comfort_value_signature(item), KnowledgeState.CONFIRMED,
+                    1.0, 1, 1, item.owner_user_id,
+                )
+                for item in candidates
+            )
+            typed_shared = (
+                LearnedPreference(
+                    shared.profile_id,
+                    PreferenceContext(
+                        "shared", "comfortable_environment", area_id,
+                        presence_set=tuple(sorted(present_user_ids)),
+                    ),
+                    _comfort_value_signature(shared), KnowledgeState.CONFIRMED,
+                    1.0, 1, 1, shared.owner_user_id,
+                )
+                if shared is not None else None
+            )
+            resolution = resolve_preferences(
+                typed, present_user_ids=present_user_ids,
+                shared_preference=typed_shared,
+                concept="comfortable_environment", area_id=area_id,
+            )
+            if resolution.requires_clarification and len(present_user_ids) > 1:
+                manager.create(
+                    conversation_id, "comfort-household-conflict",
+                    DialogTaskKind.CONFLICT_RESOLUTION,
+                    DialogPriority.SELECTION,
+                    slots={"area_id": area_id,
+                           "present_user_ids": present_user_ids},
+                    reason="Bestätigte Komfortprofile anwesender Benutzer widersprechen sich.",
+                    requested_by_user_id=actor_id,
+                )
+                response.async_set_speech(
+                    "Für euch sind unterschiedliche Komfortwerte gespeichert. "
+                    "Welche Temperatur soll gelten, wenn ihr beide zuhause seid?"
+                )
+                return conversation.ConversationResult(
+                    response=response, conversation_id=conversation_id
+                )
+            if typed_shared is not None and resolution.source_preference_ids == (typed_shared.preference_id,):
+                profile = shared
+            elif resolution.source_preference_ids:
+                selected_id = resolution.source_preference_ids[0]
+                profile = next(
+                    (item for item in candidates if item.profile_id == selected_id), None
+                )
         if profile is None:
             if area_id is None:
                 response.async_set_speech(
@@ -2380,6 +2492,9 @@ class NluConversationEntity(
                         automation_configs: list[tuple[str, dict[str, object], datetime]] = [
                             (automation_id, generation.config, scheduled_for)
                         ]
+                        checkpoint_records: list[
+                            tuple[ThermalDeadlineCheckpoint, datetime]
+                        ] = []
                         advice = stored_plan.adaptive_advice
                         if advice is not None:
                             area_id = stored_plan.goal.scope.area_id
@@ -2412,6 +2527,11 @@ class NluConversationEntity(
                                 advice.model_id,
                                 advice.predicted_duration.total_seconds(),
                                 advice.uncertainty_buffer.total_seconds(),
+                                checkpoint_id=f"thermal-checkpoint-{uuid.uuid4().hex}",
+                                token=secrets.token_urlsafe(32),
+                                run_id=execution_run_id,
+                                scheduled_for=scheduled_for.isoformat(),
+                                deadline=advice.final_verification_at.isoformat(),
                             )
                             enriched = append_start_checkpoint(
                                 generation.config, base_checkpoint
@@ -2421,6 +2541,7 @@ class NluConversationEntity(
                                     False, "Die thermische Startprüfung konnte nicht geplant werden."
                                 )
                             automation_configs[0] = (automation_id, enriched, scheduled_for)
+                            checkpoint_records = [(base_checkpoint, scheduled_for)]
                             for phase, checkpoint_at in (
                                 (ThermalCheckpointPhase.INTERMEDIATE,
                                  advice.intermediate_check_at),
@@ -2428,8 +2549,14 @@ class NluConversationEntity(
                                  advice.final_verification_at),
                             ):
                                 checkpoint_id = uuid.uuid4().hex
+                                phase_checkpoint = replace(
+                                    base_checkpoint, phase=phase,
+                                    checkpoint_id=f"thermal-checkpoint-{uuid.uuid4().hex}",
+                                    token=secrets.token_urlsafe(32),
+                                    scheduled_for=checkpoint_at.isoformat(),
+                                )
                                 checkpoint_config = checkpoint_automation_config(
-                                    replace(base_checkpoint, phase=phase),
+                                    phase_checkpoint,
                                     scheduled_for=checkpoint_at,
                                     automation_id=checkpoint_id,
                                 )
@@ -2440,6 +2567,24 @@ class NluConversationEntity(
                                 automation_configs.append(
                                     (checkpoint_id, checkpoint_config, checkpoint_at)
                                 )
+                                checkpoint_records.append((phase_checkpoint, checkpoint_at))
+                            checkpoint_store = self._runtime_data.thermal_checkpoints
+                            if checkpoint_store is None:
+                                checkpoint_store = PendingThermalCheckpointStore(
+                                    self.hass.config.path(
+                                        ".storage/homeintent_thermal_checkpoints.json"
+                                    )
+                                )
+                                self._runtime_data.thermal_checkpoints = checkpoint_store
+                            for checkpoint_record, checkpoint_at in checkpoint_records:
+                                registered = await checkpoint_store.async_register(
+                                    checkpoint_record, scheduled_for=checkpoint_at,
+                                    deadline=advice.final_verification_at,
+                                )
+                                if not registered:
+                                    return _ScheduledOutcome(
+                                        False, "Ein thermischer Prüfpunkt konnte nicht authentifiziert werden."
+                                    )
                         if self._automation_executor is None:
                             self._automation_executor = AutomationExecutor(self.hass)
                         created_ids: list[str] = []
@@ -2462,6 +2607,11 @@ class NluConversationEntity(
                                     _LOGGER.exception(
                                         "Could not roll back thermal checkpoint %s",
                                         created_id,
+                                    )
+                            if advice is not None and self._runtime_data.thermal_checkpoints is not None:
+                                for checkpoint_record, _checkpoint_at in checkpoint_records:
+                                    await self._runtime_data.thermal_checkpoints.async_delete(
+                                        checkpoint_record.checkpoint_id
                                     )
                             return _ScheduledOutcome(False, str(err))
                         return _ScheduledOutcome(True)
@@ -2544,6 +2694,8 @@ class NluConversationEntity(
                                     failures[-1] if failures and verification_records and not verification_records[-1].success else None,
                                     outcome.message if outcome is not None else "Nicht ausgeführt.",
                                     outcome.executed_at if outcome is not None else None,
+                                    outcome.attempted_at if outcome is not None else None,
+                                    outcome.service_accepted_at if outcome is not None else None,
                                 )
                             )
                         run = GoalRun.start(
@@ -2558,6 +2710,7 @@ class NluConversationEntity(
                         )
                         run = replace(
                             run,
+                            run_id=execution_run_id,
                             updated_at=dt_util.utcnow().isoformat(),
                             confirmed=True,
                             steps=tuple(step_records),
@@ -2989,6 +3142,28 @@ class NluConversationEntity(
         registry = self._runtime_data.learned_models
         if registry is None:
             return None
+        normalized_request = language_document.normalized_text.casefold()
+        if re.search(
+            r"\b(?:normalerweise|typischerweise|vermutlich|trend|wann.*leer|wie\s+lange)\b",
+            normalized_request,
+        ):
+            if re.search(r"\b(?:strom|energie|verbrauch)\b", normalized_request):
+                response.async_set_speech(
+                    "Für dieses Gerät habe ich noch kein belastbares Verbrauchsmodell."
+                )
+            elif re.search(r"\b(?:batterie|akku)\b", normalized_request):
+                response.async_set_speech(
+                    "Für dieses Gerät habe ich noch kein belastbares Batterie-Trendmodell."
+                )
+            elif re.search(r"\b(?:dauer|lange|fertig|laufzeit)\b", normalized_request):
+                response.async_set_speech(
+                    "Für dieses Gerät habe ich noch kein belastbares Dauermodell."
+                )
+            else:
+                return None
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
         manager = self._runtime_data.dialog_manager
         conversation_id = user_input.conversation_id
         actor_id = conversation_user_id(user_input)
@@ -3049,11 +3224,10 @@ class NluConversationEntity(
             reply = classify_confirmation_reply(language_document.source_text)
             if reply is ConfirmationReply.NO:
                 if model is not None:
-                    await registry.async_upsert(replace(
-                        model,
-                        parameters={**model.parameters, "suggestion_status": "rejected"},
-                        model_version=model.model_version + 1,
-                    ))
+                    await registry.async_delete_with_reason(
+                        model.model_id, reason="user_rejected_habit",
+                        suppression_kind=SuppressionKind.REJECTED_HABIT,
+                    )
                 manager.cancel(conversation_id)
                 response.async_set_speech(
                     "In Ordnung. Dieses unveränderte Muster schlage ich nicht erneut vor."
@@ -3344,7 +3518,18 @@ class NluConversationEntity(
                 item,
                 aliases=tuple(dict.fromkeys((*item.aliases, *aliases_by_entity[item.entity_id]))),
             )
-            if item.entity_id in aliases_by_entity else item
+            if item.entity_id in aliases_by_entity
+            and any(
+                model.knowledge_state is KnowledgeState.CONFIRMED
+                and model.context.get("user_id") == user_id
+                and model.parameters.get("entity_id") == item.entity_id
+                and (
+                    model.context.get("area_id") is None
+                    or model.context.get("area_id") == item.area_id == area_id
+                )
+                for model in models
+            )
+            else item
             for item in entities
         ]
 
@@ -6321,6 +6506,16 @@ def _comfort_profile_preview(profile: ComfortProfile) -> str:
             f"Helligkeit {profile.brightness_min} bis {profile.brightness_max} Prozent"
         )
     return ", ".join(parts)
+
+
+def _comfort_value_signature(profile: ComfortProfile) -> str:
+    """Comparable typed value; never averages conflicting user profiles."""
+    return repr((
+        profile.temperature_min, profile.temperature_max,
+        profile.brightness_min, profile.brightness_max,
+        profile.color_temperature_kelvin, profile.humidity_min,
+        profile.humidity_max, profile.cover_position,
+    ))
 
 
 def _scheduled_action_model(plan: ServiceCallPlan) -> ActionModel | None:

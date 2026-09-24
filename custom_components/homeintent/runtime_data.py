@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from collections import deque
 from typing import Any
+import asyncio
+from collections.abc import Callable
 
 from .engine import NluEngine
 from .audit_log import AuditTrail
@@ -25,6 +27,7 @@ from .learning_policy import LearningPolicy
 from .model_registry import ModelRegistry
 from .predictive_house_model import PredictiveHouseModel
 from .thermal_tracker import ThermalExperienceTracker
+from .thermal_deadline import PendingThermalCheckpointStore
 
 
 @dataclass
@@ -61,6 +64,9 @@ class HomeIntentRuntimeData:
     predictive_house: PredictiveHouseModel | None = None
     learning_manager: LearningManager | None = None
     thermal_tracker: ThermalExperienceTracker | None = None
+    thermal_checkpoints: PendingThermalCheckpointStore | None = None
+    learning_tasks: set[asyncio.Task[None]] = field(default_factory=set)
+    remove_learning_listener: Callable[[], None] | None = None
 
     def __post_init__(self) -> None:
         self.context_store.bind_dialog_listener(self._synchronize_dialog)

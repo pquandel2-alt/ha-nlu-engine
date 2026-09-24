@@ -17,6 +17,7 @@ from .experience import (
 )
 from .learning_policy import DEFAULT_LEARNING_POLICY, LearningPolicy
 from .learning_policy import KnowledgeState
+from .goal_run import EffectEvidenceState
 from .model_registry import LearnedKind, LearnedModel, ModelHealth
 from .prediction import PredictionResult, PredictionStatus
 
@@ -82,6 +83,16 @@ class ThermalModel:
     updated_at: datetime
     drift_detected: bool = False
     invalidation_reason: str | None = None
+    min_temperature_delta: float | None = None
+    max_temperature_delta: float | None = None
+    min_start_temperature: float | None = None
+    max_start_temperature: float | None = None
+    min_outdoor_gap: float | None = None
+    max_outdoor_gap: float | None = None
+    validation_sample_count: int = 0
+    validation_mae_seconds: float | None = None
+    validation_median_absolute_error_seconds: float | None = None
+    validation_p90_absolute_error_seconds: float | None = None
 
 
 def thermal_observation_to_experience(
@@ -117,6 +128,8 @@ def thermal_observation_to_experience(
             observation.target_celsius if observation.reached_target else None,
             observation.duration_seconds,
             observation.reached_target and observation.service_succeeded,
+            (EffectEvidenceState.VERIFIED_SUCCESS
+             if observation.usable else EffectEvidenceState.INVALID),
         ),
         evidence, ExperienceProvenance.GOAL_RUN,
         ExperienceQuality.COMPLETE if observation.usable else ExperienceQuality.INVALID,
@@ -172,30 +185,58 @@ def thermal_model_to_learned(
         "residual_p90_seconds": model.residual_p90_seconds,
         "drift_detected": model.drift_detected,
         "updated_at": model.updated_at.isoformat(),
+        "validation_sample_count": model.validation_sample_count,
     }
     if model.binding.outdoor_temperature_entity_id is not None:
         parameters["outdoor_temperature_entity_id"] = model.binding.outdoor_temperature_entity_id
     if model.outside_gap_coefficient is not None:
         parameters["outside_gap_coefficient"] = model.outside_gap_coefficient
+    for key, value in (
+        ("min_temperature_delta", model.min_temperature_delta),
+        ("max_temperature_delta", model.max_temperature_delta),
+        ("min_start_temperature", model.min_start_temperature),
+        ("max_start_temperature", model.max_start_temperature),
+        ("min_outdoor_gap", model.min_outdoor_gap),
+        ("max_outdoor_gap", model.max_outdoor_gap),
+        ("validation_mae_seconds", model.validation_mae_seconds),
+        ("validation_median_absolute_error_seconds", model.validation_median_absolute_error_seconds),
+        ("validation_p90_absolute_error_seconds", model.validation_p90_absolute_error_seconds),
+    ):
+        if value is not None:
+            parameters[key] = value
     health = (
         ModelHealth.INVALID if model.invalidation_reason else
         ModelHealth.DRIFT_DETECTED if model.drift_detected else ModelHealth.VALID
     )
     if health is ModelHealth.VALID:
-        if model.mae_seconds > policy.maximum_thermal_mae_minutes * 60.0:
+        authoritative_mae = (
+            model.validation_mae_seconds
+            if model.validation_mae_seconds is not None else model.mae_seconds
+        )
+        if authoritative_mae > policy.maximum_thermal_mae_minutes * 60.0:
             health = ModelHealth.UNRELIABLE
         elif (
             model.sample_count < policy.usable_model_samples
             or model.confidence < policy.minimum_planning_confidence
+            or model.validation_sample_count == 0
         ):
             health = ModelHealth.LOW_CONFIDENCE
+    validation_metrics = {
+        "training_mae_seconds": model.mae_seconds,
+        "residual_mad_seconds": model.residual_mad_seconds,
+    }
+    if model.validation_mae_seconds is not None:
+        validation_metrics["holdout_mae_seconds"] = model.validation_mae_seconds
+    if model.validation_median_absolute_error_seconds is not None:
+        validation_metrics["holdout_median_absolute_error_seconds"] = model.validation_median_absolute_error_seconds
+    if model.validation_p90_absolute_error_seconds is not None:
+        validation_metrics["holdout_p90_absolute_error_seconds"] = model.validation_p90_absolute_error_seconds
     return LearnedModel(
         model.model_id, LearnedKind.THERMAL_MODEL, model.binding.area_id,
         {"area_id": model.binding.area_id}, parameters, KnowledgeState.OBSERVED,
         model.confidence, model.sample_count, model.trained_from,
         model.trained_until, (), model.model_version,
-        {"mae_seconds": model.mae_seconds,
-         "residual_mad_seconds": model.residual_mad_seconds},
+        validation_metrics,
         health=health, invalidation_reason=model.invalidation_reason,
     )
 
@@ -228,6 +269,16 @@ def thermal_model_from_learned(model: LearnedModel) -> ThermalModel | None:
         required[4] or 0.0, required[5] or 0.0, model.first_observed,
         model.last_observed, _stored_datetime(values.get("updated_at"), model.last_observed),
         bool(values.get("drift_detected", False)), model.invalidation_reason,
+        _numeric(values.get("min_temperature_delta")),
+        _numeric(values.get("max_temperature_delta")),
+        _numeric(values.get("min_start_temperature")),
+        _numeric(values.get("max_start_temperature")),
+        _numeric(values.get("min_outdoor_gap")),
+        _numeric(values.get("max_outdoor_gap")),
+        int(_numeric(values.get("validation_sample_count")) or 0),
+        _numeric(values.get("validation_mae_seconds")),
+        _numeric(values.get("validation_median_absolute_error_seconds")),
+        _numeric(values.get("validation_p90_absolute_error_seconds")),
     )
 
 
@@ -252,7 +303,14 @@ def train_thermal_model(
         and len(usable) >= policy.usable_model_samples
         and all(item.outdoor_celsius is not None for item in usable)
     )
-    rows = tuple(_row(item, use_outside) for item in usable)
+    ordered = tuple(sorted(usable, key=lambda item: (item.ended_at, item.started_at)))
+    holdout_count = (
+        max(1, math.ceil(len(ordered) * policy.thermal_holdout_fraction))
+        if len(ordered) >= policy.thermal_minimum_holdout_samples else 0
+    )
+    training = ordered[:-holdout_count] if holdout_count else ordered
+    holdout = ordered[-holdout_count:] if holdout_count else ()
+    rows = tuple(_row(item, use_outside) for item in training)
     coefficients = _least_squares(rows)
     predictions = tuple(_dot(row[:-1], coefficients) for row in rows)
     residuals = tuple(row[-1] - prediction for row, prediction in zip(rows, predictions))
@@ -260,8 +318,17 @@ def train_thermal_model(
     mae = sum(absolute) / len(absolute)
     mad = median(abs(item - median(residuals)) for item in residuals)
     p90 = _quantile(absolute, 0.90)
+    validation_absolute = tuple(
+        abs(row[-1] - _dot(row[:-1], coefficients))
+        for row in (_row(item, use_outside) for item in holdout)
+    )
+    validation_mae = (
+        sum(validation_absolute) / len(validation_absolute)
+        if validation_absolute else None
+    )
+    authoritative_error = validation_mae if validation_mae is not None else mae
     evidence_factor = min(1.0, len(usable) / policy.usable_model_samples)
-    error_factor = max(0.0, 1.0 - mae / (policy.maximum_thermal_mae_minutes * 60.0))
+    error_factor = max(0.0, 1.0 - authoritative_error / (policy.maximum_thermal_mae_minutes * 60.0))
     confidence = max(0.0, min(1.0, evidence_factor * error_factor))
     current = now or datetime.now(timezone.utc)
     return ThermalModel(
@@ -269,7 +336,26 @@ def train_thermal_model(
         coefficients[0], coefficients[1], coefficients[2] if use_outside else None,
         len(usable), confidence, mae, median(residuals), mad, p90,
         min(item.started_at for item in usable), max(item.ended_at for item in usable),
-        current,
+        current, invalidation_reason=(
+            "non_positive_temperature_delta_coefficient"
+            if coefficients[1] <= 0.0 else None
+        ),
+        min_temperature_delta=min(item.target_celsius - item.start_celsius for item in usable),
+        max_temperature_delta=max(item.target_celsius - item.start_celsius for item in usable),
+        min_start_temperature=min(item.start_celsius for item in usable),
+        max_start_temperature=max(item.start_celsius for item in usable),
+        min_outdoor_gap=(
+            min(max(0.0, item.start_celsius - (item.outdoor_celsius or 0.0)) for item in usable)
+            if use_outside else None
+        ),
+        max_outdoor_gap=(
+            max(max(0.0, item.start_celsius - (item.outdoor_celsius or 0.0)) for item in usable)
+            if use_outside else None
+        ),
+        validation_sample_count=len(validation_absolute),
+        validation_mae_seconds=validation_mae,
+        validation_median_absolute_error_seconds=(median(validation_absolute) if validation_absolute else None),
+        validation_p90_absolute_error_seconds=(_quantile(validation_absolute, 0.90) if validation_absolute else None),
     )
 
 
@@ -301,16 +387,45 @@ def predict_thermal_duration(
     if model.outside_gap_coefficient is not None and outdoor_celsius is None:
         return _model_prediction(model, policy, PredictionStatus.INCOMPATIBLE_CONTEXT,
                                  explanation="Die bestätigte Außentemperaturmessung fehlt.")
+    delta = target_celsius - current_celsius
+    if _outside_domain(
+        delta, model.min_temperature_delta, model.max_temperature_delta,
+        policy.thermal_extrapolation_margin_ratio,
+    ):
+        return _model_prediction(
+            model, policy, PredictionStatus.OUT_OF_DISTRIBUTION,
+            explanation="Die angefragte Temperaturänderung liegt außerhalb der Trainingsdomäne.",
+        )
+    outdoor_gap = (
+        max(0.0, current_celsius - outdoor_celsius)
+        if outdoor_celsius is not None else None
+    )
+    if model.outside_gap_coefficient is not None and outdoor_gap is not None and _outside_domain(
+        outdoor_gap, model.min_outdoor_gap, model.max_outdoor_gap,
+        policy.thermal_extrapolation_margin_ratio,
+    ):
+        return _model_prediction(
+            model, policy, PredictionStatus.OUT_OF_DISTRIBUTION,
+            explanation="Die Außentemperaturdifferenz liegt außerhalb der Trainingsdomäne.",
+        )
     if model.sample_count < policy.usable_model_samples:
         return _model_prediction(model, policy, PredictionStatus.LOW_CONFIDENCE,
                                  explanation="Noch nicht genug verwertbare Heizvorgänge.")
-    if model.mae_seconds > policy.maximum_thermal_mae_minutes * 60.0:
+    authoritative_mae = (
+        model.validation_mae_seconds
+        if model.validation_mae_seconds is not None else model.mae_seconds
+    )
+    if authoritative_mae > policy.maximum_thermal_mae_minutes * 60.0:
         return _model_prediction(model, policy, PredictionStatus.MODEL_UNRELIABLE,
                                  explanation="Der historische mittlere Fehler ist zu hoch.")
     if not policy.permits_planning(model.confidence, model.sample_count):
         return _model_prediction(model, policy, PredictionStatus.LOW_CONFIDENCE,
                                  explanation="Konfidenz unterhalb der Planning-Schwelle.")
-    delta = target_celsius - current_celsius
+    if model.validation_sample_count == 0:
+        return _model_prediction(
+            model, policy, PredictionStatus.LOW_CONFIDENCE,
+            explanation="Noch keine deterministische Holdout-Validierung verfügbar.",
+        )
     features = [1.0, delta]
     names = ["temperature_delta"]
     if model.outside_gap_coefficient is not None and outdoor_celsius is not None:
@@ -435,6 +550,16 @@ def _quantile(values: tuple[float, ...], quantile: float) -> float:
 
 def _numeric(value: object) -> float | None:
     return float(value) if isinstance(value, (int, float)) else None
+
+
+def _outside_domain(
+    value: float, minimum: float | None, maximum: float | None, margin_ratio: float
+) -> bool:
+    if minimum is None or maximum is None:
+        return False
+    width = max(0.0, maximum - minimum)
+    margin = width * max(0.0, margin_ratio)
+    return value < minimum - margin or value > maximum + margin
 
 
 def _stored_datetime(value: object, default: datetime) -> datetime:

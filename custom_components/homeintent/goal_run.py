@@ -53,6 +53,15 @@ class CausalityLevel(StrEnum):
     POSSIBLE_BUT_UNPROVEN = "possible_but_unproven"
 
 
+class EffectEvidenceState(StrEnum):
+    """Authority of an observed effect; absence of evidence is not failure."""
+
+    VERIFIED_SUCCESS = "verified_success"
+    VERIFIED_FAILURE = "verified_failure"
+    UNVERIFIED = "unverified"
+    INVALID = "invalid"
+
+
 @dataclass(frozen=True)
 class VerificationRecord:
     entity_id: str
@@ -74,6 +83,8 @@ class StepExecutionRecord:
     failure_code: FailureCode | None = None
     message: str = ""
     executed_at: str | None = None
+    attempted_at: str | None = None
+    service_accepted_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -201,8 +212,12 @@ class GoalRunStore:
 
     def add_append_listener(
         self, listener: Callable[[GoalRun], Awaitable[None]]
-    ) -> None:
+    ) -> Callable[[], None]:
         self._append_listeners.append(listener)
+        def remove() -> None:
+            if listener in self._append_listeners:
+                self._append_listeners.remove(listener)
+        return remove
 
     async def async_append(self, run: GoalRun) -> None:
         async with self._lock:
@@ -358,6 +373,8 @@ def _step_dict(value: StepExecutionRecord) -> dict[str, object]:
         "failure_code": value.failure_code.value if value.failure_code else None,
         "message": value.message,
         "executed_at": value.executed_at,
+        "attempted_at": value.attempted_at,
+        "service_accepted_at": value.service_accepted_at,
     }
 
 
@@ -379,6 +396,8 @@ def _step_from(raw: Mapping[str, object]) -> StepExecutionRecord:
         FailureCode(str(raw["failure_code"])) if raw.get("failure_code") else None,
         str(raw.get("message", "")),
         _text(raw.get("executed_at")),
+        _text(raw.get("attempted_at")),
+        _text(raw.get("service_accepted_at")),
     )
 
 
@@ -471,7 +490,7 @@ def _run_entity_ids(run: GoalRun) -> frozenset[str]:
 
 
 __all__ = (
-    "CausalityLevel", "FailureCode", "FailureExplanation", "GoalRun",
+    "CausalityLevel", "EffectEvidenceState", "FailureCode", "FailureExplanation", "GoalRun",
     "GoalRunClarification", "GoalRunQuery",
     "GoalRunStatus", "GoalRunStore", "NotificationRecord", "StepExecutionRecord",
     "VerificationRecord", "explain_goal_run",

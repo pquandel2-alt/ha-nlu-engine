@@ -111,6 +111,8 @@ class StepResult:
     message: str
     executed_at: str | None = None
     verified_at: str | None = None
+    attempted_at: str | None = None
+    service_accepted_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -524,18 +526,19 @@ class PlanExecutor:
                 completed_ids.add(step.step_id)
                 results.append(StepResult(step.step_id, True, f"Persistent für {step.execute_at_local_time} Uhr geplant."))
                 continue
-            executed_at = datetime.now(timezone.utc).isoformat()
+            attempted_at = datetime.now(timezone.utc).isoformat()
             result = await self._execute_plan(action, fresh, confirmed)
             if not result.executed:
                 results.append(StepResult(
                     step.step_id, False, result.error or "Nicht ausgeführt.",
-                    executed_at,
+                    attempted_at, None, attempted_at, None,
                 ))
                 compensated = await self._compensate(executed, confirmed)
                 return PlanResult(
                     plan.plan_id, _failed_status(executed, compensated),
                     tuple(results), compensated,
                 )
+            service_accepted_at = datetime.now(timezone.utc).isoformat()
             verified = True
             for entity_id, state in step.verification.items():
                 if not await self._verify_state(entity_id, state):
@@ -545,7 +548,8 @@ class PlanExecutor:
             if not verified:
                 results.append(StepResult(
                     step.step_id, False, "Erwartete Wirkung nicht beobachtet.",
-                    executed_at, verified_at,
+                    service_accepted_at, verified_at, attempted_at,
+                    service_accepted_at,
                 ))
                 compensated = await self._compensate((*executed, step), confirmed)
                 return PlanResult(
@@ -556,7 +560,8 @@ class PlanExecutor:
             completed_ids.add(step.step_id)
             results.append(StepResult(
                 step.step_id, True, "Ausgeführt und verifiziert.",
-                executed_at, verified_at,
+                service_accepted_at, verified_at, attempted_at,
+                service_accepted_at,
             ))
         return PlanResult(
             plan.plan_id,

@@ -83,14 +83,24 @@ def resolve_preferences(
     shared_preference: LearnedPreference | None = None,
     conflict_policy: ConflictResolution = ConflictResolution.MANUAL_CLARIFICATION,
     owner_user_id: str | None = None,
+    concept: str | None = None,
+    area_id: str | None = None,
 ) -> PreferenceResolution:
     confirmed = tuple(
         item for item in preferences
         if item.knowledge_state is KnowledgeState.CONFIRMED
         and item.context.user_id in present_user_ids
+        and (concept is None or item.context.concept == concept)
+        and (area_id is None or item.context.area_id == area_id)
     )
     if len(present_user_ids) > 1 and shared_preference is not None:
-        if shared_preference.knowledge_state is KnowledgeState.CONFIRMED:
+        if (
+            shared_preference.knowledge_state is KnowledgeState.CONFIRMED
+            and tuple(sorted(shared_preference.context.presence_set))
+            == tuple(sorted(set(present_user_ids)))
+            and (concept is None or shared_preference.context.concept == concept)
+            and (area_id is None or shared_preference.context.area_id == area_id)
+        ):
             return PreferenceResolution(
                 shared_preference.preferred_value, False,
                 (shared_preference.preference_id,),
