@@ -165,9 +165,18 @@ def extract_goal_run_experiences(run: GoalRun) -> tuple[ExperienceRecord, ...]:
                     observed_at = None
             latency = None
             try:
-                created = datetime.fromisoformat(run.created_at)
-                if observed_at is not None and created.tzinfo is not None:
-                    latency = max(0.0, (observed_at - created).total_seconds())
+                executed_at = (
+                    datetime.fromisoformat(step.executed_at)
+                    if step.executed_at is not None else None
+                )
+                if (
+                    observed_at is not None
+                    and executed_at is not None
+                    and executed_at.tzinfo is not None
+                ):
+                    latency = max(
+                        0.0, (observed_at - executed_at).total_seconds()
+                    )
             except (ValueError, TypeError):
                 pass
             success = bool(verification.success) if verification is not None else False

@@ -73,6 +73,7 @@ class StepExecutionRecord:
     verification: tuple[VerificationRecord, ...] = ()
     failure_code: FailureCode | None = None
     message: str = ""
+    executed_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -356,6 +357,7 @@ def _step_dict(value: StepExecutionRecord) -> dict[str, object]:
         ],
         "failure_code": value.failure_code.value if value.failure_code else None,
         "message": value.message,
+        "executed_at": value.executed_at,
     }
 
 
@@ -376,6 +378,7 @@ def _step_from(raw: Mapping[str, object]) -> StepExecutionRecord:
         accepted if isinstance(accepted, bool) else None, verification,
         FailureCode(str(raw["failure_code"])) if raw.get("failure_code") else None,
         str(raw.get("message", "")),
+        _text(raw.get("executed_at")),
     )
 
 

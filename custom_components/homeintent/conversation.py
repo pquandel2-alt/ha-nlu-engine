@@ -2528,7 +2528,11 @@ class NluConversationEntity(
                                 verification_records.append(
                                     VerificationRecord(
                                         entity_id, expected, observed, success, code,
-                                        dt_util.utcnow().isoformat(),
+                                        (
+                                            outcome.verified_at
+                                            if outcome is not None
+                                            else None
+                                        ),
                                     )
                                 )
                             step_records.append(
@@ -2539,6 +2543,7 @@ class NluConversationEntity(
                                     tuple(verification_records),
                                     failures[-1] if failures and verification_records and not verification_records[-1].success else None,
                                     outcome.message if outcome is not None else "Nicht ausgeführt.",
+                                    outcome.executed_at if outcome is not None else None,
                                 )
                             )
                         run = GoalRun.start(

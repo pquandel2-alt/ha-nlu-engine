@@ -558,6 +558,13 @@ def test_verified_earlier_step_plus_later_effect_failure_is_partial_failure():
 
     result = asyncio.run(PlanExecutor(refresh, execute, verify).execute(plan, confirmed=True))
     assert result.status is PlanStatus.PARTIAL_FAILURE
+    for step_result in result.steps[1:]:
+        assert step_result.executed_at is not None
+        assert step_result.verified_at is not None
+        executed_at = datetime.fromisoformat(step_result.executed_at)
+        verified_at = datetime.fromisoformat(step_result.verified_at)
+        assert executed_at.tzinfo is not None
+        assert executed_at <= verified_at
 
 
 def test_structured_plan_modification_removes_every_child_room_step():

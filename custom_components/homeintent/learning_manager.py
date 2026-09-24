@@ -10,7 +10,13 @@ from .experience import ExperienceQuality, extract_goal_run_experiences
 from .experience_store import ExperienceStore
 from .goal_run import GoalRun, GoalRunStatus
 from .learning_policy import KnowledgeState, LearningPolicy
-from .model_registry import LearnedKind, LearnedModel, ModelHealth, ModelRegistry
+from .model_registry import (
+    LearnedKind,
+    LearnedModel,
+    ModelHealth,
+    ModelRegistry,
+    UpsertResult,
+)
 from .predictive_house_model import PredictiveHouseModel
 from .statistical_models import (
     EffectTimingModel,
@@ -46,38 +52,48 @@ class LearningManager:
         self.models = models
         self.predictive_house = predictive_house
         self.policy = policy
+        self.models.bind_active_view(
+            self._activate_learned_model, self._deactivate_learned_model
+        )
 
     async def async_restore_models(self) -> None:
         """Rehydrate the read-only prediction view after an HA restart."""
-        for model in await self.models.async_list():
-            if model.health is ModelHealth.INVALID:
-                continue
-            if model.kind is LearnedKind.THERMAL_MODEL:
-                thermal = thermal_model_from_learned(model)
-                if thermal is not None:
-                    self.predictive_house.install_thermal(thermal)
-            elif model.kind is LearnedKind.EFFECT_TIMING:
-                operator = model.context.get("operator_id")
-                median = _number(model.parameters.get("median_seconds"))
-                p90 = _number(model.parameters.get("p90_seconds"))
-                p95 = _number(model.parameters.get("p95_seconds"))
-                mad = _number(model.parameters.get("mad_seconds"))
-                if isinstance(operator, str) and None not in (median, p90, p95, mad):
-                    self.predictive_house.install_effect_timing(EffectTimingModel(
-                        model.model_id, operator, model.subject, model.sample_count,
-                        median or 0.0, p90 or 0.0, p95 or 0.0, mad or 0.0,
-                        model.confidence,
-                    ))
-            elif model.kind is LearnedKind.RELIABILITY:
-                operator = model.context.get("operator_id")
-                rate = _number(model.parameters.get("success_rate"))
-                if isinstance(operator, str) and rate is not None:
-                    successes = round(rate * model.sample_count)
-                    self.predictive_house.install_reliability(ReliabilityStatistic(
-                        model.model_id, operator, model.subject, successes,
-                        model.sample_count - successes, model.sample_count, rate,
-                        model.confidence,
-                    ))
+        await self.models.async_restore_active_view()
+
+    def _activate_learned_model(self, model: LearnedModel) -> None:
+        """Update the advisory view only after authoritative registry acceptance."""
+        if model.health is ModelHealth.INVALID:
+            self.predictive_house.forget(model.model_id)
+            return
+        if model.kind is LearnedKind.THERMAL_MODEL:
+            thermal = thermal_model_from_learned(model)
+            if thermal is not None:
+                self.predictive_house.install_thermal(thermal)
+        elif model.kind is LearnedKind.EFFECT_TIMING:
+            operator = model.context.get("operator_id")
+            median = _number(model.parameters.get("median_seconds"))
+            p90 = _number(model.parameters.get("p90_seconds"))
+            p95 = _number(model.parameters.get("p95_seconds"))
+            mad = _number(model.parameters.get("mad_seconds"))
+            if isinstance(operator, str) and None not in (median, p90, p95, mad):
+                self.predictive_house.install_effect_timing(EffectTimingModel(
+                    model.model_id, operator, model.subject, model.sample_count,
+                    median or 0.0, p90 or 0.0, p95 or 0.0, mad or 0.0,
+                    model.confidence,
+                ))
+        elif model.kind is LearnedKind.RELIABILITY:
+            operator = model.context.get("operator_id")
+            rate = _number(model.parameters.get("success_rate"))
+            if isinstance(operator, str) and rate is not None:
+                successes = round(rate * model.sample_count)
+                self.predictive_house.install_reliability(ReliabilityStatistic(
+                    model.model_id, operator, model.subject, successes,
+                    model.sample_count - successes, model.sample_count, rate,
+                    model.confidence,
+                ))
+
+    def _deactivate_learned_model(self, model_id: str) -> None:
+        self.predictive_house.forget(model_id)
 
     async def async_update_thermal_model(
         self, binding: ThermalBinding
@@ -124,17 +140,23 @@ class LearningManager:
                     updated_at=(later[-1].ended_at if later else existing_thermal.updated_at),
                     model_version=existing_thermal.model_version + 1,
                 )
-                self.predictive_house.install_thermal(drifted)
-                await self.models.async_upsert(thermal_model_to_learned(drifted, self.policy))
-                return drifted
+                stored = await self.models.async_upsert(
+                    thermal_model_to_learned(drifted, self.policy)
+                )
+                if stored is UpsertResult.STORED:
+                    return drifted
+                return None
         model = train_thermal_model(
             binding, observations, self.policy,
             model_version=(existing.model_version + 1 if existing is not None else 1),
         )
         if model is None:
             return None
-        self.predictive_house.install_thermal(model)
-        await self.models.async_upsert(thermal_model_to_learned(model, self.policy))
+        stored = await self.models.async_upsert(
+            thermal_model_to_learned(model, self.policy)
+        )
+        if stored is not UpsertResult.STORED:
+            return None
         return model
 
     async def async_invalidate_thermal_model(
@@ -229,7 +251,8 @@ class LearningManager:
             health=ModelHealth.VALID if inferred else ModelHealth.LOW_CONFIDENCE,
             confirmed_by=existing.confirmed_by if existing is not None else None,
         )
-        await self.models.async_upsert(model)
+        if await self.models.async_upsert(model) is not UpsertResult.STORED:
+            return None
         return model
 
     async def async_observe_goal_run(self, run: GoalRun) -> None:
@@ -259,7 +282,6 @@ class LearningManager:
                 record.action.operator_id, record.action.target_id, outcomes
             )
             if reliability is not None:
-                self.predictive_house.install_reliability(reliability)
                 await self.models.async_upsert(LearnedModel(
                     reliability.model_id, LearnedKind.RELIABILITY,
                     record.action.target_id,
@@ -285,7 +307,6 @@ class LearningManager:
             )
             if timing is None:
                 continue
-            self.predictive_house.install_effect_timing(timing)
             await self.models.async_upsert(LearnedModel(
                 timing.model_id, LearnedKind.EFFECT_TIMING,
                 record.action.target_id,

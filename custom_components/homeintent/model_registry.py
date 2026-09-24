@@ -10,7 +10,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Mapping, Sequence, cast
+from typing import Callable, Mapping, Sequence, cast
 
 from .learning_policy import KnowledgeState, LearningPolicy
 
@@ -37,6 +37,14 @@ class ModelHealth(StrEnum):
     STALE = "stale"
     DRIFT_DETECTED = "drift_detected"
     INVALID = "invalid"
+
+
+class UpsertResult(StrEnum):
+    """Authoritative outcome of attempting to store learned knowledge."""
+
+    STORED = "stored"
+    SUPPRESSED = "suppressed"
+    REJECTED = "rejected"
 
 
 ModelValue = str | float | int | bool
@@ -116,14 +124,29 @@ class ModelRegistry:
         self.policy = policy
         self._lock = asyncio.Lock()
         self._cache: tuple[list[LearnedModel], set[str]] | None = None
+        self._activate: Callable[[LearnedModel], None] | None = None
+        self._deactivate: Callable[[str], None] | None = None
 
-    async def async_upsert(self, model: LearnedModel) -> None:
-        await self.async_upsert_many((model,))
+    def bind_active_view(
+        self,
+        activate: Callable[[LearnedModel], None],
+        deactivate: Callable[[str], None],
+    ) -> None:
+        """Bind the sole in-memory view governed by registry decisions."""
+        self._activate = activate
+        self._deactivate = deactivate
 
-    async def async_upsert_many(self, incoming: Sequence[LearnedModel]) -> None:
+    async def async_upsert(self, model: LearnedModel) -> UpsertResult:
+        """Store one model and report whether it may become active."""
+        return (await self.async_upsert_many((model,)))[0]
+
+    async def async_upsert_many(
+        self, incoming: Sequence[LearnedModel]
+    ) -> tuple[UpsertResult, ...]:
         """Atomically update a bounded batch without feature-specific files."""
         async with self._lock:
             models, tombstones = await self._load_unlocked()
+            previous_ids = {item.model_id for item in models}
             indexed = {item.model_id: item for item in models}
             for model in incoming:
                 if model.model_id not in tombstones:
@@ -133,6 +156,44 @@ class ModelRegistry:
             )[-max(1, self.policy.model_limit):]
             await asyncio.to_thread(self._write, bounded, tombstones)
             self._cache = (list(bounded), set(tombstones))
+            stored_ids = {item.model_id for item in bounded}
+            results = tuple(
+                UpsertResult.SUPPRESSED
+                if model.model_id in tombstones
+                else UpsertResult.STORED
+                if model.model_id in stored_ids
+                else UpsertResult.REJECTED
+                for model in incoming
+            )
+            if self._deactivate is not None:
+                for model_id in previous_ids - stored_ids:
+                    self._deactivate(model_id)
+                for model, result in zip(incoming, results, strict=True):
+                    if result is not UpsertResult.STORED:
+                        self._deactivate(model.model_id)
+            if self._activate is not None:
+                for model, result in zip(incoming, results, strict=True):
+                    if result is UpsertResult.STORED:
+                        self._activate(model)
+            return results
+
+    async def async_is_suppressed(self, model_id: str) -> bool:
+        """Return the persisted tombstone decision for a model identifier."""
+        async with self._lock:
+            _models, tombstones = await self._load_unlocked()
+            return model_id in tombstones
+
+    async def async_restore_active_view(self) -> int:
+        """Restore accepted models while serializing against delete/upsert."""
+        async with self._lock:
+            models, tombstones = await self._load_unlocked()
+            active = tuple(
+                model for model in models if model.model_id not in tombstones
+            )
+            if self._activate is not None:
+                for model in active:
+                    self._activate(model)
+            return len(active)
 
     async def async_get(self, model_id: str) -> LearnedModel | None:
         async with self._lock:
@@ -162,6 +223,8 @@ class ModelRegistry:
                 tombstones.add(model_id)
             await asyncio.to_thread(self._write, retained, tombstones)
             self._cache = (list(retained), set(tombstones))
+            if self._deactivate is not None:
+                self._deactivate(model_id)
             return existed
 
     async def async_reset(self) -> int:
@@ -170,6 +233,9 @@ class ModelRegistry:
             tombstones.update(item.model_id for item in models)
             await asyncio.to_thread(self._write, (), tombstones)
             self._cache = ([], set(tombstones))
+            if self._deactivate is not None:
+                for model in models:
+                    self._deactivate(model.model_id)
             return len(models)
 
     async def async_invalidate(self, model_id: str, reason: str) -> bool:
@@ -307,5 +373,5 @@ def explain_learned_model(model: LearnedModel) -> str:
 
 __all__ = (
     "LearnedKind", "LearnedKnowledgeStore", "LearnedModel", "ModelHealth",
-    "ModelRegistry", "ModelValue", "explain_learned_model",
+    "ModelRegistry", "ModelValue", "UpsertResult", "explain_learned_model",
 )

@@ -49,7 +49,13 @@ from homeintent.house_graph import (
 from homeintent.learning_policy import KnowledgeState, LearningMode, LearningPolicy
 from homeintent.learning_policy import ConfidenceBand
 from homeintent.learning_manager import LearningManager
-from homeintent.model_registry import LearnedKind, LearnedModel, ModelHealth, ModelRegistry
+from homeintent.model_registry import (
+    LearnedKind,
+    LearnedModel,
+    ModelHealth,
+    ModelRegistry,
+    UpsertResult,
+)
 from homeintent.preferences import (
     ConflictResolution,
     LearnedPreference,
@@ -136,12 +142,50 @@ def test_goal_run_extractor_uses_verified_features_only():
             "step", "light.turn_on", ("light.a",), (), True,
             (VerificationRecord("light.a", "on", "on", True,
                                 observed_at=(NOW + timedelta(seconds=3)).isoformat()),),
+            executed_at=(NOW + timedelta(seconds=1)).isoformat(),
         ),), (), GoalRunStatus.SUCCESS,
     )
     records = extract_goal_run_experiences(run)
     assert len(records) == 1
-    assert records[0].effect.latency_seconds == 3
+    assert records[0].effect.latency_seconds == 2
     assert "private utterance" not in repr(records[0].to_dict())
+
+
+def test_goal_run_extractor_uses_each_step_execution_time_and_never_run_start():
+    goal = GoalModel(GoalKind.ACHIEVE_STATE, goal_id="g")
+    run = GoalRun(
+        "run", "g", NOW.isoformat(), (NOW + timedelta(seconds=22)).isoformat(),
+        "", "u", None, goal, "plan", ("light.a", "light.b"), (), True,
+        (
+            StepExecutionRecord(
+                "first", "light.turn_on", ("light.a",), (), True,
+                (VerificationRecord(
+                    "light.a", "on", "on", True,
+                    observed_at=(NOW + timedelta(seconds=3)).isoformat(),
+                ),),
+                executed_at=(NOW + timedelta(seconds=2)).isoformat(),
+            ),
+            StepExecutionRecord(
+                "second", "light.turn_on", ("light.b",), (), True,
+                (VerificationRecord(
+                    "light.b", "on", "on", True,
+                    observed_at=(NOW + timedelta(seconds=22)).isoformat(),
+                ),),
+                executed_at=(NOW + timedelta(seconds=20)).isoformat(),
+            ),
+        ),
+        (), GoalRunStatus.SUCCESS,
+    )
+    records = extract_goal_run_experiences(run)
+    assert [item.effect.latency_seconds for item in records] == [1.0, 2.0]
+    restored = GoalRun.from_dict(run.to_dict())
+    assert restored.steps[1].executed_at == (NOW + timedelta(seconds=20)).isoformat()
+
+    legacy = replace(
+        run,
+        steps=(replace(run.steps[1], executed_at=None),),
+    )
+    assert extract_goal_run_experiences(legacy)[0].effect.latency_seconds is None
 
 
 def test_model_registry_persists_invalidates_deletes_and_tombstones(tmp_path):
@@ -152,12 +196,13 @@ def test_model_registry_persists_invalidates_deletes_and_tombstones(tmp_path):
         {"mae": 2.0}, KnowledgeState.OBSERVED, 0.9, 20, NOW, NOW,
         ("exp_1",), health=ModelHealth.VALID,
     )
-    asyncio.run(registry.async_upsert(model))
+    assert asyncio.run(registry.async_upsert(model)) is UpsertResult.STORED
     assert asyncio.run(ModelRegistry(path, _policy()).async_get(model.model_id)) == model
     assert asyncio.run(registry.async_invalidate(model.model_id, "sensor_removed"))
     assert asyncio.run(registry.async_get(model.model_id)).health is ModelHealth.INVALID
     assert asyncio.run(registry.async_delete(model.model_id))
-    asyncio.run(registry.async_upsert(model))
+    assert asyncio.run(registry.async_upsert(model)) is UpsertResult.SUPPRESSED
+    assert asyncio.run(registry.async_is_suppressed(model.model_id))
     assert asyncio.run(registry.async_get(model.model_id)) is None
 
 
@@ -603,6 +648,7 @@ def test_learning_manager_goalrun_models_thermal_update_and_restart(tmp_path):
                     "light.a", "on", "on", True,
                     observed_at=(started + timedelta(seconds=1 + index % 3)).isoformat(),
                 ),),
+                executed_at=started.isoformat(),
             ),), (), GoalRunStatus.SUCCESS,
         )
         asyncio.run(manager.async_observe_goal_run(run))
@@ -628,6 +674,164 @@ def test_learning_manager_goalrun_models_thermal_update_and_restart(tmp_path):
         replace(policy, predictive_models_enabled=False),
     )
     assert asyncio.run(disabled.async_update_thermal_model(binding)) is None
+
+
+def test_tombstoned_effect_and_reliability_models_cannot_reactivate_or_restore(tmp_path):
+    policy = _policy(
+        retention_days=3650, minimum_model_samples=2, usable_model_samples=2
+    )
+    experiences = ExperienceStore(tmp_path / "experiences.json", policy)
+    registry_path = tmp_path / "models.json"
+    registry = ModelRegistry(registry_path, policy)
+    house = PredictiveHouseModel(policy)
+    manager = LearningManager(experiences, registry, house, policy)
+    goal = GoalModel(GoalKind.ACHIEVE_STATE, goal_id="g")
+
+    def observed_run(index: int) -> GoalRun:
+        started = NOW + timedelta(minutes=index)
+        return GoalRun(
+            f"run{index}", "g", (started - timedelta(seconds=30)).isoformat(),
+            (started + timedelta(seconds=2)).isoformat(), "", "u", None,
+            goal, "p", ("light.a",), (), True,
+            (StepExecutionRecord(
+                "s", "light.turn_on", ("light.a",), (), True,
+                (VerificationRecord(
+                    "light.a", "on", "on", True,
+                    observed_at=(started + timedelta(seconds=2)).isoformat(),
+                ),),
+                executed_at=started.isoformat(),
+            ),), (), GoalRunStatus.SUCCESS,
+        )
+
+    asyncio.run(manager.async_observe_goal_run(observed_run(0)))
+    asyncio.run(manager.async_observe_goal_run(observed_run(1)))
+    timing_id = "effect_latency:light.turn_on:light.a"
+    reliability_id = "reliability:light.turn_on:light.a"
+    assert house.effect_timing_model("light.turn_on", "light.a") is not None
+    assert house.predict_reliability("light.turn_on", "light.a").value == 1.0
+
+    assert asyncio.run(registry.async_delete(timing_id, suppress=True))
+    assert asyncio.run(registry.async_delete(reliability_id, suppress=True))
+    assert house.effect_timing_model("light.turn_on", "light.a") is None
+    assert house.predict_reliability(
+        "light.turn_on", "light.a"
+    ).status is PredictionStatus.INSUFFICIENT_DATA
+    asyncio.run(manager.async_observe_goal_run(observed_run(2)))
+
+    assert asyncio.run(registry.async_get(timing_id)) is None
+    assert asyncio.run(registry.async_get(reliability_id)) is None
+    assert house.predict_effect_latency(
+        "light.turn_on", "light.a"
+    ).status is PredictionStatus.INSUFFICIENT_DATA
+    assert house.predict_reliability(
+        "light.turn_on", "light.a"
+    ).status is PredictionStatus.INSUFFICIENT_DATA
+
+    restarted_house = PredictiveHouseModel(policy)
+    restarted = LearningManager(
+        experiences, ModelRegistry(registry_path, policy), restarted_house, policy
+    )
+    asyncio.run(restarted.async_restore_models())
+    asyncio.run(restarted.async_observe_goal_run(observed_run(3)))
+    assert restarted_house.predict_effect_latency(
+        "light.turn_on", "light.a"
+    ).status is PredictionStatus.INSUFFICIENT_DATA
+    assert restarted_house.predict_reliability(
+        "light.turn_on", "light.a"
+    ).status is PredictionStatus.INSUFFICIENT_DATA
+
+
+def test_tombstoned_thermal_model_cannot_reactivate_or_restore(tmp_path):
+    policy = _policy(
+        retention_days=3650, minimum_model_samples=2, usable_model_samples=2
+    )
+    experiences = ExperienceStore(tmp_path / "experiences.json", policy)
+    registry_path = tmp_path / "models.json"
+    registry = ModelRegistry(registry_path, policy)
+    house = PredictiveHouseModel(policy)
+    manager = LearningManager(experiences, registry, house, policy)
+    binding = ThermalBinding(
+        "living_room", "sensor.living_temperature", "climate.living_room",
+        confirmed=True,
+    )
+    records = tuple(
+        thermal_observation_to_experience(
+            observation, goal_id="warm", run_id=f"thermal{index}"
+        )
+        for index, observation in enumerate(_thermal_observations())
+    )
+    asyncio.run(experiences.async_extend(records))
+    assert asyncio.run(manager.async_update_thermal_model(binding)) is not None
+    model_id = "thermal:living_room"
+    assert asyncio.run(registry.async_delete(model_id, suppress=True))
+    assert house.thermal_model("living_room") is None
+
+    extra = replace(
+        _thermal_observations(1)[0],
+        started_at=NOW + timedelta(days=2),
+        ended_at=NOW + timedelta(days=2, minutes=30),
+    )
+    asyncio.run(experiences.async_append(thermal_observation_to_experience(
+        extra, goal_id="warm", run_id="thermal-new"
+    )))
+    assert asyncio.run(manager.async_update_thermal_model(binding)) is None
+    assert asyncio.run(registry.async_get(model_id)) is None
+    assert house.thermal_model("living_room") is None
+    assert house.predict_thermal(
+        "living_room", current_celsius=19, target_celsius=21,
+        outdoor_celsius=None, now=NOW,
+    ).status is PredictionStatus.INSUFFICIENT_DATA
+
+    restarted_house = PredictiveHouseModel(policy)
+    restarted = LearningManager(
+        experiences, ModelRegistry(registry_path, policy), restarted_house, policy
+    )
+    asyncio.run(restarted.async_restore_models())
+    assert asyncio.run(restarted.async_update_thermal_model(binding)) is None
+    assert restarted_house.thermal_model("living_room") is None
+
+
+def test_reset_tombstones_block_retraining_from_retained_old_evidence(tmp_path):
+    policy = _policy(
+        retention_days=3650, minimum_model_samples=2, usable_model_samples=2
+    )
+    experiences = ExperienceStore(tmp_path / "experiences.json", policy)
+    registry_path = tmp_path / "models.json"
+    registry = ModelRegistry(registry_path, policy)
+    house = PredictiveHouseModel(policy)
+    manager = LearningManager(experiences, registry, house, policy)
+    goal = GoalModel(GoalKind.ACHIEVE_STATE, goal_id="g")
+    for index in range(2):
+        started = NOW + timedelta(minutes=index)
+        run = GoalRun(
+            f"run{index}", "g", started.isoformat(),
+            (started + timedelta(seconds=1)).isoformat(), "", "u", None,
+            goal, "p", ("light.a",), (), True,
+            (StepExecutionRecord(
+                "s", "light.turn_on", ("light.a",), (), True,
+                (VerificationRecord(
+                    "light.a", "on", "on", True,
+                    observed_at=(started + timedelta(seconds=1)).isoformat(),
+                ),), executed_at=started.isoformat(),
+            ),), (), GoalRunStatus.SUCCESS,
+        )
+        asyncio.run(manager.async_observe_goal_run(run))
+    assert asyncio.run(registry.async_reset()) == 2
+    house.clear()
+
+    restarted_registry = ModelRegistry(registry_path, policy)
+    restarted_house = PredictiveHouseModel(policy)
+    restarted = LearningManager(
+        experiences, restarted_registry, restarted_house, policy
+    )
+    asyncio.run(restarted.async_observe_goal_run(run))
+    assert asyncio.run(restarted_registry.async_list()) == ()
+    assert restarted_house.predict_effect_latency(
+        "light.turn_on", "light.a"
+    ).status is PredictionStatus.INSUFFICIENT_DATA
+    assert restarted_house.predict_reliability(
+        "light.turn_on", "light.a"
+    ).status is PredictionStatus.INSUFFICIENT_DATA
 
 
 def test_learning_manager_discovers_but_never_automates_habit_and_respects_rejection(tmp_path):
@@ -698,6 +902,35 @@ def test_learning_manager_infers_contextual_preference_but_never_confirms_it(tmp
     assert preference.parameters["entity_id"] == "light.floor"
     assert preference.context["area_id"] == "living_room"
     assert preference.confirmed_by is None
+
+
+def test_tombstoned_preference_cannot_be_recreated_after_restart(tmp_path):
+    policy = _policy(retention_days=3650)
+    path = tmp_path / "models.json"
+    registry = ModelRegistry(path, policy)
+    manager = LearningManager(
+        ExperienceStore(tmp_path / "experiences.json", policy), registry,
+        PredictiveHouseModel(policy), policy,
+    )
+    created = asyncio.run(manager.async_observe_preference_selection(
+        user_id="philipp", concept="Lampe", area_id="living_room",
+        entity_id="light.floor", observed_at=NOW,
+    ))
+    assert created is not None
+    assert asyncio.run(registry.async_delete(created.model_id, suppress=True))
+
+    restarted_registry = ModelRegistry(path, policy)
+    restarted = LearningManager(
+        ExperienceStore(tmp_path / "experiences.json", policy),
+        restarted_registry, PredictiveHouseModel(policy), policy,
+    )
+    assert asyncio.run(restarted.async_observe_preference_selection(
+        user_id="philipp", concept="Lampe", area_id="living_room",
+        entity_id="light.floor", observed_at=NOW + timedelta(minutes=1),
+    )) is None
+    assert asyncio.run(restarted_registry.async_list(
+        kind=LearnedKind.PREFERENCE
+    )) == ()
 
 
 def test_learning_manager_disabled_and_empty_inputs_are_noops(tmp_path):

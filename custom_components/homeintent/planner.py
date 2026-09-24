@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Awaitable, Callable, Iterable, Mapping, Protocol, Sequence, cast
 
@@ -109,6 +109,8 @@ class StepResult:
     step_id: str
     success: bool
     message: str
+    executed_at: str | None = None
+    verified_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -522,9 +524,13 @@ class PlanExecutor:
                 completed_ids.add(step.step_id)
                 results.append(StepResult(step.step_id, True, f"Persistent für {step.execute_at_local_time} Uhr geplant."))
                 continue
+            executed_at = datetime.now(timezone.utc).isoformat()
             result = await self._execute_plan(action, fresh, confirmed)
             if not result.executed:
-                results.append(StepResult(step.step_id, False, result.error or "Nicht ausgeführt."))
+                results.append(StepResult(
+                    step.step_id, False, result.error or "Nicht ausgeführt.",
+                    executed_at,
+                ))
                 compensated = await self._compensate(executed, confirmed)
                 return PlanResult(
                     plan.plan_id, _failed_status(executed, compensated),
@@ -535,8 +541,12 @@ class PlanExecutor:
                 if not await self._verify_state(entity_id, state):
                     verified = False
                     break
+            verified_at = datetime.now(timezone.utc).isoformat()
             if not verified:
-                results.append(StepResult(step.step_id, False, "Erwartete Wirkung nicht beobachtet."))
+                results.append(StepResult(
+                    step.step_id, False, "Erwartete Wirkung nicht beobachtet.",
+                    executed_at, verified_at,
+                ))
                 compensated = await self._compensate((*executed, step), confirmed)
                 return PlanResult(
                     plan.plan_id, _failed_status(executed, compensated),
@@ -544,7 +554,10 @@ class PlanExecutor:
                 )
             executed.append(step)
             completed_ids.add(step.step_id)
-            results.append(StepResult(step.step_id, True, "Ausgeführt und verifiziert."))
+            results.append(StepResult(
+                step.step_id, True, "Ausgeführt und verifiziert.",
+                executed_at, verified_at,
+            ))
         return PlanResult(
             plan.plan_id,
             PlanStatus.SCHEDULED if scheduled else PlanStatus.COMPLETED,

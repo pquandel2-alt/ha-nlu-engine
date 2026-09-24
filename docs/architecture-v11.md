@@ -38,6 +38,12 @@ conversation transcripts. `extract_goal_run_experiences()` consumes completed
 V10 run evidence. Thermal cycles use the same record with normalized Celsius
 features and exact measurement IDs.
 
+Effect latency is measured from the individual `StepExecutionRecord.executed_at`
+timestamp to that step's verified observation, never from the start of the
+whole `GoalRun`. Older or malformed runs without both timezone-aware timestamps
+retain `latency_seconds=None`; unknown timing evidence is not converted into a
+failure or an invented duration.
+
 `ExperienceStore` is a schema-versioned JSON store. Writes use a same-directory
 temporary file, `fsync` and atomic replace. IDs deduplicate records; count and
 age retention are central policy values. Invalid JSON, unknown schemas and bad
@@ -52,6 +58,14 @@ reliability, preference, habit, duration, energy and battery models. It records
 scope, parameters, sample count, validation metrics, provenance, version,
 health and invalidation reason. Persistent tombstones prevent a deleted model
 from being silently rebuilt from old evidence.
+
+Every upsert returns an explicit `STORED`, `SUPPRESSED` or `REJECTED` result.
+The registry owns the bound in-memory prediction view lifecycle under the same
+async lock: only a stored model is activated, while suppression, deletion,
+bounded eviction and reset deactivate it. Restart restoration is serialized by
+the registry as well. Consequently a tombstone is authoritative in persistent
+storage and memory, including when retained Experience evidence triggers a
+later retraining attempt.
 
 The registry exposes only redacted diagnostics: counts by kind and health.
 Personal values and evidence IDs are omitted.

@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **6.0.0** (V11)
+- Aktuelle Version: **6.0.1** (V11)
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -43,6 +43,13 @@ Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
 
 ## Was ist in Version 6.0 / V11 neu?
+
+Version 6.0.1 schließt das V11-Integritäts-Hardening ab: Persistente
+Modell-Tombstones sind nun auch für die aktive In-Memory-Vorhersageansicht
+atomar maßgeblich. Effektlatenzen verwenden außerdem den Ausführungszeitpunkt
+des jeweiligen Planschritts statt des Starts eines mehrstufigen GoalRuns.
+Historische Runs ohne belastbaren Step-Zeitstempel erzeugen keine geschätzte
+Latenz.
 
 V11 ergänzt V10 um eine vollständig lokale Advisory- und Lernschicht. Aus
 verifizierten `GoalRun`-Wirkungen entstehen kompakte, bounded Experiences;
