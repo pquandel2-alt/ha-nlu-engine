@@ -50,8 +50,10 @@ does not define the denominator. Partial, cancelled and never-verified actions
 therefore cannot silently reduce reliability. Old records migrate
 conservatively from quality, observation and success without rewriting history.
 
-`ExperienceStore` is a schema-versioned JSON store. Writes use a same-directory
-temporary file, `fsync` and atomic replace. IDs deduplicate records; count and
+`ExperienceStore` is a schema-versioned JSON store. Writes use a flushed and
+closed same-directory temporary file followed by atomic replace. It deliberately
+does not force a synchronous device flush for every advisory sample, so a slow
+storage backend cannot stall a GoalRun callback. IDs deduplicate records; count and
 age retention are central policy values. Invalid JSON, unknown schemas and bad
 individual records fail closed. It is not a recorder replacement.
 

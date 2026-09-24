@@ -96,7 +96,12 @@ class ExperienceStore:
                     handle, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
                 )
                 handle.flush()
-                os.fsync(handle.fileno())
+                # Closing the same-directory temporary file before os.replace()
+                # makes the JSON snapshot atomically visible.  Do not force a
+                # synchronous device flush for every observation: learning is
+                # advisory, and a per-sample fsync can block an otherwise
+                # bounded GoalRun callback for hundreds of milliseconds on
+                # virtualised Home Assistant storage.
             os.replace(temporary, self.path)
         except Exception:
             try:
