@@ -999,10 +999,10 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/homeintent --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 6.0.0:
+Geprüfter Release-Stand von Version 6.0.1:
 
 ```text
-3186 passed, 12 skipped, 0 failed
+3191 passed, 12 skipped, 0 failed
 87,08 % Gesamt-Coverage (20952/24061 Statements; Terminalanzeige 87 %)
 72 % Coverage für conversation.py
 ```
@@ -1029,7 +1029,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-6.0.0.json --quiet
+  --check docs/perf/v7-shadow-baseline-6.0.1.json --quiet
 ```
 
 Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die
