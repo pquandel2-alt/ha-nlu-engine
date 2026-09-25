@@ -46,10 +46,10 @@ ON = {**STATES, "light.living": replace(STATES["light.living"], state="on")}
 
 
 def _evaluate(permission=PERMISSION, *, enabled=True, situation=LEFT_ON, owner_known=True,
-              entities=ON, nobody_home=True, executions=0):
+              entities=ON, nobody_home=True, attempts=0):
     return AutoExecutionPolicy().evaluate(
         permission, enabled=enabled, situation=situation, owner_known=owner_known,
-        entities=entities, nobody_home=nobody_home, now=NOW, executions_today=executions,
+        entities=entities, nobody_home=nobody_home, now=NOW, attempts_today=attempts,
     )
 
 
@@ -63,7 +63,7 @@ def _evaluate(permission=PERMISSION, *, enabled=True, situation=LEFT_ON, owner_k
     ({"situation": replace(LEFT_ON, kind=SituationKind.ENTRY_LEFT_OPEN)}, "situation_kind_mismatch"),
     ({"situation": replace(LEFT_ON, state=SituationState.RESOLVED)}, "situation_no_longer_active"),
     ({"situation": replace(LEFT_ON, area_id="kitchen")}, "area_mismatch"),
-    ({"executions": 6}, "daily_execution_limit"),
+    ({"attempts": 6}, "daily_attempt_limit"),
     ({"nobody_home": False}, "condition_nobody_home_not_met"),
     ({"nobody_home": None}, "condition_nobody_home_not_met"),
     ({"entities": STATES}, "current_state_no_longer_matches"),
@@ -100,9 +100,10 @@ def test_permission_store_rules():
     assert store.revoke("missing") is None
     assert store.revoke_all("anna") == 0
     assert store.revoke_all() == 1
-    store.record_execution("perm", NOW)
-    store.record_execution("perm", NOW + timedelta(days=2))
-    assert store.executions_today("perm", NOW + timedelta(days=2)) == 1
+    store.record_attempt("perm", NOW, verified=True)
+    store.record_attempt("perm", NOW + timedelta(days=2), verified=False)
+    assert store.attempts_today("perm", NOW + timedelta(days=2)) == 1
+    assert store.verified_executions_today("perm", NOW + timedelta(days=2)) == 0
     round_trip = StandingPermissionStore.from_dict(store.to_dict())
     assert len(round_trip.all()) == 2 and round_trip.active(NOW) == ()
 

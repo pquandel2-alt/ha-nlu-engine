@@ -94,7 +94,7 @@ class AutoExecutionPolicy:
         entities: Mapping[str, EntitySnapshot],
         nobody_home: bool | None,
         now: datetime,
-        executions_today: int,
+        attempts_today: int,
     ) -> AutoExecutionDecision:
         """Checks 1-8 of the V12 contract; V10 enforces 9-13 afterwards."""
         reasons: list[str] = []
@@ -117,8 +117,11 @@ class AutoExecutionPolicy:
             return AutoExecutionDecision(False, ("situation_no_longer_active",), pid)
         if permission.area_id is not None and permission.area_id != situation.area_id:
             return AutoExecutionDecision(False, ("area_mismatch",), pid)
-        if executions_today >= permission.max_executions_per_day:
-            return AutoExecutionDecision(False, ("daily_execution_limit",), pid)
+        # The daily budget counts *attempts* (every automatic V10 run, verified
+        # or not), so failing, rejected or conflicting runs cannot retry
+        # without bound.  ``max_executions_per_day`` keeps its stored name.
+        if attempts_today >= permission.max_executions_per_day:
+            return AutoExecutionDecision(False, ("daily_attempt_limit",), pid)
         for condition in permission.conditions:
             if condition is PermissionCondition.NOBODY_HOME and nobody_home is not True:
                 return AutoExecutionDecision(False, ("condition_nobody_home_not_met",), pid)
@@ -152,12 +155,41 @@ def auto_targets(
     )
 
 
+_HISTORY_LIMIT = 32
+
+
+def _append(target: dict[str, list[datetime]], permission_id: str, at: datetime) -> None:
+    history = [item for item in target.get(permission_id, []) if at - item < timedelta(days=1)]
+    history.append(at)
+    target[permission_id] = history[-_HISTORY_LIMIT:]
+
+
+def _within_day(source: Mapping[str, list[datetime]], permission_id: str, now: datetime) -> int:
+    return sum(1 for item in source.get(permission_id, ()) if now - item < timedelta(days=1))
+
+
+def _stamp_map(raw: object, known: Mapping[str, object]) -> dict[str, list[datetime]]:
+    result: dict[str, list[datetime]] = {}
+    if not isinstance(raw, Mapping):
+        return result
+    for key, values in cast(Mapping[object, object], raw).items():
+        if isinstance(key, str) and key in known and isinstance(values, list):
+            result[key] = [
+                stamp for value in cast(Sequence[object], values)
+                if (stamp := _aware(value)) is not None
+            ][-_HISTORY_LIMIT:]
+    return result
+
+
 class StandingPermissionStore:
     """Bounded, fail-closed permission storage.  Nothing exists by default."""
 
     def __init__(self) -> None:
         self._items: OrderedDict[str, StandingPermission] = OrderedDict()
-        self._executions: dict[str, list[datetime]] = {}
+        # Stored under the legacy key ``executions``: 7.0.0 recorded every
+        # automatic run there, i.e. attempts.  Verified runs are tracked apart.
+        self._attempts: dict[str, list[datetime]] = {}
+        self._verified: dict[str, list[datetime]] = {}
 
     def add(self, permission: StandingPermission) -> None:
         if not permission.confirmed:
@@ -209,28 +241,30 @@ class StandingPermissionStore:
         ]
         return candidates[0] if len(candidates) == 1 else None
 
-    def record_execution(self, permission_id: str, at: datetime) -> None:
-        history = [
-            item for item in self._executions.get(permission_id, [])
-            if at - item < timedelta(days=1)
-        ]
-        history.append(at)
-        self._executions[permission_id] = history[-32:]
+    def record_attempt(self, permission_id: str, at: datetime, *, verified: bool) -> None:
+        """Record one automatic V10 run; ``verified`` only for a verified effect."""
+        _append(self._attempts, permission_id, at)
+        if verified:
+            _append(self._verified, permission_id, at)
 
-    def executions_today(self, permission_id: str, now: datetime) -> int:
-        return sum(
-            1 for item in self._executions.get(permission_id, ())
-            if now - item < timedelta(days=1)
-        )
+    def attempts_today(self, permission_id: str, now: datetime) -> int:
+        return _within_day(self._attempts, permission_id, now)
+
+    def verified_executions_today(self, permission_id: str, now: datetime) -> int:
+        return _within_day(self._verified, permission_id, now)
 
     def to_dict(self) -> dict[str, object]:
         return {
             "schema_version": SCHEMA_VERSION,
             "permissions": [_permission_dict(item) for item in self._items.values()],
-            "executions": {
-                key: [item.isoformat() for item in value]
-                for key, value in self._executions.items() if key in self._items
-            },
+            "executions": self._stamps(self._attempts),
+            "verified_executions": self._stamps(self._verified),
+        }
+
+    def _stamps(self, source: dict[str, list[datetime]]) -> dict[str, list[str]]:
+        return {
+            key: [item.isoformat() for item in value]
+            for key, value in source.items() if key in self._items
         }
 
     @classmethod
@@ -249,14 +283,8 @@ class StandingPermissionStore:
             parsed = _permission_from(item)
             if parsed is not None:
                 store._items[parsed.permission_id] = parsed
-        executions = document.get("executions")
-        if isinstance(executions, Mapping):
-            for key, values in cast(Mapping[object, object], executions).items():
-                if isinstance(key, str) and key in store._items and isinstance(values, list):
-                    store._executions[key] = [
-                        stamp for value in cast(Sequence[object], values)
-                        if (stamp := _aware(value)) is not None
-                    ][-32:]
+        store._attempts = _stamp_map(document.get("executions"), store._items)
+        store._verified = _stamp_map(document.get("verified_executions"), store._items)
         return store
 
 

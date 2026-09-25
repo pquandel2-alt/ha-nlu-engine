@@ -37,7 +37,7 @@ jobs:
         if: matrix.python-version == '3.12'
         run: >-
           python scripts/v7_shadow_report.py
-          --check docs/perf/v7-shadow-baseline-7.0.0.json
+          --check docs/perf/v7-shadow-baseline-7.0.1.json
           --quiet
       - name: V9-Latenzbudget bei großer Registry prüfen
         if: matrix.python-version == '3.12'
@@ -82,6 +82,9 @@ jobs:
           tests/test_v12_runtime.py
           tests/test_v12_units.py
           tests/test_v12_decision_matrix.py
+          tests/test_v12_push_authentication.py
+          tests/test_v12_room_freshness.py
+          tests/test_v12_auto_counters.py
       - name: Tests mit Coverage ausführen
         if: matrix.python-version == '3.12'
         run: >-

@@ -19,6 +19,7 @@ service sink.
 from __future__ import annotations
 
 import re
+import secrets
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Awaitable, Callable, Mapping, Protocol, cast
@@ -60,6 +61,7 @@ from .proactive_model import (
     ProposalChoice,
     ProposalState,
     ProposedGoal,
+    PushActionBinding,
     RecipientContext,
     RoomPresenceResult,
     SituationEvidence,
@@ -76,7 +78,6 @@ from .proactive_policy import (
     QuietHoursPolicy,
 )
 from .proactive_session import (
-    PROPOSAL_ID_RE,
     ProposalReply,
     ProposalStore,
     ReplyOutcome,
@@ -94,8 +95,11 @@ from .standing_permission import AutoExecutionPolicy, StandingPermissionStore
 
 
 PUSH_ACTION_PREFIX = "HOMEINTENT_V12_"
+# The token is optional in the pattern only so that an action without device
+# identity is *rejected explicitly* instead of being ignored as foreign.
 _PUSH_ACTION_RE = re.compile(
-    r"^HOMEINTENT_V12_(?P<choice>ACCEPT|LATER|IGNORE)_(?P<proposal>p[0-9a-f]{32})$"
+    r"^HOMEINTENT_V12_(?P<choice>ACCEPT|LATER|IGNORE)_(?P<proposal>p[0-9a-f]{32})"
+    r"(?:_(?P<token>t[0-9a-f]{16}))?$"
 )
 _PROPOSAL_KINDS = frozenset({
     SituationKind.ENTRY_LEFT_OPEN,
@@ -133,6 +137,8 @@ class DeliveryReceipt:
     delivered: tuple[CommunicationChannel, ...]
     origin_device_id: str | None = None
     errors: tuple[str, ...] = ()
+    # Interactive push tokens actually sent, one per bound Companion device.
+    push_bindings: tuple[PushActionBinding, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -197,7 +203,11 @@ class EngineCounters:
     events_relevant: int = 0
     evaluations: int = 0
     deliveries: int = 0
-    auto_executions: int = 0
+    # Every automatic V10 run is an attempt; only a verified effect counts
+    # as an execution.  Rejected, unverified, stale and conflicting runs are
+    # attempts without an execution.
+    auto_attempts: int = 0
+    auto_verified_executions: int = 0
 
 
 class ProactiveContextEngine:
@@ -435,7 +445,7 @@ class ProactiveContextEngine:
             entities=entities,
             nobody_home=self.ports.nobody_home(),
             now=now,
-            executions_today=self.permissions.executions_today(permission.permission_id, now),
+            attempts_today=self.permissions.attempts_today(permission.permission_id, now),
         )
         if not decision.allowed:
             self._record(situation, OpportunityOutcome.HISTORY_ONLY, permission.owner_user_id,
@@ -458,15 +468,18 @@ class ProactiveContextEngine:
             provenance=f"standing_permission:{permission.permission_id}",
             now=now,
         )
-        self.permissions.record_execution(permission.permission_id, now)
-        self.counters.auto_executions += 1
+        verified = result.status is ProactiveExecutionStatus.EXECUTED
+        self.permissions.record_attempt(permission.permission_id, now, verified=verified)
+        self.counters.auto_attempts += 1
+        if verified:
+            self.counters.auto_verified_executions += 1
         self._record(
             situation, OpportunityOutcome.HISTORY_ONLY, permission.owner_user_id,
             CommunicationChannel.HISTORY_ONLY, priority, situation.privacy_level,
             f"auto_{result.status.value}", (*decision.reasons, result.reason), None,
             run_id=result.run.run_id if result.run is not None else None,
         )
-        return result.status is ProactiveExecutionStatus.EXECUTED
+        return verified
 
     # ---------------------------------------------------------- communication
     async def _communicate(
@@ -503,6 +516,7 @@ class ProactiveContextEngine:
                 quiet=self.config.quiet.is_quiet(recipient.user_id, local),
                 requires_response=goal is not None,
                 others_home=self.ports.others_home(recipient.person_id),
+                now=now,
             )
             routed.append((recipient, decision, attention))
         interactive = [
@@ -554,6 +568,11 @@ class ProactiveContextEngine:
                     proposal = self.proposals.bind_origin_device(
                         proposal.proposal_id, receipt.origin_device_id,
                     ) or proposal
+                if proposal is not None:
+                    for binding in receipt.push_bindings:
+                        proposal = self.proposals.bind_push_action(
+                            proposal.proposal_id, binding,
+                        ) or proposal
             self._record(
                 situation, outcome, recipient.user_id,
                 decision.channel if receipt.delivered else CommunicationChannel.HISTORY_ONLY,
@@ -721,31 +740,43 @@ class ProactiveContextEngine:
 
     async def async_handle_push_action(
         self, action: str, *, user_id: str | None, device_id: str | None,
-        allowed_device_ids: tuple[str, ...] = (),
     ) -> ReplyResult | None:
-        """Opaque proposal reference + typed choice; never a service payload."""
+        """Authorize an interactive push action; every rejection is read-only.
+
+        Valid only when all hold: the HA user is authenticated and a
+        recipient, the action carries a device token, that token was issued
+        for this proposal to this user's Companion device, an event-reported
+        ``device_id`` (if any) matches that device, and the proposal is still
+        pending and unexpired.  Replays find the proposal resolved.
+        """
         match = _PUSH_ACTION_RE.fullmatch(action)
         if match is None:
             return None
-        proposal_id = match.group("proposal")
-        if not PROPOSAL_ID_RE.fullmatch(proposal_id):
-            return ReplyResult(False, "invalid_reference")
-        now = self.ports.now()
-        proposal = self.proposals.get(proposal_id)
+        proposal = self.proposals.get(match.group("proposal"))
         if proposal is None:
             return ReplyResult(False, "unknown_proposal")
         if proposal.state is not ProposalState.PENDING:
             return ReplyResult(False, "already_resolved")
-        if proposal.expires_at <= now:
-            self.proposals.expire(now)
+        if proposal.expires_at <= self.ports.now():
             return ReplyResult(False, "expired")
         if user_id is None or user_id not in proposal.recipient_user_ids:
             return ReplyResult(False, "wrong_recipient")
-        if allowed_device_ids and device_id is not None and device_id not in allowed_device_ids:
+        token = match.group("token")
+        if token is None:
+            return ReplyResult(False, "missing_device_identity")
+        binding = next(
+            (item for item in proposal.push_bindings if secrets.compare_digest(item.token, token)),
+            None,
+        )
+        if binding is None:
+            return ReplyResult(False, "unbound_device")
+        if binding.user_id != user_id:
+            return ReplyResult(False, "wrong_recipient")
+        if device_id is not None and device_id != binding.device_id:
             return ReplyResult(False, "unexpected_device")
         choice = ProposalChoice(match.group("choice").casefold())
         return await self.async_apply_choice(
-            proposal_id, choice, user_id=user_id,
+            proposal.proposal_id, choice, user_id=user_id,
             is_admin=await self.ports.async_is_admin(user_id), snooze=None, source="push",
         )
 

@@ -11,6 +11,7 @@ real device writes; notification/TTS/satellite calls are counted separately.
 from __future__ import annotations
 
 import asyncio
+import secrets
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -40,6 +41,7 @@ from homeintent.proactive_execution import V10ProposalRunner  # noqa: E402
 from homeintent.proactive_model import (  # noqa: E402
     CommunicationChannel,
     ProactiveSituation,
+    PushActionBinding,
     RecipientContext,
     RoomEvidenceClass,
     RoomPresenceResult,
@@ -114,6 +116,13 @@ class FakePorts:
     habits: dict[str, HabitEvidence] = field(default_factory=dict)
     active_subjects: frozenset[str] = frozenset()
     delivery_fails: bool = False
+    # notify target -> HA device registry id (the authoritative binding).
+    companion_devices: dict[str, str] = field(default_factory=lambda: {
+        "notify.mobile_app_philipp": "phone_philipp",
+        "notify.mobile_app_anna": "phone_anna",
+    })
+    issued: dict[tuple[str, str], PushActionBinding] = field(default_factory=dict)
+    frozen_rooms: set[str] = field(default_factory=set)
 
     def now(self) -> datetime:
         return self.clock
@@ -141,7 +150,12 @@ class FakePorts:
         return tuple(home_values or values)
 
     def room_for(self, person_id: str | None) -> RoomPresenceResult | None:
-        return self.rooms.get(person_id or "")
+        """Configured rooms behave like a live sensor re-observed now, unless
+        the person is in ``frozen_rooms`` (evidence returned exactly as given)."""
+        room = self.rooms.get(person_id or "")
+        if room is None or person_id in self.frozen_rooms or room.area_id is None:
+            return room
+        return replace(room, observed_at=self.clock, valid_until=self.clock + timedelta(minutes=10))
 
     def others_home(self, person_id: str | None) -> bool:
         return any(state == "home" for person, state in self.household.items() if person != person_id)
@@ -175,7 +189,25 @@ class FakePorts:
             record = next((item for item in self.satellite_records
                            if item.entity_id == message.decision.satellite_entity_id), None)
             origin = record.device_id if record is not None else None
-        return DeliveryReceipt(tuple(channels), origin)
+        bindings: list[PushActionBinding] = []
+        user = message.decision.recipient_user_id
+        if message.proposal_id is not None and user is not None:
+            for target in message.decision.push_target_ids:
+                device = self.companion_devices.get(target)
+                if device is None:
+                    continue
+                binding = PushActionBinding(f"t{secrets.token_hex(8)}", user, device)
+                bindings.append(binding)
+                self.issued[(message.proposal_id, user)] = binding
+        return DeliveryReceipt(tuple(channels), origin, (), tuple(bindings))
+
+    def push_action(self, choice: str, user: str = "philipp", proposal_id: str | None = None) -> tuple[str, str]:
+        """(action id, device id) exactly as that user's Companion app sends it."""
+        proposal = proposal_id or next(
+            item.proposal_id for item in reversed(self.delivered) if item.proposal_id
+        )
+        binding = self.issued[(proposal, user)]
+        return f"HOMEINTENT_V12_{choice}_{proposal}_{binding.token}", binding.device_id
 
     def schedule(self, key: str, at: datetime, callback: Callable[[], Awaitable[None]]) -> None:
         self.scheduled[key] = Scheduled(key, at, callback)

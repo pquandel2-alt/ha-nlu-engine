@@ -86,6 +86,7 @@ def _registry(size: int) -> dict[str, EntitySnapshot]:
     )
     entities["sensor.philipp_area"] = EntitySnapshot(
         "sensor.philipp_area", "Philipp Raum", "sensor", "Raum 1", area_id=None,
+        last_changed=NOW, last_updated=NOW,
     )
     return entities
 
@@ -227,9 +228,10 @@ async def _run(args: argparse.Namespace) -> dict[str, list[float]]:
         decision = attention.decide(attention_store, recipient="philipp", dedupe_key=situation.dedupe_key,
                                     priority=PriorityLevel.IMPORTANT, requires_response=True, now=NOW)
         router.route(recipient, priority=PriorityLevel.IMPORTANT, privacy=PrivacyLevel.HOUSEHOLD,
-                     room=RoomPresenceResult("person.philipp", "area_1", RoomEvidenceClass.EXACT, NOW, None),
+                     room=RoomPresenceResult("person.philipp", "area_1", RoomEvidenceClass.EXACT, NOW,
+                                             NOW + timedelta(minutes=10)),
                      satellites=ports.sat, attention=decision if decision.outcome else deliver,
-                     quiet=False, requires_response=True, others_home=False)
+                     quiet=False, requires_response=True, others_home=False, now=NOW)
         elapsed_routing = (time.perf_counter() - started) * 1000
         started = time.perf_counter()
         ports.room_for("person.philipp")
