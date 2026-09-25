@@ -139,13 +139,9 @@ from .goal_model import (
     TemporalGoal,
 )
 from .goal_run import (
-    FailureCode,
     GoalRun,
     GoalRunClarification,
     GoalRunQuery,
-    GoalRunStatus,
-    StepExecutionRecord,
-    VerificationRecord,
     explain_goal_run,
 )
 from .memory import MemoryKind
@@ -177,7 +173,7 @@ from .planner import (
     materialize_goal,
     materialize_comfort_profile,
     materialize_routine,
-    observed_effect,
+    goal_run_from_plan_result,
 )
 from .adaptive_planning import AdaptivePlanningAdvice, advise_deadline_goal
 from .thermal_deadline import (
@@ -2738,101 +2734,16 @@ class NluConversationEntity(
                             item.entity_id: item
                             for item in build_entity_snapshots(self.hass, self.entry)
                         }
-                        by_result = {item.step_id: item for item in result.steps}
-                        step_records: list[StepExecutionRecord] = []
-                        failures: list[FailureCode] = []
-                        for step in stored_plan.steps:
-                            if step.kind is not StepKind.ACTION:
-                                continue
-                            outcome = by_result.get(step.step_id)
-                            verification_records: list[VerificationRecord] = []
-                            verification_items = (
-                                ()
-                                if step.execute_at_local_time is not None
-                                else step.verification.items()
-                            )
-                            for entity_id, expected in verification_items:
-                                observed_entity = current_entities.get(entity_id)
-                                observed = (
-                                    observed_effect(observed_entity, expected)
-                                    if observed_entity is not None
-                                    else None
-                                )
-                                success = (
-                                    observed_entity is not None
-                                    and effect_satisfied(observed_entity, expected)
-                                )
-                                code = None
-                                if not success:
-                                    code = (
-                                        FailureCode.TARGET_UNAVAILABLE
-                                        if observed in {None, "unavailable", "unknown"}
-                                        else FailureCode.WRONG_STATE
-                                    )
-                                    failures.append(code)
-                                verification_records.append(
-                                    VerificationRecord(
-                                        entity_id, expected, observed, success, code,
-                                        (
-                                            outcome.verified_at
-                                            if outcome is not None
-                                            else None
-                                        ),
-                                    )
-                                )
-                            step_records.append(
-                                StepExecutionRecord(
-                                    step.step_id, step.operator_id,
-                                    tuple(step.verification), step.preconditions,
-                                    outcome.success if outcome is not None else None,
-                                    tuple(verification_records),
-                                    failures[-1] if failures and verification_records and not verification_records[-1].success else None,
-                                    outcome.message if outcome is not None else "Nicht ausgeführt.",
-                                    outcome.executed_at if outcome is not None else None,
-                                    outcome.attempted_at if outcome is not None else None,
-                                    outcome.service_accepted_at if outcome is not None else None,
-                                )
-                            )
-                        run = GoalRun.start(
-                            stored_plan.goal,
+                        run = goal_run_from_plan_result(
+                            stored_plan, result, current_entities,
+                            run_id=execution_run_id,
                             user_id=actor_id,
                             person_entity_id=(
                                 self._runtime_data.user_contexts.resolve_current_person(actor_id).person_entity_id
                                 if self._runtime_data.user_contexts is not None
                                 else None
                             ),
-                            plan_id=stored_plan.plan_id,
-                        )
-                        run = replace(
-                            run,
-                            run_id=execution_run_id,
                             updated_at=dt_util.utcnow().isoformat(),
-                            confirmed=True,
-                            steps=tuple(step_records),
-                            selected_targets=tuple(
-                                entity_id
-                                for step in stored_plan.steps
-                                for entity_id in step.verification
-                            ),
-                            status=(
-                                GoalRunStatus.SUCCESS
-                                if result.status is PlanStatus.COMPLETED
-                                else (
-                                    GoalRunStatus.SCHEDULED
-                                    if result.status is PlanStatus.SCHEDULED
-                                    else (
-                                        GoalRunStatus.PARTIAL_FAILURE
-                                        if result.status is PlanStatus.PARTIAL_FAILURE
-                                        else GoalRunStatus.FAILURE
-                                    )
-                                )
-                            ),
-                            failures=tuple(dict.fromkeys(failures)) or (
-                                ()
-                                if result.status in {PlanStatus.COMPLETED, PlanStatus.SCHEDULED}
-                                else (FailureCode.SERVICE_ERROR,)
-                            ),
-                            evidence=(f"plan_status={result.status.value}",),
                         )
                         await self._runtime_data.goal_runs.async_append(run)
                     manager.cancel(conversation_id)

@@ -14,6 +14,13 @@ from .agent_action_policy import validate_agent_service_plan
 from .entities import EntitySnapshot, normalize_for_compare
 from .execution_policy import PolicyOutcome, evaluate_service_plan
 from .goal_model import DesiredState, GoalKind, GoalModel, GoalScope
+from .goal_run import (
+    FailureCode,
+    GoalRun,
+    GoalRunStatus,
+    StepExecutionRecord,
+    VerificationRecord,
+)
 from .profiles import ComfortProfile, RoutineDefinition, RoutineStepDefinition
 from .risk import RiskLevel, classify_service_plan
 from .service_call import ServiceCallPlan
@@ -113,6 +120,10 @@ class StepResult:
     verified_at: str | None = None
     attempted_at: str | None = None
     service_accepted_at: str | None = None
+    # Authoritative device-service acceptance, independent of ``success``:
+    # None = no device service call happened (no-op, check, or only scheduled),
+    # False = a call was attempted and rejected/failed, True = HA accepted it.
+    service_accepted: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -531,7 +542,7 @@ class PlanExecutor:
             if not result.executed:
                 results.append(StepResult(
                     step.step_id, False, result.error or "Nicht ausgeführt.",
-                    attempted_at, None, attempted_at, None,
+                    attempted_at, None, attempted_at, None, False,
                 ))
                 compensated = await self._compensate(executed, confirmed)
                 return PlanResult(
@@ -549,7 +560,7 @@ class PlanExecutor:
                 results.append(StepResult(
                     step.step_id, False, "Erwartete Wirkung nicht beobachtet.",
                     service_accepted_at, verified_at, attempted_at,
-                    service_accepted_at,
+                    service_accepted_at, True,
                 ))
                 compensated = await self._compensate((*executed, step), confirmed)
                 return PlanResult(
@@ -561,7 +572,7 @@ class PlanExecutor:
             results.append(StepResult(
                 step.step_id, True, "Ausgeführt und verifiziert.",
                 service_accepted_at, verified_at, attempted_at,
-                service_accepted_at,
+                service_accepted_at, True,
             ))
         return PlanResult(
             plan.plan_id,
@@ -779,3 +790,109 @@ __all__ = (
     "materialize_routine", "validate_plan_graph", "effect_satisfied",
     "observed_effect",
 )
+
+
+def goal_run_from_plan_result(
+    plan: MaterializedPlan,
+    result: PlanResult,
+    current_entities: Mapping[str, EntitySnapshot],
+    *,
+    run_id: str,
+    user_id: str | None,
+    person_entity_id: str | None,
+    updated_at: str,
+    evidence: tuple[str, ...] = (),
+) -> GoalRun:
+    """Build the authoritative GoalRun record for one executed V10 plan.
+
+    Service acceptance is copied from ``StepResult.service_accepted`` and is
+    never inferred from step success, timestamps or verification.  Effect
+    evidence is recorded only for an accepted call or a satisfied no-op; a
+    rejected or unreached step carries no device observation.
+    """
+    by_result = {item.step_id: item for item in result.steps}
+    step_records: list[StepExecutionRecord] = []
+    failures: list[FailureCode] = []
+    for step in plan.steps:
+        if step.kind is not StepKind.ACTION:
+            continue
+        outcome = by_result.get(step.step_id)
+        verification_records: list[VerificationRecord] = []
+        verification_items = (
+            ()
+            if step.execute_at_local_time is not None
+            or outcome is None
+            or outcome.service_accepted is False
+            else step.verification.items()
+        )
+        for entity_id, expected in verification_items:
+            observed_entity = current_entities.get(entity_id)
+            observed = (
+                observed_effect(observed_entity, expected)
+                if observed_entity is not None
+                else None
+            )
+            success = (
+                observed_entity is not None
+                and effect_satisfied(observed_entity, expected)
+            )
+            code = None
+            if not success:
+                code = (
+                    FailureCode.TARGET_UNAVAILABLE
+                    if observed in {None, "unavailable", "unknown"}
+                    else FailureCode.WRONG_STATE
+                )
+                failures.append(code)
+            verification_records.append(
+                VerificationRecord(
+                    entity_id, expected, observed, success, code,
+                    outcome.verified_at if outcome is not None else None,
+                )
+            )
+        rejected = outcome is not None and outcome.service_accepted is False
+        if rejected:
+            failures.append(FailureCode.SERVICE_ERROR)
+        step_records.append(
+            StepExecutionRecord(
+                step.step_id, step.operator_id,
+                tuple(step.verification), step.preconditions,
+                outcome.service_accepted if outcome is not None else None,
+                tuple(verification_records),
+                (
+                    FailureCode.SERVICE_ERROR
+                    if rejected
+                    else failures[-1]
+                    if failures and verification_records
+                    and not verification_records[-1].success
+                    else None
+                ),
+                outcome.message if outcome is not None else "Nicht ausgeführt.",
+                outcome.executed_at if outcome is not None else None,
+                outcome.attempted_at if outcome is not None else None,
+                outcome.service_accepted_at if outcome is not None else None,
+            )
+        )
+    run = GoalRun.start(
+        plan.goal, user_id=user_id, person_entity_id=person_entity_id,
+        plan_id=plan.plan_id,
+    )
+    status = {
+        PlanStatus.COMPLETED: GoalRunStatus.SUCCESS,
+        PlanStatus.SCHEDULED: GoalRunStatus.SCHEDULED,
+        PlanStatus.PARTIAL_FAILURE: GoalRunStatus.PARTIAL_FAILURE,
+    }.get(result.status, GoalRunStatus.FAILURE)
+    return GoalRun(
+        run_id, run.goal_id, run.created_at, updated_at, run.source_utterance,
+        user_id, person_entity_id, plan.goal, plan.plan_id,
+        tuple(
+            entity_id for step in plan.steps for entity_id in step.verification
+        ),
+        (), True, tuple(step_records), (), status,
+        failures=tuple(dict.fromkeys(failures)) or (
+            ()
+            if result.status in {PlanStatus.COMPLETED, PlanStatus.SCHEDULED}
+            else (FailureCode.SERVICE_ERROR,)
+        ),
+        evidence=(f"plan_status={result.status.value}", *evidence),
+    )
