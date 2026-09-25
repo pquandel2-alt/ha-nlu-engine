@@ -23,7 +23,7 @@ def test_wie_hoch_ist_die_aussentemperatur(engine, sensor_entities):
     result = engine.match("wie hoch ist die Außentemperatur?", sensor_entities)
     assert result is not None
     assert result.plan is None
-    assert result.response_text == "18.4 Grad."
+    assert result.response_text == "18,4 Grad."
 
 
 def test_wie_ist_luftfeuchtigkeit_bad(engine, sensor_entities):
@@ -42,13 +42,13 @@ def test_welche_temperatur_zeigt_der_sensor(engine, sensor_entities):
     result = engine.match("Welche Temperatur zeigt der Außentemperatur Sensor?", sensor_entities)
     assert result is not None
     assert result.plan is None
-    assert result.response_text == "18.4 Grad."
+    assert result.response_text == "18,4 Grad."
 
 
 def test_was_zeigt_der_sensor_an(engine, sensor_entities):
     result = engine.match("Was zeigt der Außentemperatur Sensor an?", sensor_entities)
     assert result is not None
-    assert result.response_text == "18.4 Grad."
+    assert result.response_text == "18,4 Grad."
 
 
 @pytest.mark.parametrize(
@@ -97,7 +97,7 @@ def test_measurement_property_disambiguates_live_sensor_siblings(engine, questio
     result = engine.match(question, entities)
 
     assert result is not None
-    assert result.response_text == "30.4 Grad."
+    assert result.response_text == "30,4 Grad."
     assert result.command.entities[0].entity_id == "sensor.outdoor_temperature"
 
 
@@ -122,7 +122,7 @@ def test_query_case_does_not_matter(engine, sensor_entities):
     # - a real alternate-name match, not umlaut normalization/guessing.
     result = engine.match("WIE HOCH IST DIE AUSSENTEMPERATUR", sensor_entities)
     assert result is not None
-    assert result.response_text == "18.4 Grad."
+    assert result.response_text == "18,4 Grad."
 
 
 def test_wie_hell_ist_dimmed_light_speaks_percentage(engine):
@@ -162,7 +162,7 @@ def test_wie_viel_energie_verbraucht_waschmaschine(engine, sensor_entities):
     result = engine.match("wie viel Energie verbraucht die Waschmaschine Verbrauch?", sensor_entities)
     assert result is not None
     assert result.plan is None
-    assert result.response_text == "3.7 Kilowattstunden."
+    assert result.response_text == "3,7 Kilowattstunden."
 
 
 def test_wie_ist_fensterkontakt_buero_batterie_speaks_percentage(engine, sensor_entities):

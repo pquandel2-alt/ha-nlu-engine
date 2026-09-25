@@ -3111,7 +3111,15 @@ class NluEngine:
             last_area=context.last_area if context is not None else None,
         )
         normalized = normalize(text).strip(" ,")
-        trigger = self._automation_trigger_parser.parse(normalized, parse_context)
+        # Only a trigger on its own starts a draft. Anything after the first
+        # comma is the action the full automation match could not read; taking
+        # the whole sentence as a trigger would silently change its meaning.
+        _, separator, remainder = normalized.partition(",")
+        if separator and remainder.strip(" .!?").casefold() not in {"", "dann"}:
+            return None
+        trigger = self._automation_trigger_parser.parse(
+            normalized.split(",", 1)[0].strip(), parse_context
+        )
         if trigger is None:
             return None
         return AutomationDraftMatchResult(trigger=trigger, source_text=text)

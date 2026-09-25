@@ -219,6 +219,25 @@ _SCORE_MATCHING_DEVICE_CLASS = 15
 _AMBIGUITY_MARGIN = 5
 
 
+def format_spoken_number(value: object) -> str:
+    """Numeric value with a German decimal comma ("19,5", "78" not "78.0").
+
+    Non-numeric values are returned unchanged.
+    """
+    if isinstance(value, bool):
+        return str(value)
+    try:
+        number = float(str(value))
+    except (TypeError, ValueError):
+        return str(value)
+    if number != number or number in (float("inf"), float("-inf")):
+        return str(value)
+    rendered = f"{number:.2f}".rstrip("0").rstrip(".")
+    if rendered == "-0":
+        rendered = "0"
+    return rendered.replace(".", ",")
+
+
 # Domains whose state is the timestamp of their last activation. "unknown" is
 # their normal state until they are triggered for the first time and says
 # nothing about the device being unreachable.

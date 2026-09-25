@@ -54,7 +54,7 @@ ENTITIES = [
         ("Welches Datum haben wir?", "Mittwoch, der 26. August 2026"),
         ("Wer ist zuhause?", "Zuhause: Philipp"),
         ("Ist Anna zuhause?", "Anna ist laut Home Assistant nicht zuhause"),
-        ("Wie ist das Wetter?", "teilweise bewölkt, 23.4 Grad"),
+        ("Wie ist das Wetter?", "teilweise bewölkt, 23,4 Grad"),
         ("Wie wird das Wetter morgen?", "Morgen wird es sonnig, bis 25 Grad"),
         ("Welche Batterien sind unter 20 Prozent?", "Fernbedienung Batterie mit 12 Prozent"),
         ("Gibt es Probleme im Haus?", "Schwache Batterien: Fernbedienung Batterie"),

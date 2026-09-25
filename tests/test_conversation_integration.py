@@ -132,7 +132,7 @@ def test_live_outdoor_sensor_wins_over_multiple_weather_entities(monkeypatch):
 
     result = _run(entity, "Welche Temperatur zeigt der Außentemperatur-Sensor?")
 
-    assert result.response.speech == "30.4 Grad."
+    assert result.response.speech == "30,4 Grad."
     assert result.response.response_type == intent.IntentResponseType.QUERY_ANSWER
     entity.hass.services.async_call.assert_not_awaited()
 
@@ -873,7 +873,7 @@ def test_floor_temperature_question_reaches_live_conversation_query(
     entity.hass.services.async_call.assert_not_awaited()
     assert result.response.error_code is None
     assert result.response.response_type == intent.IntentResponseType.QUERY_ANSWER
-    assert result.response.speech == "22.4 Grad."
+    assert result.response.speech == "22,4 Grad."
 
 
 def test_floor_temperature_question_lists_multiple_sensors(monkeypatch):
@@ -929,7 +929,7 @@ def test_temperature_query_then_contextual_setpoint_reaches_live_service(monkeyp
         conversation_id="logical-temperature",
     )
 
-    assert query.response.speech == "22.4 Grad."
+    assert query.response.speech == "22,4 Grad."
     assert command.response.speech == "Erdgeschoss Heizung auf 22 Grad gestellt."
     entity.hass.services.async_call.assert_awaited_once_with(
         "climate",
@@ -1203,3 +1203,15 @@ def test_complete_command_replaces_native_alias_confirmation(monkeypatch):
     assert entity._runtime_data.dialog_manager.active("replace-alias") is None
     updater.assert_not_called()
     entity.hass.services.async_call.assert_awaited_once()
+
+
+def test_declining_the_missing_action_discards_the_draft(monkeypatch):
+    entity = _make_entity(monkeypatch, [KUECHE_FENSTER, KUECHE_LICHT])
+
+    _run(entity, "Wenn das Küchenfenster geöffnet wird")
+    declined = _run(entity, "Nein.")
+
+    assert declined.response.speech == "In Ordnung. Ich lege keine Automation an."
+    assert declined.continue_conversation is False
+    assert entity._context_store.get("conv-1") is None
+    entity.hass.services.async_call.assert_not_awaited()

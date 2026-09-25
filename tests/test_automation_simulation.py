@@ -30,7 +30,7 @@ def test_simulation_evaluates_state_condition_and_describes_action():
     spoken = render_automation_simulation(automation, [light, window])
 
     assert result.ready is True
-    assert "turn on für Küchenlicht" in spoken
+    assert "Küchenlicht einschalten" in spoken
     assert "nur eine Simulation" in spoken
 
 

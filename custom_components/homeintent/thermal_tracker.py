@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import tempfile
+import threading
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -54,6 +55,11 @@ class ThermalExperienceTracker:
         self._active: dict[str, ActiveThermalCycle] = {}
         self._counter = 0
         self._state_path = Path(state_path) if state_path is not None else None
+        # Writes may finish out of order when they run in worker threads; the
+        # generation keeps an older document from replacing a newer one.
+        self._write_lock = threading.Lock()
+        self._generation = 0
+        self._written_generation = 0
 
     @property
     def active(self) -> tuple[ActiveThermalCycle, ...]:
@@ -223,7 +229,7 @@ class ThermalExperienceTracker:
                 await self._manager.async_invalidate_thermal_model(
                     cycle.binding.area_id, "measurement_source_removed"
                 )
-        self._persist()
+        await self._async_persist()
 
     async def async_finalize(
         self,
@@ -271,7 +277,7 @@ class ThermalExperienceTracker:
             await self._manager.async_invalidate_thermal_model(
                 finalized.binding.area_id, "measurement_source_removed"
             )
-        self._persist()
+        await self._async_persist()
         return reached
 
     async def async_restore(
@@ -321,14 +327,29 @@ class ThermalExperienceTracker:
         self._active = restored
         # Startup runs on the event loop; the document is built here so the
         # worker thread never iterates state the loop may mutate.
-        await asyncio.to_thread(self._write_document, self._persisted_document())
+        await self._async_persist()
         return len(restored)
 
     def _persisted_document(self) -> dict[str, object]:
         return {"schema_version": 1, "cycles": [_cycle_dict(item) for item in self.active]}
 
+    def _next_document(self) -> tuple[int, dict[str, object]]:
+        # Built on the event loop so no worker thread reads live state.
+        self._generation += 1
+        return self._generation, self._persisted_document()
+
+    def _write_generation(self, generation: int, document: dict[str, object]) -> None:
+        with self._write_lock:
+            if generation <= self._written_generation:
+                return
+            self._write_document(document)
+            self._written_generation = generation
+
     def _persist(self) -> None:
-        self._write_document(self._persisted_document())
+        self._write_generation(*self._next_document())
+
+    async def _async_persist(self) -> None:
+        await asyncio.to_thread(self._write_generation, *self._next_document())
 
     def _write_document(self, document: dict[str, object]) -> None:
         if self._state_path is None:

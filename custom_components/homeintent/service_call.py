@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
-from .entities import EntitySnapshot
+from .entities import EntitySnapshot, format_spoken_number
 from .nlu.capabilities import Capability
 from .nlu.automation_operations import validate_registered_operation
 from .nlu.query import QueryType, derive_query_type
@@ -142,7 +142,7 @@ INTENTS: dict[str, IntentSpec] = {
     "HassPressButton": IntentSpec(
         allowed_domains=frozenset({"button"}),
         build=lambda es: ServiceCallPlan("button", "press", _entity_id_field(es)),
-        response=lambda es: _plural_response(es, "drücken.", "gedrückt."),
+        response=lambda es: _plural_response(es, "gedrückt.", "gedrückt."),
     ),
     "HassOpenValve": IntentSpec(
         allowed_domains=frozenset({"valve"}),
@@ -159,12 +159,12 @@ INTENTS: dict[str, IntentSpec] = {
     "HassLock": IntentSpec(
         allowed_domains=frozenset({"lock"}),
         build=lambda es: ServiceCallPlan("lock", "lock", _entity_id_field(es)),
-        response=lambda es: _plural_response(es, "abschließen.", "abgeschlossen."),
+        response=lambda es: _plural_response(es, "abgeschlossen.", "abgeschlossen."),
     ),
     "HassUnlock": IntentSpec(
         allowed_domains=frozenset({"lock"}),
         build=lambda es: ServiceCallPlan("lock", "unlock", _entity_id_field(es)),
-        response=lambda es: _plural_response(es, "aufschließen.", "aufgeschlossen."),
+        response=lambda es: _plural_response(es, "aufgeschlossen.", "aufgeschlossen."),
     ),
 }
 
@@ -285,7 +285,8 @@ _UNIT_SPOKEN_DE = {"°C": "Grad", "%": "Prozent", "hPa": "Hektopascal", "lx": "L
 
 def _speak_state(entity: EntitySnapshot) -> str:
     unit = _UNIT_SPOKEN_DE.get(entity.unit, entity.unit) if entity.unit else None
-    return f"{entity.state} {unit}." if unit else f"{entity.state}."
+    value = format_spoken_number(entity.state) if unit else entity.state
+    return f"{value} {unit}." if unit else f"{value}."
 
 
 # A light's ``state`` is "on"/"off", not a number - its brightness lives in
@@ -312,12 +313,7 @@ def _speak_query(entity: EntitySnapshot) -> str:
 
 def _format_measurement_number(raw: str) -> str:
     """Speak numeric HA states with a German decimal separator."""
-    try:
-        value = float(raw)
-    except (TypeError, ValueError):
-        return str(raw)
-    rendered = f"{value:.2f}".rstrip("0").rstrip(".")
-    return rendered.replace(".", ",")
+    return format_spoken_number(raw)
 
 
 def _speak_location_measurements(

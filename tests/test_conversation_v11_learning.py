@@ -377,6 +377,6 @@ def test_remaining_time_question_is_not_hijacked_by_the_no_model_answer(tmp_path
     remaining = _turn(agent, "Wie lange läuft der Küchentimer noch?")
     predictive = _turn(agent, "Wie lange läuft die Kaffeemaschine normalerweise?")
 
-    assert "Verbleibende Zeit: 00:04:15" in remaining.response.speech
+    assert "Verbleibende Zeit: 4 Minuten und 15 Sekunden" in remaining.response.speech
     assert "kein belastbares Dauermodell" in predictive.response.speech
     agent.hass.services.async_call.assert_not_awaited()

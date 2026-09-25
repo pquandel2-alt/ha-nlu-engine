@@ -32,6 +32,33 @@ def _entity_ids(value: object) -> tuple[str, ...]:
     return ()
 
 
+# German infinitives for the services HomeIntent automations use.
+_SERVICE_VERBS_DE = {
+    "turn_on": "einschalten",
+    "turn_off": "ausschalten",
+    "toggle": "umschalten",
+    "open_cover": "öffnen",
+    "close_cover": "schließen",
+    "stop_cover": "anhalten",
+    "set_cover_position": "auf eine Position fahren",
+    "open_valve": "öffnen",
+    "close_valve": "schließen",
+    "set_temperature": "auf eine Temperatur stellen",
+    "set_hvac_mode": "auf einen Modus stellen",
+    "lock": "abschließen",
+    "unlock": "aufschließen",
+    "press": "drücken",
+    "media_play": "abspielen",
+    "media_pause": "pausieren",
+    "media_stop": "stoppen",
+    "start": "starten",
+    "stop": "stoppen",
+    "return_to_base": "zur Ladestation schicken",
+    "send_message": "Nachricht senden",
+    "create": "Benachrichtigung anlegen",
+}
+
+
 def simulate_automation(
     automation: AutomationSummary,
     entities: list[EntitySnapshot],
@@ -88,11 +115,10 @@ def simulate_automation(
         else:
             target_ids = _entity_ids(action.get("entity_id"))
         if isinstance(service, str):
-            operation = service.rsplit(".", 1)[-1].replace("_", " ")
+            service_name = service.rsplit(".", 1)[-1]
+            operation = _SERVICE_VERBS_DE.get(service_name, service_name.replace("_", " "))
             labels = ", ".join(_entity_label(item, index) for item in target_ids)
-            action_details.append(
-                f"{operation} für {labels}" if labels else operation
-            )
+            action_details.append(f"{labels} {operation}" if labels else operation)
         elif "delay" in action:
             action_details.append(f"wartet {action['delay']}")
         else:

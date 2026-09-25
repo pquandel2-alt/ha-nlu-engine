@@ -258,6 +258,8 @@ class GermanResponseRealizer:
             )
             if not names:
                 return f"Keine {noun} gefunden{location}."
+            if not location:
+                return f"Gefunden: {_join_names(names)}."
             verb = "ist" if len(names) == 1 else "sind"
             return f"{_join_names(names)} {verb}{location}."
         if kind is QueryAnswerKind.DEVICE_LIST:
@@ -298,7 +300,8 @@ class GermanResponseRealizer:
         if kind is QueryAnswerKind.EXISTS:
             if not names:
                 return f"Nein, es gibt keine {noun}."
-            return f"Ja, es gibt {len(names)} {noun}."
+            count_noun = query.noun_singular if len(names) == 1 else noun
+            return f"Ja, es gibt {len(names)} {count_noun}."
         if kind is QueryAnswerKind.ALL:
             if not names:
                 return f"Ich habe keine {noun} gefunden."

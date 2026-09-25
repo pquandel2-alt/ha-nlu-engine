@@ -50,6 +50,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import hashlib
+import logging
 import re
 import uuid
 from dataclasses import dataclass, replace
@@ -77,6 +78,8 @@ from .automation_transaction import (
     LEGACY_TRANSACTION_JOURNAL_FILENAME,
 )
 from .storage_migration import resolve_storage_path
+
+_LOGGER = logging.getLogger(__name__)
 
 AUTOMATIONS_YAML_FILENAME = "automations.yaml"
 AUTOMATION_CATEGORY_SCOPE = "automation"
@@ -554,6 +557,27 @@ class AutomationExecutor:
                 )
                 raise
             await self._async_complete_transaction()
+        self._remove_entity_registry_entry(automation_id)
+
+    def _remove_entity_registry_entry(self, automation_id: str) -> None:
+        """Drop the deleted automation's registry entry, like HA's own editor.
+
+        Without this the removed automation stays behind as an "unavailable"
+        entity. Best effort: the automation itself is already gone.
+        """
+        try:
+            entity_registry = er.async_get(self._hass)
+            entity_id = entity_registry.async_get_entity_id(
+                "automation", "automation", automation_id
+            )
+            if entity_id is not None:
+                entity_registry.async_remove(entity_id)
+        except Exception as err:  # noqa: BLE001 - cleanup must never fail a delete
+            _LOGGER.warning(
+                "Could not remove registry entry of deleted automation %s: %s",
+                automation_id,
+                err,
+            )
 
     async def async_disable_automation(self, automation_id: str) -> None:
         """V5 Teil 8/10 (Wave 11, "Automation Disable/Enable"): durably

@@ -84,6 +84,9 @@ COMMAND_MARKER_EXPRESSIONS: tuple[str, ...] = (
     r"änder(?:e|n|st|t)?",
     r"anheb(?:e|en|st|t)?",
     r"verriegel(?:e|n|st|t)?", r"entriegel(?:e|n|st|t)?",
+    # Usual imperative forms drop the e before l ("verriegle").
+    r"verriegl(?:e|st|t)", r"entriegl(?:e|st|t)",
+    r"(?:auf|ab)?sperr(?:e|en|st|t)?",
     r"(?:auf|ab)schließ(?:e|en|est|t)?",
 )
 
@@ -126,12 +129,17 @@ ACTION_EXPRESSIONS: dict[str, tuple[str, ...]] = {
     "locate": (r"find(?:e|en|est|et)?", r"ort(?:e|en|est|et)?", r"lokalisier(?:e|en|st|t)?"),
     "press": (r"drück(?:e|en|st|t)?", r"drueck(?:e|en|st|t)?", r"betätig(?:e|en|st|t)?", r"betaetig(?:e|en|st|t)?"),
     "lock": (
-        r"verriegel(?:e|n|st|t)?", r"abschließ(?:e|en|est|t)?",
+        # "verriegle" drops the e before l in the usual imperative form.
+        r"verriegel(?:e|n|st|t)?", r"verriegl(?:e|st|t)", r"abschließ(?:e|en|est|t)?",
+        r"absperr(?:e|en|st|t)?",
         r"schließ(?:e|en|est|t)?(?:\s+\w+){1,8}\s+ab",
+        r"sperr(?:e|en|st|t)?(?:\s+\w+){1,8}\s+ab",
     ),
     "unlock": (
-        r"entriegel(?:e|n|st|t)?", r"aufschließ(?:e|en|est|t)?",
+        r"entriegel(?:e|n|st|t)?", r"entriegl(?:e|st|t)", r"aufschließ(?:e|en|est|t)?",
+        r"aufsperr(?:e|en|st|t)?",
         r"schließ(?:e|en|est|t)?(?:\s+\w+){1,8}\s+auf",
+        r"sperr(?:e|en|st|t)?(?:\s+\w+){1,8}\s+auf",
     ),
 }
 

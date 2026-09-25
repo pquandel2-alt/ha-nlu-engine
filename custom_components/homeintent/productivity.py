@@ -34,6 +34,8 @@ class TimerOperation(Enum):
     CANCEL = auto()
     FINISH = auto()
     STATUS = auto()
+    LIST = auto()
+    CANCEL_ALL = auto()
 
 
 @dataclass(frozen=True)
@@ -376,17 +378,78 @@ def _timer_name(text: str) -> str | None:
     return name
 
 
+# Words that can follow "Timer" in a command without being its name.
+_TIMER_NAME_STOPWORDS = frozenset({
+    "ab", "abbrechen", "an", "auf", "aus", "beenden", "bitte", "das", "dem",
+    "den", "der", "die", "fort", "fortsetzen", "für", "fuer", "gleich", "im",
+    "in", "jetzt", "läuft", "laeuft", "löschen", "loeschen", "los", "mal",
+    "mit", "noch", "oder", "pausieren", "sofort", "stoppen", "über", "ueber",
+    "um", "und", "von", "weiter", "zu", "zum", "zurück", "zurueck",
+})
+# Compound prefixes that do not name a specific timer ("einen Timer").
+_TIMER_COMPOUND_STOPWORDS = frozenset({
+    "alle", "dein", "deine", "den", "der", "die", "ein", "eine", "einen",
+    "kein", "keine", "mein", "meine", "welche", "welcher",
+})
+_TIMER_COMPOUND_RE = re.compile(
+    r"(?<![\w-])(?P<name>[a-zäöüß]{2,}?)-?timers?\b", re.IGNORECASE
+)
+_TIMER_FOLLOWING_NAME_RE = re.compile(
+    r"\btimers?\s+(?:namens\s+)?(?P<name>[a-zäöüß][\wäöüß-]*)", re.IGNORECASE
+)
+_ALL_TIMERS_RE = re.compile(r"\b(?:alle|sämtliche|saemtliche)\s+timer\b", re.IGNORECASE)
+_LIST_TIMERS_RE = re.compile(
+    r"\bwelche\s+timer\b|\b(?:zeig(?:e|t)?|nenn(?:e|t)?|lies|liste)\b.*\btimer\b",
+    re.IGNORECASE,
+)
+_TIMER_CANCEL_RE = re.compile(
+    r"\b(?:abbrechen|stopp(?:e|en|t)?|stop(?:pe|pen|pt)?|zurücksetzen|zuruecksetzen|"
+    r"lösch(?:e|en|t)?|loesch(?:e|en|t)?|beenden|beende)\b|\b(?:brich|brech(?:e|t)?)\b.*\bab\b",
+    re.IGNORECASE,
+)
+
+
+def timer_name_reference(text: str) -> str | None:
+    """The timer name a command refers to, if it names one.
+
+    Covers "den Timer Nudeln", "den Pizza-Timer", "den Nudeltimer" and the
+    explicit "mit dem Namen …" form. The result is matched against the names
+    of the running timers afterwards, so it does not need to be exact.
+    """
+    explicit = _timer_name(text)
+    if explicit is not None:
+        return explicit
+    for match in _TIMER_COMPOUND_RE.finditer(text):
+        prefix = match.group("name")
+        if prefix.casefold() not in _TIMER_COMPOUND_STOPWORDS:
+            return prefix[:1].upper() + prefix[1:]
+    following = _TIMER_FOLLOWING_NAME_RE.search(text)
+    if following is not None:
+        name = following.group("name").strip("-")
+        if name and name.casefold() not in _TIMER_NAME_STOPWORDS:
+            return name
+    return None
+
+
 def parse_timer_request(text: str, entities: list[EntitySnapshot]) -> TimerRequest | None:
     if not _TIMER_NOUN_RE.search(text):
         return None
     lowered = text.casefold()
     entity_id, candidates = _select_target(text, entities, "timer")
     duration = parse_duration_seconds(text)
+    if entity_id is None and not candidates and _ALL_TIMERS_RE.search(text):
+        if _TIMER_CANCEL_RE.search(text):
+            return TimerRequest(TimerOperation.CANCEL_ALL)
+        return TimerRequest(TimerOperation.LIST)
+    if entity_id is None and not candidates and _LIST_TIMERS_RE.search(text):
+        return TimerRequest(TimerOperation.LIST)
     if re.search(r"\b(?:wie\s+lange|restzeit|status|stand|läuft|laeuft)\b", lowered):
         operation = TimerOperation.STATUS
     elif re.search(r"\b(?:pausier(?:e|en|t)?|anhalten|halte\s+.*\s+an)\b", lowered):
         operation = TimerOperation.PAUSE
-    elif re.search(r"\b(?:fortsetzen|weiterlaufen|weiter\s+laufen|resume)\b", lowered):
+    elif re.search(r"\b(?:fortsetzen|weiterlaufen|weiter\s+laufen|resume)\b", lowered) or re.search(
+        r"\bsetz(?:e|t)?\b.*\bfort\b", lowered
+    ):
         operation = TimerOperation.RESUME
     elif re.search(r"\b(?:abbrechen|stopp(?:e|en|t)?|stop(?:pe|pen|pt)?|zurücksetzen|zuruecksetzen|lösch(?:e|en|t)?|loesch(?:e|en|t)?)\b", lowered) or re.search(
         r"\b(?:brich|brech(?:e|t)?)\b.*\bab\b", lowered
@@ -399,12 +462,12 @@ def parse_timer_request(text: str, entities: list[EntitySnapshot]) -> TimerReque
             return None
         sign = -1 if re.search(r"\b(?:verkürz|verkuerz|weniger|abziehen)", lowered) else 1
         operation = TimerOperation.CHANGE
-        return TimerRequest(operation, change_seconds=sign * duration, entity_id=entity_id, candidates=candidates, name=_timer_name(text))
+        return TimerRequest(operation, change_seconds=sign * duration, entity_id=entity_id, candidates=candidates, name=timer_name_reference(text))
     elif duration is not None and re.search(r"\b(?:stell(?:e|en|t)?|setz(?:e|en|t)?|start(?:e|en|et)?|mach(?:e|en|t)?|[a-zäöüß]*timer)\b", lowered):
         operation = TimerOperation.START
     else:
         return None
-    return TimerRequest(operation, duration_seconds=duration, entity_id=entity_id, candidates=candidates, name=_timer_name(text))
+    return TimerRequest(operation, duration_seconds=duration, entity_id=entity_id, candidates=candidates, name=timer_name_reference(text))
 
 
 def parse_productivity_request(
@@ -445,3 +508,62 @@ def format_duration(seconds: int) -> str:
     if secs or not parts:
         parts.append(f"{secs} Sekunde" + ("n" if secs != 1 else ""))
     return " und ".join(parts)
+
+
+_TIMER_NAME_REPLY_PREFIX_RE = re.compile(
+    r"^(?:(?:der|den)\s+timer\s+)?(?:(?:er|der\s+timer)\s+)?"
+    r"(?:heißt|heisst|soll\s+(?:heißen|heissen)|nenne?\s+(?:ihn|es)|name(?:\s+ist)?:?)\s+",
+    re.IGNORECASE,
+)
+_TIMER_NO_NAME_RE = re.compile(
+    r"^(?:ohne(?:\s+einen)?\s+namen?|kein(?:en)?\s+namen?|egal|ist\s+egal|"
+    r"brauch(?:e|t)\s+(?:er\s+)?keinen(?:\s+namen)?)[.!]?$",
+    re.IGNORECASE,
+)
+_ORDINALS = {
+    "erste": 1, "ersten": 1, "erster": 1, "eins": 1, "1": 1,
+    "zweite": 2, "zweiten": 2, "zweiter": 2, "zwei": 2, "2": 2,
+    "dritte": 3, "dritten": 3, "dritter": 3, "drei": 3, "3": 3,
+    "vierte": 4, "vierten": 4, "vierter": 4, "vier": 4, "4": 4,
+}
+
+
+def timer_name_reply(text: str) -> str | None:
+    """The name given in reply to "Wie soll der Timer heißen?".
+
+    Returns an empty string for "ohne Namen"/"egal" and ``None`` when the
+    reply is not usable as a name.
+    """
+    if "?" in text:
+        return None
+    cleaned = text.strip().strip(".!„“\"'").strip()
+    if _TIMER_NO_NAME_RE.match(cleaned):
+        return ""
+    trailing = re.match(
+        r"^(?:er|es|der\s+timer)\s+soll\s+(?P<name>.+?)\s+(?:heißen|heissen)$",
+        cleaned,
+        re.IGNORECASE,
+    )
+    if trailing is not None:
+        cleaned = trailing.group("name")
+    cleaned = _TIMER_NAME_REPLY_PREFIX_RE.sub("", cleaned).strip()
+    cleaned = re.sub(r"^(?:timer\s+)", "", cleaned, flags=re.IGNORECASE).strip()
+    if (
+        not cleaned
+        or len(cleaned) > 40
+        or len(cleaned.split()) > 4
+        or any(ord(char) < 32 for char in cleaned)
+        or not re.search(r"[a-zäöüß]", cleaned, re.IGNORECASE)
+    ):
+        return None
+    return cleaned[:1].upper() + cleaned[1:]
+
+
+def timer_choice_ordinal(text: str) -> int | None:
+    """1-based position for replies like "den zweiten" or "Nummer 2"."""
+    for word in re.findall(r"[a-zäöüß0-9]+", text.casefold()):
+        if word in _ORDINALS:
+            return _ORDINALS[word]
+    if re.search(r"\bletzte[nr]?\b", text, re.IGNORECASE):
+        return -1
+    return None

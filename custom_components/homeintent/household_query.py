@@ -7,7 +7,12 @@ from datetime import datetime, timedelta
 from typing import Mapping, cast
 
 from .device_result import DeviceControlResult
-from .entities import ACTIVATION_TIMESTAMP_DOMAINS, EntitySnapshot, normalize_for_compare
+from .entities import (
+    ACTIVATION_TIMESTAMP_DOMAINS,
+    EntitySnapshot,
+    format_spoken_number,
+    normalize_for_compare,
+)
 from .nlu.domain_operations import DOMAIN_WORDS
 from .nlu.language_frontend import LanguageDocument
 from .nlu.normalize import normalize
@@ -300,9 +305,9 @@ def match_household_query(
         humidity = weather.attributes.get("humidity")
         details = [condition]
         if temperature is not None:
-            details.append(f"{temperature} Grad")
+            details.append(f"{format_spoken_number(temperature)} Grad")
         if humidity is not None:
-            details.append(f"{humidity} Prozent Luftfeuchtigkeit")
+            details.append(f"{format_spoken_number(humidity)} Prozent Luftfeuchtigkeit")
         return _read_only(f"{weather.friendly_name}: " + ", ".join(details) + ".")
 
     if re.search(r"\b(?:wie\s+wird|wetter|vorhersage)\b.*\b(?:morgen|uebermorgen)\b", key):
@@ -328,9 +333,9 @@ def match_household_query(
         condition = _WEATHER_DE.get(str(row.get("condition", "")), str(row.get("condition", "")))
         temperatures: list[str] = []
         if row.get("temperature") is not None:
-            temperatures.append(f"bis {row['temperature']} Grad")
+            temperatures.append(f"bis {format_spoken_number(row['temperature'])} Grad")
         if row.get("templow") is not None:
-            temperatures.append(f"mindestens {row['templow']} Grad")
+            temperatures.append(f"mindestens {format_spoken_number(row['templow'])} Grad")
         label = "übermorgen" if day_offset == 2 else "morgen"
         return _read_only(
             f"{label.capitalize()} wird es {condition}"

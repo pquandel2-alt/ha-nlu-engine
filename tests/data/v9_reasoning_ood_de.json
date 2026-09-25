@@ -153,7 +153,7 @@
   {"text":"Kann das Licht ausgeschaltet werden?","category":"query_vs_command","expected_kind":"unsupported"},
   {"text":"Vielleicht das Licht im Büro aus.","category":"uncertain_command","expected_kind":"unsupported"},
   {"text":"Öffne keine Tür.","category":"negated_command","expected_kind":"unsafe"},
-  {"text":"Entriegle nicht alle Schlösser.","category":"safety","expected_kind":"unsupported"},
+  {"text":"Entriegle nicht alle Schlösser.","category":"safety","expected_kind":"unsafe"},
   {"text":"Mach 20, nein Wohnzimmer.","category":"invalid_repair","expected_kind":"unsupported"},
   {"text":"Stell die Heizung auf warm, nein Büro.","category":"invalid_repair","expected_kind":"unsupported"},
   {"text":"Mach das Licht später vielleicht aus.","category":"ambiguity","expected_kind":"unsafe"},

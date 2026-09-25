@@ -107,7 +107,7 @@ def test_measurement_query_is_v7_authoritative(engine):
 
     assert outcome.authority is UnderstandingAuthority.V7_MIGRATED
     assert outcome.kind is UnderstandingKind.QUERY
-    assert outcome.speech == "21.5 Grad."
+    assert outcome.speech == "21,5 Grad."
 
 
 def test_understand_returns_explicit_unsupported_reason(engine, entities):

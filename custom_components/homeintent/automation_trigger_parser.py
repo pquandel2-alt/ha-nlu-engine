@@ -121,6 +121,22 @@ class AutomationTriggerParser:
                     comparator=NumericComparator.EQUAL,
                     threshold=float(equality.group("threshold").replace(",", ".")),
                 )
+        # Everyday sun wording. Checked before Hassil because a free name slot
+        # would otherwise read "die Sonne aufgeht" as an opening entity.
+        colloquial_sun = re.fullmatch(
+            r"(?:wenn|sobald|falls)\s+(?:es\s+(?P<light>dunkel|hell)\s+wird|"
+            r"die\s+sonne\s+(?P<sun>unter|auf)geht)[?.!]*",
+            text.strip(),
+            re.IGNORECASE,
+        )
+        if colloquial_sun is not None:
+            sets = (colloquial_sun.group("light") or "").casefold() == "dunkel" or (
+                (colloquial_sun.group("sun") or "").casefold() == "unter"
+            )
+            return TriggerModel(
+                type=TriggerType.SUN,
+                sun_event=SunEvent.SUNSET if sets else SunEvent.SUNRISE,
+            )
         slot_lists = {
             "device_class": _DEVICE_CLASS_SLOT_LIST,
             "area": WildcardSlotList(name="area"),

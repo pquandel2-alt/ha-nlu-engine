@@ -285,7 +285,16 @@ from .productivity import (
     TodoOperation,
     TodoRequest,
     format_duration,
+    parse_productivity_request,
     select_productivity_candidate,
+    timer_choice_ordinal,
+    timer_name_reply,
+)
+from .native_timer import (
+    NativeTimerInfo,
+    describe_timers,
+    join_timer_labels,
+    match_timer_name,
 )
 from .phonetic_correction import PhoneticSuggestion, phonetic_suggestions
 
@@ -379,6 +388,31 @@ def _confirmation_question(response_text: str) -> str:
             text = f"{text[: -len(ending)]}{infinitive}"
             break
     return f"Soll ich wirklich {text}?"
+
+
+def _helper_timer_seconds_left(entity: EntitySnapshot) -> int | None:
+    """Remaining seconds of a ``timer.*`` helper.
+
+    Home Assistant refreshes ``remaining`` only when a timer is paused, so a
+    running timer is measured against its ``finishes_at`` timestamp.
+    """
+    if entity.state == "active":
+        finishes_at = entity.attributes.get("finishes_at")
+        if isinstance(finishes_at, str):
+            try:
+                end = datetime.fromisoformat(finishes_at)
+            except ValueError:
+                end = None
+            if end is not None and end.tzinfo is not None:
+                return max(0, round((end - datetime.now(end.tzinfo)).total_seconds()))
+    for key in ("remaining", "duration"):
+        value = entity.attributes.get(key)
+        if isinstance(value, str):
+            match = re.fullmatch(r"\s*(\d+):(\d{2}):(\d{2})\s*", value)
+            if match:
+                hours, minutes, seconds = (int(part) for part in match.groups())
+                return hours * 3600 + minutes * 60 + seconds
+    return None
 
 
 def _with_session_conversation_id(
@@ -4295,6 +4329,12 @@ class NluConversationEntity(
         entities: list[EntitySnapshot],
     ) -> conversation.ConversationResult:
         """Complete the action missing from a pending automation draft."""
+        if classify_confirmation_reply(user_input.text) is ConfirmationReply.NO:
+            self._context_store.clear(user_input.conversation_id)
+            response.async_set_speech("In Ordnung. Ich lege keine Automation an.")
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
         completed = self._engine.complete_automation_draft(
             user_input.text,
             draft.trigger,
@@ -5040,6 +5080,8 @@ class NluConversationEntity(
         request: ProductivityRequest,
         *,
         awaiting_confirmation: bool = False,
+        awaiting_timer_name: bool = False,
+        timer_choices: tuple[NativeTimerInfo, ...] = (),
     ) -> None:
         self._context_store.set(
             conversation_id,
@@ -5051,8 +5093,178 @@ class NluConversationEntity(
                 pending_productivity_command=PendingProductivityCommand(
                     request=request,
                     awaiting_confirmation=awaiting_confirmation,
+                    awaiting_timer_name=awaiting_timer_name,
+                    timer_choices=timer_choices,
                 ),
             ),
+        )
+
+    async def _async_handle_native_timer_request(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        request: TimerRequest,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult:
+        """Name, select and confirm native Assist timers before acting."""
+        native_timer = self._runtime_data.native_timer
+        assert native_timer is not None
+        conversation_id = user_input.conversation_id
+
+        def done(speech: str, *, query: bool = False) -> conversation.ConversationResult:
+            response.async_set_speech(speech)
+            if query:
+                response.response_type = intent.IntentResponseType.QUERY_ANSWER
+            return conversation.ConversationResult(
+                response=response, conversation_id=conversation_id
+            )
+
+        try:
+            if request.operation is TimerOperation.START:
+                # Fail before asking for a name when nothing could be heard.
+                await native_timer.async_ensure_audible(user_input)
+                if not request.name:
+                    self._store_productivity(
+                        conversation_id, request, awaiting_timer_name=True
+                    )
+                    return done("Wie soll der Timer heißen?")
+                timers = await native_timer.async_list_timers(user_input)
+                if match_timer_name(request.name, timers):
+                    self._store_productivity(
+                        conversation_id, request, awaiting_timer_name=True
+                    )
+                    return done(
+                        f"Es läuft schon ein Timer {request.name}. "
+                        "Wie soll der neue Timer heißen?"
+                    )
+                return await self._async_execute_productivity(
+                    user_input, response, request, entities
+                )
+            timers = await native_timer.async_list_timers(user_input)
+        except Exception as err:  # noqa: BLE001 - HA intent errors are heterogeneous
+            _LOGGER.error("Timer command failed: %s", err)
+            response.async_set_error(
+                intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                f"Fehler beim Ausführen: {err}",
+            )
+            return conversation.ConversationResult(
+                response=response, conversation_id=conversation_id
+            )
+
+        if not timers:
+            return done("Es läuft kein Timer.", query=True)
+        if request.operation is TimerOperation.LIST:
+            return done(describe_timers(timers), query=True)
+        if request.operation is TimerOperation.CANCEL_ALL:
+            self._store_productivity(conversation_id, request, awaiting_confirmation=True)
+            if len(timers) == 1:
+                return done(f"Soll ich wirklich den Timer {timers[0].label} löschen?")
+            return done(f"Soll ich wirklich alle {len(timers)} Timer löschen?")
+
+        candidates = timers
+        if request.name:
+            candidates = match_timer_name(request.name, timers)
+            if not candidates:
+                return done(
+                    f"Ich finde keinen Timer {request.name}. "
+                    + describe_timers(timers)
+                )
+        if len(candidates) == 1:
+            return await self._async_execute_native_timer(
+                user_input, response, request, candidates[0], entities
+            )
+        if request.operation is TimerOperation.STATUS and not request.name:
+            return done(describe_timers(timers), query=True)
+        self._store_productivity(conversation_id, request, timer_choices=candidates)
+        return done(f"Welchen Timer meinst du: {join_timer_labels(candidates)}?")
+
+    async def _async_execute_native_timer(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        request: TimerRequest,
+        target: NativeTimerInfo,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult:
+        self._context_store.clear(user_input.conversation_id)
+        if request.operation is TimerOperation.STATUS:
+            response.async_set_speech(describe_timers((target,)).split(". ", 1)[-1])
+            response.response_type = intent.IntentResponseType.QUERY_ANSWER
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
+        return await self._async_execute_productivity(
+            user_input, response, request, entities, timer_target=target
+        )
+
+    async def _async_handle_pending_timer_reply(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        pending: PendingProductivityCommand,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult:
+        request = pending.request
+        assert isinstance(request, TimerRequest)
+        conversation_id = user_input.conversation_id
+
+        def ask(speech: str) -> conversation.ConversationResult:
+            response.async_set_speech(speech)
+            return conversation.ConversationResult(
+                response=response, conversation_id=conversation_id
+            )
+
+        if classify_confirmation_reply(user_input.text) is ConfirmationReply.NO or re.fullmatch(
+            r"\s*(?:abbrechen|abbruch|vergiss\s+es|stopp?)[.!]?\s*",
+            user_input.text,
+            re.IGNORECASE,
+        ):
+            self._context_store.clear(conversation_id)
+            return ask("Abgebrochen. Ich führe nichts aus.")
+
+        # A new timer or list command is not an answer to the open question
+        # ("Pausiere den Küchentimer" must never become a timer name).
+        new_request = parse_productivity_request(user_input.text, entities)
+        if new_request is not None:
+            self._context_store.clear(conversation_id)
+            return await self._async_handle_productivity_request(
+                user_input, response, new_request, entities
+            )
+
+        if pending.awaiting_timer_name:
+            name = timer_name_reply(user_input.text)
+            if name is None:
+                return ask("Bitte nenne einen kurzen Namen für den Timer, zum Beispiel Nudeln.")
+            if name:
+                native_timer = self._runtime_data.native_timer
+                assert native_timer is not None
+                timers = await native_timer.async_list_timers(user_input)
+                if match_timer_name(name, timers):
+                    return ask(
+                        f"Es läuft schon ein Timer {name}. Wie soll der neue Timer heißen?"
+                    )
+            self._context_store.clear(conversation_id)
+            return await self._async_execute_productivity(
+                user_input, response, replace(request, name=name or None), entities
+            )
+
+        choices = tuple(
+            item for item in pending.timer_choices if isinstance(item, NativeTimerInfo)
+        )
+        selected: NativeTimerInfo | None = None
+        position = timer_choice_ordinal(user_input.text)
+        if position is not None and choices:
+            index = len(choices) - 1 if position == -1 else position - 1
+            if 0 <= index < len(choices):
+                selected = choices[index]
+        if selected is None:
+            matched = match_timer_name(user_input.text.strip(" .!?"), choices)
+            if len(matched) == 1:
+                selected = matched[0]
+        if selected is None:
+            return ask(f"Welchen Timer meinst du: {join_timer_labels(choices)}?")
+        return await self._async_execute_native_timer(
+            user_input, response, request, selected, entities
         )
 
     async def _async_handle_pending_productivity(
@@ -5062,6 +5274,10 @@ class NluConversationEntity(
         pending: PendingProductivityCommand,
         entities: list[EntitySnapshot],
     ) -> conversation.ConversationResult:
+        if pending.awaiting_timer_name or pending.timer_choices:
+            return await self._async_handle_pending_timer_reply(
+                user_input, response, pending, entities
+            )
         if pending.awaiting_confirmation:
             reply = classify_confirmation_reply(user_input.text)
             if reply is ConfirmationReply.UNCLEAR:
@@ -5071,7 +5287,11 @@ class NluConversationEntity(
                 )
             self._context_store.clear(user_input.conversation_id)
             if reply is ConfirmationReply.NO:
-                response.async_set_speech("Abgebrochen. Die Liste wurde nicht verändert.")
+                response.async_set_speech(
+                    "Abgebrochen. Die Timer laufen weiter."
+                    if isinstance(pending.request, TimerRequest)
+                    else "Abgebrochen. Die Liste wurde nicht verändert."
+                )
                 return conversation.ConversationResult(
                     response=response, conversation_id=user_input.conversation_id
                 )
@@ -5124,7 +5344,7 @@ class NluConversationEntity(
                 )
             elif isinstance(request, TimerRequest) and self._runtime_data.native_timer is not None:
                 self._context_store.clear(user_input.conversation_id)
-                return await self._async_execute_productivity(
+                return await self._async_handle_native_timer_request(
                     user_input, response, request, entities
                 )
             else:
@@ -5159,12 +5379,16 @@ class NluConversationEntity(
         response: intent.IntentResponse,
         request: ProductivityRequest,
         entities: list[EntitySnapshot],
+        *,
+        timer_target: NativeTimerInfo | None = None,
     ) -> conversation.ConversationResult:
         try:
             if isinstance(request, TodoRequest):
                 speech = await self._async_execute_todo(request)
             else:
-                speech = await self._async_execute_timer(request, entities, user_input)
+                speech = await self._async_execute_timer(
+                    request, entities, user_input, timer_target=timer_target
+                )
         except Exception as err:  # noqa: BLE001 - HA service errors are heterogeneous
             _LOGGER.error("Productivity command failed: %s", err)
             response.async_set_error(
@@ -5388,12 +5612,21 @@ class NluConversationEntity(
         request: TimerRequest,
         entities: list[EntitySnapshot],
         user_input: conversation.ConversationInput,
+        *,
+        timer_target: NativeTimerInfo | None = None,
     ) -> str:
         if request.entity_id is None:
             native_timer = self._runtime_data.native_timer
             if native_timer is None:
                 raise ValueError("Home Assistants native Timerverwaltung ist nicht verfügbar.")
-            return await native_timer.async_execute(request, user_input)
+            if request.operation is TimerOperation.CANCEL_ALL:
+                canceled = await native_timer.async_cancel_all(user_input)
+                if canceled == 1:
+                    return "Der Timer wurde gelöscht."
+                return f"Alle {canceled} Timer wurden gelöscht."
+            return await native_timer.async_execute(
+                request, user_input, target=timer_target
+            )
         assert request.entity_id is not None
         entity = next((item for item in entities if item.entity_id == request.entity_id), None)
         if request.operation is TimerOperation.STATUS:
@@ -5401,9 +5634,11 @@ class NluConversationEntity(
                 return "Der Timer ist nicht mehr verfügbar."
             if entity.state == "idle":
                 return "Der Timer ist nicht aktiv."
-            remaining = entity.attributes.get("remaining") or entity.attributes.get("duration")
+            seconds_left = _helper_timer_seconds_left(entity)
             state = "pausiert" if entity.state == "paused" else "aktiv"
-            return f"Der Timer ist {state}. Verbleibende Zeit: {remaining}."
+            if seconds_left is None:
+                return f"Der Timer ist {state}."
+            return f"Der Timer ist {state}. Verbleibende Zeit: {format_duration(seconds_left)}."
 
         service = {
             TimerOperation.START: "start",

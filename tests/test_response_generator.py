@@ -408,7 +408,7 @@ def test_automation_list_prefers_source_text_over_alias():
     )
     assert respond(result) == (
         "Es gibt folgende Automationen: Wenn das Küchenfenster geöffnet wird, "
-        "schalte das Küchenlicht ein.."
+        "schalte das Küchenlicht ein."
     )
 
 
@@ -431,7 +431,7 @@ def test_automation_list_multiple_automations_are_joined():
     )
     assert respond(result) == (
         "Es gibt folgende Automationen: Wenn das Küchenfenster geöffnet wird, "
-        "schalte das Küchenlicht ein. und Von Hand erstellte Automation."
+        "schalte das Küchenlicht ein und Von Hand erstellte Automation."
     )
 
 
@@ -463,7 +463,7 @@ def test_automation_by_entity_single_match_plain_query():
     )
     assert respond(result) == (
         "Küchenlicht wird von folgender Automation gesteuert: Wenn das "
-        "Küchenfenster geöffnet wird, schalte das Küchenlicht ein.."
+        "Küchenfenster geöffnet wird, schalte das Küchenlicht ein."
     )
 
 
@@ -477,7 +477,7 @@ def test_automation_by_entity_single_match_causal_query_is_hedged():
     )
     assert respond(result) == (
         "Küchenlicht könnte durch folgende Automation beeinflusst werden: Wenn "
-        "das Küchenfenster geöffnet wird, schalte das Küchenlicht ein.."
+        "das Küchenfenster geöffnet wird, schalte das Küchenlicht ein."
     )
 
 
@@ -491,7 +491,7 @@ def test_automation_by_entity_multiple_matches_are_joined_plural():
     )
     assert respond(result) == (
         "Küchenlicht wird von folgenden Automationen gesteuert: Wenn das "
-        "Küchenfenster geöffnet wird, schalte das Küchenlicht ein. und Von "
+        "Küchenfenster geöffnet wird, schalte das Küchenlicht ein und Von "
         "Hand erstellte Automation."
     )
 

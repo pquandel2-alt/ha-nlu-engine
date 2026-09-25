@@ -67,7 +67,7 @@ def test_a_single_match_returns_a_confirmation_question_naming_the_automation(en
     assert isinstance(result, AutomationDeletionMatchResult)
     assert result.automation == KUECHE_AUTOMATION
     assert result.response_text == (
-        'Soll die Automation "Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht ein." '
+        'Soll die Automation "Wenn das Küchenfenster geöffnet wird, schalte das Küchenlicht ein" '
         "gelöscht werden?"
     )
 

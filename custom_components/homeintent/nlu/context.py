@@ -249,6 +249,10 @@ class PendingProductivityCommand:
 
     request: "ProductivityRequest"
     awaiting_confirmation: bool = False
+    # A native timer start waiting for the user to name the timer.
+    awaiting_timer_name: bool = False
+    # Running timers the user must choose between (native timer labels).
+    timer_choices: tuple[object, ...] = ()
 
 
 @dataclass(frozen=True)

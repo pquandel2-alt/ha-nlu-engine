@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+import re
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
@@ -21,6 +23,90 @@ _LOGGER = logging.getLogger(__name__)
 
 class NativeTimerUnavailableError(ValueError):
     """Raised when no audible native or configured fallback target exists."""
+
+
+@dataclass(frozen=True)
+class NativeTimerInfo:
+    """One running or paused Assist timer as reported by Home Assistant."""
+
+    name: str
+    seconds_left: int
+    is_active: bool
+    start_hours: int = 0
+    start_minutes: int = 0
+    start_seconds: int = 0
+
+    @property
+    def label(self) -> str:
+        if self.name:
+            return self.name
+        total = self.start_hours * 3600 + self.start_minutes * 60 + self.start_seconds
+        return f"Timer über {format_duration(total)}"
+
+    def target_slots(self) -> dict[str, dict[str, object]]:
+        """Slots that make Home Assistant pick exactly this timer."""
+        if self.name:
+            return {"name": {"value": self.name}}
+        slots: dict[str, dict[str, object]] = {}
+        for key, value in (
+            ("start_hours", self.start_hours),
+            ("start_minutes", self.start_minutes),
+            ("start_seconds", self.start_seconds),
+        ):
+            if value:
+                slots[key] = {"value": value}
+        return slots
+
+
+def _name_key(name: str) -> str:
+    return re.sub(r"[^0-9a-zäöüß]", "", name.casefold())
+
+
+def match_timer_name(
+    spoken: str, timers: Sequence[NativeTimerInfo]
+) -> tuple[NativeTimerInfo, ...]:
+    """Timers whose name the spoken name refers to.
+
+    Exact matches win. Otherwise one name may extend the other by a short
+    inflection ("Nudel" / "Nudeln", "Pizza-Timer" / "Pizza").
+    """
+    key = _name_key(spoken)
+    if not key:
+        return ()
+    named = [timer for timer in timers if _name_key(timer.name)]
+    exact = tuple(timer for timer in named if _name_key(timer.name) == key)
+    if exact:
+        return exact
+    return tuple(
+        timer
+        for timer in named
+        if min(len(key), len(_name_key(timer.name))) >= 3
+        and abs(len(key) - len(_name_key(timer.name))) <= 2
+        and (
+            _name_key(timer.name).startswith(key)
+            or key.startswith(_name_key(timer.name))
+        )
+    )
+
+
+def describe_timers(timers: Sequence[NativeTimerInfo]) -> str:
+    """Spoken list of timers with their remaining time."""
+    if not timers:
+        return "Es läuft kein Timer."
+    parts = [
+        f"{timer.label}: {'noch' if timer.is_active else 'pausiert,'} "
+        f"{format_duration(timer.seconds_left)}"
+        for timer in timers
+    ]
+    count = "Ein Timer läuft" if len(timers) == 1 else f"{len(timers)} Timer laufen"
+    return f"{count}. " + "; ".join(parts) + "."
+
+
+def join_timer_labels(timers: Sequence[NativeTimerInfo]) -> str:
+    labels = [timer.label for timer in timers]
+    if len(labels) <= 1:
+        return "".join(labels)
+    return ", ".join(labels[:-1]) + " oder " + labels[-1]
 
 
 class NativeTimerRuntime:
@@ -67,7 +153,7 @@ class NativeTimerRuntime:
             return
         name = getattr(timer, "name", None)
         message = (
-            f"{name}: Der Timer ist abgelaufen."
+            f"Der Timer {name.strip()} ist abgelaufen."
             if isinstance(name, str) and name.strip()
             else "Der Timer ist abgelaufen."
         )
@@ -77,11 +163,13 @@ class NativeTimerRuntime:
         )
 
     async def _async_announce(self, message: str) -> None:
-        await self._async_play_chime()
+        # The name comes first so a listener knows which timer ended; the
+        # configured alert tone follows as the actual alarm.
         try:
             await self._delivery.async_speak(message, self._entry.options)
         except Exception as err:  # noqa: BLE001 - HA service errors vary by provider
             _LOGGER.error("HomeIntent timer announcement failed: %s", err)
+        await self._async_play_chime()
 
     async def _async_play_chime(self) -> None:
         """Play an explicitly configured local/HA media-source cue.
@@ -132,6 +220,91 @@ class NativeTimerRuntime:
             "einen Medienplayer."
         )
 
+    async def async_ensure_audible(self, user_input: object) -> None:
+        """Raise when a new timer could not be heard when it finishes."""
+        await self._route_device(getattr(user_input, "device_id", None))
+
+    def _command_device(self, source_device_id: str | None) -> str | None:
+        """Device for commands on existing timers; no audible output needed."""
+        from homeassistant.components.intent import async_device_supports_timers
+
+        if source_device_id and async_device_supports_timers(
+            self._hass, source_device_id
+        ):
+            return source_device_id
+        return self._fallback_device_id if self._unregister is not None else None
+
+    async def _async_handle(
+        self,
+        intent_type: str,
+        slots: dict[str, dict[str, object]],
+        user_input: object,
+        device_id: str | None,
+    ) -> object:
+        from homeassistant.helpers import intent
+
+        return await intent.async_handle(
+            self._hass,
+            DOMAIN,
+            intent_type,
+            slots,
+            getattr(user_input, "text", None),
+            getattr(user_input, "context", None),
+            language=getattr(user_input, "language", "de"),
+            assistant="conversation",
+            device_id=device_id,
+            satellite_id=getattr(user_input, "satellite_id", None),
+            conversation_agent_id=getattr(user_input, "agent_id", None),
+        )
+
+    async def async_list_timers(self, user_input: object) -> tuple[NativeTimerInfo, ...]:
+        """All Assist timers, nearest to the asking device first."""
+        from homeassistant.helpers import intent
+
+        native_response = await self._async_handle(
+            intent.INTENT_TIMER_STATUS,
+            {},
+            user_input,
+            self._command_device(getattr(user_input, "device_id", None)),
+        )
+        speech_slots = getattr(native_response, "speech_slots", {})
+        raw_timers: object = (
+            speech_slots.get("timers") if isinstance(speech_slots, dict) else None
+        )
+        timers: list[NativeTimerInfo] = []
+        if isinstance(raw_timers, list):
+            for item in raw_timers:
+                if not isinstance(item, dict):
+                    continue
+                seconds = item.get("total_seconds_left")
+                if not isinstance(seconds, int):
+                    continue
+                name = item.get("name")
+                timers.append(
+                    NativeTimerInfo(
+                        name=name.strip() if isinstance(name, str) else "",
+                        seconds_left=seconds,
+                        is_active=bool(item.get("is_active", True)),
+                        start_hours=_int_slot(item.get("start_hours")),
+                        start_minutes=_int_slot(item.get("start_minutes")),
+                        start_seconds=_int_slot(item.get("start_seconds")),
+                    )
+                )
+        return tuple(timers)
+
+    async def async_cancel_all(self, user_input: object) -> int:
+        from homeassistant.helpers import intent
+
+        native_response = await self._async_handle(
+            intent.INTENT_CANCEL_ALL_TIMERS,
+            {},
+            user_input,
+            self._command_device(getattr(user_input, "device_id", None)),
+        )
+        speech_slots = getattr(native_response, "speech_slots", {})
+        canceled = speech_slots.get("canceled") if isinstance(speech_slots, dict) else None
+        return canceled if isinstance(canceled, int) else 0
+
     @staticmethod
     def _duration_slots(seconds: int) -> dict[str, dict[str, object]]:
         hours, remainder = divmod(abs(seconds), 3600)
@@ -146,12 +319,25 @@ class NativeTimerRuntime:
             slots["seconds"] = {"value": 0}
         return slots
 
-    async def async_execute(self, request: TimerRequest, user_input: object) -> str:
-        """Execute a parsed request through HA's registered timer intents."""
+    async def async_execute(
+        self,
+        request: TimerRequest,
+        user_input: object,
+        *,
+        target: NativeTimerInfo | None = None,
+    ) -> str:
+        """Execute a parsed request through HA's registered timer intents.
+
+        ``target`` is the concrete timer HomeIntent resolved beforehand; it
+        replaces the spoken name so Home Assistant's exact name match applies.
+        """
         from homeassistant.helpers import intent
 
-        device_id = await self._route_device(getattr(user_input, "device_id", None))
         operation = request.operation
+        if operation is TimerOperation.START:
+            device_id = await self._route_device(getattr(user_input, "device_id", None))
+        else:
+            device_id = self._command_device(getattr(user_input, "device_id", None))
         if operation is TimerOperation.START:
             intent_type = intent.INTENT_START_TIMER
         elif operation is TimerOperation.CHANGE:
@@ -178,22 +364,14 @@ class NativeTimerRuntime:
             if not seconds:
                 raise ValueError("Für den Timer fehlt eine gültige Dauer.")
             slots.update(self._duration_slots(seconds))
-        if request.name:
+        name = request.name
+        if target is not None and operation is not TimerOperation.START:
+            slots.update(target.target_slots())
+            name = target.name or None
+        elif request.name:
             slots["name"] = {"value": request.name}
-        native_response = await intent.async_handle(
-            self._hass,
-            DOMAIN,
-            intent_type,
-            slots,
-            getattr(user_input, "text", None),
-            getattr(user_input, "context", None),
-            language=getattr(user_input, "language", "de"),
-            assistant="conversation",
-            device_id=device_id,
-            satellite_id=getattr(user_input, "satellite_id", None),
-            conversation_agent_id=getattr(user_input, "agent_id", None),
-        )
-        label = f" „{request.name}“" if request.name else ""
+        native_response = await self._async_handle(intent_type, slots, user_input, device_id)
+        label = f" „{name}“" if name else ""
         if operation is TimerOperation.START:
             return f"Timer{label} für {format_duration(seconds)} gestartet."
         if operation is TimerOperation.CHANGE:
@@ -204,8 +382,7 @@ class NativeTimerRuntime:
             TimerOperation.RESUME: f"Timer{label} fortgesetzt.",
             TimerOperation.CANCEL: f"Timer{label} abgebrochen.",
             TimerOperation.FINISH: f"Timer{label} beendet.",
-            TimerOperation.STATUS: self._status_speech(native_response),
-        }[operation]
+        }.get(operation) or self._status_speech(native_response)
 
     @staticmethod
     def _status_speech(native_response: object) -> str:
@@ -228,3 +405,7 @@ class NativeTimerRuntime:
             return "Der Timerstatus ist derzeit nicht verfügbar."
         suffix = " Weitere Timer nenne ich auf Nachfrage." if len(timers) > 3 else ""
         return "; ".join(rendered) + "." + suffix
+
+
+def _int_slot(value: object) -> int:
+    return value if isinstance(value, int) and value > 0 else 0

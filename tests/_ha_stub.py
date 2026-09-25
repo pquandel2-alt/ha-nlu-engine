@@ -330,6 +330,9 @@ def install() -> None:
             self.entries.setdefault(entity_id, RegistryEntry())
             return entity_id
 
+        def async_remove(self, entity_id: str) -> None:
+            self.entries.pop(entity_id, None)
+
         def async_update_entity(self, entity_id: str, **changes: Any) -> RegistryEntry:
             entry = self.entries[entity_id]
             for key, value in changes.items():

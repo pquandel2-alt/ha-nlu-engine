@@ -818,3 +818,25 @@ def test_a_category_assignment_failure_rolls_back_yaml_and_live_automation():
         [],
     ]
     assert hass.services.async_call.await_count == 2
+
+
+def test_delete_automation_removes_its_entity_registry_entry():
+    hass = _make_hass()
+    from homeassistant.helpers import entity_registry as er
+
+    registry = er.async_get(hass)
+    entity_id = registry.async_get_entity_id("automation", "automation", "abc123")
+    assert registry.async_get(entity_id) is not None
+    with (
+        patch.object(
+            automation_executor.yaml_util,
+            "load_yaml",
+            return_value=[EXISTING_AUTOMATION, OTHER_AUTOMATION],
+        ),
+        patch.object(automation_executor.yaml_util, "dump", return_value="dumped-yaml"),
+        patch.object(automation_executor, "write_utf8_file_atomic"),
+        _patch_metadata_write(),
+    ):
+        asyncio.run(AutomationExecutor(hass).async_delete_automation("abc123"))
+
+    assert entity_id not in registry.entries
