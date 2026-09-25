@@ -31,6 +31,9 @@ class DialogTaskKind(StrEnum):
     PREFERENCE_CONFIRMATION = "preference_confirmation"
     MODEL_RESET_CONFIRMATION = "model_reset_confirmation"
     CONFLICT_RESOLUTION = "conflict_resolution"
+    PROACTIVE_CLARIFICATION = "proactive_clarification"
+    STANDING_PERMISSION_CONFIRMATION = "standing_permission_confirmation"
+    PROACTIVE_MUTE_CONFIRMATION = "proactive_mute_confirmation"
 
 
 class DialogPriority(IntEnum):

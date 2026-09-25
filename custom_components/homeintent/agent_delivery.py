@@ -135,24 +135,32 @@ class AgentDelivery:
         severity: str,
         goal_id: str,
         run_id: str,
+        actions: tuple[tuple[str, str], ...] = (),
     ) -> bool:
         """Deliver an already-rendered V10 notification to one bound target.
 
         Recipient resolution and content construction happen before this
         boundary.  No broadcast fallback is permitted for typed goals.
+        ``actions`` are (opaque action id, title) pairs; an action id never
+        carries a domain, service or entity.
         """
         if not target_id.startswith("notify."):
             raise ValueError("Typed push delivery requires one explicit notify.* target")
         service = target_id.partition(".")[2]
+        data: dict[str, object] = {
+            "tag": dedupe_key,
+            "severity": severity,
+            "goal_id": goal_id,
+            "run_id": run_id,
+        }
+        if actions:
+            data["actions"] = [
+                {"action": action_id, "title": title} for action_id, title in actions
+            ]
         payload = {
             "title": title,
             "message": message,
-            "data": {
-                "tag": dedupe_key,
-                "severity": severity,
-                "goal_id": goal_id,
-                "run_id": run_id,
-            },
+            "data": data,
         }
         # Explicit service and entity bindings never fall back to a broadcast.
         # ``None`` is limited to schema-v1 records and is resolved only from
@@ -184,6 +192,28 @@ class AgentDelivery:
             blocking=True,
         )
         return True
+
+    async def async_satellite_message(
+        self, satellite_entity_id: str, message: str, *, ask: bool
+    ) -> None:
+        """Speak on one explicitly resolved Assist satellite.
+
+        ``ask`` uses ``assist_satellite.start_conversation`` so the satellite
+        keeps listening for the answer (no extra wake word); otherwise
+        ``assist_satellite.announce``.  Never a broadcast.
+        """
+        if not satellite_entity_id.startswith("assist_satellite."):
+            raise ValueError("Voice delivery requires one explicit assist_satellite.* target")
+        service = "start_conversation" if ask else "announce"
+        key = "start_message" if ask else "message"
+        if not self._hass.services.has_service("assist_satellite", service):
+            raise ValueError(f"assist_satellite.{service} is not available")
+        await self._hass.services.async_call(
+            "assist_satellite",
+            service,
+            {"entity_id": satellite_entity_id, key: message},
+            blocking=True,
+        )
 
     async def _async_tts(
         self, event: AgentEvent, options: Mapping[str, object]

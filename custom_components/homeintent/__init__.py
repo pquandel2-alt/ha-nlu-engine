@@ -33,7 +33,7 @@ from .const import (
     DOMAIN,
 )
 from .memory import MemoryKind, MemoryStore
-from .goal_run import GoalRun, GoalRunStore
+from .goal_run import GoalRun, GoalRunStatus, GoalRunStore
 from .monitor_goal import MonitorGoalRuntime, MonitorGoalStore
 from .nlu.context import ConversationContextStore
 from .profiles import ProfileStore
@@ -52,6 +52,8 @@ from .thermal_tracker import ThermalExperienceTracker
 from .statistical_models import evaluate_latency_anomaly
 from .thermal_deadline import (
     PendingThermalCheckpointStore,
+    ThermalCheckpointResult,
+    ThermalCheckpointStatus,
     ThermalDeadlineCheckpoint,
     async_process_thermal_checkpoint,
 )
@@ -323,6 +325,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     situation_runtime = SituationRuntime(hass, entry, entry.runtime_data)
     entry.runtime_data.situation_runtime = situation_runtime
     entry.async_on_unload(situation_runtime.async_start())
+    from .proactive_runtime import ProactiveRuntime
+
+    # V12 is an additive decision layer: it observes through the existing
+    # SituationRuntime and acts only through the V10 pipeline.
+    proactive_context = ProactiveRuntime(
+        hass, entry, entry.runtime_data,
+        _storage_path(hass, "homeintent_proactive.json", "ha_nlu_proactive.json"),
+    )
+    entry.runtime_data.proactive_context = proactive_context
+    entry.async_on_unload(await proactive_context.async_start())
+
+    async def _proactive_goal_failure(run: GoalRun) -> None:
+        # Only a failure nobody was watching (scheduled / monitor goals) needs
+        # a proactive notice; interactive and V12-originated runs report inline.
+        if run.status not in {GoalRunStatus.FAILURE, GoalRunStatus.PARTIAL_FAILURE}:
+            return
+        if any(item.startswith("proactive:") for item in run.evidence):
+            return
+        unattended = run.goal.lifecycle.value == "monitor" or any(
+            item.startswith("thermal") or item == "plan_status=scheduled"
+            for item in run.evidence
+        )
+        if not unattended:
+            return
+        label = run.source_utterance or "Geplantes Ziel"
+        await proactive_context.async_report_goal_failure(
+            run_id=run.run_id, goal_label=label[:80], owner_user_id=run.user_id,
+        )
+
+    entry.runtime_data.remove_proactive_listener = goal_runs.add_append_listener(
+        _proactive_goal_failure
+    )
     from .adapters import StructuredAdapterRuntime
 
     adapter_runtime = StructuredAdapterRuntime(
@@ -433,6 +467,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             result = await async_process_thermal_checkpoint(
                 checkpoint, snapshots, thermal_tracker, goal_runs, now=now
             )
+            proactive = entry.runtime_data.proactive_context
+            if (
+                proactive is not None
+                and isinstance(result, ThermalCheckpointResult)
+                and result.status is ThermalCheckpointStatus.LIKELY_LATE
+            ):
+                area_name = next(
+                    (item.area_name for item in snapshots
+                     if item.area_id == checkpoint.area_id and item.area_name),
+                    checkpoint.area_id,
+                )
+                owner = next(
+                    (run.user_id for run in await goal_runs.async_list()
+                     if run.run_id == checkpoint.run_id),
+                    None,
+                )
+                await proactive.async_report_thermal_risk(
+                    area_id=checkpoint.area_id, area_name=area_name or checkpoint.area_id,
+                    goal_id=checkpoint.goal_id, current=result.measured_celsius,
+                    target=result.target_celsius, owner_user_id=owner,
+                )
             if result is None and checkpoint.phase.value == "final":
                 _LOGGER.warning(
                     "Thermal final checkpoint has no GoalRun for %s",
@@ -647,6 +702,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if entry.runtime_data.remove_learning_listener is not None:
             entry.runtime_data.remove_learning_listener()
             entry.runtime_data.remove_learning_listener = None
+        if entry.runtime_data.remove_proactive_listener is not None:
+            entry.runtime_data.remove_proactive_listener()
+            entry.runtime_data.remove_proactive_listener = None
         for task in tuple(entry.runtime_data.learning_tasks):
             task.cancel()
         if entry.runtime_data.learning_tasks:

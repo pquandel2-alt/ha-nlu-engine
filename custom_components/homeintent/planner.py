@@ -401,6 +401,72 @@ def materialize_routine(
     return plan
 
 
+def materialize_target_states(
+    goal: GoalModel,
+    targets: Sequence[tuple[str, DesiredState, str]],
+    entities: Iterable[EntitySnapshot],
+    *,
+    options: Mapping[str, object],
+    is_admin: bool,
+    user_id: str | None,
+    limits: PlanningLimits = PlanningLimits(),
+) -> MaterializedPlan:
+    """Materialize explicit (entity, desired state) targets through V10.
+
+    Used for proactive proposals: the caller supplies only desired states;
+    this planner selects the closed operator, runs the Validator and the
+    central ExecutionPolicy, skips already-satisfied targets and adds the
+    mandatory verification for every action step.
+    """
+    snapshots = tuple(entities)
+    by_id = {item.entity_id: item for item in snapshots}
+    if not targets:
+        raise ValueError("Der Vorschlag enthält kein Ziel")
+    steps: list[PlanStep] = [
+        PlanStep(
+            "check-fresh-state", StepKind.CHECK,
+            "Aktuelle Zustände, Verfügbarkeit und Fähigkeiten prüfen",
+            invariants=("fresh_snapshot", "capability_checked", "policy_checked"),
+        )
+    ]
+    dependency = steps[0].step_id
+    selected: list[str] = []
+    skipped: list[str] = []
+    for entity_id, desired, description in targets:
+        if len(steps) >= limits.max_steps:
+            raise ValueError("Der Vorschlag überschreitet das begrenzte Planungsbudget")
+        entity = by_id.get(entity_id)
+        if entity is None:
+            raise ValueError(f"Ziel {entity_id} ist nicht mehr vorhanden")
+        if _desired_already_satisfied(entity, desired):
+            skipped.append(f"{entity_id}:already_satisfied")
+            continue
+        action, effect = _action_for_desired_state(entity, desired)
+        _validate_action(action, snapshots, options, is_admin, user_id)
+        operator = _operator_id(action.domain, action.service)
+        step_id = f"target-{len(steps)}"
+        steps.append(
+            PlanStep(
+                step_id, StepKind.ACTION, description or f"{entity.friendly_name} anpassen",
+                preconditions=("entity_available", "capability_checked"),
+                effects=(effect,), dependencies=(dependency,), action=action,
+                risk=classify_service_plan(action, snapshots), reversible=False,
+                verification={entity_id: _verification_value(desired)},
+                operator_id=operator, idempotent=_is_idempotent(action),
+            )
+        )
+        selected.append(operator)
+        dependency = step_id
+    aggregate = max((item.risk for item in steps), default=RiskLevel.LOW)
+    plan = MaterializedPlan(
+        f"plan_{uuid.uuid4().hex}", goal, tuple(steps), aggregate, True,
+        f"{len(steps) - 1} geprüfte Aktion(en), Gesamtrisiko {aggregate.name.lower()}.",
+        _trace(goal, snapshots, tuple(selected), tuple(skipped), limits),
+    )
+    validate_plan_graph(plan, limits=limits)
+    return plan
+
+
 def materialize_comfort_profile(
     goal: GoalModel,
     profile: ComfortProfile,
@@ -650,6 +716,8 @@ def _action_for_desired_state(entity: EntitySnapshot, desired: DesiredState) -> 
         return ServiceCallPlan("homeassistant", service, entity.entity_id, {}), f"state={value}"
     if desired.property_name == "state" and value == "closed" and entity.domain == "cover":
         return ServiceCallPlan("cover", "close_cover", entity.entity_id, {}), "state=closed"
+    if desired.property_name == "state" and value == "open" and entity.domain == "cover":
+        return ServiceCallPlan("cover", "open_cover", entity.entity_id, {}), "state=open"
     if desired.property_name == "state" and value == "locked" and entity.domain == "lock":
         return ServiceCallPlan("lock", "lock", entity.entity_id, {}), "state=locked"
     if desired.property_name == "brightness" and entity.domain == "light" and isinstance(value, (int, float)):

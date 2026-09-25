@@ -66,7 +66,11 @@ _COMPOUND_HEADS: tuple[tuple[str, GrammaticalGender], ...] = (
 )
 
 _ENTITY_HEADS: tuple[tuple[str, GrammaticalGender], ...] = (
+    ("geschirrspüler", GrammaticalGender.MASCULINE),
     ("bewegungsmelder", GrammaticalGender.MASCULINE),
+    ("waschmaschine", GrammaticalGender.FEMININE),
+    ("spülmaschine", GrammaticalGender.FEMININE),
+    ("trockner", GrammaticalGender.MASCULINE),
     ("luftbefeuchter", GrammaticalGender.MASCULINE),
     ("medienplayer", GrammaticalGender.MASCULINE),
     ("saugroboter", GrammaticalGender.MASCULINE),
@@ -84,6 +88,7 @@ _ENTITY_HEADS: tuple[tuple[str, GrammaticalGender], ...] = (
     ("tür", GrammaticalGender.FEMININE),
     ("tor", GrammaticalGender.NEUTER),
     ("ventil", GrammaticalGender.NEUTER),
+    ("garage", GrammaticalGender.FEMININE),
 )
 
 
@@ -150,3 +155,25 @@ def sentence_initial(text: str) -> str:
     """Uppercase only the first character of a non-empty realized phrase."""
 
     return text[:1].upper() + text[1:]
+
+
+_DEFINITE_ARTICLES = {
+    GrammaticalGender.MASCULINE: ("der", "den", "ihn"),
+    GrammaticalGender.FEMININE: ("die", "die", "sie"),
+    GrammaticalGender.NEUTER: ("das", "das", "es"),
+}
+
+
+def definite_entity_phrase(name: str) -> tuple[str, str, str] | None:
+    """Return (nominative phrase, accusative phrase, accusative pronoun).
+
+    Only a known lexical head yields an article; otherwise ``None`` so the
+    caller can fall back to a gender-neutral construction instead of guessing.
+    """
+
+    gender = entity_name_gender(name)
+    if gender is None:
+        return None
+    nominative, accusative, pronoun = _DEFINITE_ARTICLES[gender]
+    stripped = name.strip()
+    return f"{nominative} {stripped}", f"{accusative} {stripped}", pronoun

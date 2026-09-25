@@ -162,6 +162,8 @@ from .preferences import (
 )
 from .predictive_house_model import PredictiveHouseModel
 from .management_understanding import understand_management
+from .proactive_dialog import V12_TASK_KINDS
+from .room_presence import build_area_lookup
 from .planner import (
     Goal,
     GoalKind,
@@ -594,6 +596,13 @@ class NluConversationEntity(
         satellite microphones open after a plain "Mach das Licht an".
         """
         user_input = _with_session_conversation_id(user_input, chat_log)
+        proactive = self._runtime_data.proactive_context
+        if proactive is not None:
+            # An authenticated turn on a mapped satellite is short-lived room
+            # evidence; an anonymous turn is never identity evidence.
+            proactive.record_authenticated_turn(
+                conversation_user_id(user_input), getattr(user_input, "device_id", None)
+            )
         result = await self._async_handle_message_inner(user_input, chat_log)
         self._apply_continue_conversation(user_input, result)
         return result
@@ -887,6 +896,25 @@ class NluConversationEntity(
             )
 
         if active_dialog is None:
+            proactive = self._runtime_data.proactive_context
+            if proactive is not None and (
+                proactive.enabled
+                or (active_task is not None and active_task.kind in V12_TASK_KINDS)
+            ):
+                owned = await proactive.dialogs.async_handle_owned_turn(
+                    user_input.text,
+                    conversation_id=user_input.conversation_id,
+                    user_id=conversation_user_id(user_input),
+                    is_admin=await user_is_admin(self.hass, user_input),
+                    entities=entities,
+                    area_lookup=build_area_lookup(entities),
+                    local_now=dt_util.now(),
+                )
+                if owned is not None:
+                    response.async_set_speech(owned.speech)
+                    return conversation.ConversationResult(
+                        response=response, conversation_id=user_input.conversation_id
+                    )
             procedure_result = await self._async_handle_procedure_turn(
                 user_input, response, language_document, entities
             )
@@ -933,8 +961,32 @@ class NluConversationEntity(
                 return memory_result
 
         # A normal pending conversation dialog always wins. Only an otherwise
-        # unclaimed yes/no reply may address one unique, unexpired ASK event
-        # that was actually spoken over TTS; ambiguity is never guessed.
+        # unclaimed bare reply may address one unique V12 proposal for this
+        # caller; with several open questions V12 asks which one is meant.
+        proactive = self._runtime_data.proactive_context
+        if active_dialog is None and proactive is not None and proactive.enabled:
+            other_questions = (
+                await self._runtime_data.proactive_agent.async_open_voice_question_count()
+                if self._runtime_data.proactive_agent is not None
+                else 0
+            )
+            proposal_reply = await proactive.dialogs.async_handle_bare_reply(
+                user_input.text,
+                conversation_id=user_input.conversation_id,
+                user_id=conversation_user_id(user_input),
+                device_id=getattr(user_input, "device_id", None),
+                is_admin=await user_is_admin(self.hass, user_input),
+                other_open_questions=other_questions,
+            )
+            if proposal_reply is not None:
+                response.async_set_speech(proposal_reply.speech)
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
+
+        # Only an otherwise unclaimed yes/no reply may address one unique,
+        # unexpired ASK event that was actually spoken over TTS; ambiguity is
+        # never guessed.
         if active_dialog is None and self._runtime_data.proactive_agent is not None:
             agent_reply = await self._runtime_data.proactive_agent.async_handle_voice_reply(
                 user_input.text,

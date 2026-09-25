@@ -39,6 +39,10 @@ class ExecutionCoordinator:
                 self._owners[entity_id] = run_id
             return ReservationResult(ConflictOutcome.ACQUIRED, targets)
 
+    def reserved_entity_ids(self) -> frozenset[str]:
+        """Targets currently owned by a running goal (read-only view)."""
+        return frozenset(self._owners)
+
     async def async_release(self, run_id: str) -> None:
         async with self._lock:
             for entity_id in tuple(self._owners):

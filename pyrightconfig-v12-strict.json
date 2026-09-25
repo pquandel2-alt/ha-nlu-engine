@@ -1,0 +1,22 @@
+{
+  "include": [
+    "custom_components/homeintent/proactive_model.py",
+    "custom_components/homeintent/situation_detection.py",
+    "custom_components/homeintent/proactive_policy.py",
+    "custom_components/homeintent/attention_policy.py",
+    "custom_components/homeintent/room_presence.py",
+    "custom_components/homeintent/communication_router.py",
+    "custom_components/homeintent/standing_permission.py",
+    "custom_components/homeintent/context_forecast.py",
+    "custom_components/homeintent/proactive_session.py",
+    "custom_components/homeintent/proactive_store.py",
+    "custom_components/homeintent/proactive_messages.py",
+    "custom_components/homeintent/proactive_execution.py",
+    "custom_components/homeintent/proactive_engine.py",
+    "custom_components/homeintent/proactive_dialog.py"
+  ],
+  "exclude": ["tests"],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "strict",
+  "reportMissingImports": false
+}

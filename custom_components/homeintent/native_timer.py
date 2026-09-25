@@ -161,6 +161,17 @@ class NativeTimerRuntime:
             self._async_announce(message),
             name="HomeIntent timer announcement",
         )
+        # V12 may observe the expiry for history only; NativeTimer remains the
+        # sole announcer, so one expiry yields exactly one announcement.
+        runtime_data = getattr(self._entry, "runtime_data", None)
+        proactive = getattr(runtime_data, "proactive_context", None)
+        if proactive is not None:
+            try:
+                proactive.record_timer_finished(
+                    name.strip() if isinstance(name, str) and name.strip() else "Timer"
+                )
+            except Exception:  # noqa: BLE001 - history must never affect the timer
+                _LOGGER.debug("V12 timer history note failed", exc_info=True)
 
     async def _async_announce(self, message: str) -> None:
         # The name comes first so a listener knows which timer ended; the

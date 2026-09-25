@@ -41,6 +41,7 @@ class HomeIntentRuntimeData:
     audit_trail: AuditTrail = field(default_factory=AuditTrail)
     proactive_agent: Any | None = None
     situation_runtime: Any | None = None
+    proactive_context: Any | None = None
     memory: MemoryStore | None = None
     situation_evaluator: SituationEvaluator = field(default_factory=SituationEvaluator)
     routine_statistics: dict[str, RoutineStatistics] = field(default_factory=dict)
@@ -67,6 +68,7 @@ class HomeIntentRuntimeData:
     thermal_checkpoints: PendingThermalCheckpointStore | None = None
     learning_tasks: set[asyncio.Task[None]] = field(default_factory=set)
     remove_learning_listener: Callable[[], None] | None = None
+    remove_proactive_listener: Callable[[], None] | None = None
 
     def __post_init__(self) -> None:
         self.context_store.bind_dialog_listener(self._synchronize_dialog)
