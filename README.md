@@ -42,6 +42,68 @@ Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
 
+## Was ist in Version 7.0 / V12 neu?
+
+**Proaktive Kontextintelligenz.** HomeIntent wartet nicht mehr nur auf einen
+Befehl. Es erkennt relevante Situationen im Haus, entscheidet, ob sie eine
+Unterbrechung wert sind, wählt die richtige Person und den richtigen Kanal und
+fragt nach – ausgeführt wird erst nach einer ausdrücklichen Antwort:
+
+> „Die Garage ist noch offen. Soll ich sie schließen?“ – „Ja.“
+
+> „Das Wohnzimmer wird voraussichtlich nicht rechtzeitig warm.“
+
+> „Die Waschmaschine ist fertig.“
+
+> „Du machst werktags morgens häufig dieselbe Abfolge. Als Nächstes folgen
+> meist: Küchenrollladen öffnen und Wohnzimmerlicht einschalten. Soll ich die
+> Routine starten?“
+
+Das Wichtigste in der Praxis:
+
+- **Vorschlagen, nicht eigenmächtig handeln.** Vorhersagen und erkannte
+  Situationen führen nie selbst etwas aus. Jede Aktion läuft nach „Ja“, einem
+  Push-Knopf oder einer vorher ausdrücklich bestätigten Daueranweisung durch
+  die bestehende V10-Kette: Planer, Validator, Ausführungsrichtlinie,
+  Konfliktprüfung, Wirkungsprüfung und GoalRun.
+- **Der richtige Kanal.** Ist eindeutig belegt, in welchem Raum du bist, und
+  gibt es dort genau einen Sprachsatelliten, spricht HomeIntent dort und hört
+  ohne erneutes Aktivierungswort auf die Antwort. Ist der Raum unklar, gibt es
+  keinen oder mehrere Satelliten, ist der Inhalt persönlich und jemand anderes
+  zu Hause, oder bist du unterwegs, kommt eine private Push-Nachricht mit den
+  Knöpfen „Schließen“, „Später“ und „Ignorieren“. HomeIntent rät nie einen
+  Raum und sendet nichts ungefragt an alle Lautsprecher.
+- **Nicht nerven.** Hinweise werden dedupliziert, in Ruhezeiten zurückgehalten
+  oder privat zugestellt, mehrere kleine Meldungen werden zusammengefasst, und
+  es gibt ein Hinweisbudget. Rauch-, Kohlenmonoxid-, Gas- und Wassermelder
+  umgehen jede dieser Grenzen.
+- **Dialoge bleiben getrennt.** Ein „Ja“ gehört immer zur aktuell offenen
+  Rückfrage: Timer-Namen, Timer-Auswahl, „Lösche alle Timer“, Automationen und
+  Sicherheitsbestätigungen haben Vorrang. Bei mehreren offenen Vorschlägen
+  fragt HomeIntent nach („Meinst du das Licht in der Küche oder die Garage?“).
+  Wer eine Frage nicht gestellt bekommen hat, kann sie nicht bestätigen.
+- **„Später“, „Erinnere mich in 20 Minuten“, „Ignorieren“.** Nach Ablauf prüft
+  HomeIntent den aktuellen Zustand – ist die Garage inzwischen zu, bleibt es
+  still. „Ignorieren“ gilt nur für diese eine Situation; „Sag mir das künftig
+  nicht mehr“ wird erst nach Rückfrage gespeichert.
+- **Daueranweisungen (optional).** „Wenn niemand zuhause ist und im
+  Wohnzimmer noch Licht an ist, darfst du es automatisch ausschalten.“ wird nach
+  Vorschau und „Ja“ gespeichert. Schlösser, Garagen, Tore, Türen, Alarmanlagen,
+  Ventile und herdähnliche Geräte werden niemals automatisch geschaltet –
+  HomeIntent fragt dort immer.
+- **Nachvollziehbar.** „Warum hast du mich wegen der Garage angesprochen?“ und
+  „Welche Hinweise gab es heute?“ werden aus gespeicherten Belegen beantwortet.
+- **Zuverlässigere Lernbasis.** Ein bereits erfüllter Zielzustand („Licht ist
+  schon an“) zählt nicht mehr als erfolgreiche Geräteaktion; eine abgelehnte
+  Serviceanfrage nicht mehr als Wirkungsfehler. Nur angenommene und geprüfte
+  Aktionen fließen in die V11-Zuverlässigkeit ein.
+
+Die proaktive Kontextintelligenz ist standardmäßig **ausgeschaltet** und wird
+in den HomeIntent-Optionen aktiviert; Daueranweisungen sind zusätzlich separat
+abgeschaltet. Empfänger und Push-Ziele kommen aus `homeintent.bind_user_context`
+und `homeintent.set_household`. Alles läuft lokal. Details:
+[docs/architecture-v12.md](docs/architecture-v12.md).
+
 ## Was ist in Version 6.1.0 neu?
 
 **Benannte Timer.** Jeder neue Assist-Timer bekommt einen Namen; fehlt er im
@@ -1033,8 +1095,25 @@ Für zuverlässige Ergebnisse:
 - Der lokale Dokumentadapter indexiert TXT, Markdown und begrenzte
   textbasierte PDFs. Verschlüsselte oder reine Scan-PDFs werden nicht per OCR
   interpretiert.
+- Proaktive Sprachausgabe im Raum braucht konfigurierte Raumsensoren und genau
+  einen Sprachsatelliten pro Bereich; sonst wird privat per Push zugestellt.
+- Die meisten Sprachsatelliten melden keinen angemeldeten Benutzer. Eine
+  anonyme Antwort gilt deshalb nur für Haushaltsfragen auf dem Satelliten, der
+  gefragt hat, und unterliegt den Regeln für Nicht-Administratoren.
+- Daueranweisungen decken derzeit genau eine Satzform ab (Licht aus, wenn
+  niemand zu Hause ist); alles andere bleibt eine normale Automation.
 
 ## Architektur
+
+Proaktive Hinweise (V12) laufen als zusätzliche Entscheidungsschicht über die
+bestehende Kette; Details in [docs/architecture-v12.md](docs/architecture-v12.md):
+
+```text
+HA-Zustand ─► Situation ─► V11-Vorhersage (nur gelesen) ─► Priorität/Privatsphäre
+  ─► Unterbrechung sinnvoll? ─► Aufmerksamkeit ─► Raum + Satellit ─► Kanal
+  ─► Vorschlag (keine Aktion) ─► Antwort ─► V10-Planer/-Richtlinie/-Ausführung
+  ─► Wirkungsprüfung ─► GoalRun ─► V11-Erfahrung
+```
 
 ```text
 Home Assistant Assist

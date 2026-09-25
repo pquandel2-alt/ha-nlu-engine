@@ -289,3 +289,23 @@ def test_personal_history_is_only_explained_to_its_recipient(tmp_path):
             assert "Arzttermin" not in world.engine.history_summary(since=NOW - timedelta(days=1), user_id=other)
 
     asyncio.run(scenario())
+
+
+def test_model_sourced_situations_expire_and_cancel_their_proposals(tmp_path):
+    world = build_world(
+        tmp_path, garage_states(), recipients={"philipp": philipp()},
+        household={"person.philipp": "not_home", "person.anna": "not_home"},
+    )
+
+    async def scenario():
+        await world.engine.async_report_situation(DetectionSignal(
+            SituationKind.PENDING_GOAL_REQUIRES_ATTENTION, "pending_goal_requires_attention:r",
+            (), None, True, NOW, (), "Heizplan", owner_user_id="philipp",
+        ))
+        assert world.engine.situations.get("pending_goal_requires_attention:r").state is SituationState.COMMUNICATED
+        world.ports.clock = NOW + timedelta(hours=13)
+        await world.engine.async_process_signals((), now=world.ports.clock)
+        assert world.engine.situations.get("pending_goal_requires_attention:r").state is SituationState.EXPIRED
+        assert world.engine.situations.active() == ()
+
+    asyncio.run(scenario())

@@ -256,7 +256,7 @@ class ProactiveContextEngine:
     async def async_process_signals(
         self, signals: tuple[DetectionSignal, ...], *, now: datetime, allow_auto: bool = True,
     ) -> None:
-        changed_any = False
+        changed_any = await self._expire_situations(now)
         for signal in signals:
             base_priority = self.priority_policy.decide(_probe(signal, now)).level
             privacy = self.privacy_policy.classify(_probe(signal, now)).level
@@ -274,6 +274,16 @@ class ProactiveContextEngine:
             await self.async_evaluate(situation, now=now, allow_auto=allow_auto)
         if changed_any:
             await self.async_persist()
+
+    async def _expire_situations(self, now: datetime) -> bool:
+        """Kinds without a live resolution signal end after a bounded age."""
+        before = {item.dedupe_key for item in self.situations.active()}
+        if not self.situations.expire_older_than(now, self.config.situation_max_age):
+            return False
+        for situation in self.situations.all():
+            if situation.dedupe_key in before and situation.state is SituationState.EXPIRED:
+                await self._on_resolved(situation, now)
+        return True
 
     async def _on_resolved(self, situation: ProactiveSituation, now: datetime) -> None:
         self.ports.cancel(f"check:{situation.dedupe_key}")
@@ -945,6 +955,7 @@ class ProactiveContextEngine:
         self._goals = goals
         now = self.ports.now()
         self.proposals.expire(now)
+        await self._expire_situations(now)
         entities = self.ports.fresh_entities()
         nobody_home = self.ports.nobody_home()
         for situation in self.situations.active():
