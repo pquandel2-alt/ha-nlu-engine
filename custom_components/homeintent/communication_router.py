@@ -133,11 +133,9 @@ class CommunicationRouter:
             return "recipient_not_home"
         if quiet:
             return "quiet_hours"
-        if room is None or room.area_id is None:
-            return "room_unknown"
-        if room.evidence_class is RoomEvidenceClass.AMBIGUOUS:
+        if room is not None and room.evidence_class is RoomEvidenceClass.AMBIGUOUS:
             return "room_ambiguous"
-        if room.evidence_class is RoomEvidenceClass.UNKNOWN:
+        if room is None or room.area_id is None or room.evidence_class is RoomEvidenceClass.UNKNOWN:
             return "room_unknown"
         if privacy is PrivacyLevel.SENSITIVE:
             return "sensitive_content"

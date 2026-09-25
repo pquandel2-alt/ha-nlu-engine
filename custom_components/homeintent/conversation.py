@@ -908,7 +908,6 @@ class NluConversationEntity(
                     is_admin=await user_is_admin(self.hass, user_input),
                     entities=entities,
                     area_lookup=build_area_lookup(entities),
-                    local_now=dt_util.now(),
                 )
                 if owned is not None:
                     response.async_set_speech(owned.speech)

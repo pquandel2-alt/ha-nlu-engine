@@ -71,7 +71,10 @@ class AttentionStateStore:
             self._key_last.popitem(last=False)
 
     def dismiss(self, dedupe_key: str, until: datetime) -> None:
-        """Short-term suppression for the *current* situation only."""
+        """Short-term suppression for the *current* situation only.
+
+        Callers pass the situation occurrence id, never a stable subject key.
+        """
         self._dismissed_until.pop(dedupe_key, None)
         self._dismissed_until[dedupe_key] = until
         while len(self._dismissed_until) > MAX_TRACKED_KEYS:
@@ -197,12 +200,15 @@ class AttentionPolicy:
         priority: PriorityLevel,
         requires_response: bool,
         now: datetime,
+        occurrence_id: str | None = None,
     ) -> AttentionDecision:
         if priority >= PriorityLevel.URGENT:
             return AttentionDecision(AttentionOutcome.BYPASS, ("critical_bypasses_attention",))
         if not self.config.enabled:
             return AttentionDecision(AttentionOutcome.DELIVER, ("attention_budget_disabled",))
-        dismissed = store.dismissed_until(dedupe_key)
+        # A dismissal belongs to one occurrence; the next time the garage is
+        # left open is a new situation and may be reported again.
+        dismissed = store.dismissed_until(occurrence_id or dedupe_key)
         if dismissed is not None and now < dismissed:
             return AttentionDecision(AttentionOutcome.SUPPRESS, ("recently_dismissed",))
         last_key = store.key_last(dedupe_key)

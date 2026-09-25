@@ -124,6 +124,17 @@ def situation_message(
     return finish_sentence(f"Achtung: {subject} meldet {hazard}!"), None
 
 
+def proposal_label(situation: ProactiveSituation, *, area_name: str | None = None) -> str:
+    """Accusative noun phrase naming what a proposal is about."""
+    name = situation.subject_name or (situation.subject_ids[0] if situation.subject_ids else "")
+    if situation.kind is SituationKind.DEVICE_LEFT_ON_WHEN_LEAVING:
+        return f"das Licht {dative_location_phrase(area_name or name)}"
+    if situation.kind is SituationKind.HABIT_OPPORTUNITY:
+        return "die Routine"
+    phrase = definite_entity_phrase(name)
+    return phrase[1] if phrase is not None else f"„{name.strip()}“"
+
+
 def full_message(statement: str, question: str | None) -> str:
     return join_sentences((statement, question) if question else (statement,))
 
@@ -144,10 +155,8 @@ def grouped_message(items: list[str] | tuple[str, ...]) -> str:
 
 
 def clarification_question(labels: list[str] | tuple[str, ...]) -> str:
-    phrased: list[str] = []
-    for label in labels:
-        phrase = definite_entity_phrase(label)
-        phrased.append(phrase[1] if phrase is not None else f"„{label}“")
+    """``labels`` are accusative phrases from ``proposal_label``."""
+    phrased = [label for label in labels if label]
     if len(phrased) == 2:
         return finish_sentence(f"Meinst du {phrased[0]} oder {phrased[1]}?")
     return finish_sentence(f"Welche Rückfrage meinst du: {join_german(tuple(phrased))}?")
@@ -244,5 +253,6 @@ __all__ = (
     "grouped_message",
     "join_sentences",
     "outcome_message",
+    "proposal_label",
     "situation_message",
 )

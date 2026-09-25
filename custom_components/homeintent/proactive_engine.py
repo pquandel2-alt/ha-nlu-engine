@@ -40,6 +40,7 @@ from .proactive_messages import (
     full_message,
     grouped_message,
     outcome_message,
+    proposal_label,
     situation_message,
 )
 from .proactive_model import (
@@ -483,6 +484,7 @@ class ProactiveContextEngine:
                 self.attention_state, recipient=recipient.user_id,
                 dedupe_key=situation.dedupe_key, priority=priority,
                 requires_response=goal is not None, now=now,
+                occurrence_id=situation.situation_id,
             )
             decision = self.router.route(
                 recipient, priority=priority, privacy=privacy,
@@ -508,7 +510,7 @@ class ProactiveContextEngine:
                 proposed_goal=goal,
                 channel=interactive[0].channel,
                 privacy_level=privacy,
-                subject_label=situation.subject_name,
+                subject_label=proposal_label(situation, area_name=area_name),
                 question=question or statement,
                 now=now,
                 ttl=self.config.proposal_ttl,
@@ -774,7 +776,7 @@ class ProactiveContextEngine:
         if situation is not None:
             # Only the current occurrence is acknowledged; no preference is learned.
             self.situations.set_state(situation.dedupe_key, SituationState.ACKNOWLEDGED, now=now)
-            self.attention_state.dismiss(situation.dedupe_key, now + self.config.dismiss_cooldown)
+            self.attention_state.dismiss(situation.situation_id, now + self.config.dismiss_cooldown)
             self._ack(situation, choice.value, now)
         await self.async_persist()
         if choice is ProposalChoice.IGNORE:
@@ -1009,12 +1011,27 @@ def _ordinal(text: str) -> int | None:
     return None
 
 
+_FUNCTION_WORDS = frozenset({
+    "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "im", "in",
+    "am", "an", "auf", "und", "oder", "mit", "bitte", "meine", "meinen", "mein",
+})
+
+
 def _label_matches(label: str, normalized_reply: str) -> bool:
     from .entities import normalize_for_compare
 
-    label_words = [item for item in re.split(r"[^a-z0-9]+", normalize_for_compare(label)) if len(item) >= 3]
-    reply = normalize_for_compare(normalized_reply)
-    return bool(label_words) and any(word in reply for word in label_words)
+    label_words = {
+        item for item in re.split(r"[^a-z0-9]+", normalize_for_compare(label))
+        if len(item) >= 3 and item not in _FUNCTION_WORDS
+    }
+    reply_words = {
+        item for item in re.split(r"[^a-z0-9]+", normalize_for_compare(normalized_reply))
+        if item and item not in _FUNCTION_WORDS
+    }
+    return bool(label_words & reply_words) or any(
+        word.startswith(label_word) or label_word.startswith(word)
+        for word in reply_words for label_word in label_words if len(word) >= 4
+    )
 
 
 def build_evidence(**values: str) -> tuple[SituationEvidence, ...]:

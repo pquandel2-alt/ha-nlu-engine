@@ -90,13 +90,13 @@ class ProactiveDialogHandler:
         is_admin: bool,
         entities: Iterable[EntitySnapshot],
         area_lookup: Mapping[str, str],
-        local_now: datetime,
     ) -> DialogOutcome | None:
         """Answer an open V12 task or a fresh explicit V12 command.
 
         Returns ``None`` when the turn is not V12's (including when another
         feature owns the active dialog task).
         """
+        local_now = self._engine.ports.local_now()
         task = self._dialogs.active(conversation_id)
         if task is not None:
             if task.kind not in V12_TASK_KINDS:
