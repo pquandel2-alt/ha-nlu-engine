@@ -388,7 +388,9 @@ def parse_timer_request(text: str, entities: list[EntitySnapshot]) -> TimerReque
         operation = TimerOperation.PAUSE
     elif re.search(r"\b(?:fortsetzen|weiterlaufen|weiter\s+laufen|resume)\b", lowered):
         operation = TimerOperation.RESUME
-    elif re.search(r"\b(?:abbrechen|stopp(?:e|en|t)?|stop(?:pe|pen|pt)?|zurücksetzen|zuruecksetzen|lösch(?:e|en|t)?|loesch(?:e|en|t)?)\b", lowered):
+    elif re.search(r"\b(?:abbrechen|stopp(?:e|en|t)?|stop(?:pe|pen|pt)?|zurücksetzen|zuruecksetzen|lösch(?:e|en|t)?|loesch(?:e|en|t)?)\b", lowered) or re.search(
+        r"\b(?:brich|brech(?:e|t)?)\b.*\bab\b", lowered
+    ):
         operation = TimerOperation.CANCEL
     elif re.search(r"\b(?:beenden|beende|fertig|ablaufen\s+lassen)\b", lowered):
         operation = TimerOperation.FINISH

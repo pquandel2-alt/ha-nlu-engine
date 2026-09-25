@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import tempfile
@@ -283,7 +284,7 @@ class ThermalExperienceTracker:
         by_id = {item.entity_id: item for item in entities}
         runs = {item.run_id: item for item in await goal_runs.async_list()}
         restored: dict[str, ActiveThermalCycle] = {}
-        for cycle in self._read_persisted():
+        for cycle in await asyncio.to_thread(self._read_persisted):
             climate = by_id.get(cycle.binding.climate_entity_id)
             sensor = by_id.get(cycle.binding.temperature_entity_id)
             setpoint = (
@@ -318,10 +319,18 @@ class ThermalExperienceTracker:
             if compatible:
                 restored[cycle.binding.climate_entity_id] = cycle
         self._active = restored
-        self._persist()
+        # Startup runs on the event loop; the document is built here so the
+        # worker thread never iterates state the loop may mutate.
+        await asyncio.to_thread(self._write_document, self._persisted_document())
         return len(restored)
 
+    def _persisted_document(self) -> dict[str, object]:
+        return {"schema_version": 1, "cycles": [_cycle_dict(item) for item in self.active]}
+
     def _persist(self) -> None:
+        self._write_document(self._persisted_document())
+
+    def _write_document(self, document: dict[str, object]) -> None:
         if self._state_path is None:
             return
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -330,9 +339,7 @@ class ThermalExperienceTracker:
         )
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                json.dump({"schema_version": 1, "cycles": [
-                    _cycle_dict(item) for item in self.active
-                ]}, handle, sort_keys=True)
+                json.dump(document, handle, sort_keys=True)
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, self._state_path)

@@ -359,3 +359,37 @@ def test_productivity_service_failure_is_cleanly_reported(monkeypatch):
     result = _run(agent, "Füge Milch zur Einkaufsliste hinzu")
 
     assert "todo down" in result.response.speech
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "Brich den Küchentimer ab.",
+        "Breche den Küchentimer ab.",
+        "Küchentimer abbrechen.",
+        "Stoppe den Küchentimer.",
+    ),
+)
+def test_timer_cancel_understands_separable_abbrechen(text):
+    request = parse_productivity_request(text, [TIMER])
+
+    assert request is not None
+    assert request.operation is TimerOperation.CANCEL
+
+
+def test_timer_remaining_question_is_answered_by_the_timer_not_a_learning_model(monkeypatch):
+    agent = _entity(monkeypatch, [TIMER])
+
+    result = _run(agent, "Wie lange läuft der Küchentimer noch?")
+
+    assert "Verbleibende Zeit: 00:04:15" in (result.response.speech or "")
+    agent.hass.services.async_call.assert_not_awaited()
+
+
+def test_timer_cancel_by_separable_verb_calls_timer_cancel(monkeypatch):
+    agent = _entity(monkeypatch, [TIMER])
+
+    _run(agent, "Brich den Küchentimer ab.")
+
+    agent.hass.services.async_call.assert_awaited_once()
+    assert agent.hass.services.async_call.await_args.args[:2] == ("timer", "cancel")

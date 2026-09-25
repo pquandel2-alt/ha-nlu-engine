@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import Mapping, cast
 
 from .device_result import DeviceControlResult
-from .entities import EntitySnapshot, normalize_for_compare
+from .entities import ACTIVATION_TIMESTAMP_DOMAINS, EntitySnapshot, normalize_for_compare
 from .nlu.domain_operations import DOMAIN_WORDS
 from .nlu.language_frontend import LanguageDocument
 from .nlu.normalize import normalize
@@ -218,7 +218,11 @@ def match_household_query(
     if re.search(r"\b(?:gibt\s+es\s+)?(?:probleme|stoerungen|fehler)\s+(?:im|zu\s+hause|daheim)\b", key):
         unavailable = [
             entity.friendly_name for entity in entities
-            if normalize_for_compare(entity.state) in {"unknown", "unavailable"}
+            if normalize_for_compare(entity.state) == "unavailable"
+            or (
+                normalize_for_compare(entity.state) == "unknown"
+                and entity.domain not in ACTIVATION_TIMESTAMP_DOMAINS
+            )
         ]
         weak_batteries = [
             f"{entity.friendly_name} ({value:g} Prozent)"

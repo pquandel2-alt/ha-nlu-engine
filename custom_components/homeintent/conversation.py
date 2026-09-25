@@ -351,6 +351,55 @@ _GENERATION_ERROR_SPOKEN_DE = {
 }
 
 
+# Past-tense or passive endings of service_call.py's response texts and the
+# infinitive a confirmation question needs ("Burgtor wird geöffnet" ->
+# "Soll ich wirklich Burgtor öffnen?"). Longer endings come first.
+_CONFIRMATION_INFINITIVES: tuple[tuple[str, str], ...] = (
+    ("wird geöffnet", "öffnen"),
+    ("wird geschlossen", "schließen"),
+    ("aufgeschlossen", "aufschließen"),
+    ("abgeschlossen", "abschließen"),
+    ("eingeschaltet", "einschalten"),
+    ("ausgeschaltet", "ausschalten"),
+    ("geschlossen", "schließen"),
+    ("ausgeführt", "ausführen"),
+    ("geöffnet", "öffnen"),
+    ("gedrückt", "drücken"),
+    ("aktiviert", "aktivieren"),
+    ("gestartet", "starten"),
+    ("gestoppt", "stoppen"),
+)
+
+
+def _confirmation_question(response_text: str) -> str:
+    """Turn a device response text into a grammatical safety question."""
+    text = response_text.rstrip(".")
+    for ending, infinitive in _CONFIRMATION_INFINITIVES:
+        if text.endswith(f" {ending}"):
+            text = f"{text[: -len(ending)]}{infinitive}"
+            break
+    return f"Soll ich wirklich {text}?"
+
+
+def _with_session_conversation_id(
+    user_input: conversation.ConversationInput, chat_log: object
+) -> conversation.ConversationInput:
+    """Key a turn without caller-supplied id by Home Assistant's chat session.
+
+    The REST API and ``conversation.process`` may pass ``conversation_id=None``
+    while Home Assistant still opens a chat session with its own id. All dialog
+    state here is keyed by conversation id, so without this fallback every such
+    caller shared one state and an open question of one caller captured the
+    next command of another.
+    """
+    if user_input.conversation_id:
+        return user_input
+    session_id = getattr(chat_log, "conversation_id", None)
+    if not isinstance(session_id, str) or not session_id:
+        return user_input
+    return replace(user_input, conversation_id=session_id)
+
+
 def _is_complete_actionable_understanding(
     payload: MatchResult | CommandPlan | None,
 ) -> bool:
@@ -514,6 +563,7 @@ class NluConversationEntity(
         populated after every successful command, so keying off it would hold
         satellite microphones open after a plain "Mach das Licht an".
         """
+        user_input = _with_session_conversation_id(user_input, chat_log)
         result = await self._async_handle_message_inner(user_input, chat_log)
         self._apply_continue_conversation(user_input, result)
         return result
@@ -533,7 +583,10 @@ class NluConversationEntity(
         if conversation_id is None:
             return
         active = active_pending_dialog(self._context_store.get(conversation_id))
-        if active is None or active.kind not in _CONTINUE_CONVERSATION_KINDS:
+        awaiting_answer = (
+            active is not None and active.kind in _CONTINUE_CONVERSATION_KINDS
+        ) or self._runtime_data.dialog_manager.has_open_question(conversation_id)
+        if not awaiting_answer:
             return
         # ConversationResult grew this field in Home Assistant 2025.2 and is a
         # slots dataclass, so on an older core the assignment raises instead of
@@ -2281,6 +2334,14 @@ class NluConversationEntity(
                 response.async_set_speech("Diese Routinen-Definition gehört zu einem anderen Benutzer.")
                 return conversation.ConversationResult(response=response, conversation_id=conversation_id)
             draft = active.slots.get("routine")
+            if (
+                not isinstance(draft, RoutineDefinition)
+                and classify_confirmation_reply(language_document.source_text)
+                is ConfirmationReply.NO
+            ):
+                manager.cancel(conversation_id)
+                response.async_set_speech("In Ordnung. Ich lege keine Routine an.")
+                return conversation.ConversationResult(response=response, conversation_id=conversation_id)
             if isinstance(draft, RoutineDefinition):
                 reply = classify_confirmation_reply(language_document.source_text)
                 if reply is ConfirmationReply.NO:
@@ -3144,7 +3205,10 @@ class NluConversationEntity(
             return None
         normalized_request = language_document.normalized_text.casefold()
         if re.search(
-            r"\b(?:normalerweise|typischerweise|vermutlich|trend|wann.*leer|wie\s+lange)\b",
+            # Only predictive wording. A bare "wie lange" also asks for a
+            # running timer, an appliance's remaining time or recorder history,
+            # which have their own authoritative read paths.
+            r"\b(?:normalerweise|typischerweise|vermutlich|trend|wann.*leer)\b",
             normalized_request,
         ):
             if re.search(r"\b(?:strom|energie|verbrauch)\b", normalized_request):
@@ -4323,7 +4387,7 @@ class NluConversationEntity(
                     ),
                 )
                 response.async_set_speech(
-                    f"Soll ich wirklich {result.response_text.rstrip('.')}?"
+                    _confirmation_question(result.response_text)
                 )
                 return conversation.ConversationResult(
                     response=response, conversation_id=user_input.conversation_id
@@ -5595,7 +5659,7 @@ class NluConversationEntity(
                     ),
                 )
                 response.async_set_speech(
-                    f"Soll ich wirklich {device_control.response_text.rstrip('.')}?"
+                    _confirmation_question(device_control.response_text)
                 )
                 return conversation.ConversationResult(
                     response=response, conversation_id=user_input.conversation_id

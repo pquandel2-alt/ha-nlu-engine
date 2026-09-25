@@ -219,6 +219,12 @@ _SCORE_MATCHING_DEVICE_CLASS = 15
 _AMBIGUITY_MARGIN = 5
 
 
+# Domains whose state is the timestamp of their last activation. "unknown" is
+# their normal state until they are triggered for the first time and says
+# nothing about the device being unreachable.
+ACTIVATION_TIMESTAMP_DOMAINS = frozenset({"scene", "button", "input_button"})
+
+
 def normalize_for_compare(text: str) -> str:
     """Lowercase + collapse whitespace, for the 'Normalized exact' tier.
 

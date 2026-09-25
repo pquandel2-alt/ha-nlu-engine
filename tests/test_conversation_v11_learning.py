@@ -362,3 +362,21 @@ def test_thermal_deadline_creates_start_intermediate_and_final_one_shots(
         call.args[:2] == ("automation", "reload")
         for call in agent.hass.services.async_call.await_args_list
     )
+
+
+def test_remaining_time_question_is_not_hijacked_by_the_no_model_answer(tmp_path, monkeypatch):
+    agent, _learning, _registry = _agent(tmp_path, monkeypatch)
+    timer = EntitySnapshot(
+        "timer.kueche", "Küchentimer", "timer", "active",
+        attributes={"remaining": "00:04:15"},
+    )
+    monkeypatch.setattr(
+        ha_conversation, "build_entity_snapshots", lambda *_: [*ENTITIES, timer]
+    )
+
+    remaining = _turn(agent, "Wie lange läuft der Küchentimer noch?")
+    predictive = _turn(agent, "Wie lange läuft die Kaffeemaschine normalerweise?")
+
+    assert "Verbleibende Zeit: 00:04:15" in remaining.response.speech
+    assert "kein belastbares Dauermodell" in predictive.response.speech
+    agent.hass.services.async_call.assert_not_awaited()

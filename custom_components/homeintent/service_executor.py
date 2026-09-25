@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 
 from .agent_action_policy import RESERVED_TARGET_DATA_KEYS
 from .audit_log import AuditTrail
-from .entities import EntitySnapshot
+from .entities import ACTIVATION_TIMESTAMP_DOMAINS, EntitySnapshot
 from .effect_monitor import EffectMonitor
 from .execution_policy import PolicyDecision, PolicyOutcome, evaluate_service_plan
 from .service_call import ServiceCallPlan
@@ -54,7 +54,7 @@ async def async_execute_service_plan(
             False, decision, "Mindestens ein Ziel ist nicht mehr verfügbar oder freigegeben."
         )
     fresh_targets = [entity for entity in entities if entity.entity_id in target_ids]
-    if any(entity.state in {"unknown", "unavailable"} for entity in fresh_targets):
+    if any(_state_is_unreliable(entity) for entity in fresh_targets):
         return ExecutionResult(
             False, decision, "Mindestens ein Ziel meldet keinen verlässlichen aktuellen Zustand."
         )
@@ -84,6 +84,12 @@ async def async_execute_service_plan(
     return ExecutionResult(True, decision)
 
 
+def _state_is_unreliable(entity: EntitySnapshot) -> bool:
+    if entity.state == "unavailable":
+        return True
+    return entity.state == "unknown" and entity.domain not in ACTIVATION_TIMESTAMP_DOMAINS
+
+
 def _required_capabilities(plan: ServiceCallPlan) -> frozenset[str]:
     if plan.service == "turn_on":
         return frozenset(
@@ -93,9 +99,12 @@ def _required_capabilities(plan: ServiceCallPlan) -> frozenset[str]:
         )
     if plan.service == "turn_off":
         return frozenset({"TURN_OFF"})
-    if plan.service in {"open_cover", "open_valve"}:
+    # Only valves report OPEN/CLOSE (nlu/capabilities.py); for covers open and
+    # close are the baseline contract and derive_capabilities() models POSITION
+    # alone, so requiring OPEN/CLOSE there rejected every positionable cover.
+    if plan.service == "open_valve":
         return frozenset({"OPEN"})
-    if plan.service in {"close_cover", "close_valve"}:
+    if plan.service == "close_valve":
         return frozenset({"CLOSE"})
     if plan.service == "set_cover_position":
         return frozenset({"POSITION"})
