@@ -170,3 +170,21 @@ def test_appliance_completion_time_rejects_non_timestamp_sensor():
     assert result is not None
     assert result.plan is None
     assert "keine eindeutig" in result.response_text
+
+
+def test_problem_report_ignores_never_activated_scenes_but_keeps_unknown_devices():
+    entities = [
+        *ENTITIES,
+        EntitySnapshot("switch.pumpe", "Pumpe", "switch", "unknown"),
+        EntitySnapshot("button.klingel", "Klingel", "button", "unknown"),
+        EntitySnapshot("scene.party", "Party", "scene", "unavailable"),
+    ]
+
+    result = match_household_query("Gibt es Probleme im Haus?", entities, NOW)
+
+    assert result is not None
+    assert result.plan is None
+    text = result.response_text or ""
+    assert "Nicht verfügbar: Pumpe, Party" in text
+    assert "Filmabend" not in text
+    assert "Klingel" not in text

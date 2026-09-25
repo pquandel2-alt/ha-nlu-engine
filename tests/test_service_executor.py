@@ -127,3 +127,82 @@ def test_brightness_rechecks_turn_on_and_brightness_capabilities():
     )
     assert not result.executed
     hass.services.async_call.assert_not_awaited()
+
+
+def _execute(entity: EntitySnapshot, plan: ServiceCallPlan):
+    hass = HomeAssistant()
+    result = asyncio.run(
+        async_execute_service_plan(
+            hass,
+            plan,
+            [entity],
+            {},
+            is_admin=False,
+            user_id=None,
+            confirmed=True,
+        )
+    )
+    return hass, result
+
+
+def test_positionable_cover_can_still_be_opened_and_closed():
+    # derive_capabilities() models only POSITION for covers; open/close are
+    # the baseline cover contract and must not be rejected as unsupported.
+    for service, state in (("open_cover", "closed"), ("close_cover", "open")):
+        entity = EntitySnapshot(
+            "cover.rollladen", "Rollladen", "cover", state,
+            capabilities=frozenset({"POSITION"}),
+        )
+        hass, result = _execute(
+            entity, ServiceCallPlan("cover", service, entity.entity_id)
+        )
+        assert result.executed is True, service
+        hass.services.async_call.assert_awaited_once_with(
+            "cover", service, {"entity_id": "cover.rollladen"}, blocking=True
+        )
+
+
+def test_valve_without_reported_open_capability_is_still_rejected():
+    entity = EntitySnapshot(
+        "valve.garten", "Gartenventil", "valve", "closed",
+        capabilities=frozenset({"CLOSE"}),
+    )
+    hass, result = _execute(
+        entity, ServiceCallPlan("valve", "open_valve", entity.entity_id)
+    )
+    assert result.executed is False
+    hass.services.async_call.assert_not_awaited()
+
+
+def test_never_activated_scene_or_button_can_be_triggered():
+    # Scenes and buttons report their last activation time; "unknown" is their
+    # normal state until the first activation and says nothing about health.
+    for entity, plan in (
+        (
+            EntitySnapshot("scene.abend", "Abend", "scene", "unknown"),
+            ServiceCallPlan("scene", "turn_on", "scene.abend"),
+        ),
+        (
+            EntitySnapshot("button.klingel", "Klingel", "button", "unknown"),
+            ServiceCallPlan("button", "press", "button.klingel"),
+        ),
+    ):
+        hass, result = _execute(entity, plan)
+        assert result.executed is True, entity.entity_id
+
+
+def test_stateful_target_with_unknown_state_is_still_rejected():
+    entity = EntitySnapshot("switch.pumpe", "Pumpe", "switch", "unknown")
+    hass, result = _execute(
+        entity, ServiceCallPlan("homeassistant", "turn_on", entity.entity_id)
+    )
+    assert result.executed is False
+    hass.services.async_call.assert_not_awaited()
+
+
+def test_unavailable_scene_is_still_rejected():
+    entity = EntitySnapshot("scene.abend", "Abend", "scene", "unavailable")
+    hass, result = _execute(
+        entity, ServiceCallPlan("scene", "turn_on", entity.entity_id)
+    )
+    assert result.executed is False

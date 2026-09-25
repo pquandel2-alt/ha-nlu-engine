@@ -883,6 +883,7 @@ zu finden, bevor eine konkrete Formulierung getestet wird.
 ## Installation über HACS
 
 HomeIntent wird derzeit als benutzerdefiniertes HACS-Repository installiert.
+Voraussetzung ist Home Assistant **2026.4.0** oder neuer.
 
 1. Öffne **HACS → Integrationen**.
 2. Öffne oben rechts **Benutzerdefinierte Repositories**.

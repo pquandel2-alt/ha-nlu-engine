@@ -64,6 +64,12 @@ class DialogDecision:
     replaced: bool = False
 
 
+# Task id under which legacy ``pending_*`` context state is mirrored at the
+# start of a turn. The mirror can outlive the question by one turn, so it does
+# not count as a question of its own (see ``has_open_question``).
+CONTEXT_MIRROR_TASK_ID = "context-payload"
+
+
 class DialogManager:
     """Conversation-scoped task queue with one deterministic active task."""
 
@@ -118,6 +124,20 @@ class DialogManager:
             tasks.values(),
             key=lambda item: (item.priority, item.created_at, item.task_id),
             default=None,
+        )
+
+    def has_open_question(
+        self, conversation_id: str, *, now: datetime | None = None
+    ) -> bool:
+        """Whether a task created by a handler still waits for the user.
+
+        Mirrored legacy state is excluded: it is refreshed only at the start of
+        the next turn and is answered by the legacy context check instead.
+        """
+        self.active(conversation_id, now=now)
+        return any(
+            task_id != CONTEXT_MIRROR_TASK_ID
+            for task_id in self._tasks.get(conversation_id, {})
         )
 
     def cancel(self, conversation_id: str, task_id: str | None = None) -> int:
@@ -214,7 +234,7 @@ class DialogManager:
         payload, selection, ownership, priority and replacement live in the
         central coordinator.
         """
-        task_id = "context-payload"
+        task_id = CONTEXT_MIRROR_TASK_ID
         if kind is None:
             self.cancel(conversation_id, task_id)
             return None

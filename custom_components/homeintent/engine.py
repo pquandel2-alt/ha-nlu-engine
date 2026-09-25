@@ -3254,6 +3254,17 @@ class NluEngine:
             validation_error,
         )
 
+    def warm_up(self) -> None:
+        """Trigger hassil's lazily loaded, file-backed number rules once.
+
+        Call from an executor thread: the first recognition of a spoken number
+        reads unicode_rbnf's language XML, which must not happen inside Home
+        Assistant's event loop during a conversation turn.
+        """
+        self._relative_time_command_parser.decompose(
+            "in fünf Minuten schalte das Licht ein"
+        )
+
     def match_relative_time_automation(
         self,
         text: str,

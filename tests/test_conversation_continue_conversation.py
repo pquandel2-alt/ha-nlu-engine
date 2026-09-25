@@ -153,3 +153,85 @@ def test_every_pending_dialog_kind_is_explicitly_decided():
         "listed in _CONTINUE_CONVERSATION_KINDS. Decide per kind whether it "
         "means a question was spoken (satellite keeps listening) or not."
     )
+
+
+# --- questions asked through the central DialogManager ---------------------
+
+KUECHE_HEIZUNG = EntitySnapshot(
+    "climate.kueche_heizung", "Küche Heizung", "climate", "heat",
+    area_id="kueche", area_name="Küche",
+    capabilities=frozenset({"TURN_ON", "TURN_OFF", "TEMPERATURE"}),
+    attributes={"temperature": 20, "current_temperature": 19, "hvac_modes": ["heat", "off"]},
+)
+
+
+def _make_goal_entity(monkeypatch, tmp_path: Path) -> NluConversationEntity:
+    entity = _make_entity(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        ha_conversation,
+        "build_entity_snapshots",
+        lambda hass, entry: [*ALL_ENTITIES, KUECHE_HEIZUNG],
+    )
+    return entity
+
+
+def test_routine_definition_question_continues_the_conversation(monkeypatch, tmp_path):
+    entity = _make_entity(monkeypatch, tmp_path)
+
+    question = _run(entity, "Bereite das Haus für die Nacht vor.")
+
+    assert "Was soll ich" in question.response.speech
+    assert question.continue_conversation is True
+
+
+def test_declining_the_routine_definition_cancels_it(monkeypatch, tmp_path):
+    entity = _make_entity(monkeypatch, tmp_path)
+    _run(entity, "Bereite das Haus für die Nacht vor.")
+
+    declined = _run(entity, "Nein.")
+    command = _run(entity, "Mach das Küchenlicht an.")
+
+    assert "keine Routine" in declined.response.speech
+    assert declined.continue_conversation is False
+    assert command.response.speech == "Küchenlicht eingeschaltet."
+    assert command.continue_conversation is False
+
+
+def test_goal_clarification_and_plan_preview_continue_the_conversation(monkeypatch, tmp_path):
+    entity = _make_goal_entity(monkeypatch, tmp_path)
+
+    clarification = _run(
+        entity, "Sorge dafür, dass es morgen um 7 Uhr in der Küche 21 Grad hat."
+    )
+    preview = _run(entity, "Ersteres.")
+    declined = _run(entity, "Nein.")
+
+    assert clarification.continue_conversation is True
+    assert "Planvorschau" in preview.response.speech
+    assert preview.continue_conversation is True
+    assert declined.continue_conversation is False
+
+
+def test_resolved_selection_does_not_keep_the_mirrored_task_listening(monkeypatch, tmp_path):
+    # The DialogManager mirrors legacy pending state under a fixed task id at
+    # the start of a turn; that mirror must not hold the microphone open after
+    # the question has been answered in the same turn.
+    laternen = [
+        EntitySnapshot(
+            f"light.{area}_laterne", f"{name} Laterne", "light", "off",
+            area_id=area, area_name=name,
+            capabilities=frozenset({"TURN_ON", "TURN_OFF"}),
+        )
+        for area, name in (("hof", "Hof"), ("turm", "Turm"))
+    ]
+    entity = _make_entity(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        ha_conversation, "build_entity_snapshots", lambda hass, entry: laternen
+    )
+
+    question = _run(entity, "Schalte die Laterne ein.")
+    answer = _run(entity, "Die im Turm.")
+
+    assert question.continue_conversation is True
+    assert "Turm Laterne" in answer.response.speech
+    assert answer.continue_conversation is False

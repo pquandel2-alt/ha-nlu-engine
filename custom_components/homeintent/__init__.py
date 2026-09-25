@@ -37,6 +37,7 @@ from .goal_run import GoalRun, GoalRunStore
 from .monitor_goal import MonitorGoalRuntime, MonitorGoalStore
 from .nlu.context import ConversationContextStore
 from .profiles import ProfileStore
+from .engine import NluEngine
 from .runtime_data import HomeIntentRuntimeData
 from .storage_migration import resolve_storage_path
 from .user_context import UserContextStore
@@ -82,6 +83,13 @@ LEGACY_DOMAIN = "ha_nlu"
 # while that script waits for this service handler: a circular wait.
 SELF_DELETE_GRACE_SECONDS = 0.1
 SELF_DELETE_RETRY_SECONDS = (1.0, 5.0)
+
+
+def _build_engine() -> NluEngine:
+    """Load all grammar files off the event loop and warm hassil's number rules."""
+    engine = NluEngine()
+    engine.warm_up()
+    return engine
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -165,7 +173,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "ha_nlu_thermal_checkpoints.json",
         )
     )
+    engine = await hass.async_add_executor_job(_build_engine)
     entry.runtime_data = HomeIntentRuntimeData(
+        engine=engine,
         context_store=ConversationContextStore(ttl_seconds=context_ttl),
         memory=memory,
         user_contexts=user_contexts,
