@@ -94,7 +94,13 @@ const SCENES = [
     ha: 'Morgen wird es bewölkt, bis 19 Grad, mindestens 11 Grad.', ms: '0,04 ms' },
   { me: 'Wer ist zuhause?',
     sys: 'person-Domäne · kein Serviceplan erzeugt',
-    ha: 'Zuhause: Philipp.', ms: '0,03 ms' }
+    ha: 'Zuhause: Philipp.', ms: '0,03 ms' },
+  { me: 'Wenn ich gehe und ein Fenster offen ist, sag mir Bescheid.',
+    sys: 'Monitor-Ziel · Empfänger eindeutig · Vorschau',
+    ha: 'Ich würde dich benachrichtigen, wenn du gehst und ein Fenster offen ist. Soll ich das speichern?', ms: '0,09 ms' },
+  { me: 'Merk dir, dass ich beim Fernsehen nur die Stehlampe auf 30 Prozent möchte.',
+    sys: 'Präferenz · personengebunden · Bestätigung nötig',
+    ha: 'Soll ich das dauerhaft für dich speichern?', ms: '0,06 ms' }
 ];
 
 const chatBody = $('#chatBody'), chatMs = $('#chatMs'), chatBadge = $('#chatBadge');
@@ -276,14 +282,14 @@ const EXAMPLES = [
     why: '<b>Erzeugte Automationen sind gewöhnliche HA-Automationen</b> in der Kategorie „Homeintent“ — sichtbar, editierbar und löschbar in der normalen Oberfläche. Ein CI-Job validiert das erzeugte Schema gegen ein echtes Home Assistant im Docker-Container.'
   },
   {
-    tag: 'V7-Autorität — neu in 4.62',
+    tag: 'Semantische Autorität',
     text: 'Mach das Küchenlicht auf 30 Prozent.',
     stages: [
       S('Loss-aware Frontend', 'Ein <code>LanguageDocument</code> hält Originaltokens, Quellspannen und Normalisierungsvarianten mit Kosten und Herkunft fest — der Rohtext wird nie überschrieben.'),
       S('SemanticInterpreter', 'Erzeugt vollständige <code>MeaningCandidates</code> und meldet offen, was fehlt: Konflikte, leere Slots, ungeklärte Tokens.'),
       S('Katalogabgleich', 'Das Paar <code>light</code> + Prozentwert steht in <code>semantic_catalog.py</code> auf der vermessenen Capability-Liste → V7 ist hier <b>autoritativ</b>.'),
       S('Score-Margin', 'Nur ein <b>vollständiger</b> Kandidat zählt. Zwei konkurrierende vollständige Lesarten bräuchten mindestens <code>10</code> Scorepunkte Abstand — hier gibt es nur eine.'),
-      S('UnderstandingOutcome', 'Ergebnis <code>COMMAND</code> · <code>authority = V7</code>. Der Live-Router lässt den Treffer vor dem historischen Device-Router passieren.'),
+      S('UnderstandingOutcome', 'Ergebnis <code>COMMAND</code> · <code>authority = V7</code>. Historische Gerätegrammatiken werden im Produktivbetrieb weder geladen noch als Fallback verwendet.'),
       S('Revalidierung', 'Die stabile Entity-ID wird gegen den <b>aktuellen</b> Registry-Snapshot und die aktuelle Capability erneut geprüft — nicht gegen den Stand von vorhin.'),
       S('Shadow-Gate', 'Derselbe Turn läuft im Release-Vergleich rein lesend gegen den Legacy-Pfad. Bei 3.772 Turns: 0 Divergenzen.')
     ],
@@ -291,7 +297,7 @@ const EXAMPLES = [
     say: 'Okay, das Küchenlicht steht auf 30 Prozent.',
     plan: [['Dienst', 'light.turn_on'], ['Ziel', 'light.kueche'], ['brightness_pct', '30'],
            ['authority', 'V7'], ['Risiko', 'niedrig']],
-    why: '<b>Warum das eine eigene Stufe ist:</b> Bedeutung lag schon länger im Compiler — die <em>Entscheidung</em> traf aber oft noch ein gewachsener Spezialparser. Seit 4.60 ist die Reihenfolge umgedreht, und <code>authority</code> macht für jeden Turn nachprüfbar, welcher Pfad geantwortet hat. Nicht migrierte Fachcapabilities bleiben kontrollierter Fallback hinter derselben Sicherheitsgrenze.'
+    why: '<b>Warum das eine eigene Stufe ist:</b> Bedeutung lag schon länger im Compiler — die <em>Entscheidung</em> traf aber oft noch ein gewachsener Spezialparser. Seit 4.60 ist die Reihenfolge umgedreht, und <code>authority</code> macht für jeden Turn nachprüfbar, welcher Pfad geantwortet hat. Seit V8 sind die früheren Gerätefachparser entfernt; der Altpfad wird nur noch im read-only Shadow-Audit geladen.'
   }
 ];
 
