@@ -94,7 +94,7 @@ def test_area_query_first_turn(engine):
     assert result is not None
     assert result.command.intent == "HassGetState"
     assert result.command.entities[0].entity_id == "sensor.wohnzimmer_temp"
-    assert result.response_text == "21.5 Grad."
+    assert result.response_text == "21,5 Grad."
 
 
 def test_area_query_first_turn_variant_kalt(engine):
@@ -127,7 +127,7 @@ def test_temperature_query_resolves_erdgeschoss_as_a_floor(engine):
         result = engine.match(sentence, ENTITIES)
         assert result is not None
         assert result.command.entities[0].entity_id == "sensor.kueche_temp"
-        assert result.response_text == "23.0 Grad."
+        assert result.response_text == "23 Grad."
 
 
 def test_colloquial_temperature_query_resolves_lower_floor(engine):
@@ -136,7 +136,7 @@ def test_colloquial_temperature_query_resolves_lower_floor(engine):
     result = engine.match("wie warm isses unten", ENTITIES + [FLURLICHT_UNTEN])
     assert result is not None
     assert result.command.entities[0].entity_id == "sensor.kueche_temp"
-    assert result.response_text == "23.0 Grad."
+    assert result.response_text == "23 Grad."
 
 
 def test_battery_query_with_masculine_article(engine):
@@ -177,7 +177,7 @@ def test_query_followup_area(engine):
     result = engine.match_query_followup("Und in der Küche?", ENTITIES, context)
     assert result is not None
     assert result.command.entities[0].entity_id == "sensor.kueche_temp"
-    assert result.response_text == "23.0 Grad."
+    assert result.response_text == "23 Grad."
 
 
 def test_query_followup_level(engine):
@@ -185,7 +185,7 @@ def test_query_followup_level(engine):
     result = engine.match_query_followup("Und oben?", ENTITIES, context)
     assert result is not None
     assert result.command.entities[0].entity_id == "sensor.schlafzimmer_temp"
-    assert result.response_text == "19.0 Grad."
+    assert result.response_text == "19 Grad."
 
 
 def test_query_followup_level_unten_returns_none_without_matching_floor(engine):

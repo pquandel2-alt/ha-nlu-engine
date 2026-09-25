@@ -33,7 +33,7 @@ def test_respond_success_query_carries_speech_and_command(engine, sensor_entitie
     result = engine.respond("wie hoch ist die Außentemperatur?", sensor_entities)
     assert result.success is True
     assert result.error is None
-    assert result.speech == "18.4 Grad."
+    assert result.speech == "18,4 Grad."
     assert result.command is not None
 
 

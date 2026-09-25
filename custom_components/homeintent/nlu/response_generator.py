@@ -33,6 +33,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from ..entities import format_spoken_number
 from ..response_planner import (
     DialogAct,
     GermanResponseRealizer,
@@ -105,7 +106,9 @@ def _automation_label(automation) -> str:
     integration didn't create (every HA automation has one, whether made by
     hand in the UI or by HomeIntent - see ``AutomationSummary``'s docstring).
     """
-    return automation.source_text or automation.alias
+    # The source sentence ends with its own punctuation; the label is embedded
+    # in longer answers, so a trailing "." would double up there.
+    return (automation.source_text or automation.alias).rstrip(" .!?")
 
 
 class ResponseGenerator:
@@ -138,7 +141,7 @@ class ResponseGenerator:
             spoken_unit = {
                 "°C": "Grad", "°F": "Grad", "%": "Prozent",
             }.get(unit, unit)
-            return f"{entity.state} {spoken_unit}."
+            return f"{format_spoken_number(entity.state)} {spoken_unit}."
 
         return GermanResponseRealizer().realize(
             self.plan(result, context=context, allow_reference=allow_reference)
@@ -159,7 +162,7 @@ class ResponseGenerator:
         if isinstance(result.scalar, bool):
             return "Ja." if result.scalar else "Nein."
         if result.scalar is not None:
-            return f"{result.scalar:g}." if isinstance(result.scalar, float) else f"{result.scalar}."
+            return f"{format_spoken_number(result.scalar)}."
         names = tuple(
             item.friendly_name for item in result.entities
         ) or tuple(item.name for item in result.areas) or tuple(
@@ -423,6 +426,24 @@ class ResponseGenerator:
         noun = self._noun(result)
         area = result.command.target.area
         entities = result.entities
+        if area is None and len(entities) == 1:
+            # Without a room there is no location to list; say what the one
+            # matching device is doing instead of an unfinished sentence.
+            entity = entities[0]
+            spoken = _SEMANTIC_STATE_SPOKEN_DE.get(derive_semantic_state(entity))
+            if spoken is None:
+                return self._wrap(
+                    QueryResponsePlan(
+                        QueryAnswerKind.UNKNOWN_SINGLE, names=(entity.friendly_name,)
+                    )
+                )
+            return self._wrap(
+                QueryResponsePlan(
+                    QueryAnswerKind.SINGLE,
+                    names=(entity.friendly_name,),
+                    current_state=spoken,
+                )
+            )
         return self._wrap(
             QueryResponsePlan(
                 QueryAnswerKind.AREA_LIST,
@@ -491,6 +512,7 @@ class ResponseGenerator:
             QueryResponsePlan(
                 QueryAnswerKind.EXISTS,
                 noun_plural=self._noun(result),
+                noun_singular=self._noun_singular(result),
                 names=tuple(entity.friendly_name for entity in result.entities),
             )
         )

@@ -73,7 +73,7 @@
   {
     "id": "query_location_correction",
     "turns": ["Wie warm ist es im Wohnzimmer?", "Nein, ich meinte Küche"],
-    "expect": {"action": false, "response_contains": "22.5 Grad"}
+    "expect": {"action": false, "response_contains": "22,5 Grad"}
   },
   {
     "id": "cover_colloquial_alias",

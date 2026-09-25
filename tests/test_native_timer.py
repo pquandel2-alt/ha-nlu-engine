@@ -78,28 +78,28 @@ def test_finished_fallback_speaks_timer_information_once():
         {
             "entity_id": "tts.piper",
             "media_player_entity_id": ["media_player.assist"],
-            "message": "Nudeln: Der Timer ist abgelaufen.",
+            "message": "Der Timer Nudeln ist abgelaufen.",
         },
         blocking=True,
     )
 
 
-def test_finished_fallback_plays_configured_local_chime_before_information():
+def test_finished_fallback_names_the_timer_before_the_alert_tone():
     runtime, hass = _runtime({
         CONF_AGENT_TTS_ENTITY: "tts.piper",
         CONF_AGENT_MEDIA_PLAYERS: ["media_player.assist"],
         CONF_TIMER_CHIME_MEDIA_ID: "media-source://media_source/local/timer.wav",
     })
 
-    asyncio.run(runtime._async_announce("Nudeln: Der Timer ist abgelaufen."))
+    asyncio.run(runtime._async_announce("Der Timer Nudeln ist abgelaufen."))
 
-    assert hass.services.async_call.await_args_list[0].args[:2] == (
+    assert hass.services.async_call.await_args_list[0].args[:2] == ("tts", "speak")
+    assert hass.services.async_call.await_args_list[1].args[:2] == (
         "media_player", "play_media"
     )
-    assert hass.services.async_call.await_args_list[0].args[2]["media_content_id"] == (
+    assert hass.services.async_call.await_args_list[1].args[2]["media_content_id"] == (
         "media-source://media_source/local/timer.wav"
     )
-    assert hass.services.async_call.await_args_list[1].args[:2] == ("tts", "speak")
 
 
 def test_timer_chime_rejects_arbitrary_remote_url_but_still_speaks():
@@ -192,6 +192,7 @@ def test_native_timer_operations_use_only_registered_ha_intents(
 ):
     runtime, _ = _runtime()
     monkeypatch.setattr(runtime, "_route_device", AsyncMock(return_value="voice"))
+    monkeypatch.setattr(runtime, "_command_device", lambda device_id: "voice")
     handle = _install_timer_intents(monkeypatch)
 
     speech = asyncio.run(runtime.async_execute(
@@ -209,6 +210,7 @@ def test_native_status_uses_structured_speech_slots(monkeypatch):
     ]})
     runtime, _ = _runtime()
     monkeypatch.setattr(runtime, "_route_device", AsyncMock(return_value="voice"))
+    monkeypatch.setattr(runtime, "_command_device", lambda device_id: "voice")
     _install_timer_intents(monkeypatch, response)
 
     speech = asyncio.run(runtime.async_execute(
@@ -243,6 +245,7 @@ def test_route_prefers_native_source_and_can_use_configured_fallback(monkeypatch
 def test_zero_duration_is_rejected_before_native_intent(monkeypatch):
     runtime, _ = _runtime()
     monkeypatch.setattr(runtime, "_route_device", AsyncMock(return_value="voice"))
+    monkeypatch.setattr(runtime, "_command_device", lambda device_id: "voice")
     handle = _install_timer_intents(monkeypatch)
 
     with pytest.raises(ValueError, match="gültige Dauer"):
@@ -252,3 +255,75 @@ def test_zero_duration_is_rejected_before_native_intent(monkeypatch):
         ))
 
     handle.assert_not_awaited()
+
+
+def test_list_timers_reads_names_and_start_durations(monkeypatch):
+    from homeintent.native_timer import NativeTimerInfo
+
+    response = SimpleNamespace(speech_slots={"timers": [
+        {"name": "Nudeln", "total_seconds_left": 75, "is_active": True, "start_minutes": 5},
+        {"name": "", "total_seconds_left": 30, "is_active": False, "start_hours": 0,
+         "start_minutes": 3, "start_seconds": 0},
+        {"name": "kaputt"},
+    ]})
+    runtime, _ = _runtime()
+    monkeypatch.setattr(runtime, "_command_device", lambda device_id: None)
+    handle = _install_timer_intents(monkeypatch, response)
+
+    timers = asyncio.run(runtime.async_list_timers(
+        ConversationInput(text="Welche Timer laufen?", conversation_id="list")
+    ))
+
+    assert handle.await_args.args[2] == "HassTimerStatus"
+    assert handle.await_args.args[3] == {}
+    assert timers == (
+        NativeTimerInfo("Nudeln", 75, True, start_minutes=5),
+        NativeTimerInfo("", 30, False, start_minutes=3),
+    )
+
+
+def test_cancel_all_uses_the_native_intent(monkeypatch):
+    monkeypatch.setattr(intent, "INTENT_CANCEL_ALL_TIMERS", "HassCancelAllTimers", raising=False)
+    runtime, _ = _runtime()
+    monkeypatch.setattr(runtime, "_command_device", lambda device_id: None)
+    handle = _install_timer_intents(monkeypatch, SimpleNamespace(speech_slots={"canceled": 2}))
+
+    canceled = asyncio.run(runtime.async_cancel_all(
+        ConversationInput(text="Lösche alle Timer", conversation_id="all")
+    ))
+
+    assert handle.await_args.args[2] == "HassCancelAllTimers"
+    assert canceled == 2
+
+
+def test_resolved_target_replaces_the_spoken_name(monkeypatch):
+    from homeintent.native_timer import NativeTimerInfo
+
+    runtime, _ = _runtime()
+    monkeypatch.setattr(runtime, "_command_device", lambda device_id: "voice")
+    handle = _install_timer_intents(monkeypatch)
+
+    speech = asyncio.run(runtime.async_execute(
+        TimerRequest(TimerOperation.CANCEL, name="Nudel"),
+        ConversationInput(text="Lösche den Nudeltimer", conversation_id="target"),
+        target=NativeTimerInfo("Nudeln", 60, True, start_minutes=5),
+    ))
+
+    assert handle.await_args.args[3] == {"name": {"value": "Nudeln"}}
+    assert speech == "Timer „Nudeln“ abgebrochen."
+
+
+def test_commands_on_existing_timers_do_not_require_audible_output(monkeypatch):
+    runtime, _ = _runtime()
+    route = AsyncMock(side_effect=NativeTimerUnavailableError("stumm"))
+    monkeypatch.setattr(runtime, "_route_device", route)
+    monkeypatch.setattr(runtime, "_command_device", lambda device_id: None)
+    handle = _install_timer_intents(monkeypatch)
+
+    asyncio.run(runtime.async_execute(
+        TimerRequest(TimerOperation.CANCEL, name="Nudeln"),
+        ConversationInput(text="Lösche den Timer Nudeln", conversation_id="silent"),
+    ))
+
+    route.assert_not_awaited()
+    assert handle.await_args.args[2] == "HassCancelTimer"

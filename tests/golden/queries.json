@@ -3,13 +3,13 @@
     "text": "wie hoch ist die Außentemperatur?",
     "expect_match": true,
     "plan": null,
-    "response_text": "18.4 Grad."
+    "response_text": "18,4 Grad."
   },
   {
     "text": "wie ist die Außentemperatur",
     "expect_match": true,
     "plan": null,
-    "response_text": "18.4 Grad."
+    "response_text": "18,4 Grad."
   },
   {
     "text": "wie hoch ist die Luftfeuchtigkeit Bad",
@@ -33,7 +33,7 @@
     "text": "wie warm ist die Außentemperatur",
     "expect_match": true,
     "plan": null,
-    "response_text": "18.4 Grad."
+    "response_text": "18,4 Grad."
   },
   {
     "text": "wie ist die Luftfeuchtigkeit Bad",
@@ -75,7 +75,7 @@
     "text": "wie viel Energie verbraucht der Trockner?",
     "expect_match": true,
     "plan": null,
-    "response_text": "2.1 Kilowattstunden."
+    "response_text": "2,1 Kilowattstunden."
   },
   {
     "text": "wie ist die Fensterkontakt Batterie?",

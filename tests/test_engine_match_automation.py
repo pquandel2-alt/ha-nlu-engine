@@ -15,6 +15,8 @@ sub-feature in this repo already follows.
 
 from __future__ import annotations
 
+import pytest
+
 from homeintent.engine import AutomationDraftMatchResult, AutomationMatchResult
 from homeintent.entities import EntitySnapshot
 from homeintent.nlu.automation_validator import AutomationValidationError
@@ -541,3 +543,38 @@ def test_notification_trigger_first_with_window_variants(engine):
         )
         assert isinstance(result, AutomationMatchResult)
         assert result.model.triggers[0].target.area_id == "wohnzimmer"
+
+
+def test_trigger_with_unreadable_action_is_not_mistaken_for_a_trigger_only_draft(engine):
+    # The whole sentence must not be read as "when the light turns on".
+    draft = engine.match_automation_draft_start(
+        "Wenn das Küchenfenster geöffnet wird, mach irgendwas Unbekanntes.", ENTITIES
+    )
+
+    assert draft is None
+
+
+def test_trigger_with_trailing_dann_still_starts_a_draft(engine):
+    draft = engine.match_automation_draft_start(
+        "Wenn das Küchenfenster geöffnet wird, dann", ENTITIES
+    )
+
+    assert isinstance(draft, AutomationDraftMatchResult)
+
+
+@pytest.mark.parametrize(
+    ("sentence", "event"),
+    (
+        ("Wenn es dunkel wird, schalte das Küchenlicht ein.", "SUNSET"),
+        ("Wenn die Sonne untergeht, mach das Küchenlicht an.", "SUNSET"),
+        ("Sobald es hell wird, schalte das Küchenlicht aus.", "SUNRISE"),
+        ("Wenn die Sonne aufgeht, schalte das Küchenlicht aus.", "SUNRISE"),
+    ),
+)
+def test_everyday_sun_wording_becomes_a_sun_trigger(engine, sentence, event):
+    result = engine.match_automation(sentence, ENTITIES)
+
+    assert isinstance(result, AutomationMatchResult)
+    assert result.validation_error is None
+    assert result.model.triggers[0].sun_event.name == event
+    assert len(result.model.actions) == 1

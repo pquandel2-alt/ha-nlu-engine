@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **6.0.3** (V11)
+- Aktuelle Version: **6.1.0** (V11)
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -41,6 +41,38 @@ HomeIntent benötigt für die Sprachverarbeitung:
 Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
+
+## Was ist in Version 6.1.0 neu?
+
+**Benannte Timer.** Jeder neue Assist-Timer bekommt einen Namen; fehlt er im
+Satz, fragt HomeIntent „Wie soll der Timer heißen?“. Mehrere Timer lassen sich
+gezielt ansprechen („Lösche den Timer Pizza“, „Brich den Nudeltimer ab“). Ohne
+Namen fragt HomeIntent bei mehreren laufenden Timern, welcher gemeint ist.
+„Welche Timer laufen?“ nennt alle Timer mit Restzeit, „Lösche alle Timer“
+fragt vorher nach. Beim Ablauf wird zuerst der Name gesagt („Der Timer Nudeln
+ist abgelaufen.“), danach folgt der konfigurierte Hinweiston.
+
+Weitere Verbesserungen:
+
+- Messwerte werden mit deutschem Dezimalkomma gesprochen („19,5 Grad“ statt
+  „19.5 Grad“, „78 Prozent“ statt „78.0 Prozent“).
+- „Wenn es dunkel wird …“, „Wenn die Sonne untergeht/aufgeht …“ und „Wenn es
+  hell wird …“ werden als Sonnen-Auslöser erkannt. Ein Satz mit Auslöser und
+  nicht lesbarer Aktion wird nicht mehr als reiner Auslöser missverstanden.
+  „Nein“ verwirft einen Automationsentwurf.
+- „Entriegle/Verriegle …“ und „Sperr … auf/ab“ werden für Schlösser
+  verstanden. Entriegeln bleibt kritisch und wird immer erst nach Bestätigung
+  ausgeführt; Verneinungen, Fragen und „vielleicht“ führen nichts aus.
+- Schlösser und Taster melden nach der Ausführung „aufgeschlossen“,
+  „abgeschlossen“ und „gedrückt“.
+- Die Restzeit eines `timer.*`-Helfers wird aus seinem Endzeitpunkt berechnet.
+- Zustandsfragen ohne Ort und Einzeltreffer antworten vollständig
+  („Kristallkugel ist ausgeschaltet.“, „Ja, es gibt 1 Licht.“).
+- Automationssimulationen beschreiben Aktionen auf Deutsch; Automationsnamen
+  erzeugen keinen doppelten Punkt mehr.
+- Gelöschte HomeIntent-Automationen hinterlassen keinen verwaisten
+  „nicht verfügbar“-Eintrag mehr.
+- Der Thermal-Lernzustand wird außerhalb des Event-Loops geschrieben.
 
 ## Was ist in Version 6.0.3 neu?
 
@@ -652,23 +684,38 @@ sichtbare Prioritätspräfixe verwalten. Bei mehreren Listen wird nachgefragt.
 ### Timer
 
 ```text
-Stelle einen Timer für 20 Minuten.
-Stelle einen Timer für fünf Minuten mit dem Hinweis Nudeln.
-Stelle einen Timer für fünf Minuten für die Waschmaschine.
-Starte den Küchentimer für 20 Minuten.
-Verlängere den Küchentimer um fünf Minuten.
-Pausiere den Küchentimer.
-Setze den Küchentimer fort.
-Wie lange läuft der Küchentimer noch?
-Brich den Küchentimer ab.
+Du: Stelle einen Timer für 20 Minuten.
+Assist: Wie soll der Timer heißen?
+Du: Pizza.
+Assist: Timer „Pizza“ für 20 Minuten gestartet.
+
+Stelle einen Timer für fünf Minuten mit dem Namen Nudeln.
+Stelle einen Nudeltimer für acht Minuten.
+Welche Timer laufen?
+Wie lange läuft der Timer Pizza noch?
+Pausiere den Timer Nudeln.
+Setze den Nudeltimer fort.
+Verlängere den Timer Pizza um fünf Minuten.
+Lösche den Timer Pizza.
+Brich den Nudeltimer ab.
+Lösche alle Timer.
 ```
+
+Jeder neue Assist-Timer bekommt einen Namen. Nennt der Satz keinen, fragt
+HomeIntent danach; „ohne Namen“ startet ihn unbenannt. Ist der Name schon
+vergeben, fragt HomeIntent nach einem anderen. Gesprochene Namen werden
+tolerant zugeordnet („Nudeltimer“ findet den Timer „Nudeln“). Laufen mehrere
+Timer und nennt ein Befehl keinen Namen, fragt HomeIntent „Welchen Timer
+meinst du: Nudeln oder Pizza?“; die Antwort darf der Name oder „der erste“
+sein. „Lösche alle Timer“ wird immer erst bestätigt.
 
 Timer ohne benannten `timer.*`-Helper laufen über Home Assistants native
 Assist-Timerverwaltung. Unterstützt der aufrufende Sprachsatellit Timer,
 erhält er das native Ablaufereignis einschließlich Timername. Für andere
 Assist-Clients verwendet HomeIntent die unter den Agentenoptionen konfigurierte
-TTS-Engine und die ausgewählten Medienplayer; dabei wird beispielsweise
-„Nudeln: Der Timer ist abgelaufen.“ gesprochen. Fehlt sowohl native
+TTS-Engine und die ausgewählten Medienplayer; dabei wird zuerst der Name
+gesprochen („Der Timer Nudeln ist abgelaufen.“) und danach der optional
+konfigurierte Hinweiston abgespielt. Fehlt sowohl native
 Timerunterstützung als auch ein vollständiges TTS-Ziel, lehnt HomeIntent den
 Start ab, statt einen unhörbaren Timer anzulegen. Vorhandene `timer.*`-Helper
 bleiben für benannte Haushalts-Timer kompatibel.
@@ -1058,12 +1105,12 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/homeintent --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 6.0.3:
+Geprüfter Release-Stand von Version 6.1.0:
 
 ```text
-3247 passed, 12 skipped, 0 failed
+3310 passed, 12 skipped, 0 failed
 87 % Gesamt-Coverage
-72 % Coverage für conversation.py
+73 % Coverage für conversation.py
 ```
 
 Zusätzlich wurden ausgeführt:
@@ -1088,7 +1135,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-6.0.3.json --quiet
+  --check docs/perf/v7-shadow-baseline-6.1.0.json --quiet
 ```
 
 Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die

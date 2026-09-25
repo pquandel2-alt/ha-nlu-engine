@@ -76,7 +76,7 @@ def _context(result) -> ConversationContext:
 
 def test_general_location_properties(engine):
     assert engine.match("Luftfeuchtigkeit im Wohnzimmer", ENTITIES).response_text == "51 Prozent."
-    assert engine.match("Stromverbrauch Küche", ENTITIES).response_text == "3.7 Kilowattstunden."
+    assert engine.match("Stromverbrauch Küche", ENTITIES).response_text == "3,7 Kilowattstunden."
     assert engine.match("Temperatur Obergeschoss", ENTITIES).response_text == "19 Grad."
 
 
@@ -85,7 +85,7 @@ def test_natural_sensor_reading_question_uses_property_and_location_semantics(en
 
     assert result is not None
     assert result.plan is None
-    assert result.response_text == "21.5 Grad."
+    assert result.response_text == "21,5 Grad."
 
 
 def test_measurement_components_have_free_order(engine):
@@ -182,7 +182,7 @@ def test_query_correction_and_natural_floor_followup(engine):
     corrected = engine.match_query_followup("Nein, ich meinte Küche", ENTITIES, _context(first))
     upstairs = engine.match_query_followup("Wie sieht es oben aus?", ENTITIES, _context(first))
 
-    assert corrected.response_text == "22.5 Grad."
+    assert corrected.response_text == "22,5 Grad."
     assert upstairs.response_text == "19 Grad."
 
 

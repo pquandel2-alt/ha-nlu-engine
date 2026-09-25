@@ -253,7 +253,7 @@ def test_common_room_temperature_question_wordings(engine):
         result = engine.match(question, [TEMPERATUR_BAD])
         assert result is not None, question
         assert result.plan is None
-        assert result.response_text == "21.5 Grad."
+        assert result.response_text == "21,5 Grad."
 
 
 def test_state_query_list_multiple_matches(engine):
@@ -802,7 +802,7 @@ def test_live_incident_gibt_es_fenster(engine):
 def test_live_incident_gibt_es_tueren(engine):
     result = engine.match("gibt es Türen", WINDOW_DOOR_ENTITIES)
     assert result is not None
-    assert result.response_text == "Ja, es gibt 1 Türen."
+    assert result.response_text == "Ja, es gibt 1 Tür."
 
 
 # --- Follow-up wave, Phase 4: state-filtered device queries ("Welche -------

@@ -38,6 +38,16 @@ TIMER = EntitySnapshot(
 )
 
 
+def _fake_native_timer(result="Timer gestartet.", timers=()):
+    """Stand-in for NativeTimerRuntime with the methods the agent uses."""
+    return type("NativeTimer", (), {
+        "async_execute": AsyncMock(return_value=result),
+        "async_ensure_audible": AsyncMock(return_value=None),
+        "async_list_timers": AsyncMock(return_value=tuple(timers)),
+        "async_cancel_all": AsyncMock(return_value=len(timers)),
+    })()
+
+
 def _entity(monkeypatch, entities):
     entry = ConfigEntry()
     agent = NluConversationEntity(entry)
@@ -178,7 +188,7 @@ def test_generic_named_timer_keeps_label_as_bounded_data():
 
 def test_generic_timer_uses_native_runtime_without_timer_helper(monkeypatch):
     agent = _entity(monkeypatch, [])
-    runtime = type("NativeTimer", (), {"async_execute": AsyncMock(return_value="Timer für die Nudeln gestartet.")})()
+    runtime = _fake_native_timer("Timer für die Nudeln gestartet.")
     agent._runtime_data.native_timer = runtime
 
     result = _run(
@@ -196,12 +206,15 @@ def test_generic_timer_uses_native_runtime_without_timer_helper(monkeypatch):
 
 def test_generic_timer_does_not_first_match_only_timer_helper(monkeypatch):
     agent = _entity(monkeypatch, [TIMER])
-    runtime = type("NativeTimer", (), {"async_execute": AsyncMock(return_value="Nativer Timer gestartet.")})()
+    runtime = _fake_native_timer("Nativer Timer gestartet.")
     agent._runtime_data.native_timer = runtime
 
-    result = _run(agent, "Stelle einen Timer für zwei Minuten", "native-not-helper")
+    question = _run(agent, "Stelle einen Timer für zwei Minuten", "native-not-helper")
+    result = _run(agent, "Pizza", "native-not-helper")
 
+    assert question.response.speech == "Wie soll der Timer heißen?"
     assert result.response.speech == "Nativer Timer gestartet."
+    assert runtime.async_execute.await_args.args[0].name == "Pizza"
     runtime.async_execute.assert_awaited_once()
     agent.hass.services.async_call.assert_not_awaited()
 
@@ -234,7 +247,7 @@ def test_timer_service_and_status(monkeypatch):
 
     agent.hass.services.async_call.reset_mock()
     status = _run(agent, "Wie lange läuft der Küchentimer noch?", "timer-status")
-    assert "00:04:15" in status.response.speech
+    assert "4 Minuten und 15 Sekunden" in status.response.speech
     agent.hass.services.async_call.assert_not_awaited()
 
 
@@ -382,7 +395,7 @@ def test_timer_remaining_question_is_answered_by_the_timer_not_a_learning_model(
 
     result = _run(agent, "Wie lange läuft der Küchentimer noch?")
 
-    assert "Verbleibende Zeit: 00:04:15" in (result.response.speech or "")
+    assert "Verbleibende Zeit: 4 Minuten und 15 Sekunden" in (result.response.speech or "")
     agent.hass.services.async_call.assert_not_awaited()
 
 
@@ -393,3 +406,21 @@ def test_timer_cancel_by_separable_verb_calls_timer_cancel(monkeypatch):
 
     agent.hass.services.async_call.assert_awaited_once()
     assert agent.hass.services.async_call.await_args.args[:2] == ("timer", "cancel")
+
+
+def test_running_helper_timer_remaining_time_comes_from_finishes_at(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    finishes_at = datetime.now(timezone.utc) + timedelta(minutes=3, seconds=20)
+    running = EntitySnapshot(
+        "timer.kueche", "Küchentimer", "timer", "active",
+        # HA leaves "remaining" at the full duration until the timer is paused.
+        attributes={"remaining": "00:10:00", "finishes_at": finishes_at.isoformat()},
+    )
+    agent = _entity(monkeypatch, [running])
+
+    result = _run(agent, "Wie lange läuft der Küchentimer noch?")
+
+    speech = result.response.speech or ""
+    assert "Verbleibende Zeit: 3 Minuten und" in speech
+    assert "10 Minuten" not in speech

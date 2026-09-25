@@ -249,7 +249,7 @@ def test_unlock_requires_explicit_confirmation(monkeypatch, tmp_path):
     entity.hass.services.async_call.assert_not_awaited()
 
     confirmed = _run(entity, "Ja")
-    assert "aufschließen" in confirmed.response.speech
+    assert "aufgeschlossen" in confirmed.response.speech
     entity.hass.services.async_call.assert_awaited_once_with(
         "lock", "unlock", {"entity_id": "lock.haustuer"}, blocking=True
     )
