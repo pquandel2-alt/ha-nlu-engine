@@ -15,12 +15,26 @@ import asyncio
 import inspect
 import tempfile
 
-import voluptuous as vol
+# Import Home Assistant first: current releases install their voluptuous
+# replacement (probatio) on import, and it must precede any voluptuous use.
 from homeassistant.components import frontend, panel_custom, websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant
 
 from homeintent import learning_center_ws
+
+
+def _rejects(schema, payload) -> bool:
+    """True when the real HA schema refuses the payload (any validator lib)."""
+    try:
+        schema(payload)
+    except AssertionError:
+        raise
+    except Exception as err:  # noqa: BLE001 - vol.Invalid or probatio.Invalid
+        return "Invalid" in type(err).__name__ or "Invalid" in {
+            base.__name__ for base in type(err).__mro__
+        }
+    return False
 
 
 def _check_schemas() -> None:
@@ -42,20 +56,13 @@ def _check_schemas() -> None:
         if name.endswith("models/reset"):
             base["confirm"] = True
         schema(base)
-        try:
-            schema({**base, "user_id": "someone-else"})
-        except vol.Invalid:
-            pass
-        else:  # pragma: no cover - smoke failure path
+        if not _rejects(schema, {**base, "user_id": "someone-else"}):
             raise AssertionError(f"{name} accepted a browser supplied user_id")
     reset = commands["homeintent/learning_center/models/reset"]._ws_schema
     for payload in ({"id": 1, "type": "homeintent/learning_center/models/reset"},
                     {"id": 1, "type": "homeintent/learning_center/models/reset", "confirm": False}):
-        try:
-            reset(payload)
-        except vol.Invalid:
-            continue
-        raise AssertionError("reset without explicit confirmation accepted")
+        if not _rejects(reset, payload):
+            raise AssertionError("reset without explicit confirmation accepted")
 
 
 def _check_signatures() -> None:
