@@ -240,19 +240,19 @@ class HomeIntentOptionsFlow(OptionsFlow):
                     vol.Optional(
                         CONF_SELECTED_ENTITIES, default=defaults.get(CONF_SELECTED_ENTITIES, [])
                     ): EntitySelector(
-                        EntitySelectorConfig(domain=SELECTABLE_DOMAINS, multiple=True)
+                        EntitySelectorConfig(domain=list(SELECTABLE_DOMAINS), multiple=True)
                     ),
                     vol.Optional(
                         CONF_READ_ONLY_ENTITIES,
                         default=defaults.get(CONF_READ_ONLY_ENTITIES, []),
                     ): EntitySelector(
-                        EntitySelectorConfig(domain=SELECTABLE_DOMAINS, multiple=True)
+                        EntitySelectorConfig(domain=list(SELECTABLE_DOMAINS), multiple=True)
                     ),
                     vol.Optional(
                         CONF_ADMIN_ONLY_ENTITIES,
                         default=defaults.get(CONF_ADMIN_ONLY_ENTITIES, []),
                     ): EntitySelector(
-                        EntitySelectorConfig(domain=SELECTABLE_DOMAINS, multiple=True)
+                        EntitySelectorConfig(domain=list(SELECTABLE_DOMAINS), multiple=True)
                     ),
                     vol.Optional(
                         CONF_CONTROL_USER_IDS,
@@ -313,9 +313,13 @@ class HomeIntentOptionsFlow(OptionsFlow):
                     ): EntitySelector(
                         EntitySelectorConfig(domain="notify", multiple=True)
                     ),
+                    # Optional single entity: a ``None`` default would be fed
+                    # back through the selector on save and rejected.
                     vol.Optional(
                         CONF_AGENT_TTS_ENTITY,
-                        default=defaults.get(CONF_AGENT_TTS_ENTITY),
+                        description={
+                            "suggested_value": defaults.get(CONF_AGENT_TTS_ENTITY)
+                        },
                     ): EntitySelector(EntitySelectorConfig(domain="tts")),
                     vol.Optional(
                         CONF_AGENT_MEDIA_PLAYERS,
@@ -403,7 +407,7 @@ class HomeIntentOptionsFlow(OptionsFlow):
                         CONF_AGENT_AUTO_ENTITY_IDS,
                         default=defaults.get(CONF_AGENT_AUTO_ENTITY_IDS, []),
                     ): EntitySelector(
-                        EntitySelectorConfig(domain=SELECTABLE_DOMAINS, multiple=True)
+                        EntitySelectorConfig(domain=list(SELECTABLE_DOMAINS), multiple=True)
                     ),
                     vol.Optional(
                         CONF_DOCUMENTS_ENABLED,

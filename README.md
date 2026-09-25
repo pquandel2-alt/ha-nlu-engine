@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **7.1.0** (V12 + Learning Center)
+- Aktuelle Version: **7.1.1** (V12 + Learning Center)
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -41,6 +41,27 @@ HomeIntent benötigt für die Sprachverarbeitung:
 Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
+
+## Was ist in Version 7.1.1 neu?
+
+**HomeIntent 7.1.1 — Options Flow Compatibility Fix.** Reine Fehlerbehebung,
+keine neuen Funktionen:
+
+- **Einstellungen → Geräte & Dienste → HomeIntent → Konfigurieren** öffnet
+  unter Home Assistant 2026.9 wieder. 7.1.0 antwortete dort mit
+  „Der Konfigurationsfluss konnte nicht geladen werden: 400: Bad Request“:
+  vier Entitätsauswahlen erhielten ihre Domains als Tupel, Home Assistant
+  erwartet `str | list[str]` und lehnte die Auswahl-Konfiguration ab
+  (`expected str at 'domain[0]'`). Die Domains werden jetzt als Liste
+  übergeben.
+- **Speichern** der Optionen scheitert nicht mehr, wenn keine TTS-Entität
+  gewählt ist (vorher `400` mit „Entity None is neither a valid entity ID
+  nor a valid UUID“). Die TTS-Auswahl ist jetzt ein Vorschlagswert und lässt
+  sich auch wieder leeren.
+- Neue Regressionstests gegen ein **echtes Home Assistant 2026.9.2**
+  (`tests_ha/`): Konfigurieren öffnen, Lern- und Proaktiv-Schalter speichern,
+  Neuladen, Learning Center (Seitenleiste, Übersicht, Autonomie) zeigt die
+  neuen Zustände.
 
 ## Was ist in Version 7.1.0 neu?
 
@@ -1263,10 +1284,19 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/homeintent --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 7.1.0:
+Options Flow und Learning Center gegen ein echtes Home Assistant (eigene
+Umgebung mit Python ≥ 3.14.2, getrennt von der Stub-basierten Suite):
+
+```bash
+python -m pip install --requirement requirements-ha-test.txt
+python -m pytest -q tests_ha
+```
+
+Geprüfter Release-Stand von Version 7.1.1:
 
 ```text
 3962 passed, 12 skipped, 0 failed
+8 passed gegen echtes Home Assistant 2026.9.2 (tests_ha)
 89 % Gesamt-Coverage
 75 % Coverage für conversation.py
 ≥ 93 % Coverage für jedes V12-Modul
@@ -1305,7 +1335,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-7.1.0.json --quiet
+  --check docs/perf/v7-shadow-baseline-7.1.1.json --quiet
 ```
 
 Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die
