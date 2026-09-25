@@ -351,6 +351,36 @@ _GENERATION_ERROR_SPOKEN_DE = {
 }
 
 
+# Past-tense or passive endings of service_call.py's response texts and the
+# infinitive a confirmation question needs ("Burgtor wird geöffnet" ->
+# "Soll ich wirklich Burgtor öffnen?"). Longer endings come first.
+_CONFIRMATION_INFINITIVES: tuple[tuple[str, str], ...] = (
+    ("wird geöffnet", "öffnen"),
+    ("wird geschlossen", "schließen"),
+    ("aufgeschlossen", "aufschließen"),
+    ("abgeschlossen", "abschließen"),
+    ("eingeschaltet", "einschalten"),
+    ("ausgeschaltet", "ausschalten"),
+    ("geschlossen", "schließen"),
+    ("ausgeführt", "ausführen"),
+    ("geöffnet", "öffnen"),
+    ("gedrückt", "drücken"),
+    ("aktiviert", "aktivieren"),
+    ("gestartet", "starten"),
+    ("gestoppt", "stoppen"),
+)
+
+
+def _confirmation_question(response_text: str) -> str:
+    """Turn a device response text into a grammatical safety question."""
+    text = response_text.rstrip(".")
+    for ending, infinitive in _CONFIRMATION_INFINITIVES:
+        if text.endswith(f" {ending}"):
+            text = f"{text[: -len(ending)]}{infinitive}"
+            break
+    return f"Soll ich wirklich {text}?"
+
+
 def _with_session_conversation_id(
     user_input: conversation.ConversationInput, chat_log: object
 ) -> conversation.ConversationInput:
@@ -4357,7 +4387,7 @@ class NluConversationEntity(
                     ),
                 )
                 response.async_set_speech(
-                    f"Soll ich wirklich {result.response_text.rstrip('.')}?"
+                    _confirmation_question(result.response_text)
                 )
                 return conversation.ConversationResult(
                     response=response, conversation_id=user_input.conversation_id
@@ -5629,7 +5659,7 @@ class NluConversationEntity(
                     ),
                 )
                 response.async_set_speech(
-                    f"Soll ich wirklich {device_control.response_text.rstrip('.')}?"
+                    _confirmation_question(device_control.response_text)
                 )
                 return conversation.ConversationResult(
                     response=response, conversation_id=user_input.conversation_id

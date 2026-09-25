@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **6.0.2** (V11)
+- Aktuelle Version: **6.0.3** (V11)
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -41,6 +41,31 @@ HomeIntent benötigt für die Sprachverarbeitung:
 Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
+
+## Was ist in Version 6.0.3 neu?
+
+Version 6.0.3 behebt Fehler, die ein Test gegen ein echtes Home Assistant
+2026.9.3 mit einem virtuellen Haus aufgedeckt hat. Das Sprachverständnis ist
+unverändert; der Shadow-Report über 3.772 Turns ist bis auf die Versionsnummer
+identisch mit 6.0.2.
+
+- Rollläden und Tore, die eine Position melden, lassen sich wieder öffnen und
+  schließen. Seit 4.66.0 scheiterte das mit „Mindestens ein Ziel unterstützt
+  die Aktion nicht mehr“.
+- Tore (`device_class: gate`) gelten beim Öffnen und Schließen wie Garagentore
+  als kritisch und brauchen eine Bestätigung. Sicherheitsrückfragen sind jetzt
+  grammatisch formuliert („Soll ich wirklich Burgtor öffnen?“).
+- Noch nie aktivierte Szenen und Taster (Zustand `unknown`) lassen sich
+  auslösen und erscheinen nicht mehr als „Nicht verfügbar“.
+- Aufrufe ohne eigene `conversation_id` (REST-API, `conversation.process`)
+  teilen sich keinen gemeinsamen Dialogzustand mehr.
+- Sprachsatelliten hören auch nach Routine-, Ziel- und Planrückfragen weiter zu.
+- „Nein“ beendet eine offene Routinen-Rückfrage.
+- „Wie lange läuft der Küchentimer noch?“ nennt die Restzeit statt einer
+  Keine-Modell-Antwort; „Brich den Küchentimer ab“ wird verstanden.
+- Grammatiken, Zahlregeln und der Thermal-Zustand werden nicht mehr blockierend
+  im Event-Loop geladen.
+- Die Mindestversion Home Assistant 2026.4.0 ist in `hacs.json` hinterlegt.
 
 ## Was ist in Version 6.0 / V11 neu?
 
@@ -1033,10 +1058,10 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/homeintent --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 6.0.2:
+Geprüfter Release-Stand von Version 6.0.3:
 
 ```text
-3215 passed, 12 skipped, 0 failed
+3247 passed, 12 skipped, 0 failed
 87 % Gesamt-Coverage
 72 % Coverage für conversation.py
 ```
@@ -1063,7 +1088,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-6.0.2.json --quiet
+  --check docs/perf/v7-shadow-baseline-6.0.3.json --quiet
 ```
 
 Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die

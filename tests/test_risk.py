@@ -30,3 +30,20 @@ def test_light_remains_low_risk():
     plan = ServiceCallPlan("homeassistant", "turn_on", light.entity_id)
     assert classify_service_plan(plan, [light]) is RiskLevel.LOW
     assert not requires_confirmation(plan, [light])
+
+
+def test_gate_open_and_close_are_critical_like_garage_doors():
+    gate = EntitySnapshot("cover.hoftor", "Hoftor", "cover", "closed", device_class="gate")
+    for service in ("open_cover", "close_cover"):
+        plan = ServiceCallPlan("cover", service, gate.entity_id)
+        assert classify_service_plan(plan, [gate]) is RiskLevel.CRITICAL, service
+        assert requires_confirmation(plan, [gate])
+
+
+def test_ordinary_shutter_stays_medium_risk():
+    shutter = EntitySnapshot(
+        "cover.rollladen", "Rollladen", "cover", "closed", device_class="shutter"
+    )
+    plan = ServiceCallPlan("cover", "open_cover", shutter.entity_id)
+    assert classify_service_plan(plan, [shutter]) is RiskLevel.MEDIUM
+    assert not requires_confirmation(plan, [shutter])
