@@ -10,9 +10,9 @@
 <meta property="og:type" content="website">
 <meta property="og:title" content="HomeIntent — Lokale Sprachsteuerung für Home Assistant">
 <meta property="og:description" content="Bedeutung erkennen, Ziel eindeutig auflösen, Fähigkeiten und Risiken prüfen — und erst danach Home Assistant verändern.">
-<meta property="og:url" content="https://pquandel2-alt.github.io/ha-nlu-engine/">
+<meta property="og:url" content="https://pquandel2-alt.github.io/homeintent/">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="canonical" href="https://pquandel2-alt.github.io/ha-nlu-engine/">
+<link rel="canonical" href="https://pquandel2-alt.github.io/homeintent/">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -37,7 +37,7 @@
         </linearGradient></defs>
       </svg>
       <span class="brand__text">HomeIntent</span>
-      <span class="brand__ver">4.63</span>
+      <span class="brand__ver">6.0</span>
     </a>
 
     <nav class="nav__links" aria-label="Hauptnavigation">
@@ -45,13 +45,13 @@
       <a href="#demo">Live-Pipeline</a>
       <a href="#koennen">Können</a>
       <a href="#sicherheit">Sicherheit</a>
-      <a href="#v7">V7</a>
+      <a href="#neu">V11</a>
       <a href="#architektur">Architektur</a>
       <a href="#grenzen">Grenzen</a>
     </nav>
 
     <div class="nav__cta">
-      <a class="btn btn--ghost" href="https://github.com/pquandel2-alt/ha-nlu-engine" target="_blank" rel="noopener">
+      <a class="btn btn--ghost" href="https://github.com/pquandel2-alt/homeintent" target="_blank" rel="noopener">
         <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8"/></svg>
         GitHub
       </a>
@@ -71,7 +71,7 @@
     <div class="hero__copy">
       <div class="pill reveal">
         <span class="pill__dot"></span>
-        Version 4.64.0 · 2.484 Tests grün · MIT
+        Version 6.0.2 · 3.215 Tests grün · MIT
       </div>
 
       <h1 class="reveal" style="--d:.05s">
@@ -82,8 +82,9 @@
       <p class="lead reveal" style="--d:.12s">
         HomeIntent ist ein eigener Conversation Agent für Home&nbsp;Assistant Assist.
         Er versteht deutsche Smart-Home-Sprache, löst Geräte gegen deine echte
-        Konfiguration auf, erzeugt geprüfte Serviceaufrufe und kann über native
-        HA-Automationen proaktiv per Push oder TTS informieren —
+        Konfiguration auf, erzeugt geprüfte Serviceaufrufe, plant mehrstufige
+        Ziele, prüft deren tatsächliche Wirkung und kann auf Wunsch aus
+        verifizierten Ergebnissen lernen —
         <strong>vollständig lokal, ohne LLM, ohne Cloud, ohne GPU.</strong>
       </p>
 
@@ -125,9 +126,9 @@
 
   <div class="wrap">
     <div class="metrics reveal">
-      <div class="metric"><b data-count="34516">0</b><span>Zeilen Produktivcode</span></div>
-      <div class="metric"><b data-count="2443">0</b><span>automatisierte Tests</span></div>
-      <div class="metric"><b data-count="85" data-suffix=" %">0</b><span>Testabdeckung</span></div>
+      <div class="metric"><b data-count="60035">0</b><span>Zeilen Produktivcode</span></div>
+      <div class="metric"><b data-count="3215">0</b><span>automatisierte Tests</span></div>
+      <div class="metric"><b data-count="87" data-suffix=" %">0</b><span>Testabdeckung</span></div>
       <div class="metric"><b data-count="31">0</b><span>Home-Assistant-Domänen</span></div>
       <div class="metric"><b data-count="0">0</b><span>Laufzeit&shy;abhängigkeiten</span></div>
     </div>
@@ -232,7 +233,7 @@
     <p class="footnote reveal">
       Beispielhaus: 3 Lichter (Küche, Flur, Stehlampe im Wohnzimmer), 2 Rollläden,
       1 Thermostat, 1 Türschloss, 2 Radios. Die gezeigten Ergebnisse entsprechen
-      dem dokumentierten Verhalten von Version 4.64.0.
+      dem dokumentierten Verhalten von Version 6.0.2.
     </p>
   </div>
 </section>
@@ -384,6 +385,22 @@
           <code>Mit Bürolicht meine ich Schreibtischlampe.</code>
         </div>
       </div>
+      <div class="glass capsule">
+        <h4><span class="capsule__n">08</span> Ziele, Routinen &amp; Wirkung</h4>
+        <p>Seit 5.0 beschreibt ein Ziel das gewünschte <em>Ergebnis</em>, nicht einen Serviceaufruf. Ein begrenzter Planer prüft Vorbedingungen, und jeder Lauf hält fest, ob der Dienst angenommen <em>und</em> die Wirkung beobachtet wurde. Unbekannte Begriffe wie „Filmabend“ führen zu einer Rückfrage.</p>
+        <div class="mini">
+          <code>Um 7 Uhr soll es im Bad 21 Grad haben.</code>
+          <code>Warum hat das nicht funktioniert?</code>
+        </div>
+      </div>
+      <div class="glass capsule">
+        <h4><span class="capsule__n">09</span> Satelliten &amp; Rückfragen</h4>
+        <p>Nach einer Rückfrage bleibt das Mikrofon des Sprachsatelliten offen, und die Antwort kann ohne erneutes Wakeword gesprochen werden. Raumlose Befehle beziehen sich auf den Bereich des Satelliten. Ein ausdrücklich genannter Raum hat immer Vorrang.</p>
+        <div class="mini">
+          <code>Fahr die Rolllade auf 50 Prozent.</code>
+          <code>Das zweite.</code>
+        </div>
+      </div>
     </div>
   </div>
 </section>
@@ -486,54 +503,123 @@
   </div>
 </section>
 
-<!-- ═══════════════════════ V7-AUTORITÄT ═══════════════════════ -->
-<section class="sec sec--alt" id="v7">
+<!-- ═══════════════════════ NEU IN 6.0 / V11 ═══════════════════════ -->
+<section class="sec sec--alt" id="neu">
   <div class="wrap">
     <div class="sechead reveal">
-      <span class="kicker">Neu in 4.60 – 4.62</span>
-      <h2>Der semantische Compiler<br>ist jetzt <em>die Autorität.</em></h2>
+      <span class="kicker">Neu in 6.0 · V11</span>
+      <h2>Es lernt dazu.<br>Aber es <em>entscheidet</em> nicht allein.</h2>
       <p class="sechead__sub">
-        Bisher lag die Bedeutung im Compiler, die Entscheidung aber oft noch bei
-        gewachsenen Spezialparsern. Seit 4.60 ist die Reihenfolge umgedreht — für
-        einen ausdrücklich vermessenen Ausschnitt entscheidet V7 zuerst, und die
-        Entscheidung selbst ist beobachtbar.
+        V11 ergänzt eine vollständig lokale Lern- und Vorhersageschicht. Aus
+        verifizierten Wirkungen entstehen kompakte Erfahrungen; transparente
+        Modelle schätzen Effektzeiten, Zuverlässigkeit und Aufheizdauern.
+        Der Grundsatz bleibt: <em>Beobachtung ist keine Erlaubnis.</em>
       </p>
     </div>
 
     <div class="grid4">
       <div class="glass tile reveal">
-        <h4>Ein Ergebnis, sieben Zustände</h4>
+        <h4>Nur beratend</h4>
+        <p>Kein V11-Baustein kann einen Dienst ausführen oder einen
+        <code>ServiceCallPlan</code> erzeugen. Vorhersagen erreichen den
+        Planer nur als Zeitempfehlung.</p>
+        <p class="mt small">Validator, Ausführungsrichtlinie, Bestätigung und
+        Executor bleiben unverändert maßgeblich.</p>
+      </div>
+
+      <div class="glass tile reveal" style="--d:.06s">
+        <h4>Standardmäßig aus</h4>
+        <p>Lernen, Vorhersagen, Gewohnheitserkennung und Vorschläge sind
+        getrennt schaltbar und ab Werk deaktiviert.</p>
+        <div class="chips">
+          <span>OFF</span><span>SILENT_LEARN</span><span>ASK</span>
+        </div>
+        <p class="mt small">Einen Lernmodus <code>AUTO_EXECUTE</code> gibt es
+        nicht. Gewohnheiten werden nur vorgeschlagen, nie selbst aktiviert.</p>
+      </div>
+
+      <div class="glass tile reveal" style="--d:.12s">
+        <h4>Vorhersage mit Beleg</h4>
+        <p>Jede Vorhersage nennt Konfidenz, Unsicherheitsintervall,
+        Stichprobenzahl, Modellalter und Herkunft.</p>
+        <div class="plan">
+          <div class="plan__row"><span>unter 5 Proben</span><b>kein Modell</b></div>
+          <div class="plan__row"><span>5 – 14 Proben</span><b>nur Info</b></div>
+          <div class="plan__row"><span>ab 15 + Holdout</span><b>planbar</b></div>
+        </div>
+        <p class="mt small">Eingaben außerhalb des Trainingsbereichs werden als
+        <code>OUT_OF_DISTRIBUTION</code> abgelehnt.</p>
+      </div>
+
+      <div class="glass tile reveal" style="--d:.18s">
+        <h4>Präferenzen bleiben deine</h4>
+        <p>Erkannte Vorlieben bleiben <code>INFERRED</code>, bis du sie
+        bestätigst. Persönliche Profile werden nie gemittelt: Sind mehrere
+        Personen anwesend und wollen Unterschiedliches, fragt HomeIntent nach.</p>
+        <p class="mt small">Gelöschte Modelle werden durch persistente
+        Tombstones nicht heimlich aus alter Evidenz neu gebildet.</p>
+      </div>
+    </div>
+
+    <h3 class="wordorder__h reveal" style="margin-top:56px">Der Weg zu 6.0</h3>
+    <div class="grid4">
+      <div class="glass tile reveal">
+        <h4>V8 · Verstehen</h4>
+        <p>Eine verlustarme Sprachgrenze bewahrt Originaltokens und
+        Quellspannen. Deutsche Satzstruktur und ein <code>SemanticGraph</code>
+        ersetzen historische Gerätegrammatiken im Produktivbetrieb vollständig.</p>
+      </div>
+      <div class="glass tile reveal" style="--d:.06s">
+        <h4>V9 · Schlussfolgern</h4>
+        <p>Typisierte Abfragen über belegte Hausfakten: relationale Filter,
+        begrenzte Multi-Hop-Traversals, Aggregate, Superlative,
+        Einheitenumrechnung und ein nachvollziehbarer <code>ReasoningTrace</code>.</p>
+      </div>
+      <div class="glass tile reveal" style="--d:.12s">
+        <h4>V10 · Ziele</h4>
+        <p>Ergebnisziele, begrenzte Mehrschrittplanung, Vorbedingungen,
+        Effektverifikation und persistente Monitor-Ziele. Die Integration heißt
+        seit 5.0 kanonisch <code>homeintent</code>.</p>
+      </div>
+      <div class="glass tile reveal" style="--d:.18s">
+        <h4>V11 · Lernen</h4>
+        <p>Lokale, transparente Modelle für Effektzeiten, Zuverlässigkeit und
+        Raumtemperaturen, streng beratend, mit Drift- und Plausibilitätsprüfung
+        und standardmäßig deaktiviert.</p>
+      </div>
+    </div>
+
+    <div class="grid4" style="margin-top:20px">
+      <div class="glass tile reveal">
+        <h4>Ein Ergebnis pro Turn</h4>
         <p>Jeder Turn endet in genau einem <code>UnderstandingOutcome</code>:</p>
         <div class="chips">
           <span>QUERY</span><span>COMMAND</span><span>AUTOMATION</span>
           <span>CLARIFICATION</span><span>AMBIGUOUS</span><span>UNSUPPORTED</span>
           <span>UNSAFE</span>
         </div>
-        <p class="mt small">Nur <code>COMMAND</code> und eine bestätigte
-        <code>AUTOMATION</code> dürfen überhaupt Richtung Executor laufen.</p>
       </div>
 
       <div class="glass tile reveal" style="--d:.06s">
-        <h4>Autorität braucht Abstand</h4>
-        <p>Ein autoritativer V7-Treffer setzt einen <strong>vollständigen</strong>
-        Kandidaten voraus. Konkurrieren zwei vollständige Lesarten, müssen
-        mindestens <strong>zehn Scorepunkte</strong> zwischen ihnen liegen.</p>
-        <p class="mt">Echte Ziel-Mehrdeutigkeit bleibt davon unberührt: Sie ist
-        und bleibt eine nicht ausführbare Klärung.</p>
+        <h4>Latenz als Gate</h4>
+        <p>Die CI prüft bei jeder Änderung Verständnis, Zielplanung und
+        Lern-/Vorhersagepfad gegen ein festes Budget:</p>
+        <div class="plan">
+          <div class="plan__row"><span>Entitäten</span><b>5.000</b></div>
+          <div class="plan__row"><span>Budget p95</span><b>&lt; 100 ms</b></div>
+        </div>
       </div>
 
       <div class="glass tile reveal" style="--d:.12s">
         <h4>Shadow-Gate vor jedem Release</h4>
         <p>Alter und neuer Pfad laufen rein lesend gegeneinander. Der
-        versionierte Bericht zu 4.64.0 umfasst <strong>3.772 Turns</strong>:</p>
+        versionierte Bericht zu 6.0.2 umfasst <strong>3.772 Turns</strong>:</p>
         <div class="plan">
           <div class="plan__row"><span>semantisch identisch</span><b>3.752</b></div>
           <div class="plan__row"><span>Divergenz</span><b>0</b></div>
           <div class="plan__row"><span>nur Legacy / nur V7</span><b>0</b></div>
           <div class="plan__row"><span>beidseitig sicher gescheitert</span><b>20</b></div>
         </div>
-        <p class="mt small">Die 20 sind kontextabhängige Folgeturns, bewusst nicht
-        ausführbare Hypothesen sowie unbekannte Ziele und Werte.</p>
       </div>
 
       <div class="glass tile reveal" style="--d:.18s">
@@ -545,19 +631,16 @@
           <div class="plan__row"><span>Unsafe&nbsp;→&nbsp;Action</span><b>0</b></div>
           <div class="plan__row"><span>Ambiguous&nbsp;→&nbsp;Action</span><b>0</b></div>
         </div>
-        <p class="mt small">Der Shadow-Pfad erzeugt nur unveränderliche Pläne und
-        besitzt keinen HA-Executor — er <em>kann</em> nichts auslösen.</p>
       </div>
     </div>
 
     <p class="footnote reveal">
       Reproduzierbar über <code>scripts/v7_shadow_report.py --check
-      docs/perf/v7-shadow-baseline-4.64.0.json</code>. Der aktive autoritative
-      Schnitt umfasst Ein/Aus für Licht, Schalter, Ventilator, Heizung,
-      Luftbefeuchter und Input-Boolean, Öffnen/Schließen für Cover und Ventile,
-      Media Play/Pause, Saugroboter Start/Stopp, Szenenaktivierung, Cover- und
-      Licht-Prozentwerte, Heizungs-Solltemperatur sowie typisierte Zustands-,
-      Verb- und Messwertabfragen.
+      docs/perf/v7-shadow-baseline-6.0.2.json</code>. Die 20 beidseitig
+      gescheiterten Fälle sind kontextabhängige Folgeturns, bewusst nicht
+      ausführbare Hypothesen sowie unbekannte Ziele und Werte. Details zu
+      Schwellen, Invalidierung und Datenschutz stehen in
+      <code>docs/architecture-v11.md</code>.
     </p>
   </div>
 </section>
@@ -609,7 +692,7 @@
       <span class="kicker">Architektur</span>
       <h2>Getrennt gebaut,<br>damit es <em>getrennt prüfbar</em> ist.</h2>
       <p class="sechead__sub">
-        Die gesamte Sprachschicht kennt Home Assistant nicht. 51 Module im
+        Die gesamte Sprachschicht kennt Home Assistant nicht. 66 Module im
         Verzeichnis <code>nlu/</code> enthalten nicht einen einzigen
         <code>homeassistant</code>-Import — sie lassen sich deshalb ohne laufende
         HA-Instanz vollständig testen.
@@ -627,11 +710,11 @@
         <div class="arch__lane">
           <span class="arch__lane-h">Direktbefehl · Query · Dialog</span>
           <ol>
-            <li>Normalisierung &amp; Äußerungsanalyse</li>
-            <li>Sprechakt, Modalität, Negation, Klauselrollen</li>
-            <li>Semantisches Lexikon</li>
+            <li>Verlustarmes LanguageDocument</li>
+            <li>Deutsche Satzstruktur + SemanticGraph</li>
+            <li>MeaningCandidates → UnderstandingOutcome</li>
             <li>SemanticFrame — Aktion, Ziel, Ort, Menge, Wert</li>
-            <li>World Model + Constraint Resolver</li>
+            <li>World Model + HouseGraph + Constraint Resolver</li>
             <li>Capability- und Command-Validator</li>
             <li>Execution Policy</li>
             <li class="is-end">ServiceCallPlan <em>oder</em> QueryResult</li>
@@ -659,7 +742,7 @@
       <div class="quality__item"><b>Hassfest</b><span>+ HACS-Validierung</span></div>
       <div class="quality__item"><b>Docker</b><span>Smoke-Test gegen echtes HA</span></div>
       <div class="quality__item"><b>pyright</b><span>zweistufig, strict-Scope</span></div>
-      <div class="quality__item"><b>Eval-Korpus</b><span>eigenes Release-Gate</span></div>
+      <div class="quality__item"><b>p95 &lt; 100 ms</b><span>Latenz-Gate · 5.000 Entitäten</span></div>
     </div>
   </div>
 </section>
@@ -685,8 +768,10 @@
       <div class="limit reveal" style="--d:.2s"><span>—</span><p>Kalendarische Sprache deckt die dokumentierten Muster ab — sie ist <strong>kein universeller Parser</strong> für jede denkbare deutsche Datumsform.</p></div>
       <div class="limit reveal" style="--d:.24s"><span>—</span><p>Eine Geräteaktion wird nur angeboten, wenn die nötige Fähigkeit im <strong>aktuellen</strong> HA-Zustand erkennbar ist.</p></div>
       <div class="limit reveal" style="--d:.28s"><span>—</span><p>Integrationsspezifische Device-Trigger ohne vollständiges Subtypschema werden <strong>abgelehnt</strong> statt geraten.</p></div>
-      <div class="limit reveal" style="--d:.32s"><span>—</span><p>Die V7-Autorität gilt für einen <strong>ausdrücklich vermessenen Ausschnitt</strong>. Kalender, Produktivität und einzelne Managementfunktionen laufen weiterhin über fachspezifische Parser — hinter derselben Sicherheitsgrenze, aber noch nicht im Compiler.</p></div>
-      <div class="limit reveal" style="--d:.36s"><span>—</span><p>Die Benchmark-Grafik im Repository ist eine <strong>Momentaufnahme eines älteren Stands</strong> und kein Leistungsnachweis für 4.64.0. Reale Zahlen muss man auf der eigenen Hardware messen.</p></div>
+      <div class="limit reveal" style="--d:.32s"><span>—</span><p>Hassil-Grammatiken bleiben als <strong>schneller Spezial- und Kompatibilitätspfad</strong> neben dem semantischen Compiler bestehen.</p></div>
+      <div class="limit reveal" style="--d:.36s"><span>—</span><p>Die Latenzbudgets werden auf CI-Runnern gemessen und sind <strong>kein Leistungsnachweis für deine Hardware</strong>. Reale Zahlen muss man selbst messen.</p></div>
+      <div class="limit reveal" style="--d:.4s"><span>—</span><p>Die Modellkonfidenz ist ein <strong>Qualitätswert, keine kalibrierte Wahrscheinlichkeit</strong>. Verbrauch, Gerätelaufzeit und Batterieentladung haben noch kein Vorhersagemodell. Solche Fragen erhalten eine ausdrückliche Keine-Modell-Antwort.</p></div>
+      <div class="limit reveal" style="--d:.44s"><span>—</span><p>Der lokale Dokumentadapter liest TXT, Markdown und begrenzte textbasierte PDFs. Verschlüsselte oder reine Scan-PDFs werden <strong>nicht per OCR</strong> interpretiert.</p></div>
     </div>
   </div>
 </section>
@@ -707,16 +792,16 @@
           <li>Oben rechts <b>Benutzerdefinierte Repositories</b> öffnen.</li>
           <li>
             Repository eintragen:
-            <div class="copy" data-copy="https://github.com/pquandel2-alt/ha-nlu-engine">
-              <code>https://github.com/pquandel2-alt/ha-nlu-engine</code>
+            <div class="copy" data-copy="https://github.com/pquandel2-alt/homeintent">
+              <code>https://github.com/pquandel2-alt/homeintent</code>
               <button aria-label="Kopieren">kopieren</button>
             </div>
           </li>
           <li>Typ <b>Integration</b> wählen.</li>
-          <li>Nach <b>HA NLU Engine</b> suchen und installieren.</li>
+          <li>Nach <b>HomeIntent</b> suchen und installieren.</li>
           <li>Home Assistant <b>neu starten</b>.</li>
           <li><b>Einstellungen → Geräte &amp; Dienste → Integration hinzufügen</b>.</li>
-          <li><b>HA NLU Engine</b> hinzufügen.</li>
+          <li><b>HomeIntent</b> hinzufügen.</li>
         </ol>
       </div>
 
@@ -724,7 +809,7 @@
         <h3>Assist verbinden</h3>
         <ol class="steps steps--alt">
           <li>Einstellungen der gewünschten <b>Assist-Pipeline</b> öffnen.</li>
-          <li><b>HA NLU Engine</b> als Conversation Agent wählen.</li>
+          <li><b>HomeIntent</b> als Conversation Agent wählen.</li>
           <li>Die benötigten <b>Entitäten für Assist freigeben</b>.</li>
           <li>Bei Bedarf die <b>Optionen</b> für feste Auswahl und Sicherheitsrichtlinien öffnen.</li>
         </ol>
@@ -740,6 +825,14 @@
             <li>nur benötigte Entitäten freigeben</li>
           </ul>
         </div>
+
+        <div class="glass hint">
+          <h4>Umstieg von „HA NLU Engine“</h4>
+          <p class="small">Die Integration heißt seit 5.0 <code>homeintent</code>.
+          Bestehende <code>ha_nlu</code>-Einträge funktionieren über einen
+          Kompatibilitäts-Shim weiter. Ein normales HACS-Update ab 5.0.1 plus
+          Neustart genügt.</p>
+        </div>
       </div>
     </div>
   </div>
@@ -749,10 +842,10 @@
 <section class="cta">
   <div class="wrap cta__inner reveal">
     <h2>Ein Assistent, dem du<br>den Hausschlüssel <em>geben würdest.</em></h2>
-    <p>Lokal, deterministisch, quelloffen unter MIT. Version 4.64.0.</p>
+    <p>Lokal, deterministisch, quelloffen unter MIT. Version 6.0.2.</p>
     <div class="cta__btns">
-      <a class="btn btn--primary btn--lg" href="https://github.com/pquandel2-alt/ha-nlu-engine" target="_blank" rel="noopener">Auf GitHub ansehen</a>
-      <a class="btn btn--ghost btn--lg" href="https://my.home-assistant.io/redirect/hacs_repository/?owner=pquandel2-alt&amp;repository=ha-nlu-engine&amp;category=integration" target="_blank" rel="noopener">In HACS öffnen</a>
+      <a class="btn btn--primary btn--lg" href="https://github.com/pquandel2-alt/homeintent" target="_blank" rel="noopener">Auf GitHub ansehen</a>
+      <a class="btn btn--ghost btn--lg" href="https://my.home-assistant.io/redirect/hacs_repository/?owner=pquandel2-alt&amp;repository=homeintent&amp;category=integration" target="_blank" rel="noopener">In HACS öffnen</a>
     </div>
   </div>
 </section>
@@ -767,20 +860,21 @@
     </div>
     <div class="foot__cols">
       <div><h5>Projekt</h5>
-        <a href="https://github.com/pquandel2-alt/ha-nlu-engine" target="_blank" rel="noopener">Repository</a>
-        <a href="https://github.com/pquandel2-alt/ha-nlu-engine/releases/latest" target="_blank" rel="noopener">Releases</a>
-        <a href="https://github.com/pquandel2-alt/ha-nlu-engine/blob/main/LICENSE" target="_blank" rel="noopener">MIT-Lizenz</a>
+        <a href="https://github.com/pquandel2-alt/homeintent" target="_blank" rel="noopener">Repository</a>
+        <a href="https://github.com/pquandel2-alt/homeintent/releases/latest" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/pquandel2-alt/homeintent/blob/main/LICENSE" target="_blank" rel="noopener">MIT-Lizenz</a>
       </div>
       <div><h5>Dokumentation</h5>
-        <a href="https://github.com/pquandel2-alt/ha-nlu-engine/blob/main/docs/architecture-v7.md" target="_blank" rel="noopener">Architektur v7</a>
-        <a href="https://github.com/pquandel2-alt/ha-nlu-engine/blob/main/docs/natural-language-roadmap-v7.md" target="_blank" rel="noopener">Sprach-Roadmap v7</a>
-        <a href="https://github.com/pquandel2-alt/ha-nlu-engine/blob/main/docs/quality-checklist.md" target="_blank" rel="noopener">Qualitäts-Checkliste</a>
-        <a href="https://github.com/pquandel2-alt/ha-nlu-engine/blob/main/docs/troubleshooting.md" target="_blank" rel="noopener">Fehlerdiagnose</a>
+        <a href="https://github.com/pquandel2-alt/homeintent/blob/main/docs/architecture-v11.md" target="_blank" rel="noopener">Architektur V11</a>
+        <a href="https://github.com/pquandel2-alt/homeintent/blob/main/docs/architecture-v10.md" target="_blank" rel="noopener">Architektur V10</a>
+        <a href="https://github.com/pquandel2-alt/homeintent/blob/main/docs/homeintent-rename-migration.md" target="_blank" rel="noopener">Migration von ha_nlu</a>
+        <a href="https://github.com/pquandel2-alt/homeintent/blob/main/docs/quality-checklist.md" target="_blank" rel="noopener">Qualitäts-Checkliste</a>
+        <a href="https://github.com/pquandel2-alt/homeintent/blob/main/docs/troubleshooting.md" target="_blank" rel="noopener">Fehlerdiagnose</a>
       </div>
       <div><h5>Seite</h5>
         <a href="#demo">Live-Pipeline</a>
         <a href="#sicherheit">Sicherheit</a>
-        <a href="#v7">V7-Autorität</a>
+        <a href="#neu">Neu in 6.0</a>
         <a href="#grenzen">Bekannte Grenzen</a>
       </div>
     </div>
