@@ -457,6 +457,11 @@ def _number(value: object) -> float | None:
     return float(value) if isinstance(value, (int, float)) else None
 
 
+def time_band(hour: int) -> str:
+    """Public name of the V11 habit time band (single definition)."""
+    return _time_band(hour)
+
+
 def _time_band(hour: int) -> str:
     if 5 <= hour < 11:
         return "morning"

@@ -181,6 +181,10 @@ class UserContextStore:
             "notification_target_ambiguous",
         )
 
+    def bound_users(self) -> tuple[UserContext, ...]:
+        """Explicit HA-user -> person bindings, in stable order."""
+        return tuple(self._users[key] for key in sorted(self._users))
+
     @property
     def household(self) -> HouseholdContext:
         return self._household

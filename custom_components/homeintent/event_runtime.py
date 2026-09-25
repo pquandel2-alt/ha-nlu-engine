@@ -115,6 +115,16 @@ class SituationRuntime:
                 )
             except Exception:  # noqa: BLE001 - monitor failure must not break HA event flow
                 _LOGGER.exception("HomeIntent monitor goal evaluation failed")
+        proactive = self._runtime_data.proactive_context
+        if proactive is not None:
+            try:
+                await proactive.async_observe_state(
+                    entity,
+                    previous if isinstance(previous, str) else None,
+                    tuple(entities),
+                )
+            except Exception:  # noqa: BLE001 - V12 must never break HA event flow
+                _LOGGER.exception("HomeIntent proactive context evaluation failed")
         categories = self._configured_categories()
         if not categories:
             return
@@ -234,6 +244,19 @@ class SituationRuntime:
         self, effect: ExpectedEffect
     ) -> None:
         """Report a missing observable effect without retrying the action."""
+        proactive = self._runtime_data.proactive_context
+        if proactive is not None:
+            try:
+                name = next(
+                    (item.friendly_name for item in build_entity_snapshots(self._hass, self._entry)
+                     if item.entity_id == effect.entity_id),
+                    effect.entity_id,
+                )
+                await proactive.async_report_effect_anomaly(
+                    effect.entity_id, effect.operator_id, name
+                )
+            except Exception:  # noqa: BLE001 - V12 must never break HA event flow
+                _LOGGER.exception("HomeIntent proactive effect report failed")
         if "expected_effect_missing" not in self._configured_categories():
             return
         entities = build_entity_snapshots(self._hass, self._entry)

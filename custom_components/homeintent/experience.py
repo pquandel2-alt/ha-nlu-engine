@@ -171,7 +171,10 @@ def extract_goal_run_experiences(run: GoalRun) -> tuple[ExperienceRecord, ...]:
         return ()
     result: list[ExperienceRecord] = []
     for step in run.steps:
-        if step.operator_id is None:
+        # Only an accepted device service call can produce action-effect
+        # evidence: a satisfied no-op (None) or a rejected call (False) says
+        # nothing about whether the device reacts to the operator.
+        if step.operator_id is None or step.service_accepted is not True:
             continue
         for target in step.selected_targets:
             matches = tuple(v for v in step.verification if v.entity_id == target)

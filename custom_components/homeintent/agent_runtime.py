@@ -240,10 +240,21 @@ class ProactiveAgentRuntime:
         return await self._deliver_and_store(event)
 
     async def async_handle_notification_action(self, event: Any) -> None:
-        if not self.enabled:
+        raw = getattr(event, "data", {}).get("action")
+        if not self.enabled and not (isinstance(raw, str) and raw.startswith("HOMEINTENT_V12_")):
             return
         raw_action = getattr(event, "data", {}).get("action")
         if not isinstance(raw_action, str):
+            return
+        proactive = self._runtime_data.proactive_context
+        if proactive is not None and raw_action.startswith("HOMEINTENT_V12_"):
+            # V12 proposals carry only an opaque reference and a typed choice.
+            user_id, _is_admin = await self._async_notification_actor(event)
+            device_id = getattr(event, "data", {}).get("device_id")
+            await proactive.async_handle_push_action(
+                raw_action, user_id=user_id,
+                device_id=device_id if isinstance(device_id, str) else None,
+            )
             return
         operation = None
         event_id = ""
@@ -356,6 +367,19 @@ class ProactiveAgentRuntime:
         return (
             "Die Situation ist nicht mehr aktuell oder die Aktion ist nicht mehr erlaubt. "
             "Ich habe nichts ausgeführt."
+        )
+
+    async def async_open_voice_question_count(self) -> int:
+        """Number of unexpired TTS-delivered ASK events (read-only)."""
+        if not self.enabled:
+            return 0
+        now = dt_util.utcnow()
+        return sum(
+            1 for event in (await self._store.async_load_all()).values()
+            if event.mode is AgentMode.ASK
+            and event.state is AgentEventState.NOTIFIED
+            and "tts" in event.delivered_channels
+            and _parse_datetime(event.expires_at) > now
         )
 
     async def async_recheck(self, event_id: str) -> None:

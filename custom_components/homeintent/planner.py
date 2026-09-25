@@ -14,6 +14,13 @@ from .agent_action_policy import validate_agent_service_plan
 from .entities import EntitySnapshot, normalize_for_compare
 from .execution_policy import PolicyOutcome, evaluate_service_plan
 from .goal_model import DesiredState, GoalKind, GoalModel, GoalScope
+from .goal_run import (
+    FailureCode,
+    GoalRun,
+    GoalRunStatus,
+    StepExecutionRecord,
+    VerificationRecord,
+)
 from .profiles import ComfortProfile, RoutineDefinition, RoutineStepDefinition
 from .risk import RiskLevel, classify_service_plan
 from .service_call import ServiceCallPlan
@@ -113,6 +120,10 @@ class StepResult:
     verified_at: str | None = None
     attempted_at: str | None = None
     service_accepted_at: str | None = None
+    # Authoritative device-service acceptance, independent of ``success``:
+    # None = no device service call happened (no-op, check, or only scheduled),
+    # False = a call was attempted and rejected/failed, True = HA accepted it.
+    service_accepted: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -390,6 +401,72 @@ def materialize_routine(
     return plan
 
 
+def materialize_target_states(
+    goal: GoalModel,
+    targets: Sequence[tuple[str, DesiredState, str]],
+    entities: Iterable[EntitySnapshot],
+    *,
+    options: Mapping[str, object],
+    is_admin: bool,
+    user_id: str | None,
+    limits: PlanningLimits = PlanningLimits(),
+) -> MaterializedPlan:
+    """Materialize explicit (entity, desired state) targets through V10.
+
+    Used for proactive proposals: the caller supplies only desired states;
+    this planner selects the closed operator, runs the Validator and the
+    central ExecutionPolicy, skips already-satisfied targets and adds the
+    mandatory verification for every action step.
+    """
+    snapshots = tuple(entities)
+    by_id = {item.entity_id: item for item in snapshots}
+    if not targets:
+        raise ValueError("Der Vorschlag enthält kein Ziel")
+    steps: list[PlanStep] = [
+        PlanStep(
+            "check-fresh-state", StepKind.CHECK,
+            "Aktuelle Zustände, Verfügbarkeit und Fähigkeiten prüfen",
+            invariants=("fresh_snapshot", "capability_checked", "policy_checked"),
+        )
+    ]
+    dependency = steps[0].step_id
+    selected: list[str] = []
+    skipped: list[str] = []
+    for entity_id, desired, description in targets:
+        if len(steps) >= limits.max_steps:
+            raise ValueError("Der Vorschlag überschreitet das begrenzte Planungsbudget")
+        entity = by_id.get(entity_id)
+        if entity is None:
+            raise ValueError(f"Ziel {entity_id} ist nicht mehr vorhanden")
+        if _desired_already_satisfied(entity, desired):
+            skipped.append(f"{entity_id}:already_satisfied")
+            continue
+        action, effect = _action_for_desired_state(entity, desired)
+        _validate_action(action, snapshots, options, is_admin, user_id)
+        operator = _operator_id(action.domain, action.service)
+        step_id = f"target-{len(steps)}"
+        steps.append(
+            PlanStep(
+                step_id, StepKind.ACTION, description or f"{entity.friendly_name} anpassen",
+                preconditions=("entity_available", "capability_checked"),
+                effects=(effect,), dependencies=(dependency,), action=action,
+                risk=classify_service_plan(action, snapshots), reversible=False,
+                verification={entity_id: _verification_value(desired)},
+                operator_id=operator, idempotent=_is_idempotent(action),
+            )
+        )
+        selected.append(operator)
+        dependency = step_id
+    aggregate = max((item.risk for item in steps), default=RiskLevel.LOW)
+    plan = MaterializedPlan(
+        f"plan_{uuid.uuid4().hex}", goal, tuple(steps), aggregate, True,
+        f"{len(steps) - 1} geprüfte Aktion(en), Gesamtrisiko {aggregate.name.lower()}.",
+        _trace(goal, snapshots, tuple(selected), tuple(skipped), limits),
+    )
+    validate_plan_graph(plan, limits=limits)
+    return plan
+
+
 def materialize_comfort_profile(
     goal: GoalModel,
     profile: ComfortProfile,
@@ -531,7 +608,7 @@ class PlanExecutor:
             if not result.executed:
                 results.append(StepResult(
                     step.step_id, False, result.error or "Nicht ausgeführt.",
-                    attempted_at, None, attempted_at, None,
+                    attempted_at, None, attempted_at, None, False,
                 ))
                 compensated = await self._compensate(executed, confirmed)
                 return PlanResult(
@@ -549,7 +626,7 @@ class PlanExecutor:
                 results.append(StepResult(
                     step.step_id, False, "Erwartete Wirkung nicht beobachtet.",
                     service_accepted_at, verified_at, attempted_at,
-                    service_accepted_at,
+                    service_accepted_at, True,
                 ))
                 compensated = await self._compensate((*executed, step), confirmed)
                 return PlanResult(
@@ -561,7 +638,7 @@ class PlanExecutor:
             results.append(StepResult(
                 step.step_id, True, "Ausgeführt und verifiziert.",
                 service_accepted_at, verified_at, attempted_at,
-                service_accepted_at,
+                service_accepted_at, True,
             ))
         return PlanResult(
             plan.plan_id,
@@ -639,6 +716,8 @@ def _action_for_desired_state(entity: EntitySnapshot, desired: DesiredState) -> 
         return ServiceCallPlan("homeassistant", service, entity.entity_id, {}), f"state={value}"
     if desired.property_name == "state" and value == "closed" and entity.domain == "cover":
         return ServiceCallPlan("cover", "close_cover", entity.entity_id, {}), "state=closed"
+    if desired.property_name == "state" and value == "open" and entity.domain == "cover":
+        return ServiceCallPlan("cover", "open_cover", entity.entity_id, {}), "state=open"
     if desired.property_name == "state" and value == "locked" and entity.domain == "lock":
         return ServiceCallPlan("lock", "lock", entity.entity_id, {}), "state=locked"
     if desired.property_name == "brightness" and entity.domain == "light" and isinstance(value, (int, float)):
@@ -779,3 +858,109 @@ __all__ = (
     "materialize_routine", "validate_plan_graph", "effect_satisfied",
     "observed_effect",
 )
+
+
+def goal_run_from_plan_result(
+    plan: MaterializedPlan,
+    result: PlanResult,
+    current_entities: Mapping[str, EntitySnapshot],
+    *,
+    run_id: str,
+    user_id: str | None,
+    person_entity_id: str | None,
+    updated_at: str,
+    evidence: tuple[str, ...] = (),
+) -> GoalRun:
+    """Build the authoritative GoalRun record for one executed V10 plan.
+
+    Service acceptance is copied from ``StepResult.service_accepted`` and is
+    never inferred from step success, timestamps or verification.  Effect
+    evidence is recorded only for an accepted call or a satisfied no-op; a
+    rejected or unreached step carries no device observation.
+    """
+    by_result = {item.step_id: item for item in result.steps}
+    step_records: list[StepExecutionRecord] = []
+    failures: list[FailureCode] = []
+    for step in plan.steps:
+        if step.kind is not StepKind.ACTION:
+            continue
+        outcome = by_result.get(step.step_id)
+        verification_records: list[VerificationRecord] = []
+        verification_items = (
+            ()
+            if step.execute_at_local_time is not None
+            or outcome is None
+            or outcome.service_accepted is False
+            else step.verification.items()
+        )
+        for entity_id, expected in verification_items:
+            observed_entity = current_entities.get(entity_id)
+            observed = (
+                observed_effect(observed_entity, expected)
+                if observed_entity is not None
+                else None
+            )
+            success = (
+                observed_entity is not None
+                and effect_satisfied(observed_entity, expected)
+            )
+            code = None
+            if not success:
+                code = (
+                    FailureCode.TARGET_UNAVAILABLE
+                    if observed in {None, "unavailable", "unknown"}
+                    else FailureCode.WRONG_STATE
+                )
+                failures.append(code)
+            verification_records.append(
+                VerificationRecord(
+                    entity_id, expected, observed, success, code,
+                    outcome.verified_at if outcome is not None else None,
+                )
+            )
+        rejected = outcome is not None and outcome.service_accepted is False
+        if rejected:
+            failures.append(FailureCode.SERVICE_ERROR)
+        step_records.append(
+            StepExecutionRecord(
+                step.step_id, step.operator_id,
+                tuple(step.verification), step.preconditions,
+                outcome.service_accepted if outcome is not None else None,
+                tuple(verification_records),
+                (
+                    FailureCode.SERVICE_ERROR
+                    if rejected
+                    else failures[-1]
+                    if failures and verification_records
+                    and not verification_records[-1].success
+                    else None
+                ),
+                outcome.message if outcome is not None else "Nicht ausgeführt.",
+                outcome.executed_at if outcome is not None else None,
+                outcome.attempted_at if outcome is not None else None,
+                outcome.service_accepted_at if outcome is not None else None,
+            )
+        )
+    run = GoalRun.start(
+        plan.goal, user_id=user_id, person_entity_id=person_entity_id,
+        plan_id=plan.plan_id,
+    )
+    status = {
+        PlanStatus.COMPLETED: GoalRunStatus.SUCCESS,
+        PlanStatus.SCHEDULED: GoalRunStatus.SCHEDULED,
+        PlanStatus.PARTIAL_FAILURE: GoalRunStatus.PARTIAL_FAILURE,
+    }.get(result.status, GoalRunStatus.FAILURE)
+    return GoalRun(
+        run_id, run.goal_id, run.created_at, updated_at, run.source_utterance,
+        user_id, person_entity_id, plan.goal, plan.plan_id,
+        tuple(
+            entity_id for step in plan.steps for entity_id in step.verification
+        ),
+        (), True, tuple(step_records), (), status,
+        failures=tuple(dict.fromkeys(failures)) or (
+            ()
+            if result.status in {PlanStatus.COMPLETED, PlanStatus.SCHEDULED}
+            else (FailureCode.SERVICE_ERROR,)
+        ),
+        evidence=(f"plan_status={result.status.value}", *evidence),
+    )
