@@ -28,6 +28,7 @@ from .model_registry import ModelRegistry
 from .predictive_house_model import PredictiveHouseModel
 from .thermal_tracker import ThermalExperienceTracker
 from .thermal_deadline import PendingThermalCheckpointStore
+from .learning_center import LearningCenterRevision
 
 
 @dataclass
@@ -69,6 +70,11 @@ class HomeIntentRuntimeData:
     learning_tasks: set[asyncio.Task[None]] = field(default_factory=set)
     remove_learning_listener: Callable[[], None] | None = None
     remove_proactive_listener: Callable[[], None] | None = None
+    # 7.1 Learning Center: runtime-only change counter and bounded audit.
+    learning_center_revision: LearningCenterRevision = field(
+        default_factory=LearningCenterRevision
+    )
+    learning_center_audit: Any | None = None
 
     def __post_init__(self) -> None:
         self.context_store.bind_dialog_listener(self._synchronize_dialog)

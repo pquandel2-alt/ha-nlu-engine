@@ -1,14 +1,25 @@
 {
   "domain": "homeintent",
   "name": "HomeIntent",
-  "after_dependencies": ["recorder"],
-  "codeowners": ["@pquandel2-alt"],
+  "after_dependencies": [
+    "recorder"
+  ],
+  "codeowners": [
+    "@pquandel2-alt"
+  ],
   "config_flow": true,
-  "dependencies": ["conversation", "intent"],
+  "dependencies": [
+    "conversation",
+    "frontend",
+    "http",
+    "intent",
+    "panel_custom",
+    "websocket_api"
+  ],
   "documentation": "https://github.com/pquandel2-alt/homeintent",
   "integration_type": "service",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/pquandel2-alt/homeintent/issues",
   "requirements": [],
-  "version": "7.0.1"
+  "version": "7.1.0"
 }

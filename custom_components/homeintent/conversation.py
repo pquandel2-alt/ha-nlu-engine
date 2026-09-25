@@ -38,7 +38,6 @@ from .alias_learning import (
     AliasLearningDraft,
     append_alias_rule,
     parse_alias_learning,
-    remove_alias_rule,
 )
 from .agent_action_policy import validate_agent_service_plan
 from .automation_action_edit import (
@@ -152,11 +151,20 @@ from .model_registry import (
     LearnedKind,
     LearnedModel,
     ModelHealth,
-    SuppressionKind,
     explain_learned_model,
 )
 from .learning_policy import KnowledgeState
-from .habit_discovery import routine_from_habit_model
+from .learning_control import (
+    LearningControlError,
+    async_accept_habit,
+    async_confirm_preference,
+    async_forget_model,
+    async_reject_habit,
+    async_reject_preference,
+    async_reset_models,
+    model_owner,
+    options_without_preference_aliases,
+)
 from .preferences import (
     LearnedPreference, PreferenceContext, resolve_preferences,
 )
@@ -3248,12 +3256,11 @@ class NluConversationEntity(
             )
             reply = classify_confirmation_reply(language_document.source_text)
             if reply is ConfirmationReply.NO:
-                if model is not None:
-                    await registry.async_upsert(replace(
-                        model,
-                        parameters={**model.parameters, "suggestion_status": "rejected"},
-                        model_version=model.model_version + 1,
-                    ))
+                if model is not None and actor_id is not None:
+                    try:
+                        await async_reject_preference(registry, model.model_id, actor_id)
+                    except LearningControlError:
+                        pass
                 manager.cancel(conversation_id)
                 response.async_set_speech(
                     "In Ordnung. Die beobachtete Auswahl bleibt unverbindlich."
@@ -3264,16 +3271,15 @@ class NluConversationEntity(
                 manager.cancel(conversation_id)
                 response.async_set_speech("Der Präferenzkandidat ist nicht mehr verfügbar.")
             else:
-                await registry.async_upsert(replace(
-                    model, knowledge_state=KnowledgeState.CONFIRMED,
-                    parameters={**model.parameters, "suggestion_status": "accepted"},
-                    model_version=model.model_version + 1,
-                    confirmed_by=actor_id,
-                ))
                 manager.cancel(conversation_id)
-                response.async_set_speech(
-                    "Gespeichert. Diese Präferenz gilt nur im bestätigten Kontext."
-                )
+                try:
+                    await async_confirm_preference(registry, model.model_id, actor_id)
+                except LearningControlError as err:
+                    response.async_set_speech(_learning_control_speech(err))
+                else:
+                    response.async_set_speech(
+                        "Gespeichert. Diese Präferenz gilt nur im bestätigten Kontext."
+                    )
             return conversation.ConversationResult(response=response, conversation_id=conversation_id)
         if (
             active is not None
@@ -3289,11 +3295,11 @@ class NluConversationEntity(
             )
             reply = classify_confirmation_reply(language_document.source_text)
             if reply is ConfirmationReply.NO:
-                if model is not None:
-                    await registry.async_delete_with_reason(
-                        model.model_id, reason="user_rejected_habit",
-                        suppression_kind=SuppressionKind.REJECTED_HABIT,
-                    )
+                if model is not None and actor_id is not None:
+                    try:
+                        await async_reject_habit(registry, model.model_id, actor_id)
+                    except LearningControlError:
+                        pass
                 manager.cancel(conversation_id)
                 response.async_set_speech(
                     "In Ordnung. Dieses unveränderte Muster schlage ich nicht erneut vor."
@@ -3304,18 +3310,18 @@ class NluConversationEntity(
                 manager.cancel(conversation_id)
                 response.async_set_speech("Der Gewohnheitskandidat ist nicht mehr verfügbar.")
             else:
-                routine = routine_from_habit_model(model, actor_id)
+                try:
+                    routine: RoutineDefinition | None = await async_accept_habit(
+                        registry, model.model_id, actor_id
+                    )
+                except LearningControlError:
+                    routine = None
                 if routine is None:
                     manager.cancel(conversation_id)
                     response.async_set_speech(
                         "Aus dem Kandidaten lässt sich keine sichere typisierte Routine bilden."
                     )
                 else:
-                    await registry.async_upsert(replace(
-                        model,
-                        parameters={**model.parameters, "suggestion_status": "accepted"},
-                        model_version=model.model_version + 1,
-                    ))
                     manager.create(
                         conversation_id, "habit-routine-preview",
                         DialogTaskKind.ROUTINE_DEFINITION,
@@ -3340,54 +3346,22 @@ class NluConversationEntity(
                 reply = classify_confirmation_reply(language_document.source_text)
                 if reply is ConfirmationReply.YES:
                     model_id = active.payload.model_id
+                    predictive = self._runtime_data.predictive_house
                     if active.payload.operation is LearningDialogOperation.DELETE_MODEL and model_id is not None:
-                        model = await registry.async_get(model_id)
-                        deleted = int(await registry.async_delete(model_id, suppress=True))
-                        predictive = self._runtime_data.predictive_house
-                        if predictive is not None:
-                            predictive.forget(model_id)
-                        preference_entity_id = (
-                            model.parameters.get("entity_id")
-                            if model is not None else None
+                        forgotten = await async_forget_model(registry, predictive, model_id)
+                        deleted = int(forgotten is not None)
+                        removed: tuple[LearnedModel, ...] = (
+                            (forgotten,) if forgotten is not None else ()
                         )
-                        if (
-                            model is not None
-                            and model.kind is LearnedKind.PREFERENCE
-                            and model.context.get("area_id") is None
-                            and isinstance(preference_entity_id, str)
-                        ):
-                            aliases = remove_alias_rule(
-                                self.entry.options.get(CONF_CUSTOM_ALIASES),
-                                alias=model.subject,
-                                entity_id=preference_entity_id,
-                            )
-                            self.hass.config_entries.async_update_entry(
-                                self.entry,
-                                options={**self.entry.options, CONF_CUSTOM_ALIASES: aliases},
-                            )
                     else:
-                        models_before_reset = await registry.async_list()
-                        deleted = await registry.async_reset()
-                        predictive = self._runtime_data.predictive_house
-                        if predictive is not None:
-                            predictive.clear()
-                        aliases: object = self.entry.options.get(CONF_CUSTOM_ALIASES)
-                        for model in models_before_reset:
-                            preference_entity_id = model.parameters.get("entity_id")
-                            if (
-                                model.kind is LearnedKind.PREFERENCE
-                                and model.context.get("area_id") is None
-                                and isinstance(preference_entity_id, str)
-                            ):
-                                aliases = remove_alias_rule(
-                                    aliases, alias=model.subject,
-                                    entity_id=preference_entity_id,
-                                )
-                        if aliases != self.entry.options.get(CONF_CUSTOM_ALIASES):
-                            self.hass.config_entries.async_update_entry(
-                                self.entry,
-                                options={**self.entry.options, CONF_CUSTOM_ALIASES: aliases},
-                            )
+                        deleted, removed = await async_reset_models(registry, predictive)
+                    updated_options = options_without_preference_aliases(
+                        self.entry.options, removed, CONF_CUSTOM_ALIASES
+                    )
+                    if updated_options is not None:
+                        self.hass.config_entries.async_update_entry(
+                            self.entry, options=updated_options
+                        )
                     response.async_set_speech(
                         f"{deleted} gelernte Modelle wurden gelöscht und für alte Evidenz unterdrückt."
                     )
@@ -3402,7 +3376,13 @@ class NluConversationEntity(
         request = interpret_learning_request(language_document.source_text)
         if request is None:
             return None
-        models = await registry.async_list()
+        # Personal knowledge (preferences, habits) is only ever described to
+        # its authenticated owner - the same server-side visibility rule the
+        # Learning Center applies.
+        models = tuple(
+            item for item in await registry.async_list()
+            if (owner := model_owner(item)) is None or owner == actor_id
+        )
         matched = tuple(item for item in models if _model_matches_hint(item, request.subject_hint))
         if request.operation is LearningOperation.LIST:
             if not matched:
@@ -3470,7 +3450,11 @@ class NluConversationEntity(
                     )
                 else:
                     descriptions = "; ".join(_learned_model_summary(item) for item in matched[:5])
-                    response.async_set_speech(descriptions)
+                    # Assist cannot navigate the UI; it only points to the panel.
+                    response.async_set_speech(
+                        f"{descriptions}. Die vollständige Übersicht findest du "
+                        "im HomeIntent Learning Center."
+                    )
         elif request.operation is LearningOperation.EXPLAIN:
             if len(matched) != 1:
                 response.async_set_speech("Dazu ist kein einzelnes belegtes Modell eindeutig.")
@@ -6932,6 +6916,14 @@ def _thermal_advice_for_goal(
         now=dt_util.now(),
     )
     return advise_deadline_goal(goal, prediction)
+
+
+def _learning_control_speech(error: LearningControlError) -> str:
+    return {
+        "wrong_owner": "Dieses gelernte Wissen gehört zu einem anderen Benutzer.",
+        "invalid_state": "Dieser Vorschlag ist bereits entschieden.",
+        "not_found": "Der Kandidat ist nicht mehr verfügbar.",
+    }.get(error.code.value, "Diese Änderung ist für dieses Modell nicht möglich.")
 
 
 def _learned_model_summary(model: LearnedModel) -> str:

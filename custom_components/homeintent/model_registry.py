@@ -153,6 +153,7 @@ class ModelRegistry:
         self._cache: tuple[list[LearnedModel], dict[str, TombstoneRecord]] | None = None
         self._activate: Callable[[LearnedModel], None] | None = None
         self._deactivate: Callable[[str], None] | None = None
+        self._change_listeners: list[Callable[[], None]] = []
 
     def bind_active_view(
         self,
@@ -162,6 +163,26 @@ class ModelRegistry:
         """Bind the sole in-memory view governed by registry decisions."""
         self._activate = activate
         self._deactivate = deactivate
+
+    def add_change_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
+        """Notify after every persisted write; the callback gets no content."""
+        self._change_listeners.append(listener)
+
+        def _remove() -> None:
+            if listener in self._change_listeners:
+                self._change_listeners.remove(listener)
+
+        return _remove
+
+    def _notify_changed(self) -> None:
+        for listener in tuple(self._change_listeners):
+            listener()
+
+    async def async_list_tombstones(self) -> tuple[TombstoneRecord, ...]:
+        """Read-only copy of the persisted suppression records."""
+        async with self._lock:
+            _models, tombstones = await self._load_unlocked()
+        return tuple(tombstones[key] for key in sorted(tombstones))
 
     async def async_upsert(self, model: LearnedModel) -> UpsertResult:
         """Store one model and report whether it may become active."""
@@ -183,6 +204,7 @@ class ModelRegistry:
             )[-max(1, self.policy.model_limit):]
             await asyncio.to_thread(self._write, bounded, tombstones)
             self._cache = (list(bounded), dict(tombstones))
+            self._notify_changed()
             stored_ids = {item.model_id for item in bounded}
             results = tuple(
                 UpsertResult.SUPPRESSED
@@ -263,6 +285,7 @@ class ModelRegistry:
                 )
             await asyncio.to_thread(self._write, retained, tombstones)
             self._cache = (list(retained), dict(tombstones))
+            self._notify_changed()
             if self._deactivate is not None:
                 self._deactivate(model_id)
             return existed
@@ -279,6 +302,7 @@ class ModelRegistry:
             })
             await asyncio.to_thread(self._write, (), tombstones)
             self._cache = ([], dict(tombstones))
+            self._notify_changed()
             if self._deactivate is not None:
                 for model in models:
                     self._deactivate(model.model_id)
@@ -308,6 +332,7 @@ class ModelRegistry:
             if removable:
                 await asyncio.to_thread(self._write, models, tombstones)
                 self._cache = (list(models), dict(tombstones))
+                self._notify_changed()
             return len(removable)
 
     async def async_invalidate(self, model_id: str, reason: str) -> bool:

@@ -15,7 +15,7 @@
     "step": {
       "init": {
         "title": "Configure HomeIntent",
-        "description": "Configure devices, safety, and local delivery channels. HomeIntent rules remain visible in the Home Assistant automation UI.",
+        "description": "Configure devices, safety, and local delivery channels. HomeIntent rules remain visible in the Home Assistant automation UI. What HomeIntent has learned and may do without asking is shown and controlled in the Learning Center in the sidebar (HomeIntent, path /homeintent).",
         "data": {
           "selected_entities": "Allowed entities",
           "read_only_entities": "Read-only entities",

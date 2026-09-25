@@ -47,6 +47,26 @@ class ExperienceStore:
     async def async_list(self) -> tuple[ExperienceRecord, ...]:
         return tuple(await asyncio.to_thread(self._read))
 
+    async def async_get_many(
+        self, experience_ids: Sequence[str], *, limit: int
+    ) -> tuple[ExperienceRecord, ...]:
+        """Resolve at most ``limit`` provenance ids, newest first.
+
+        Reading and filtering both happen in the worker thread, so the event
+        loop only ever receives the bounded result, never the whole store.
+        """
+        wanted = frozenset(experience_ids)
+        bound = max(0, limit)
+        if not wanted or bound == 0:
+            return ()
+
+        def _select() -> tuple[ExperienceRecord, ...]:
+            matches = [item for item in self._read() if item.experience_id in wanted]
+            matches.sort(key=lambda item: item.timestamp, reverse=True)
+            return tuple(matches[:bound])
+
+        return await asyncio.to_thread(_select)
+
     async def async_forget_model_inputs(self, model_id: str) -> int:
         """Remove explicit model links, without broad person-history deletion."""
         marker = f"model:{model_id}"

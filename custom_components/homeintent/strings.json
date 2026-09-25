@@ -15,7 +15,7 @@
     "step": {
       "init": {
         "title": "HomeIntent konfigurieren",
-        "description": "Lege Geräte, Sicherheit und die lokalen Ausgabekanäle des proaktiven Agenten fest. Von HomeIntent erzeugte Regeln bleiben in der Home-Assistant-Automationsoberfläche sichtbar.",
+        "description": "Lege Geräte, Sicherheit und die lokalen Ausgabekanäle des proaktiven Agenten fest. Von HomeIntent erzeugte Regeln bleiben in der Home-Assistant-Automationsoberfläche sichtbar. Was HomeIntent gelernt hat und ohne Rückfrage tun darf, zeigt und steuert das Learning Center in der Seitenleiste (HomeIntent, Pfad /homeintent).",
         "data": {
           "selected_entities": "Freigegebene Entitäten",
           "read_only_entities": "Nur lesbare Entitäten",
