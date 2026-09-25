@@ -46,6 +46,19 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    CONF_ATTENTION_BUDGET_ENABLED,
+    CONF_CRITICAL_MULTI_CHANNEL_ENABLED,
+    CONF_PROACTIVE_APPLIANCE_ENTITIES,
+    CONF_PROACTIVE_CONTEXT_ENABLED,
+    CONF_PROACTIVE_ENTRY_OPEN_MINUTES,
+    CONF_PROACTIVE_PERSON_ROOM_SENSORS,
+    CONF_PROACTIVE_SATELLITE_AREAS,
+    CONF_PROACTIVE_USER_QUIET_HOURS,
+    CONF_PUSH_PROACTIVE_ENABLED,
+    CONF_QUIET_HOURS_ENABLED,
+    CONF_ROOM_AWARE_VOICE_ENABLED,
+    CONF_STANDING_PERMISSIONS_ENABLED,
+    CONF_VOICE_PROACTIVE_ENABLED,
     AGENT_CHANNEL_PUSH,
     AGENT_CHANNEL_TTS,
     CONF_AGENT_COOLDOWN_SECONDS,
@@ -416,5 +429,62 @@ class HomeIntentOptionsFlow(OptionsFlow):
                         CONF_HA_SOURCES_ENABLED,
                         default=defaults.get(CONF_HA_SOURCES_ENABLED, False),
                     ): bool,
+                    # V12 proactive context intelligence: opt-in, conservative.
+                    vol.Optional(
+                        CONF_PROACTIVE_CONTEXT_ENABLED,
+                        default=defaults.get(CONF_PROACTIVE_CONTEXT_ENABLED, False),
+                    ): bool,
+                    vol.Optional(
+                        CONF_VOICE_PROACTIVE_ENABLED,
+                        default=defaults.get(CONF_VOICE_PROACTIVE_ENABLED, True),
+                    ): bool,
+                    vol.Optional(
+                        CONF_PUSH_PROACTIVE_ENABLED,
+                        default=defaults.get(CONF_PUSH_PROACTIVE_ENABLED, True),
+                    ): bool,
+                    vol.Optional(
+                        CONF_ROOM_AWARE_VOICE_ENABLED,
+                        default=defaults.get(CONF_ROOM_AWARE_VOICE_ENABLED, True),
+                    ): bool,
+                    vol.Optional(
+                        CONF_ATTENTION_BUDGET_ENABLED,
+                        default=defaults.get(CONF_ATTENTION_BUDGET_ENABLED, True),
+                    ): bool,
+                    vol.Optional(
+                        CONF_QUIET_HOURS_ENABLED,
+                        default=defaults.get(CONF_QUIET_HOURS_ENABLED, True),
+                    ): bool,
+                    vol.Optional(
+                        CONF_STANDING_PERMISSIONS_ENABLED,
+                        default=defaults.get(CONF_STANDING_PERMISSIONS_ENABLED, False),
+                    ): bool,
+                    vol.Optional(
+                        CONF_CRITICAL_MULTI_CHANNEL_ENABLED,
+                        default=defaults.get(CONF_CRITICAL_MULTI_CHANNEL_ENABLED, True),
+                    ): bool,
+                    vol.Optional(
+                        CONF_PROACTIVE_ENTRY_OPEN_MINUTES,
+                        default=defaults.get(CONF_PROACTIVE_ENTRY_OPEN_MINUTES, 15),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=240)),
+                    vol.Optional(
+                        CONF_PROACTIVE_APPLIANCE_ENTITIES,
+                        default=defaults.get(CONF_PROACTIVE_APPLIANCE_ENTITIES, []),
+                    ): EntitySelector(
+                        EntitySelectorConfig(
+                            domain=["sensor", "select", "binary_sensor"], multiple=True
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_PROACTIVE_PERSON_ROOM_SENSORS,
+                        default=defaults.get(CONF_PROACTIVE_PERSON_ROOM_SENSORS, ""),
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
+                    vol.Optional(
+                        CONF_PROACTIVE_SATELLITE_AREAS,
+                        default=defaults.get(CONF_PROACTIVE_SATELLITE_AREAS, ""),
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
+                    vol.Optional(
+                        CONF_PROACTIVE_USER_QUIET_HOURS,
+                        default=defaults.get(CONF_PROACTIVE_USER_QUIET_HOURS, ""),
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
                 }
         )

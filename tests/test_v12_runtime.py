@@ -346,3 +346,71 @@ def test_restore_failure_never_blocks_setup(tmp_path, monkeypatch, scheduled):
         stop()
 
     asyncio.run(scenario())
+
+
+def test_habit_refresh_reads_v11_models_and_triggers_suggestions(tmp_path, monkeypatch, scheduled):
+    _registry(monkeypatch, [SimpleNamespace(entity_id="assist_satellite.wz", area_id="living_room", device_id="dev_wz")])
+    from homeintent.learning_policy import KnowledgeState, LearningMode, LearningPolicy
+    from homeintent.model_registry import LearnedKind, LearnedModel, ModelHealth, ModelRegistry
+
+    async def scenario():
+        states = garage_states() + [entity("cover.kitchen", "Küchenrollladen", "closed", area="kitchen")]
+        runtime, hass, calls, entities, data = await _runtime(tmp_path, monkeypatch, states=states)
+        policy = LearningPolicy(learning_mode=LearningMode.ASK, habit_discovery_enabled=True,
+                                predictive_models_enabled=True)
+        registry = ModelRegistry(tmp_path / "models.json", policy)
+        await registry.async_upsert(LearnedModel(
+            "habit:h1", LearnedKind.HABIT, "philipp",
+            {"time_band": "day", "weekday": 3, "sequence_family": "f"},
+            {"sequence": "LIGHT_TURN_ON@light.kitchen=on|COVER_OPEN_COVER@cover.kitchen=open",
+             "support": 0.8, "suggestion_status": "new", "creates_automation": False},
+            KnowledgeState.INFERRED, 0.8, 12, NOW - timedelta(days=20), NOW, ("goal_run:x",),
+            health=ModelHealth.VALID,
+        ))
+        await registry.async_upsert(LearnedModel(
+            "habit:junk", LearnedKind.HABIT, "philipp", {"time_band": "day"},
+            {"sequence": "LOCK_UNLOCK@lock.front=unlocked"}, KnowledgeState.INFERRED, 0.8, 12,
+            NOW - timedelta(days=2), NOW, ("goal_run:y",),
+        ))
+        data.learned_models = registry
+        data.learning_policy = policy
+        await runtime.async_refresh_habits()
+        assert [item.model_id for item in runtime._habit_candidates] == ["habit:h1"]
+        assert runtime._habit_triggers == frozenset({"light.kitchen"})
+        Clock.now = datetime(2026, 9, 24, 11, 0, tzinfo=timezone.utc)  # Thursday 13:00 local
+        try:
+            kitchen = replace(entities["light.kitchen"], state="on")
+            entities["light.kitchen"] = kitchen
+            await runtime.async_observe_state(kitchen, "off", tuple(entities.values()))
+        finally:
+            Clock.now = NOW
+        spoken = [call for call in calls if call[0] == "assist_satellite"]
+        assert spoken and spoken[-1][2]["start_message"].endswith("Soll ich die Routine starten?")
+        assert [call for call in calls if call[0] in {"cover", "light", "homeassistant"}] == []
+
+    asyncio.run(scenario())
+
+
+def test_v10_adapters_use_the_policy_executor_and_bounded_verification(tmp_path, monkeypatch, scheduled):
+    _registry(monkeypatch, [])
+
+    async def scenario():
+        runtime, hass, calls, entities, data = await _runtime(tmp_path, monkeypatch)
+        from homeintent.service_call import ServiceCallPlan
+        fresh = await runtime._async_refresh()
+        denied = await runtime._async_execute_service(
+            ServiceCallPlan("cover", "close_cover", "cover.garage", {}), fresh, False, "anna", False,
+        )
+        assert not denied.executed and calls == []
+        allowed = await runtime._async_execute_service(
+            ServiceCallPlan("homeassistant", "turn_off", "light.kitchen", {}),
+            [replace(item, state="on") if item.entity_id == "light.kitchen" else item for item in fresh],
+            False, "philipp", True,
+        )
+        assert allowed.executed and calls[-1][:2] == ("homeassistant", "turn_off")
+        data.effect_monitor.timeout = timedelta(milliseconds=20)
+        assert await runtime._async_verify("light.kitchen", "off") is True
+        assert await runtime._async_verify("light.kitchen", "on") is False
+        await data.effect_monitor.async_close()
+
+    asyncio.run(scenario())

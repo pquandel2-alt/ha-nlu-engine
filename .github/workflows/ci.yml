@@ -61,6 +61,27 @@ jobs:
           python scripts/benchmark_v11.py
           --iterations 1000
           --max-p95-ms 100
+      - name: V12 Kontext-/Proaktivbudgets prüfen
+        if: matrix.python-version == '3.12'
+        run: >-
+          python scripts/benchmark_v12.py
+          --registry-size 5000
+          --iterations 300
+      - name: V11-Wirkungsevidenz und V12-Sicherheits-/OOD-Gate
+        run: >-
+          python -m pytest -q
+          tests/test_v11_action_evidence_semantics.py
+          tests/test_conversation_action_evidence.py
+          tests/test_v12_garage_e2e.py
+          tests/test_v12_behavior.py
+          tests/test_v12_conversation.py
+          tests/test_v12_ood_corpus.py
+          tests/test_v12_persistence_restart.py
+          tests/test_v12_policies.py
+          tests/test_v12_room_attention_routing.py
+          tests/test_v12_runtime.py
+          tests/test_v12_units.py
+          tests/test_v12_decision_matrix.py
       - name: Tests mit Coverage ausführen
         if: matrix.python-version == '3.12'
         run: >-
@@ -158,6 +179,9 @@ jobs:
       - name: V11 Pyright-Strict-Scope absichern
         if: matrix.python-version == '3.12'
         run: python -m pyright --project pyrightconfig-v11-strict.json
+      - name: V12 Pyright-Strict-Scope absichern
+        if: matrix.python-version == '3.12'
+        run: python -m pyright --project pyrightconfig-v12-strict.json
       - name: Statische Importprüfung
         run: python -m pyflakes custom_components tests scripts
 

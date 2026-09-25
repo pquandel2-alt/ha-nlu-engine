@@ -54,7 +54,20 @@
           "agent_auto_entity_ids": "Entities explicitly allowed for AUTO",
           "documents_enabled": "Enable local document index",
           "documents_directory": "Allowed subdirectory inside the Home Assistant configuration directory",
-          "house_relations": "House relations (source_id | relation | target_id)"
+          "house_relations": "House relations (source_id | relation | target_id)",
+          "proactive_context_enabled": "V12: Enable proactive context intelligence (opt-in)",
+          "voice_proactive_enabled": "V12: Allow proactive voice notices",
+          "push_proactive_enabled": "V12: Allow proactive push notices",
+          "room_aware_voice_enabled": "V12: Room-aware voice (only with unambiguous room evidence)",
+          "attention_budget_enabled": "V12: Attention budget, grouping and cooldown",
+          "quiet_hours_enabled": "V12: Respect quiet hours (critical warnings always)",
+          "standing_permissions_enabled": "V12: Allow explicitly confirmed standing permissions",
+          "critical_multi_channel_enabled": "V12: Critical warnings on multiple channels",
+          "proactive_entry_open_minutes": "V12: Minutes before an open garage or gate is reported",
+          "proactive_appliance_entities": "V12: Appliance program-state entities",
+          "proactive_person_room_sensors": "V12: Person room sensors (person.x = sensor.y, one line per person)",
+          "proactive_satellite_areas": "V12: Voice satellite areas (assist_satellite.x = area_id)",
+          "proactive_user_quiet_hours": "V12: Per-user quiet hours (user_id = HH:MM-HH:MM)"
         }
       }
     },

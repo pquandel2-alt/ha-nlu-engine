@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, time
+from datetime import datetime
 from typing import Any, Awaitable, Callable, Mapping
 
 from homeassistant.config_entries import ConfigEntry
@@ -590,8 +590,4 @@ class ProactiveRuntime:
             await asyncio.sleep(min(0.1, remaining))
 
 
-def local_day_start(now_local: datetime) -> datetime:
-    return datetime.combine(now_local.date(), time(0, 0), tzinfo=now_local.tzinfo)
-
-
-__all__ = ("ProactiveRuntime", "build_config", "local_day_start")
+__all__ = ("ProactiveRuntime", "build_config")

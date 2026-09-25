@@ -122,14 +122,14 @@ class AutoExecutionPolicy:
         for condition in permission.conditions:
             if condition is PermissionCondition.NOBODY_HOME and nobody_home is not True:
                 return AutoExecutionDecision(False, ("condition_nobody_home_not_met",), pid)
-        targets = auto_targets(permission, situation, entities)
-        if not targets:
-            return AutoExecutionDecision(False, ("current_state_no_longer_matches",), pid)
         uncovered = [item for item in situation.subject_ids
                      if item not in permission.entity_ids
                      and item in entities and entities[item].state == "on"]
         if uncovered:
             return AutoExecutionDecision(False, ("permission_does_not_cover_all_targets",), pid)
+        targets = auto_targets(permission, situation, entities)
+        if not targets:
+            return AutoExecutionDecision(False, ("current_state_no_longer_matches",), pid)
         for entity_id in targets:
             blocked = self.never_auto_reason(entities.get(entity_id), permission.operator)
             if blocked is not None:
@@ -341,7 +341,7 @@ _PERMISSION_RE = re.compile(
     r"^wenn\s+" + _NOBODY + r"\s+ist\s*,?\s*und\s+"
     r"(?:im|in\s+der|in\s+dem)\s+(?P<area>[a-z0-9 \-]+?)\s+(?:noch\s+)?"
     r"(?:ein\s+|das\s+|die\s+)?(?:licht|lichter|lampe|lampen|beleuchtung)\s+"
-    r"(?:noch\s+)?(?:an|eingeschaltet|brennt|brennen)\s+(?:ist|sind)?\s*,?\s*"
+    r"(?:noch\s+)?(?:an|eingeschaltet|brennt|brennen)(?:\s+(?:ist|sind))?\s*,?\s*"
     r"(?:dann\s+)?(?:darfst\s+du|du\s+darfst)\s+(?:es|sie|das\s+licht|die\s+lichter|die\s+lampen)\s+"
     r"(?:automatisch\s+|selbststaendig\s+|von\s+selbst\s+)?"
     r"(?:ausschalten|ausmachen|abschalten)\s*[.!]?$"
@@ -350,9 +350,11 @@ _PERMISSION_INTENT_RE = re.compile(
     r"\b(?:darfst\s+du|du\s+darfst|erlaube\s+ich\s+dir|erlaubnis)\b.*\b(?:automatisch|selbststaendig|von\s+selbst)\b"
     r"|\b(?:darfst\s+du|du\s+darfst)\b.*\b(?:ausschalten|ausmachen|abschalten|schliessen|oeffnen|aufschliessen|entriegeln|zumachen|aufmachen)\b"
 )
+# Matched anywhere inside a word: German compounds ("Hauptventil",
+# "Garagentor", "Holzofen") must be caught.  Over-matching only refuses.
 _NEVER_AUTO_WORDS = re.compile(
-    r"\b(?:garage\w*|\w*tor|\w*tuer\w*|schloss|haustuer\w*|entriegel\w*|aufschliess\w*|"
-    r"aufsperr\w*|alarm\w*|sirene\w*|herd|backofen|ofen|ventil\w*)\b"
+    r"(?:garage|tor\b|tore\b|tuer|schloss|entriegel|aufschliess|aufsperr|"
+    r"alarm|sirene|herd\b|ofen\b|ventil|kochfeld|grill)"
 )
 
 

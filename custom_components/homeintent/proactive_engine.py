@@ -600,8 +600,13 @@ class ProactiveContextEngine:
             self.attention_state.record_delivery(recipient_id, f"group:{recipient_id}", now)
             for item in items:
                 situation = self.situations.by_id(item.situation_id)
-                if situation is not None:
+                if situation is not None and item.text in live:
                     self.situations.mark_communicated(situation.dedupe_key, now)
+                    self._record(
+                        situation, OpportunityOutcome.COMMUNICATE, recipient_id,
+                        CommunicationChannel.PUSH, situation.priority_hint,
+                        situation.privacy_level, "delivered", ("grouped_digest",), None,
+                    )
 
     # --------------------------------------------------------------- replies
     def classify_reply(self, text: str) -> ProposalReply | None:
