@@ -34,6 +34,7 @@ from .proactive_model import (
     ProposalChoice,
     ProposalState,
     ProposedGoal,
+    PushActionBinding,
     SessionState,
     TargetState,
 )
@@ -43,6 +44,8 @@ SCHEMA_VERSION = 1
 MAX_PROPOSALS = 64
 DEFAULT_PROPOSAL_TTL = timedelta(minutes=30)
 PROPOSAL_ID_RE = re.compile(r"^p[0-9a-f]{32}$")
+PUSH_TOKEN_RE = re.compile(r"^t[0-9a-f]{16}$")
+MAX_PUSH_BINDINGS = 8
 
 
 # -- reply classification -------------------------------------------------------
@@ -189,6 +192,22 @@ class ProposalStore:
         if current is None or current.origin_device_id is not None:
             return current
         updated = replace(current, origin_device_id=device_id)
+        self._proposals[proposal_id] = updated
+        return updated
+
+    def bind_push_action(self, proposal_id: str, binding: PushActionBinding) -> PendingProposal | None:
+        """Remember which user/Companion device received which action token."""
+        current = self._proposals.get(proposal_id)
+        if (
+            current is None
+            or current.state is not ProposalState.PENDING
+            or not PUSH_TOKEN_RE.fullmatch(binding.token)
+            or binding.user_id not in current.recipient_user_ids
+            or not binding.device_id
+            or len(current.push_bindings) >= MAX_PUSH_BINDINGS
+        ):
+            return None
+        updated = replace(current, push_bindings=(*current.push_bindings, binding))
         self._proposals[proposal_id] = updated
         return updated
 
@@ -361,6 +380,10 @@ def _proposal_dict(item: PendingProposal) -> dict[str, object]:
         "resolved_by": item.resolved_by,
         "run_id": item.run_id,
         "result": item.result,
+        "push_bindings": [
+            {"token": binding.token, "user_id": binding.user_id, "device_id": binding.device_id}
+            for binding in item.push_bindings
+        ],
     }
 
 
@@ -412,9 +435,29 @@ def _proposal_from(raw: object) -> PendingProposal | None:
             _text(value.get("resolved_by")),
             _text(value.get("run_id")),
             _text(value.get("result")),
+            _push_bindings(value.get("push_bindings")),
         )
     except (KeyError, ValueError, TypeError):
         return None
+
+
+def _push_bindings(raw: object) -> tuple[PushActionBinding, ...]:
+    """Malformed bindings are dropped: a missing binding only removes buttons."""
+    if not isinstance(raw, list):
+        return ()
+    result: list[PushActionBinding] = []
+    for item in cast(Sequence[object], raw)[:MAX_PUSH_BINDINGS]:
+        if not isinstance(item, Mapping):
+            continue
+        value = cast(Mapping[str, object], item)
+        token, user_id, device_id = value.get("token"), value.get("user_id"), value.get("device_id")
+        if (
+            isinstance(token, str) and PUSH_TOKEN_RE.fullmatch(token)
+            and isinstance(user_id, str) and user_id
+            and isinstance(device_id, str) and device_id
+        ):
+            result.append(PushActionBinding(token, user_id, device_id))
+    return tuple(result)
 
 
 def _session_dict(item: ActiveGoalSession) -> dict[str, object]:
@@ -473,6 +516,7 @@ __all__ = (
     "DEFAULT_SNOOZE",
     "MAX_PROPOSALS",
     "PROPOSAL_ID_RE",
+    "PUSH_TOKEN_RE",
     "ProposalReply",
     "ProposalStore",
     "ReplyOutcome",

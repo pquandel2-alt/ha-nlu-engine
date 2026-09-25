@@ -169,14 +169,20 @@ DELIVER = AttentionDecision(AttentionOutcome.DELIVER, ())
 
 
 def _room(cls: RoomEvidenceClass, area: str | None = "living_room") -> RoomPresenceResult:
-    return RoomPresenceResult("person.philipp", area if cls in {RoomEvidenceClass.EXACT, RoomEvidenceClass.STRONG} else None, cls, NOW, None)
+    return RoomPresenceResult(
+        "person.philipp",
+        area if cls in {RoomEvidenceClass.EXACT, RoomEvidenceClass.STRONG} else None,
+        cls, NOW, NOW + timedelta(minutes=10),
+    )
 
 
 def _route(recipient=PHILIPP, *, priority=PriorityLevel.IMPORTANT, privacy=PrivacyLevel.HOUSEHOLD,
-           room=None, attention=DELIVER, quiet=False, response=True, others=False, config=None):
+           room=None, attention=DELIVER, quiet=False, response=True, others=False, config=None,
+           now=NOW):
     return CommunicationRouter(config).route(
         recipient, priority=priority, privacy=privacy, room=room, satellites=SATS,
         attention=attention, quiet=quiet, requires_response=response, others_home=others,
+        now=now,
     )
 
 

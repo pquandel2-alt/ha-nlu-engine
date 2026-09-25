@@ -239,7 +239,8 @@ def test_cross_channel_voice_question_push_answer_and_expiry(tmp_path):
         expired = await world.engine.async_handle_push_action(
             f"HOMEINTENT_V12_ACCEPT_{proposal_id}", user_id="philipp", device_id=None,
         )
-        assert expired is not None and expired.speech in {"expired", "already_resolved"}
+        # Voice-only question: no push token exists, and it is expired anyway.
+        assert expired is not None and not expired.handled
         assert world.sink.device_calls == []
 
     asyncio.run(scenario())
@@ -285,15 +286,21 @@ def test_interactive_push_actions_are_opaque_and_authenticated(tmp_path):
         ):
             result = await handle(forged, user_id="philipp", device_id=None)
             assert result is None or not result.handled
-        assert (await handle(f"HOMEINTENT_V12_ACCEPT_{pid}", user_id=None, device_id=None)).speech == "wrong_recipient"
-        assert (await handle(f"HOMEINTENT_V12_ACCEPT_{pid}", user_id="mallory", device_id=None)).speech == "wrong_recipient"
+        action, device = world.ports.push_action("ACCEPT", "philipp", pid)
+        assert (await handle(action, user_id=None, device_id=device)).speech == "wrong_recipient"
+        assert (await handle(action, user_id="mallory", device_id=device)).speech == "wrong_recipient"
+        # Anna is a recipient, but this token was issued to Philipp's phone.
+        assert (await handle(action, user_id="anna", device_id=device)).speech == "wrong_recipient"
+        assert (await handle(f"HOMEINTENT_V12_ACCEPT_{pid}", user_id="philipp", device_id=device)).speech == "missing_device_identity"
+        assert (await handle(action, user_id="philipp", device_id="phone_anna")).speech == "unexpected_device"
         assert world.sink.device_calls == []
-        accepted = await handle(f"HOMEINTENT_V12_ACCEPT_{pid}", user_id="philipp", device_id=None)
+        accepted = await handle(action, user_id="philipp", device_id=device)
         assert accepted.handled
         assert world.sink.device_calls == [("cover", "close_cover", {"entity_id": "cover.garage"})]
-        replay = await handle(f"HOMEINTENT_V12_ACCEPT_{pid}", user_id="philipp", device_id=None)
+        replay = await handle(action, user_id="philipp", device_id=device)
         assert replay.speech == "already_resolved"
-        other = await handle(f"HOMEINTENT_V12_ACCEPT_{pid}", user_id="anna", device_id=None)
+        anna_action, anna_device = world.ports.push_action("ACCEPT", "anna", pid)
+        other = await handle(anna_action, user_id="anna", device_id=anna_device)
         assert other.speech == "already_resolved"
         assert len(world.sink.device_calls) == 1
 
@@ -306,7 +313,8 @@ def test_push_later_snoozes_and_ignore_acknowledges(tmp_path):
     async def scenario():
         await _open_garage(world)
         pid = world.ports.delivered[0].proposal_id
-        later = await world.engine.async_handle_push_action(f"HOMEINTENT_V12_LATER_{pid}", user_id="philipp", device_id=None)
+        action, device = world.ports.push_action("LATER", "philipp", pid)
+        later = await world.engine.async_handle_push_action(action, user_id="philipp", device_id=device)
         assert later.handled and "30 Minuten" in later.speech
         situation = world.engine.situations.get("entry_left_open:cover.garage")
         assert situation.state is SituationState.SNOOZED
@@ -315,7 +323,8 @@ def test_push_later_snoozes_and_ignore_acknowledges(tmp_path):
         await world.ports.advance(timedelta(minutes=30))
         assert len(world.ports.delivered) == 4  # live re-check: still open -> asked again
         pid2 = world.ports.delivered[3].proposal_id
-        ignored = await world.engine.async_handle_push_action(f"HOMEINTENT_V12_IGNORE_{pid2}", user_id="anna", device_id=None)
+        action, device = world.ports.push_action("IGNORE", "anna", pid2)
+        ignored = await world.engine.async_handle_push_action(action, user_id="anna", device_id=device)
         assert ignored.handled
         assert world.engine.situations.get("entry_left_open:cover.garage").state is SituationState.ACKNOWLEDGED
         await world.ports.advance(timedelta(hours=3))

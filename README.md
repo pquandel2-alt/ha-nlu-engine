@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **7.0.0** (V12)
+- Aktuelle Version: **7.0.1** (V12)
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -42,6 +42,31 @@ Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
 
+## Was ist in Version 7.0.1 neu?
+
+Ein reines Integritäts-Update für V12, ohne neue Funktionen:
+
+- **Push-Knöpfe sind an dein Gerät gebunden.** Home Assistant meldet bei einem
+  Tipp auf einen Benachrichtigungsknopf nur den angemeldeten Benutzer, nicht
+  das Gerät. HomeIntent erzeugt deshalb pro Companion-App-Gerät ein
+  Zufallstoken, das nur in dessen Knöpfe eingebettet und am Vorschlag
+  gespeichert wird. Ein Tipp wirkt nur, wenn Benutzer, Empfänger und Token
+  zusammenpassen und eine eventuell mitgelieferte Geräte-ID dem gebundenen
+  Gerät entspricht. Abgelehnte Tipps verändern nichts. Ist kein Companion-App-
+  Gerät im Benutzerkontext gebunden und in der Geräteregistrierung
+  auffindbar, kommt die Nachricht ohne Knöpfe; beantworten lässt sie sich dann
+  über Assist.
+- **Raumbelege laufen ab.** Jeder Raumsensor, jede Anwesenheitsmeldung und
+  jede Satellitenanfrage gilt nur ab ihrem eigenen Zeitstempel für eine feste
+  Zeit (10 bzw. 5 Minuten); erneutes Nachfragen verlängert nichts. Ein
+  veralteter Raum führt nicht mehr zu einer Sprachausgabe – persönliche
+  Inhalte schon gar nicht –, widersprüchliche frische Belege gelten als
+  mehrdeutig. Nach einem Neustart gibt es keine alten Raumbelege.
+- **Ehrliche Zähler für Daueranweisungen.** Jeder automatische Lauf zählt als
+  Versuch, nur ein geprüft wirksamer Lauf als Ausführung. Das Tageslimit zählt
+  weiterhin alle Versuche, sodass fehlschlagende Läufe nicht endlos
+  wiederholen. Gespeicherte Daten aus 7.0.0 bleiben lesbar.
+
 ## Was ist in Version 7.0 / V12 neu?
 
 **Proaktive Kontextintelligenz.** HomeIntent wartet nicht mehr nur auf einen
@@ -70,8 +95,9 @@ Das Wichtigste in der Praxis:
   gibt es dort genau einen Sprachsatelliten, spricht HomeIntent dort und hört
   ohne erneutes Aktivierungswort auf die Antwort. Ist der Raum unklar, gibt es
   keinen oder mehrere Satelliten, ist der Inhalt persönlich und jemand anderes
-  zu Hause, oder bist du unterwegs, kommt eine private Push-Nachricht mit den
-  Knöpfen „Schließen“, „Später“ und „Ignorieren“. HomeIntent rät nie einen
+  zu Hause, oder bist du unterwegs, kommt eine private Push-Nachricht – mit den
+  Knöpfen „Schließen“, „Später“ und „Ignorieren“, sofern ein Companion-App-
+  Gerät an dich gebunden ist. HomeIntent rät nie einen
   Raum und sendet nichts ungefragt an alle Lautsprecher.
 - **Nicht nerven.** Hinweise werden dedupliziert, in Ruhezeiten zurückgehalten
   oder privat zugestellt, mehrere kleine Meldungen werden zusammengefasst, und
@@ -1095,8 +1121,14 @@ Für zuverlässige Ergebnisse:
 - Der lokale Dokumentadapter indexiert TXT, Markdown und begrenzte
   textbasierte PDFs. Verschlüsselte oder reine Scan-PDFs werden nicht per OCR
   interpretiert.
-- Proaktive Sprachausgabe im Raum braucht konfigurierte Raumsensoren und genau
-  einen Sprachsatelliten pro Bereich; sonst wird privat per Push zugestellt.
+- Proaktive Sprachausgabe im Raum braucht konfigurierte, aktuelle Raumsensoren
+  und genau einen Sprachsatelliten pro Bereich; sonst wird privat per Push
+  zugestellt. Die Aktualität stützt sich auf die Zeitstempel von Home
+  Assistant.
+- Push-Knöpfe gibt es nur für Companion-App-Benachrichtigungen, deren Gerät an
+  den Benutzer gebunden und in der Geräteregistrierung eingetragen ist. Das
+  Token belegt die Zustellung an dieses Gerät, nicht, wer es beim Tippen in der
+  Hand hält; wirksam ist es ohnehin nur für den angemeldeten Empfänger.
 - Die meisten Sprachsatelliten melden keinen angemeldeten Benutzer. Eine
   anonyme Antwort gilt deshalb nur für Haushaltsfragen auf dem Satelliten, der
   gefragt hat, und unterliegt den Regeln für Nicht-Administratoren.
@@ -1184,13 +1216,13 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/homeintent --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 7.0.0:
+Geprüfter Release-Stand von Version 7.0.1:
 
 ```text
-3824 passed, 12 skipped, 0 failed
+3865 passed, 12 skipped, 0 failed
 88 % Gesamt-Coverage
 74 % Coverage für conversation.py
-≥ 92 % Coverage für jedes V12-Modul
+≥ 93 % Coverage für jedes V12-Modul
 ```
 
 Zusätzlich wurden ausgeführt:
@@ -1200,7 +1232,7 @@ Zusätzlich wurden ausgeführt:
 - blockierende Strict-Prüfungen für V11 (`pyrightconfig-v11-strict.json`)
   und V12 (`pyrightconfig-v12-strict.json`),
 - eine ebenfalls blockierende vollständige Pyright-Prüfung,
-- das V12-Sicherheits- und OOD-Gate (291 handgeschriebene Fälle) und der
+- das V12-Sicherheits- und OOD-Gate (296 handgeschriebene Fälle) und der
   V12-Benchmark (`scripts/benchmark_v12.py`),
 - ein versionierter XML-Coverage-Bericht als CI-Artefakt,
 - JSON-Validierung der deutschen UI-Texte und
@@ -1219,7 +1251,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-7.0.0.json --quiet
+  --check docs/perf/v7-shadow-baseline-7.0.1.json --quiet
 ```
 
 Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 from datetime import datetime
 from typing import Any, Awaitable, Callable, Mapping
 
@@ -60,6 +61,7 @@ from .proactive_execution import V10ProposalRunner
 from .proactive_model import (
     CommunicationChannel,
     ProactiveSituation,
+    PushActionBinding,
     QuietHoursWindow,
     RecipientContext,
     RoomPresenceResult,
@@ -297,32 +299,32 @@ class ProactiveRuntime:
             return True
         result = await self.engine.async_handle_push_action(
             action, user_id=user_id, device_id=device_id,
-            allowed_device_ids=self._push_device_ids(user_id),
         )
         if result is not None and result.handled and user_id is not None:
             await self._async_push_feedback(user_id, result)
         return True
 
-    def _push_device_ids(self, user_id: str | None) -> tuple[str, ...]:
-        """Companion devices behind the user's bound notify entities."""
+    def _companion_device(self, user_id: str | None, target_id: str) -> str | None:
+        """HA device behind a notify *entity* bound to this user, or None.
+
+        Authoritative path only: UserContext notification binding -> HA
+        entity registry.  A legacy ``notify.<service>`` target has no registry
+        entry and is never mapped by name, so it gets no action buttons.
+        """
         contexts = self._data.user_contexts
-        person = self.person_for(user_id)
-        if contexts is None or person is None:
-            return ()
-        binding = contexts.resolve_notification_targets(person, channel="push")
+        if contexts is None or user_id is None:
+            return None
+        user = next((item for item in contexts.bound_users() if item.ha_user_id == user_id), None)
+        if user is None or not any(item.target_id == target_id for item in user.notification_targets):
+            return None
         try:
             from homeassistant.helpers import entity_registry as er
 
-            registry = er.async_get(self._hass)
-            devices = {
-                entry.device_id
-                for target in binding.targets
-                if (entry := registry.async_get(target.target_id)) is not None
-                and getattr(entry, "device_id", None)
-            }
+            entry = er.async_get(self._hass).async_get(target_id)
         except Exception:  # noqa: BLE001 - registry may be unavailable
-            return ()
-        return tuple(sorted(str(item) for item in devices))
+            return None
+        device_id = getattr(entry, "device_id", None) if entry is not None else None
+        return str(device_id) if device_id else None
 
     async def async_handle_reply(
         self, text: str, *, user_id: str | None, device_id: str | None, is_admin: bool,
@@ -527,16 +529,26 @@ class ProactiveRuntime:
                 delivered.append(CommunicationChannel.PUSH)
             except Exception as err:  # noqa: BLE001
                 errors.append(f"notification:{type(err).__name__}")
+        bindings: list[PushActionBinding] = []
         if decision.push_target_ids:
-            actions: tuple[tuple[str, str], ...] = ()
-            if message.proposal_id is not None:
-                actions = (
-                    (f"{PUSH_ACTION_PREFIX}ACCEPT_{message.proposal_id}", message.accept_label or "Ausführen"),
-                    (f"{PUSH_ACTION_PREFIX}LATER_{message.proposal_id}", "Später"),
-                    (f"{PUSH_ACTION_PREFIX}IGNORE_{message.proposal_id}", "Ignorieren"),
-                )
             contexts = self._data.user_contexts
             for target in decision.push_target_ids:
+                actions: tuple[tuple[str, str], ...] = ()
+                device_id = (
+                    self._companion_device(decision.recipient_user_id, target)
+                    if message.proposal_id is not None else None
+                )
+                if message.proposal_id is not None and device_id is not None and decision.recipient_user_id:
+                    # Buttons only for an authoritatively bound Companion
+                    # device; the token reaches only that device.
+                    token = f"t{secrets.token_hex(8)}"
+                    suffix = f"{message.proposal_id}_{token}"
+                    actions = (
+                        (f"{PUSH_ACTION_PREFIX}ACCEPT_{suffix}", message.accept_label or "Ausführen"),
+                        (f"{PUSH_ACTION_PREFIX}LATER_{suffix}", "Später"),
+                        (f"{PUSH_ACTION_PREFIX}IGNORE_{suffix}", "Ignorieren"),
+                    )
+                    bindings.append(PushActionBinding(token, decision.recipient_user_id, device_id))
                 kind = None
                 if contexts is not None:
                     for user in contexts.bound_users():
@@ -558,7 +570,9 @@ class ProactiveRuntime:
                         delivered.append(kind_channel)
                 except Exception as err:  # noqa: BLE001
                     errors.append(f"push:{type(err).__name__}")
-        return DeliveryReceipt(tuple(delivered), origin, tuple(errors))
+                    if actions:
+                        bindings.pop()
+        return DeliveryReceipt(tuple(delivered), origin, tuple(errors), tuple(bindings))
 
     async def _async_push_feedback(self, user_id: str, result: ReplyResult) -> None:
         contexts = self._data.user_contexts

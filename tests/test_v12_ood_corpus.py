@@ -242,10 +242,15 @@ async def _step(world, step: dict, state: dict, tmp_path: Path, config) -> None:
             user_id=step.get("user", "philipp"), is_admin=True,
         )
     elif op == "push":
+        # The action a Companion app sends: token issued to ``token_user``'s
+        # bound device; ``device`` overrides the event-reported device id.
         proposal = next(item.proposal_id for item in reversed(world.ports.delivered) if item.proposal_id)
-        raw = step.get("raw") or f"HOMEINTENT_V12_{step['choice']}_{proposal}"
+        binding = world.ports.issued.get((proposal, step.get("token_user", "philipp")))
+        suffix = f"{proposal}_{binding.token}" if binding is not None and not step.get("no_token") else proposal
+        raw = step.get("raw") or f"HOMEINTENT_V12_{step['choice']}_{suffix}"
+        device = step.get("device", binding.device_id if binding is not None else None)
         state["reply"] = await world.engine.async_handle_push_action(
-            raw.replace("{pid}", proposal), user_id=step.get("user", "philipp"), device_id=None,
+            raw.replace("{pid}", proposal), user_id=step.get("user", "philipp"), device_id=device,
         )
     elif op == "restart":
         await world.engine.async_persist()

@@ -81,14 +81,18 @@ class RoomPresenceResolver:
         home_person_ids: Iterable[str],
         now: datetime,
     ) -> RoomPresenceResult:
+        """Resolve room evidence that is still valid *now*.
+
+        Every source carries its own ``observed_at``; its validity ends at
+        ``observed_at + TTL`` and is never extended by resolving again.  A
+        source without a trustworthy timezone-aware timestamp is not evidence.
+        """
         if person_home is not True:
             return RoomPresenceResult(person_id, None, RoomEvidenceClass.UNKNOWN, None, None,
                                       ("not_home_or_unknown",))
-        valid_until = now + self.config.evidence_validity
-        exact: dict[str, str] = {}
-        strong: dict[str, str] = {}
+        exact: list[_Evidence] = []
+        strong: list[_Evidence] = []
         ambiguous_sources: list[str] = []
-        observed: datetime | None = None
         for sensor_id in self.config.person_room_sensors.get(person_id, ()):
             sensor = entities.get(sensor_id)
             if sensor is None:
@@ -101,57 +105,107 @@ class RoomPresenceResolver:
                 # An unmapped value is not evidence; never guess a room.
                 ambiguous_sources.append(f"unmapped:{sensor_id}")
                 continue
-            exact.setdefault(area_id, sensor_id)
-            if sensor.last_changed is not None and sensor.last_changed.tzinfo is not None:
-                observed = max(observed or sensor.last_changed, sensor.last_changed)
+            evidence = _fresh(area_id, sensor_id, _observed_at(sensor, now),
+                              self.config.evidence_validity, now)
+            if evidence is not None:
+                exact.append(evidence)
         interaction = self._interactions.get(person_id)
-        if interaction is not None and now - interaction.at <= self.config.interaction_validity:
-            strong.setdefault(interaction.area_id, "recent_satellite_turn")
-            observed = max(observed or interaction.at, interaction.at)
+        if interaction is not None:
+            evidence = _fresh(interaction.area_id, "recent_satellite_turn", interaction.at,
+                              self.config.interaction_validity, now)
+            if evidence is not None:
+                strong.append(evidence)
         others_home = tuple(item for item in home_person_ids if item != person_id)
-        if self.config.use_occupancy_sensors and not exact:
-            occupied = sorted({
-                entity.area_id for entity in entities.values()
-                if entity.area_id is not None
-                and entity.domain == "binary_sensor"
-                and (entity.device_class or "") in OCCUPANCY_CLASSES
-                and entity.state in _OCCUPIED
-            })
-            if occupied and not others_home:
-                if len(occupied) == 1:
-                    strong.setdefault(occupied[0], "sole_person_single_occupied_area")
-                else:
-                    ambiguous_sources.append("several_occupied_areas")
-        if len(exact) == 1:
-            area_id, source = next(iter(exact.items()))
-            conflicting = [key for key in strong if key != area_id]
+        if self.config.use_occupancy_sensors and not exact and not others_home:
+            occupied: dict[str, datetime | None] = {}
+            for entity in entities.values():
+                if (
+                    entity.area_id is not None
+                    and entity.domain == "binary_sensor"
+                    and (entity.device_class or "") in OCCUPANCY_CLASSES
+                    and entity.state in _OCCUPIED
+                ):
+                    stamp = _observed_at(entity, now)
+                    current = occupied.get(entity.area_id)
+                    occupied[entity.area_id] = (
+                        stamp if current is None or (stamp is not None and stamp > current) else current
+                    )
+            if len(occupied) > 1:
+                ambiguous_sources.append("several_occupied_areas")
+            elif len(occupied) == 1:
+                area_id, stamp = next(iter(occupied.items()))
+                evidence = _fresh(area_id, "sole_person_single_occupied_area", stamp,
+                                  self.config.evidence_validity, now)
+                if evidence is not None:
+                    strong.append(evidence)
+        exact_areas = {item.area_id for item in exact}
+        if len(exact_areas) == 1:
+            area_id = next(iter(exact_areas))
+            conflicting = [item for item in strong if item.area_id != area_id]
             if conflicting:
-                return RoomPresenceResult(
-                    person_id, None, RoomEvidenceClass.AMBIGUOUS, observed, valid_until,
-                    (source, *(strong[key] for key in conflicting)),
-                )
-            return RoomPresenceResult(
-                person_id, area_id, RoomEvidenceClass.EXACT, observed or now, valid_until,
-                (source,),
-            )
-        if len(exact) > 1:
-            return RoomPresenceResult(
-                person_id, None, RoomEvidenceClass.AMBIGUOUS, observed, valid_until,
-                tuple(sorted(exact.values())),
-            )
-        if len(strong) == 1 and not ambiguous_sources:
-            area_id, source = next(iter(strong.items()))
-            return RoomPresenceResult(
-                person_id, area_id, RoomEvidenceClass.STRONG, observed or now, valid_until,
-                (source,),
-            )
+                # Fresh sources disagree: no source silently wins.
+                return _combined(person_id, None, RoomEvidenceClass.AMBIGUOUS, (*exact, *conflicting))
+            return _combined(person_id, area_id, RoomEvidenceClass.EXACT, tuple(exact))
+        if len(exact_areas) > 1:
+            return _combined(person_id, None, RoomEvidenceClass.AMBIGUOUS, tuple(exact))
+        strong_areas = {item.area_id for item in strong}
+        if len(strong_areas) == 1 and not ambiguous_sources:
+            return _combined(person_id, next(iter(strong_areas)), RoomEvidenceClass.STRONG, tuple(strong))
         if strong or ambiguous_sources:
+            result = _combined(person_id, None, RoomEvidenceClass.AMBIGUOUS, tuple(strong))
             return RoomPresenceResult(
-                person_id, None, RoomEvidenceClass.AMBIGUOUS, observed, valid_until,
-                (*strong.values(), *ambiguous_sources),
+                result.person_id, None, RoomEvidenceClass.AMBIGUOUS, result.observed_at,
+                result.valid_until, (*result.sources, *ambiguous_sources),
             )
         return RoomPresenceResult(person_id, None, RoomEvidenceClass.UNKNOWN, None, None,
                                   ("no_room_evidence",))
+
+
+@dataclass(frozen=True)
+class _Evidence:
+    area_id: str
+    source: str
+    observed_at: datetime
+    valid_until: datetime
+
+
+_CLOCK_SKEW = timedelta(minutes=1)
+
+
+def _observed_at(entity: EntitySnapshot, now: datetime) -> datetime | None:
+    """Latest trustworthy HA timestamp of an entity's state/attributes."""
+    stamps = [
+        item for item in (entity.last_changed, entity.last_updated)
+        if item is not None and item.tzinfo is not None
+    ]
+    if not stamps:
+        return None
+    latest = max(stamps)
+    return None if latest > now + _CLOCK_SKEW else min(latest, now)
+
+
+def _fresh(
+    area_id: str, source: str, observed_at: datetime | None, ttl: timedelta, now: datetime,
+) -> _Evidence | None:
+    if observed_at is None or observed_at.tzinfo is None:
+        return None
+    valid_until = observed_at + ttl
+    if now > valid_until:
+        return None
+    return _Evidence(area_id, source, observed_at, valid_until)
+
+
+def _combined(
+    person_id: str, area_id: str | None, evidence_class: RoomEvidenceClass,
+    items: tuple[_Evidence, ...],
+) -> RoomPresenceResult:
+    """The result is only as fresh as its oldest contributing source."""
+    return RoomPresenceResult(
+        person_id, area_id, evidence_class,
+        max((item.observed_at for item in items), default=None),
+        min((item.valid_until for item in items), default=None),
+        tuple(item.source for item in items),
+    )
 
 
 def build_area_lookup(entities: Iterable[EntitySnapshot]) -> dict[str, str]:

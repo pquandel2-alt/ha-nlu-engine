@@ -159,7 +159,7 @@ IMPORTANT → private push, CRITICAL → immediate.
 
 ## Room presence and satellites
 
-`RoomPresenceResolver` combines only explicit evidence:
+`RoomPresenceResolver` combines only explicit, *fresh* evidence:
 
 - configured person room sensors (`person.x = sensor.y`, e.g. Bermuda/BLE area
   sensors) whose state maps to exactly one HA area → EXACT,
@@ -168,6 +168,24 @@ IMPORTANT → private push, CRITICAL → immediate.
   one area is occupied → STRONG.
 
 Conflicts and unmapped values give AMBIGUOUS; nothing gives UNKNOWN.
+
+Freshness (7.0.1): every source carries its own `observed_at` — the later of
+HA's `last_changed`/`last_updated` for sensors, the turn time for a satellite
+turn — and is valid until `observed_at + TTL` (10 min for sensors and
+occupancy, 5 min for satellite turns). Validity is never `now + TTL`, so
+resolving again never refreshes old evidence. A source without a timezone-aware
+timestamp, or with one more than a minute in the future, is not evidence.
+Expired sources are dropped, so a stale room sensor yields UNKNOWN, never
+EXACT. A fresh room sensor and a fresh satellite turn naming different rooms
+give AMBIGUOUS. The combined result is valid only until the earliest
+`valid_until` of the sources behind it. Room presence and satellite turns are
+kept in memory only; after a restart there is no room evidence until a new
+fresh observation arrives.
+
+Limitation: HA's `last_updated` changes on any attribute update, so an
+integration that rewrites attributes without re-measuring the room can keep a
+sensor "fresh". HomeIntent cannot tell these apart and trusts HA's
+timestamps.
 `person.x = home` alone never yields a room, and room evidence is never used as
 speaker identity.
 
@@ -188,6 +206,13 @@ matched.
 | no private channel | HISTORY_ONLY |
 | URGENT/CRITICAL | PUSH + VOICE where possible (MULTI_CHANNEL); configured house speakers only for PUBLIC safety content |
 | URGENT/CRITICAL without any reachable recipient | household fallback: HA persistent notification (+ configured house speakers) |
+
+The router checks room validity itself against the explicit decision time
+`now`: room evidence without `valid_until` (`room_evidence_unbounded`) or with
+`now > valid_until` (`room_evidence_expired`) never selects a room satellite,
+at any priority or privacy level, so stale evidence can never send PERSONAL or
+SENSITIVE content to a speaker. (The only room-independent voice route remains
+PUBLIC safety content on explicitly configured house speakers.) Unknown or ambiguous rooms never pick a satellite.
 
 Voice uses `assist_satellite.start_conversation` for questions (the satellite
 keeps listening, no wake word) and `assist_satellite.announce` otherwise.
@@ -219,12 +244,42 @@ garage makes the stored "Ja" a no-op.
 
 ## Interactive push
 
-Actions are `HOMEINTENT_V12_{ACCEPT|LATER|IGNORE}_<proposal id>`. The payload
-contains no domain, service, entity or plan. A push action is rejected when
-the reference is malformed or unknown, the proposal is expired or already
-resolved, the HA user is not a recipient, or the tap came from another
-device than the recipient's companion app. ACCEPT enters the V10 pipeline,
-LATER snoozes, IGNORE acknowledges the current occurrence.
+Actions are `HOMEINTENT_V12_{ACCEPT|LATER|IGNORE}_<proposal id>_<device token>`.
+The payload contains no domain, service, entity or plan.
+
+Device binding (7.0.1). Home Assistant's `mobile_app` fires
+`mobile_app_notification_action` with the app's event data and a context
+carrying the authenticated HA `user_id`. Core adds no device id, so an event
+`device_id` cannot prove which phone tapped. HomeIntent therefore binds the
+buttons to a device when it sends them:
+
+1. Buttons are attached only for a `notify.mobile_app_*` target that belongs
+   to the recipient in the HomeIntent user binding **and** resolves to a
+   device through the HA entity registry. Device ownership is never inferred
+   from names.
+2. For each such target HomeIntent generates a random 64-bit token
+   (`t` + 16 hex digits), puts it only into that target's action ids, and stores
+   `PushActionBinding(token, user_id, device_id)` on the proposal (persisted,
+   at most 8 per proposal). If the send fails, the binding is discarded.
+3. Without an authoritative binding (legacy `notify.*` service, no registry
+   device, unbound user) the push is still sent as an **informational message
+   without buttons**. The question can then be answered through
+   authenticated Assist.
+
+A push action is rejected — without any change to the proposal, situation,
+GoalRun, experience, standing permissions or devices — when the reference is
+malformed or unknown, the proposal is expired or already resolved (replay),
+the HA user is not a recipient, the action carries no token, the token is not
+bound to that proposal, the token was bound for another user, or the event
+carries a `device_id` different from the bound one. An event without a
+`device_id` is accepted only through a valid token. ACCEPT enters the V10
+pipeline, LATER snoozes, IGNORE acknowledges the current occurrence.
+
+What this proves, and what not: the tap came from an authenticated HA user who
+is a recipient and who knew a token that was delivered only to the bound
+Companion device. A token that leaked off the device (e.g. copied from a
+notification log) is usable by that same HA user only, never by another user.
+Informational pushes never need a binding.
 
 ## Dialog priority
 
@@ -251,12 +306,13 @@ niemand zuhause ist und im Wohnzimmer noch Licht an ist, darfst du es
 automatisch ausschalten.", followed by a preview and an explicit "Ja". It
 stores the owner, situation kind, closed operator, explicit entity ids (no
 wildcards), area, condition `nobody_home`, expiry (180 days) and a daily
-execution limit. Nothing exists by default and the feature is disabled by
+attempt limit. Nothing exists by default and the feature is disabled by
 default.
 
 Automatic execution requires all of: exact single matching permission,
 confirmed, not revoked, not expired, owner is a bound household user,
-situation kind auto-eligible and still active, area match, daily limit, fresh
+situation kind auto-eligible and still active, area match, daily attempt
+limit, fresh
 `nobody_home`, every lit subject covered by the permission, every target
 allowed by `AutoExecutionPolicy`, a five-minute persistence window; then V10
 materialization, Validator, ExecutionPolicy **without** a confirmation flag,
@@ -269,6 +325,17 @@ vacuums, mowers, cameras, humidifiers, stove/oven-like or security-named
 switches, or any unknown actuator. Even a tampered permission record for the
 garage is refused, and V10 would still classify the garage close as
 confirmation-required.
+
+Counters (7.0.1). Every automatic V10 run is an *attempt*; only a run whose
+effect V10 verified (`EXECUTED`) is a *verified execution*. Rejected services,
+failed effect verification, stale state and coordinator conflicts are attempts
+without an execution. The daily limit counts attempts, so a failing run can
+retry at most `max_executions_per_day` times per 24 h (the stored field keeps
+its name for compatibility; the refusal reason is `daily_attempt_limit`). The
+store keeps attempts under the existing `executions` key, so 7.0.0 storage
+loads unchanged and a 7.0.0 downgrade still sees every attempt, and adds
+`verified_executions`. Engine diagnostics expose `auto_attempts` and
+`auto_verified_executions`.
 
 ## Snooze, dismiss, mute, history
 
@@ -343,8 +410,11 @@ interaction marker.
 - `tests/test_v12_garage_e2e.py` — mandatory garage scenario
 - `tests/test_v12_behavior.py` — room, privacy, proposals, push, permissions, priority, attention, quiet hours, snooze
 - `tests/test_v12_conversation.py` — timer/automation/security collisions through `conversation.py`
-- `tests/test_v12_ood_corpus.py` + `tests/data/v12_ood_de.json` — 291 handwritten cases in 48 categories
+- `tests/test_v12_ood_corpus.py` + `tests/data/v12_ood_de.json` — 296 handwritten cases in 48 categories
 - `tests/test_v12_persistence_restart.py`, `tests/test_v12_decision_matrix.py`, `tests/test_v12_runtime.py`, `tests/test_v12_units.py`, `tests/test_v12_policies.py`, `tests/test_v12_room_attention_routing.py`
+- `tests/test_v12_push_authentication.py` — push actions through the real `mobile_app_notification_action` → agent runtime → proactive runtime → engine path (7.0.1)
+- `tests/test_v12_room_freshness.py` — per-source evidence expiry, conflicts, router enforcement (7.0.1)
+- `tests/test_v12_auto_counters.py` — attempts vs. verified executions, daily attempt budget (7.0.1)
 
 Every behavioral safety assertion counts calls at an instrumented
 `hass.services` sink behind the real policy-gated executor; positive controls
@@ -357,7 +427,11 @@ Every behavioral safety assertion counts calls at an instrumented
   household proposals on the satellite that asked, and V10 policy then applies
   non-admin rules.
 - Room presence is only as good as the configured sensors; without them V12
-  routes to push.
+  routes to push. Freshness relies on HA's `last_changed`/`last_updated`.
+- Interactive push buttons need a Companion app notify entity that is bound to
+  the user and registered to a device; other push targets get the text
+  without buttons. The push token proves delivery to the bound device, not
+  physical possession at tap time.
 - Guests are not household members: "others home" only knows bound `person.*`
   entities.
 - Grouped digests are delivered by push only.

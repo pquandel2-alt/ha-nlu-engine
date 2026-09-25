@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 import types
 from dataclasses import replace
@@ -102,7 +103,10 @@ async def _runtime(tmp_path, monkeypatch, *, options=None, states=None):
     await contexts.async_set_household(("person.philipp", "person.anna"), confirmed=True)
     data.user_contexts = contexts
     entities = {item.entity_id: item for item in (states or garage_states())}
-    entities["sensor.philipp_area"] = entity("sensor.philipp_area", "Philipp Raum", "Wohnzimmer")
+    entities["sensor.philipp_area"] = replace(
+        entity("sensor.philipp_area", "Philipp Raum", "Wohnzimmer"),
+        last_changed=Clock.now - timedelta(minutes=1), last_updated=Clock.now,
+    )
     monkeypatch.setattr(proactive_runtime, "build_entity_snapshots", lambda hass, entry: list(entities.values()))
     monkeypatch.setattr(proactive_runtime.dt_util, "utcnow", lambda: Clock.now)
     monkeypatch.setattr(proactive_runtime.dt_util, "now", lambda: Clock.now.astimezone(timezone(timedelta(hours=2))))
@@ -172,7 +176,10 @@ def test_ports_use_existing_authorities(tmp_path, monkeypatch, scheduled):
 
 
 def test_voice_and_push_delivery_payloads(tmp_path, monkeypatch, scheduled):
-    _registry(monkeypatch, [SimpleNamespace(entity_id="assist_satellite.wz", area_id="living_room", device_id="dev_wz")])
+    _registry(monkeypatch, [
+        SimpleNamespace(entity_id="assist_satellite.wz", area_id="living_room", device_id="dev_wz"),
+        SimpleNamespace(entity_id="notify.mobile_app_philipp", area_id=None, device_id="phone_p"),
+    ])
 
     async def scenario():
         runtime, hass, calls, entities, data = await _runtime(tmp_path, monkeypatch)
@@ -206,8 +213,10 @@ def test_voice_and_push_delivery_payloads(tmp_path, monkeypatch, scheduled):
         actions = payload["data"]["actions"]
         assert [item["title"] for item in actions] == ["Schließen", "Später", "Ignorieren"]
         for item in actions:
-            assert item["action"].startswith("HOMEINTENT_V12_")
+            assert re.fullmatch(r"HOMEINTENT_V12_(ACCEPT|LATER|IGNORE)_p[b]{32}_t[0-9a-f]{16}", item["action"])
             assert "cover" not in item["action"] and "service" not in item
+        assert receipt.push_bindings[0].device_id == "phone_p"
+        assert receipt.push_bindings[0].user_id == "philipp"
         assert "entity_id" not in payload["data"]
         # Provider failure is reported, not raised.
         hass.services.async_call = AsyncMock(side_effect=RuntimeError("down"))
@@ -314,7 +323,9 @@ def test_enabled_hooks_feed_the_engine(tmp_path, monkeypatch, scheduled):
 
 
 def test_push_action_feedback_and_habit_refresh(tmp_path, monkeypatch, scheduled):
-    _registry(monkeypatch, [])
+    _registry(monkeypatch, [
+        SimpleNamespace(entity_id="notify.mobile_app_philipp", area_id=None, device_id="phone_p"),
+    ])
 
     async def scenario():
         runtime, hass, calls, entities, data = await _runtime(tmp_path, monkeypatch)
@@ -325,7 +336,7 @@ def test_push_action_feedback_and_habit_refresh(tmp_path, monkeypatch, scheduled
         pushes = [call for call in calls if call[0] == "notify"]
         action = pushes[-1][2]["data"]["actions"][1]["action"]  # LATER
         assert action.startswith("HOMEINTENT_V12_LATER_")
-        handled = await runtime.async_handle_push_action(action, user_id="philipp", device_id=None)
+        handled = await runtime.async_handle_push_action(action, user_id="philipp", device_id="phone_p")
         assert handled
         assert calls[-1][2]["message"].startswith("In Ordnung. Ich prüfe das in 30 Minuten")
         proposal = runtime.engine.proposals.all()[-1]
@@ -379,6 +390,9 @@ def test_habit_refresh_reads_v11_models_and_triggers_suggestions(tmp_path, monke
         assert [item.model_id for item in runtime._habit_candidates] == ["habit:h1"]
         assert runtime._habit_triggers == frozenset({"light.kitchen"})
         Clock.now = datetime(2026, 9, 24, 11, 0, tzinfo=timezone.utc)  # Thursday 13:00 local
+        entities["sensor.philipp_area"] = replace(
+            entities["sensor.philipp_area"], last_changed=Clock.now, last_updated=Clock.now,
+        )
         try:
             kitchen = replace(entities["light.kitchen"], state="on")
             entities["light.kitchen"] = kitchen
@@ -412,31 +426,6 @@ def test_v10_adapters_use_the_policy_executor_and_bounded_verification(tmp_path,
         data.effect_monitor.timeout = timedelta(milliseconds=20)
         assert await runtime._async_verify("light.kitchen", "off") is True
         assert await runtime._async_verify("light.kitchen", "on") is False
-        await data.effect_monitor.async_close()
-
-    asyncio.run(scenario())
-
-
-def test_push_action_must_come_from_the_recipients_companion_device(tmp_path, monkeypatch, scheduled):
-    _registry(monkeypatch, [
-        SimpleNamespace(entity_id="notify.mobile_app_philipp", area_id=None, device_id="phone_p"),
-    ])
-
-    async def scenario():
-        runtime, hass, calls, entities, data = await _runtime(tmp_path, monkeypatch)
-        hass.states._states["person.philipp"] = State("person.philipp", "not_home")
-        garage = replace(entities["cover.garage"], state="open", last_changed=NOW - timedelta(minutes=30))
-        entities["cover.garage"] = garage
-        await runtime.async_observe_state(garage, "closed", tuple(entities.values()))
-        pushes = [call for call in calls if call[0] == "notify"]
-        accept = pushes[-1][2]["data"]["actions"][0]["action"]
-        assert runtime._push_device_ids("philipp") == ("phone_p",)
-        await runtime.async_handle_push_action(accept, user_id="philipp", device_id="stolen_phone")
-        assert runtime.engine.proposals.all()[-1].state is ProposalState.PENDING
-        assert [call for call in calls if call[0] == "cover"] == []
-        data.effect_monitor.timeout = timedelta(milliseconds=20)
-        await runtime.async_handle_push_action(accept, user_id="philipp", device_id="phone_p")
-        assert [call[:2] for call in calls if call[0] == "cover"] == [("cover", "close_cover")]
         await data.effect_monitor.async_close()
 
     asyncio.run(scenario())

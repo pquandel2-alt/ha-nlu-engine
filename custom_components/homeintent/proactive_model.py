@@ -328,6 +328,17 @@ class QuietHoursWindow:
 
 
 @dataclass(frozen=True)
+class PushActionBinding:
+    """One interactive push delivery: an opaque token that was sent only to
+    one Companion device, authoritatively resolved via UserContext ->
+    notify entity -> HA device registry, for one authenticated HA user."""
+
+    token: str
+    user_id: str
+    device_id: str
+
+
+@dataclass(frozen=True)
 class PendingProposal:
     proposal_id: str
     situation_id: str
@@ -345,6 +356,7 @@ class PendingProposal:
     resolved_by: str | None = None
     run_id: str | None = None
     result: str | None = None
+    push_bindings: tuple[PushActionBinding, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -461,6 +473,7 @@ __all__ = (
     "ProposalChoice",
     "ProposalState",
     "ProposedGoal",
+    "PushActionBinding",
     "QUIET_SITUATION_STATES",
     "QuietHoursWindow",
     "RecipientContext",

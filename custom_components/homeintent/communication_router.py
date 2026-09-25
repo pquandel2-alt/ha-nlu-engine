@@ -13,6 +13,7 @@ services.  Safe fallback beats always speaking:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from .proactive_model import (
     AttentionDecision,
@@ -53,6 +54,7 @@ class CommunicationRouter:
         quiet: bool,
         requires_response: bool,
         others_home: bool,
+        now: datetime,
     ) -> CommunicationDecision:
         reasons: list[str] = []
         if attention.outcome is AttentionOutcome.SUPPRESS:
@@ -72,7 +74,7 @@ class CommunicationRouter:
         satellite_id: str | None = None
         voice_reason = self._voice_block_reason(
             recipient, privacy=privacy, room=room, quiet=quiet and not critical,
-            others_home=others_home,
+            others_home=others_home, now=now,
         )
         if voice_reason is None and room is not None:
             resolution = satellites.for_area(room.area_id)
@@ -126,6 +128,7 @@ class CommunicationRouter:
         room: RoomPresenceResult | None,
         quiet: bool,
         others_home: bool,
+        now: datetime,
     ) -> str | None:
         if not (self.config.voice_enabled and self.config.room_aware_voice_enabled):
             return "voice_disabled"
@@ -137,6 +140,11 @@ class CommunicationRouter:
             return "room_ambiguous"
         if room is None or room.area_id is None or room.evidence_class is RoomEvidenceClass.UNKNOWN:
             return "room_unknown"
+        # Defense in depth: even a caller-supplied result must still be valid.
+        if room.valid_until is None:
+            return "room_evidence_unbounded"
+        if now > room.valid_until:
+            return "room_evidence_expired"
         if privacy is PrivacyLevel.SENSITIVE:
             return "sensitive_content"
         if privacy is PrivacyLevel.PERSONAL:
