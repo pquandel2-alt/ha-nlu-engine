@@ -295,10 +295,34 @@ class ProactiveRuntime:
             return False
         if not self.enabled:
             return True
-        result = await self.engine.async_handle_push_action(action, user_id=user_id, device_id=device_id)
+        result = await self.engine.async_handle_push_action(
+            action, user_id=user_id, device_id=device_id,
+            allowed_device_ids=self._push_device_ids(user_id),
+        )
         if result is not None and result.handled and user_id is not None:
             await self._async_push_feedback(user_id, result)
         return True
+
+    def _push_device_ids(self, user_id: str | None) -> tuple[str, ...]:
+        """Companion devices behind the user's bound notify entities."""
+        contexts = self._data.user_contexts
+        person = self.person_for(user_id)
+        if contexts is None or person is None:
+            return ()
+        binding = contexts.resolve_notification_targets(person, channel="push")
+        try:
+            from homeassistant.helpers import entity_registry as er
+
+            registry = er.async_get(self._hass)
+            devices = {
+                entry.device_id
+                for target in binding.targets
+                if (entry := registry.async_get(target.target_id)) is not None
+                and getattr(entry, "device_id", None)
+            }
+        except Exception:  # noqa: BLE001 - registry may be unavailable
+            return ()
+        return tuple(sorted(str(item) for item in devices))
 
     async def async_handle_reply(
         self, text: str, *, user_id: str | None, device_id: str | None, is_admin: bool,
@@ -487,6 +511,22 @@ class ProactiveRuntime:
                 delivered.append(CommunicationChannel.VOICE)
             except Exception as err:  # noqa: BLE001 - provider failures vary
                 errors.append(f"voice:{type(err).__name__}")
+        if (
+            decision.recipient_user_id is None
+            and CommunicationChannel.PUSH in decision.channels
+            and not decision.push_target_ids
+        ):
+            # Critical household fallback: visible in the HA UI for everyone.
+            try:
+                await self._hass.services.async_call(
+                    "persistent_notification", "create",
+                    {"title": message.title, "message": message.text,
+                     "notification_id": "homeintent_v12_critical"},
+                    blocking=True,
+                )
+                delivered.append(CommunicationChannel.PUSH)
+            except Exception as err:  # noqa: BLE001
+                errors.append(f"notification:{type(err).__name__}")
         if decision.push_target_ids:
             actions: tuple[tuple[str, str], ...] = ()
             if message.proposal_id is not None:

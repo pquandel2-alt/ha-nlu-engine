@@ -188,9 +188,11 @@ def _build(tmp_path: Path, setup: dict):
             NOW + timedelta(days=raw.get("days", 30)), raw.get("confirmed", True),
             raw.get("revoked", False),
         )
-        if permission.confirmed:
+        if permission.confirmed and permission.situation_kind is SituationKind.DEVICE_LEFT_ON_WHEN_LEAVING:
             world.engine.permissions.add(permission)
         else:
+            # Unconfirmed or non-eligible records can only exist in a tampered
+            # store; insert them past the boundary check to prove fail-closed.
             world.engine.permissions._items[permission.permission_id] = permission
     return world, config
 

@@ -56,7 +56,8 @@ def _registry(monkeypatch, entries):
     import homeassistant.helpers.device_registry as dr
     import homeassistant.helpers.entity_registry as er
 
-    fake = SimpleNamespace(entities={item.entity_id: item for item in entries})
+    by_id = {item.entity_id: item for item in entries}
+    fake = SimpleNamespace(entities=by_id, async_get=lambda entity_id: by_id.get(entity_id))
     monkeypatch.setattr(er, "async_get", lambda hass: fake)
     devices = SimpleNamespace(async_get=lambda device_id: SimpleNamespace(area_id="living_room") if device_id == "dev_area" else None)
     monkeypatch.setattr(dr, "async_get", lambda hass: devices)
@@ -412,5 +413,46 @@ def test_v10_adapters_use_the_policy_executor_and_bounded_verification(tmp_path,
         assert await runtime._async_verify("light.kitchen", "off") is True
         assert await runtime._async_verify("light.kitchen", "on") is False
         await data.effect_monitor.async_close()
+
+    asyncio.run(scenario())
+
+
+def test_push_action_must_come_from_the_recipients_companion_device(tmp_path, monkeypatch, scheduled):
+    _registry(monkeypatch, [
+        SimpleNamespace(entity_id="notify.mobile_app_philipp", area_id=None, device_id="phone_p"),
+    ])
+
+    async def scenario():
+        runtime, hass, calls, entities, data = await _runtime(tmp_path, monkeypatch)
+        hass.states._states["person.philipp"] = State("person.philipp", "not_home")
+        garage = replace(entities["cover.garage"], state="open", last_changed=NOW - timedelta(minutes=30))
+        entities["cover.garage"] = garage
+        await runtime.async_observe_state(garage, "closed", tuple(entities.values()))
+        pushes = [call for call in calls if call[0] == "notify"]
+        accept = pushes[-1][2]["data"]["actions"][0]["action"]
+        assert runtime._push_device_ids("philipp") == ("phone_p",)
+        await runtime.async_handle_push_action(accept, user_id="philipp", device_id="stolen_phone")
+        assert runtime.engine.proposals.all()[-1].state is ProposalState.PENDING
+        assert [call for call in calls if call[0] == "cover"] == []
+        data.effect_monitor.timeout = timedelta(milliseconds=20)
+        await runtime.async_handle_push_action(accept, user_id="philipp", device_id="phone_p")
+        assert [call[:2] for call in calls if call[0] == "cover"] == [("cover", "close_cover")]
+        await data.effect_monitor.async_close()
+
+    asyncio.run(scenario())
+
+
+def test_critical_fallback_creates_a_household_notification(tmp_path, monkeypatch, scheduled):
+    _registry(monkeypatch, [])
+
+    async def scenario():
+        runtime, hass, calls, entities, data = await _runtime(tmp_path, monkeypatch)
+        receipt = await runtime.async_deliver(OutgoingMessage(
+            CommunicationDecision(CommunicationChannel.PUSH, (CommunicationChannel.PUSH,), None, None,
+                                  (), False, False, ("critical_household_fallback",)),
+            "HomeIntent: Achtung", "Achtung: Rauch!", PriorityLevel.CRITICAL, None, None,
+        ))
+        assert receipt.delivered == (CommunicationChannel.PUSH,)
+        assert calls[-1][:2] == ("persistent_notification", "create")
 
     asyncio.run(scenario())

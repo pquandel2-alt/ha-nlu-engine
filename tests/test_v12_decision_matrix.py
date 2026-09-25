@@ -266,3 +266,26 @@ def test_auto_waits_then_executes_and_reports_failures(tmp_path):
         assert world.ports.delivered and world.ports.delivered[-1].proposal_id
 
     asyncio.run(scenario())
+
+
+def test_personal_history_is_only_explained_to_its_recipient(tmp_path):
+    world = build_world(
+        tmp_path, garage_states(), recipients={"philipp": philipp()},
+        household={"person.philipp": "home", "person.anna": "not_home"},
+    )
+
+    async def scenario():
+        from homeintent.situation_detection import DetectionSignal as Signal
+
+        await world.engine.async_report_situation(Signal(
+            SituationKind.PENDING_GOAL_REQUIRES_ATTENTION, "pending_goal_requires_attention:r",
+            (), None, True, NOW, (), "Arzttermin vorbereiten", owner_user_id="philipp",
+        ))
+        assert "Arzttermin" in world.engine.explain_latest(("arzttermin",), user_id="philipp")
+        for other in ("anna", None):
+            assert world.engine.explain_latest(("arzttermin",), user_id=other) == (
+                "Dazu habe ich in letzter Zeit keinen Hinweis gegeben."
+            )
+            assert "Arzttermin" not in world.engine.history_summary(since=NOW - timedelta(days=1), user_id=other)
+
+    asyncio.run(scenario())

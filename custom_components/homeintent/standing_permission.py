@@ -162,6 +162,8 @@ class StandingPermissionStore:
     def add(self, permission: StandingPermission) -> None:
         if not permission.confirmed:
             raise ValueError("Eine Daueranweisung muss ausdrücklich bestätigt sein")
+        if permission.situation_kind not in AUTO_ELIGIBLE_KINDS:
+            raise ValueError("Für diese Situation sind keine Daueranweisungen erlaubt")
         if not permission.entity_ids or any("*" in item for item in permission.entity_ids):
             raise ValueError("Daueranweisungen benötigen explizite Entitäten ohne Platzhalter")
         if len(self._items) >= MAX_PERMISSIONS and permission.permission_id not in self._items:
@@ -321,6 +323,8 @@ def _permission_from(raw: object) -> StandingPermission | None:
         return None
     if any(OPERATOR_DOMAIN[permission.operator] != item.partition(".")[0] for item in ids):
         return None
+    if permission.situation_kind not in AUTO_ELIGIBLE_KINDS:
+        return None
     return permission
 
 
@@ -346,9 +350,13 @@ _PERMISSION_RE = re.compile(
     r"(?:automatisch\s+|selbststaendig\s+|von\s+selbst\s+)?"
     r"(?:ausschalten|ausmachen|abschalten)\s*[.!]?$"
 )
+# A permission is consent for *future* situations: it needs a condition
+# ("wenn ...") or an explicit standing word.  "Du darfst das Licht
+# ausschalten." is an ordinary polite command and stays with V8/V10.
 _PERMISSION_INTENT_RE = re.compile(
-    r"\b(?:darfst\s+du|du\s+darfst|erlaube\s+ich\s+dir|erlaubnis)\b.*\b(?:automatisch|selbststaendig|von\s+selbst)\b"
-    r"|\b(?:darfst\s+du|du\s+darfst)\b.*\b(?:ausschalten|ausmachen|abschalten|schliessen|oeffnen|aufschliessen|entriegeln|zumachen|aufmachen)\b"
+    r"\b(?:darfst\s+du|du\s+darfst|erlaube\s+ich\s+dir|erlaubnis)\b.*"
+    r"\b(?:automatisch|selbststaendig|von\s+selbst|kuenftig|zukuenftig|immer)\b"
+    r"|^wenn\b.*\b(?:darfst\s+du|du\s+darfst)\b"
 )
 # Matched anywhere inside a word: German compounds ("Hauptventil",
 # "Garagentor", "Holzofen") must be caught.  Over-matching only refuses.

@@ -54,7 +54,7 @@ _ACCEPT = frozenset({
     "mach es zu", "mach ihn zu", "ausschalten", "mach es aus", "mach sie aus",
     "schalte es aus", "schalte sie aus", "ja schliessen", "ja ausschalten",
     "starten", "ja starten", "starte sie", "starte die routine", "genau",
-    "jawohl", "sicher", "klar",
+    "jawohl", "klar",
 })
 _REJECT = frozenset({
     "nein", "nein danke", "nee", "noe", "lieber nicht", "nicht noetig",

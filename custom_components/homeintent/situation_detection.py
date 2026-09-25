@@ -357,6 +357,9 @@ def habit_signal(
         TargetState(entity_id, expected, entities[entity_id].friendly_name)
         for entity_id, expected in habit.steps[1:]
         if entity_id in entities and entities[entity_id].state != expected
+        # A routine suggestion never bundles security-relevant targets behind
+        # a generic question; those always need their own explicit request.
+        and not _security_relevant(entities[entity_id])
     )
     if not remaining:
         return None
@@ -375,6 +378,17 @@ def habit_signal(
         owner_user_id=habit.user_id,
         proposed_goal=ProposedGoal(remaining, "Routine starten"),
         anticipation_ref=habit.model_id,
+    )
+
+
+_SECURITY_DOMAINS = frozenset({"lock", "alarm_control_panel", "siren", "valve"})
+_SECURITY_CLASSES = frozenset({"garage", "garage_door", "gate", "door", "lock"})
+
+
+def _security_relevant(entity: EntitySnapshot) -> bool:
+    return (
+        entity.domain in _SECURITY_DOMAINS
+        or (entity.device_class or "").casefold() in _SECURITY_CLASSES
     )
 
 

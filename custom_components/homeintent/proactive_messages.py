@@ -44,6 +44,12 @@ _ACCEPT_LABEL = {
     "on": "Einschalten",
     "open": "Öffnen",
 }
+_STEP_VERB = {
+    "closed": "schließen",
+    "off": "ausschalten",
+    "on": "einschalten",
+    "open": "öffnen",
+}
 _ACCEPT_VERB = {
     "closed": "schließen",
     "off": "ausschalten",
@@ -114,8 +120,15 @@ def situation_message(
     if kind is SituationKind.HABIT_OPPORTUNITY:
         band = situation.evidence_value("habit_phrase") or "zu dieser Zeit"
         statement = f"Du machst {band} häufig dieselbe Abfolge"
-        question = "Soll ich die Routine starten?" if proposal is not None else None
-        return finish_sentence(statement), question
+        if proposal is None:
+            return finish_sentence(statement), None
+        # The question names every step so "Ja" can never approve a hidden action.
+        steps = tuple(
+            f"{target.name or target.entity_id} {_STEP_VERB.get(target.desired_state, 'anpassen')}"
+            for target in proposal.targets
+        )
+        statement = join_sentences((statement, f"Als Nächstes folgen meist: {join_german(steps)}"))
+        return statement, "Soll ich die Routine starten?"
     if kind is SituationKind.PENDING_GOAL_REQUIRES_ATTENTION:
         label = situation.subject_name or "Ein geplantes Ziel"
         return finish_sentence(f"„{label}“ konnte nicht wie geplant erreicht werden"), None

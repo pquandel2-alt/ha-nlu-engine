@@ -135,7 +135,8 @@ def test_personal_habit_suggestion_is_never_broadcast_in_a_shared_home(tmp_path)
         assert world.spoken() == []
         assert "no_voice:personal_audience_may_be_shared" in message.decision.reasons
         assert message.text == (
-            "Du machst werktags morgens häufig dieselbe Abfolge. Soll ich die Routine starten?"
+            "Du machst werktags morgens häufig dieselbe Abfolge. Als Nächstes folgen meist: "
+            "Küchenrollladen öffnen und Wohnzimmerlicht einschalten. Soll ich die Routine starten?"
         )
         assert world.sink.device_calls == []
 
@@ -422,7 +423,10 @@ def test_garage_never_auto_even_with_a_permission_record(tmp_path):
         permission_id="perm_garage", situation_kind=SituationKind.ENTRY_LEFT_OPEN,
         entity_ids=("cover.garage",), area_id=None, conditions=(),
     )
-    world.engine.permissions.add(forged)
+    with pytest.raises(ValueError):
+        world.engine.permissions.add(forged)
+    # Simulate a tampered store that bypassed the boundary check.
+    world.engine.permissions._items[forged.permission_id] = forged
 
     async def scenario():
         await _open_garage(world)
@@ -625,3 +629,59 @@ def test_reject_is_contextual_and_not_persistent(tmp_path):
         assert world.sink.device_calls == []
 
     asyncio.run(scenario())
+
+
+def test_habit_suggestion_never_bundles_security_targets(tmp_path):
+    states = garage_states() + [
+        entity("cover.kitchen", "Küchenrollladen", "closed", area="kitchen", area_name="Küche"),
+    ]
+    world = _home_world(tmp_path, states=states)
+
+    async def scenario():
+        candidate = HabitCandidate(
+            "habit:sec", "philipp", "morning", 0,
+            (("light.kitchen", "on"), ("cover.garage", "open"), ("lock.front", "unlocked"),
+             ("cover.kitchen", "open")),
+        )
+        world.ports.states["light.kitchen"] = replace(world.ports.states["light.kitchen"], state="on")
+        signal = habit_signal(
+            world.ports.states["light.kitchen"], (candidate,), now=NOW,
+            local_now=datetime(2026, 9, 21, 7, 5, tzinfo=timezone(timedelta(hours=2))),
+            band="morning", home_user_ids=frozenset({"philipp"}), entities=world.ports.states,
+        )
+        assert [item.entity_id for item in signal.proposed_goal.targets] == ["cover.kitchen"]
+        world.ports.habits = {signal.dedupe_key: HabitEvidence("habit:sec", "philipp", True, True, False, False, 0.9)}
+        await world.engine.async_process_signals((signal,), now=NOW)
+        assert "Garage" not in world.ports.delivered[-1].text
+        await world.engine.async_handle_reply("Ja", user_id="philipp", device_id="dev_living", is_admin=True)
+        assert [call[:2] for call in world.sink.device_calls] == [("cover", "open_cover")]
+        assert world.sink.device_calls[0][2] == {"entity_id": "cover.kitchen"}
+
+    asyncio.run(scenario())
+
+
+def test_critical_alarm_without_any_recipient_uses_household_fallback(tmp_path):
+    world = build_world(tmp_path, garage_states(), household={"person.philipp": "home"})
+
+    async def scenario():
+        await world.change("binary_sensor.smoke_hall", "on")
+        assert len(world.ports.delivered) == 1
+        message = world.ports.delivered[0]
+        assert message.decision.recipient_user_id is None
+        assert "critical_household_fallback" in message.decision.reasons
+        assert world.sink.device_calls == []
+        # A non-critical situation without recipients stays in history only.
+        await world.change("cover.garage", "open")
+        await world.ports.advance(timedelta(minutes=15))
+        assert len(world.ports.delivered) == 1
+
+    asyncio.run(scenario())
+
+
+def test_polite_command_is_not_a_standing_permission():
+    from homeintent.standing_permission import looks_like_permission_request
+
+    assert not looks_like_permission_request("Du darfst das Licht ausschalten.")
+    assert not looks_like_permission_request("Darfst du das Licht ausschalten?")
+    assert looks_like_permission_request("Du darfst künftig das Licht ausschalten.")
+    assert looks_like_permission_request("Wenn ich gehe, darfst du das Licht ausschalten.")

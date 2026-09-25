@@ -551,6 +551,31 @@ class ProactiveContextEngine:
                 "delivered" if receipt.delivered else "delivery_failed",
                 (*reasons, *attention.reasons, *decision.reasons, *receipt.errors), anticipation,
             )
+        if not delivered_any and priority >= PriorityLevel.URGENT:
+            # A safety alarm is never silently dropped because no personal
+            # channel exists: fall back to the household-visible HA
+            # notification and explicitly configured house speakers.
+            channels = (CommunicationChannel.PUSH,) + (
+                (CommunicationChannel.VOICE,)
+                if self.config.router.house_speakers_configured
+                and self.config.router.critical_multi_channel_enabled
+                and privacy is PrivacyLevel.PUBLIC
+                else ()
+            )
+            fallback = CommunicationDecision(
+                CommunicationChannel.MULTI_CHANNEL if len(channels) > 1 else channels[0],
+                channels, None, None, (), False, False, ("critical_household_fallback",),
+            )
+            receipt = await self.ports.async_deliver(OutgoingMessage(
+                fallback, _title(priority), full_message(statement, None), priority, None, None,
+            ))
+            delivered_any = bool(receipt.delivered)
+            self._record(
+                situation, outcome, None,
+                fallback.channel if receipt.delivered else CommunicationChannel.HISTORY_ONLY,
+                priority, privacy, "delivered" if receipt.delivered else "delivery_failed",
+                (*reasons, "critical_household_fallback", *receipt.errors), anticipation,
+            )
         if delivered_any:
             self.situations.mark_communicated(situation.dedupe_key, now)
         elif proposal is not None:
@@ -748,7 +773,7 @@ class ProactiveContextEngine:
                 interactive_confirmed=True,
                 provenance=f"proposal:{proposal_id}", now=now,
             )
-            self._finish_execution(proposal, situation, result, now=now, by=by)
+            self._finish_execution(proposal, situation, result, now=now, by=by, user_id=user_id)
             await self.async_persist()
             return ReplyResult(True, outcome_message(
                 proposal.proposed_goal,
@@ -770,7 +795,7 @@ class ProactiveContextEngine:
                     await self.async_recheck(key, allow_auto=False)
 
                 self.ports.schedule(f"snooze:{key}", until, _wake)
-                self._ack(situation, "snoozed", now)
+                self._ack(situation, "snoozed", now, user_id)
             await self.async_persist()
             minutes = max(1, int(delay.total_seconds() // 60))
             from .productivity import format_duration
@@ -782,7 +807,7 @@ class ProactiveContextEngine:
             # Only the current occurrence is acknowledged; no preference is learned.
             self.situations.set_state(situation.dedupe_key, SituationState.ACKNOWLEDGED, now=now)
             self.attention_state.dismiss(situation.situation_id, now + self.config.dismiss_cooldown)
-            self._ack(situation, choice.value, now)
+            self._ack(situation, choice.value, now, user_id)
         await self.async_persist()
         if choice is ProposalChoice.IGNORE:
             return ReplyResult(True, "Alles klar. Zu dieser Situation melde ich mich vorerst nicht mehr.")
@@ -790,7 +815,7 @@ class ProactiveContextEngine:
 
     def _finish_execution(
         self, proposal: PendingProposal, situation: ProactiveSituation,
-        result: ProactiveExecutionResult, *, now: datetime, by: str,
+        result: ProactiveExecutionResult, *, now: datetime, by: str, user_id: str | None,
     ) -> None:
         run_id = result.run.run_id if result.run is not None else None
         executed = result.status is ProactiveExecutionStatus.EXECUTED
@@ -801,14 +826,17 @@ class ProactiveContextEngine:
         )
         self.situations.set_state(situation.dedupe_key, SituationState.ACKNOWLEDGED, now=now)
         self._record(
-            situation, OpportunityOutcome.COMMUNICATE, None, proposal.channel,
+            situation, OpportunityOutcome.COMMUNICATE, user_id, proposal.channel,
             situation.priority_hint, proposal.privacy_level, f"proposal_{result.status.value}",
             (result.reason,), None, run_id=run_id, acknowledgement="accepted",
         )
 
-    def _ack(self, situation: ProactiveSituation, acknowledgement: str, now: datetime) -> None:
+    def _ack(
+        self, situation: ProactiveSituation, acknowledgement: str, now: datetime,
+        user_id: str | None,
+    ) -> None:
         self._record(
-            situation, OpportunityOutcome.COMMUNICATE, None, CommunicationChannel.HISTORY_ONLY,
+            situation, OpportunityOutcome.COMMUNICATE, user_id, CommunicationChannel.HISTORY_ONLY,
             situation.priority_hint, situation.privacy_level, "acknowledged", (),
             None, acknowledgement=acknowledgement,
         )
@@ -854,7 +882,7 @@ class ProactiveContextEngine:
         record = self.history.latest_for_subject(subject_words)
         if record is None or (
             record.privacy >= PrivacyLevel.PERSONAL
-            and record.recipient_user_id not in {None, user_id}
+            and (user_id is None or record.recipient_user_id != user_id)
         ):
             return "Dazu habe ich in letzter Zeit keinen Hinweis gegeben."
         local = self.ports.local_now()
@@ -865,7 +893,10 @@ class ProactiveContextEngine:
         records = [
             item for item in self.history.since(since)
             if item.result == "delivered"
-            and (item.privacy < PrivacyLevel.PERSONAL or item.recipient_user_id in {None, user_id})
+            and (
+                item.privacy < PrivacyLevel.PERSONAL
+                or (user_id is not None and item.recipient_user_id == user_id)
+            )
         ]
         labels = tuple(dict.fromkeys(item.subject_label for item in records if item.subject_label))
         if not labels:
