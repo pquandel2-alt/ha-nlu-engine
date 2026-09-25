@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **6.1.0** (V11)
+- Aktuelle Version: **7.0.0** (V12)
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -1184,19 +1184,24 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/homeintent --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 6.1.0:
+Geprüfter Release-Stand von Version 7.0.0:
 
 ```text
-3310 passed, 12 skipped, 0 failed
-87 % Gesamt-Coverage
-73 % Coverage für conversation.py
+3824 passed, 12 skipped, 0 failed
+88 % Gesamt-Coverage
+74 % Coverage für conversation.py
+≥ 92 % Coverage für jedes V12-Modul
 ```
 
 Zusätzlich wurden ausgeführt:
 
 - Pyflakes für Integration und Tests,
 - eine blockierende Pyright-Prüfung für den Strict-Scope,
+- blockierende Strict-Prüfungen für V11 (`pyrightconfig-v11-strict.json`)
+  und V12 (`pyrightconfig-v12-strict.json`),
 - eine ebenfalls blockierende vollständige Pyright-Prüfung,
+- das V12-Sicherheits- und OOD-Gate (291 handgeschriebene Fälle) und der
+  V12-Benchmark (`scripts/benchmark_v12.py`),
 - ein versionierter XML-Coverage-Bericht als CI-Artefakt,
 - JSON-Validierung der deutschen UI-Texte und
 - `git diff --check`.
@@ -1214,7 +1219,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-6.1.0.json --quiet
+  --check docs/perf/v7-shadow-baseline-7.0.0.json --quiet
 ```
 
 Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die

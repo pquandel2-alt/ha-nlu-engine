@@ -163,6 +163,7 @@ from .preferences import (
 from .predictive_house_model import PredictiveHouseModel
 from .management_understanding import understand_management
 from .proactive_dialog import V12_TASK_KINDS
+from .proactive_session import classify_proposal_reply
 from .room_presence import build_area_lookup
 from .planner import (
     Goal,
@@ -963,7 +964,12 @@ class NluConversationEntity(
         # unclaimed bare reply may address one unique V12 proposal for this
         # caller; with several open questions V12 asks which one is meant.
         proactive = self._runtime_data.proactive_context
-        if active_dialog is None and proactive is not None and proactive.enabled:
+        if (
+            active_dialog is None
+            and proactive is not None
+            and proactive.enabled
+            and classify_proposal_reply(user_input.text) is not None
+        ):
             other_questions = (
                 await self._runtime_data.proactive_agent.async_open_voice_question_count()
                 if self._runtime_data.proactive_agent is not None
