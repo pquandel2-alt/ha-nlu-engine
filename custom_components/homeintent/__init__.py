@@ -366,6 +366,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(await adapter_runtime.async_start())
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    try:
+        from .learning_center_ws import async_setup_learning_center
+
+        # 7.1 Learning Center: one sidebar panel + authenticated WebSocket API
+        # over the existing V11/V12 authorities.  A panel failure must never
+        # take the conversation agent down with it.
+        await async_setup_learning_center(hass, entry)
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("HomeIntent Learning Center could not be registered")
 
     # Single-instance-only integration (config_flow.py's own
     # ``_async_abort_entries_match({})``) - guarded anyway so a second
@@ -699,6 +708,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
+        try:
+            from .learning_center_ws import async_unload_learning_center
+
+            async_unload_learning_center(hass, entry)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("HomeIntent Learning Center could not be unregistered")
         if entry.runtime_data.remove_learning_listener is not None:
             entry.runtime_data.remove_learning_listener()
             entry.runtime_data.remove_learning_listener = None

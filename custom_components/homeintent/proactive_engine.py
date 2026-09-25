@@ -230,6 +230,8 @@ class ProactiveContextEngine:
         self.proposals = ProposalStore()
         self.permissions = StandingPermissionStore()
         self.history = ProactiveHistoryStore()
+        # Content-free "something persisted" notifications (Learning Center).
+        self.persist_listeners: list[Callable[[], None]] = []
         self.forecast = ContextForecastEngine(predictive_house)
         self.priority_policy = PriorityPolicy()
         self.privacy_policy = PrivacyPolicy()
@@ -966,6 +968,8 @@ class ProactiveContextEngine:
 
     async def async_persist(self) -> None:
         await self.storage.async_write(self.document())
+        for listener in tuple(self.persist_listeners):
+            listener()
 
     async def async_restore(self) -> int:
         """Restore operational state, then revalidate it against live HA state.

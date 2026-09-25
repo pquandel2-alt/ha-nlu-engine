@@ -1,0 +1,10 @@
+{
+  "include": [
+    "custom_components/homeintent/learning_center.py",
+    "custom_components/homeintent/learning_control.py"
+  ],
+  "exclude": ["tests"],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "strict",
+  "reportMissingImports": false
+}

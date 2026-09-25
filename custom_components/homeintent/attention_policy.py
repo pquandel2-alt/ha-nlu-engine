@@ -94,6 +94,17 @@ class AttentionStateStore:
     def is_muted(self, user_id: str | None, kind: SituationKind) -> bool:
         return user_id is not None and _mute_key(user_id, kind) in self._mutes
 
+    def mutes(self) -> tuple[tuple[str, SituationKind, datetime], ...]:
+        """Read-only view of confirmed mutes as (user_id, kind, confirmed_at)."""
+        result: list[tuple[str, SituationKind, datetime]] = []
+        for key, confirmed_at in self._mutes.items():
+            user_id, _separator, raw_kind = key.partition("\0")
+            try:
+                result.append((user_id, SituationKind(raw_kind), confirmed_at))
+            except ValueError:
+                continue
+        return tuple(result)
+
     # -- grouping ------------------------------------------------------------
     def add_to_group(self, recipient: str, item: GroupedItem, deadline: datetime) -> bool:
         """Queue an item; returns True when a new flush must be scheduled."""

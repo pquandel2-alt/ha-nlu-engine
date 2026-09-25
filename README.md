@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **7.0.1** (V12)
+- Aktuelle Version: **7.1.0** (V12 + Learning Center)
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -41,6 +41,46 @@ HomeIntent benötigt für die Sprachverarbeitung:
 Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
+
+## Was ist in Version 7.1.0 neu?
+
+**HomeIntent 7.1.0 — Learning Center & Knowledge Control.** Keine neue
+Lern- oder Vorhersagegeneration, sondern eine Oberfläche, die das bereits
+vorhandene V11/V12-Wissen sichtbar, verständlich, kontrollierbar und
+nachvollziehbar macht:
+
+- **Seitenleiste → 🧠 HomeIntent** (Pfad `/homeintent`). Ohne YAML, ohne
+  Lovelace-Ressource, ohne CDN: Panel und Datei liefert die Integration selbst
+  mit; nach einem HACS-Update lädt der Browser automatisch die neue Version.
+- **Übersicht, Wissen, Autonomie, Aktivität** – fürs iPhone entworfen, auf dem
+  Desktop mehrspaltig, in Hell- und Dunkelmodus, Deutsch und Englisch.
+- **Was hat HomeIntent gelernt – und warum?** Heizverhalten, Reaktionszeiten,
+  Gerätezuverlässigkeit, Präferenzen und Gewohnheiten mit verständlichem
+  Status („Gültig“, „Lernt noch“, „Vermutet“, „Bestätigt“, „Veraltet“,
+  „Verhalten geändert“, „Unzuverlässig“, „Ungültig“), echten Kennzahlen,
+  „Wofür wird das verwendet?“ und „Woher weißt du das?“. Der Qualitätswert
+  wird nie als Wahrscheinlichkeit ausgegeben.
+- **Korrigieren und entfernen** über dieselben Autoritäten wie per Sprache:
+  Präferenz bestätigen/verwerfen, Gewohnheit als Routine übernehmen (wird
+  gespeichert, nicht ausgeführt) oder dauerhaft nicht mehr vorschlagen,
+  Modell vergessen, für Administratoren alle Lernmodelle zurücksetzen. Keine
+  dieser Aktionen schaltet ein Gerät.
+- **Was darf HomeIntent ohne Rückfrage?** Daueranweisungen mit genauem
+  Geltungsbereich, Ablauf und Tagesnutzung – widerrufbar durch Eigentümer oder
+  Administrator; stummgeschaltete Hinweise aufheben; Ruhezeit und
+  Lernfunktionen auf einen Blick.
+- **Mehrbenutzerfähig und privat.** Persönliche Präferenzen, Gewohnheiten,
+  Stummschaltungen und persönlicher Verlauf werden serverseitig gefiltert –
+  andere Benutzer erhalten sie gar nicht erst. Bestätigen kann nur der
+  Eigentümer; Administratoren können Unerwünschtes entfernen, sehen aber
+  keine persönlichen Inhalte.
+- **Eine Wahrheit für Sprache und Oberfläche.** Bestätigen, Vergessen und
+  Zurücksetzen laufen per Sprache und Panel durch dieselben Funktionen; das
+  Panel aktualisiert sich ohne Polling über ein inhaltsfreies Änderungssignal.
+- **Kein Datenumbau.** Keine Migration, kein zusätzlicher Speicher: Modelle,
+  Tombstones, Daueranweisungen und V12-Verlauf aus 7.0.1 bleiben unverändert.
+
+Details: [`docs/learning-center.md`](docs/learning-center.md).
 
 ## Was ist in Version 7.0.1 neu?
 
@@ -1059,6 +1099,12 @@ Voraussetzung ist Home Assistant **2026.4.0** oder neuer.
 7. Öffne **Einstellungen → Geräte & Dienste → Integration hinzufügen**.
 8. Füge **HomeIntent** hinzu.
 
+Danach erscheint in der Seitenleiste **🧠 HomeIntent** – das Learning Center
+(Wissen & Autonomie). Eingerichtet wird HomeIntent weiterhin unter
+**Einstellungen → Geräte & Dienste → HomeIntent → Konfigurieren**; das
+Learning Center zeigt, was HomeIntent weiß und darf, die Optionen legen fest,
+wie HomeIntent arbeitet.
+
 Bei einem Update über HACS anschließend Home Assistant neu starten. Wenn eine
 ältere Installation ungewöhnliches Verhalten zeigt, die Integration einmal
 neu laden; ein vollständiges Entfernen ist normalerweise nicht erforderlich.
@@ -1207,6 +1253,7 @@ Weitere Dokumentation:
 - [`docs/natural-language-roadmap-v7.md`](docs/natural-language-roadmap-v7.md)
 - [`docs/quality-checklist.md`](docs/quality-checklist.md)
 - [`docs/troubleshooting.md`](docs/troubleshooting.md)
+- [`docs/learning-center.md`](docs/learning-center.md)
 
 ## Entwicklung und Tests
 
@@ -1216,21 +1263,28 @@ python -m pytest -q
 python -m pytest -q --cov=custom_components/homeintent --cov-report=term-missing
 ```
 
-Geprüfter Release-Stand von Version 7.0.1:
+Geprüfter Release-Stand von Version 7.1.0:
 
 ```text
-3865 passed, 12 skipped, 0 failed
-88 % Gesamt-Coverage
-74 % Coverage für conversation.py
+3962 passed, 12 skipped, 0 failed
+89 % Gesamt-Coverage
+75 % Coverage für conversation.py
 ≥ 93 % Coverage für jedes V12-Modul
+≥ 95 % Coverage für jedes Learning-Center-Modul
 ```
 
 Zusätzlich wurden ausgeführt:
 
 - Pyflakes für Integration und Tests,
 - eine blockierende Pyright-Prüfung für den Strict-Scope,
-- blockierende Strict-Prüfungen für V11 (`pyrightconfig-v11-strict.json`)
-  und V12 (`pyrightconfig-v12-strict.json`),
+- blockierende Strict-Prüfungen für V11 (`pyrightconfig-v11-strict.json`),
+  V12 (`pyrightconfig-v12-strict.json`) und das Learning Center
+  (`pyrightconfig-learning-center-strict.json`),
+- die Learning-Center-Latenzbudgets (`scripts/benchmark_learning_center.py`),
+  die Prüfung des Panels bei iPhone-Breite in Hell und Dunkel
+  (`scripts/check_learning_center_mobile.cjs`) und die Prüfung der
+  Panel-/WebSocket-Anbindung gegen ein echtes Home Assistant
+  (`scripts/validate_learning_center_ha.py`),
 - eine ebenfalls blockierende vollständige Pyright-Prüfung,
 - das V12-Sicherheits- und OOD-Gate (296 handgeschriebene Fälle) und der
   V12-Benchmark (`scripts/benchmark_v12.py`),
@@ -1251,7 +1305,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-7.0.1.json --quiet
+  --check docs/perf/v7-shadow-baseline-7.1.0.json --quiet
 ```
 
 Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die
