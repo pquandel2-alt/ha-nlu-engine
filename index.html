@@ -42,8 +42,9 @@
 
     <nav class="nav__links" aria-label="Hauptnavigation">
       <a href="#verstehen">Verstehen</a>
-      <a href="#demo">Live-Pipeline</a>
+      <a href="#demo">Demo</a>
       <a href="#koennen">Können</a>
+      <a href="#agent">Agent</a>
       <a href="#sicherheit">Sicherheit</a>
       <a href="#neu">V11</a>
       <a href="#architektur">Architektur</a>
@@ -323,90 +324,193 @@
     <div class="capsules reveal">
       <div class="glass capsule">
         <h4><span class="capsule__n">01</span> Zustände &amp; Messwerte</h4>
-        <p>Fragen sind strikt lesend und erzeugen niemals einen steuernden Serviceplan — auch die heiklen Formen nicht: <em>„Soll ich …?“</em>, <em>„Wollen wir …?“</em>, <em>„War das …?“</em>. Zustandsantworten unterscheiden <em>wahr</em>, <em>falsch</em> und <em>nicht sicher bestimmbar</em> — fehlende Daten werden nie zu einem erfundenen „Nein“.</p>
+        <p>Fragen sind strikt lesend und erzeugen niemals einen steuernden Serviceplan, auch nicht bei heiklen Formen wie <em>„Soll ich …?“</em> oder <em>„War das …?“</em>. Antworten unterscheiden <em>wahr</em>, <em>falsch</em> und <em>nicht sicher bestimmbar</em>. Fehlende Daten werden nie zu einem erfundenen „Nein“.</p>
         <div class="mini">
           <code>Ist im Bad noch Licht an?</code>
-          <code>Welche Fenster sind offen?</code>
-          <code>Soll ich das Radio stumm schalten?</code>
+          <code>Welche Batterien sind unter 20 Prozent?</code>
+          <code>Welches Gerät verbraucht gerade am meisten Strom?</code>
         </div>
       </div>
       <div class="glass capsule">
-        <h4><span class="capsule__n">02</span> Verlauf über den Recorder</h4>
-        <p>Natürliche Vergangenheitsfragen werden rein lesend aus den Recorder-Statistiken beantwortet — ohne dass ein Gerät angefasst wird.</p>
+        <h4><span class="capsule__n">02</span> Schlussfolgern über das Haus</h4>
+        <p>Seit V9 werden Fragen über Beziehungen im Haus als typisierte Abfrage beantwortet: Filter über Räume und Geräte, Zählungen, Gruppierungen, Superlative, Mengen und Einheiten. Nur belegte Fakten zählen.</p>
         <div class="mini">
+          <code>Wo steht ein Fenster offen, obwohl das Licht aus ist?</code>
+          <code>Wie viele Fenster sind im Erdgeschoss geöffnet?</code>
+          <code>Welche davon sind im Obergeschoss?</code>
+        </div>
+      </div>
+      <div class="glass capsule">
+        <h4><span class="capsule__n">03</span> Verlauf &amp; Statistik</h4>
+        <p>Mittelwert, Minimum, Maximum, Veränderung, Häufigkeit und Dauer für heute, gestern, diese und letzte Woche kommen aus dem Recorder. Fehlen Daten, sagt HomeIntent das, statt den aktuellen Wert als Vergangenheit auszugeben.</p>
+        <div class="mini">
+          <code>Wann war das Badezimmer Fenster zuletzt offen?</code>
+          <code>War die Wohnzimmer Temperatur gestern niedriger als heute?</code>
           <code>Wie lange lief der Saugroboter gestern?</code>
-          <code>Wie oft spielte das Radio gestern?</code>
         </div>
       </div>
       <div class="glass capsule">
-        <h4><span class="capsule__n">03</span> Kontext &amp; Rückfragen</h4>
-        <p>Kurze Anschlussäußerungen werden aus Gesprächskontext und Operation zusammengesetzt — nicht über eine Liste vollständiger Sätze.</p>
+        <h4><span class="capsule__n">04</span> Haushalt, Wetter &amp; Anwesenheit</h4>
+        <p>Fragen, die kein einzelnes Gerät betreffen, beantwortet HomeIntent aus Wetter-, <code>person</code>- und <code>sun</code>-Entitäten sowie dem Gesamtzustand. Dazu kommen Datum, Uhrzeit und die verfügbaren Szenen und Skripte.</p>
         <div class="mini">
-          <code>Spielt das Radio Atlas?</code>
-          <code>Läuft es noch?</code>
-          <code>Und im Wohnzimmer?</code>
-        </div>
-      </div>
-      <div class="glass capsule">
-        <h4><span class="capsule__n">04</span> Kalender, Listen &amp; Timer</h4>
-        <p>Termine in einem Satz anlegen, fehlende Angaben im Dialog ergänzen, mehrere Listeneinträge gleichzeitig erfassen, Timer starten und abfragen.</p>
-        <div class="mini">
-          <code>Trag Zahnarzt am Dienstag um 9 Uhr ein.</code>
-          <code>Setz Milch, Brot und Kaffee auf die Einkaufsliste.</code>
-        </div>
-      </div>
-      <div class="glass capsule">
-        <h4><span class="capsule__n">05</span> Automationen per Sprache</h4>
-        <p>Zeit-, Zustands-, Sonnen-, Zahlen- und Kalenderauslöser, Wiederholungen, Zeiträume, Laufbegrenzungen, Bedingungen und Aktionsfolgen — mit Vorschau <em>vor</em> jeder Änderung.</p>
-        <div class="mini">
-          <code>Wenn es dunkel wird, mach die Stehlampe an.</code>
-          <code>Jeden Werktag um 7 Uhr die Rollläden hoch.</code>
-        </div>
-      </div>
-      <div class="glass capsule">
-        <h4><span class="capsule__n">06</span> Haushalt, Wetter &amp; Anwesenheit</h4>
-        <p>Seit 4.58 beantwortet HomeIntent auch die Fragen, die kein einzelnes
-        Gerät betreffen — aus Wetter-, <code>person</code>- und
-        <code>sun</code>-Entitäten sowie dem Gesamtzustand. Alles strikt lesend.
-        Eine Vorhersage kommt aus dem <code>forecast</code>-Attribut; fehlt es,
-        sagt HomeIntent das, statt zu raten.</p>
-        <div class="mini">
-          <code>Wie ist das Wetter?</code>
           <code>Wie wird das Wetter morgen?</code>
           <code>Wer ist zuhause?</code>
-          <code>Wann geht die Sonne unter?</code>
           <code>Gibt es Probleme im Haus?</code>
         </div>
       </div>
       <div class="glass capsule">
-        <h4><span class="capsule__n">07</span> Persönliche Aliase</h4>
-        <p>HomeIntent kann bestätigte Namen lernen. Die Regel wird erst nach einem ausdrücklichen <em>Ja</em> lokal gespeichert, ist in den Optionen sichtbar und jederzeit löschbar. Kein verstecktes Gedächtnis.</p>
+        <h4><span class="capsule__n">05</span> Haushaltsgeräte</h4>
+        <p>Waschmaschine, Trockner und Geschirrspüler: Status, Fortschritt, Restlaufzeit und Fertigstellungszeit aus freigegebenen Zustands- und Zeitstempel-Sensoren. Fehlende oder ungültige Werte werden nicht geschätzt.</p>
         <div class="mini">
-          <code>Mit Bürolicht meine ich Schreibtischlampe.</code>
+          <code>Läuft die Waschmaschine noch?</code>
+          <code>Wie lange läuft die Waschmaschine noch?</code>
+          <code>Wann ist die Waschmaschine fertig?</code>
         </div>
       </div>
       <div class="glass capsule">
-        <h4><span class="capsule__n">08</span> Ziele, Routinen &amp; Wirkung</h4>
-        <p>Seit 5.0 beschreibt ein Ziel das gewünschte <em>Ergebnis</em>, nicht einen Serviceaufruf. Ein begrenzter Planer prüft Vorbedingungen, und jeder Lauf hält fest, ob der Dienst angenommen <em>und</em> die Wirkung beobachtet wurde. Unbekannte Begriffe wie „Filmabend“ führen zu einer Rückfrage.</p>
+        <h4><span class="capsule__n">06</span> Kontext, Korrektur &amp; Rückgängig</h4>
+        <p>Kurze Folgeäußerungen werden aus Gesprächskontext und Operation zusammengesetzt. Eine Zielkorrektur nimmt eine umkehrbare Aktion zuerst zurück. „Rückgängig“ stellt den zuvor beobachteten Zustand wieder her.</p>
         <div class="mini">
-          <code>Um 7 Uhr soll es im Bad 21 Grad haben.</code>
-          <code>Warum hat das nicht funktioniert?</code>
+          <code>Und im Wohnzimmer?</code>
+          <code>Nein, ich meinte nur die Stehlampe.</code>
+          <code>Mach das rückgängig.</code>
         </div>
       </div>
       <div class="glass capsule">
-        <h4><span class="capsule__n">09</span> Satelliten &amp; Rückfragen</h4>
-        <p>Nach einer Rückfrage bleibt das Mikrofon des Sprachsatelliten offen, und die Antwort kann ohne erneutes Wakeword gesprochen werden. Raumlose Befehle beziehen sich auf den Bereich des Satelliten. Ein ausdrücklich genannter Raum hat immer Vorrang.</p>
+        <h4><span class="capsule__n">07</span> Kalender &amp; Listen</h4>
+        <p>Termine in einem Satz oder im Dialog anlegen, abfragen, freie Zeit prüfen, verschieben, umbenennen und löschen. Listen verwalten mit mehreren Einträgen pro Satz, Erledigt-Status und Verschieben zwischen Listen.</p>
         <div class="mini">
-          <code>Fahr die Rolllade auf 50 Prozent.</code>
+          <code>Habe ich morgen zwischen 14 und 16 Uhr Zeit?</code>
+          <code>Verschiebe den Zahnarzttermin auf 11 Uhr.</code>
+          <code>Füge Milch, Brot und Äpfel zur Einkaufsliste hinzu.</code>
+        </div>
+      </div>
+      <div class="glass capsule">
+        <h4><span class="capsule__n">08</span> Timer &amp; Erinnerungen</h4>
+        <p>Native Assist-Timer mit Namen und optionalem Signalton, alternativ per TTS angesagt. Erinnerungen an dich oder eine bestimmte Person, auf Wunsch außerhalb einer Ruhezeit.</p>
+        <div class="mini">
+          <code>Stelle einen Timer für fünf Minuten mit dem Hinweis Nudeln.</code>
+          <code>Verlängere den Küchentimer um fünf Minuten.</code>
+          <code>Erinnere mich in 30 Minuten an die Waschmaschine, aber nicht zwischen 22 und 7 Uhr.</code>
+        </div>
+      </div>
+      <div class="glass capsule">
+        <h4><span class="capsule__n">09</span> Automationen erstellen</h4>
+        <p>Zeit-, Zustands-, Sonnen-, Zahlen- und Kalenderauslöser, Wiederholungen, Zeiträume, Laufbegrenzungen, Bedingungen, Verzweigungen und Aktionsfolgen. Einmal-Aufträge löschen sich nach der Ausführung selbst. Vor jeder Änderung gibt es eine Vorschau.</p>
+        <div class="mini">
+          <code>Wenn es dunkel wird, mach die Stehlampe an.</code>
+          <code>Jeden zweiten Samstag um 10 Uhr schalte das Küchenlicht ein.</code>
+          <code>Fahre morgen um 8 Uhr die Rolllade hoch.</code>
+        </div>
+      </div>
+      <div class="glass capsule">
+        <h4><span class="capsule__n">10</span> Automationen verwalten</h4>
+        <p>Auflisten, erklären, simulieren, aktivieren, pausieren, duplizieren und löschen. Auslöser, Bedingungen und einzelne Aktionen lassen sich gezielt ändern. Die letzte Änderung kann rückgängig gemacht werden.</p>
+        <div class="mini">
+          <code>Was würde die Automation für Küchenlicht jetzt tun?</code>
+          <code>Warum wurde die Automation für Büro Rollladen nicht ausgelöst?</code>
+          <code>Pausiere die Automation für Küchenlicht bis morgen 20 Uhr.</code>
+        </div>
+      </div>
+      <div class="glass capsule">
+        <h4><span class="capsule__n">11</span> Selbstauskunft</h4>
+        <p>HomeIntent erklärt, was es kann und warum etwas nicht geht: fehlende Bereiche, nicht unterstützte Domänen, Fähigkeiten einzelner Geräte. „Was hast du verstanden?“ liefert den aufgelösten Plan.</p>
+        <div class="mini">
+          <code>Ist HomeIntent bereit?</code>
+          <code>Welche Geräte kannst du nicht steuern?</code>
+          <code>Was kann der Fernseher im Wohnzimmer?</code>
+        </div>
+      </div>
+      <div class="glass capsule">
+        <h4><span class="capsule__n">12</span> Satelliten, Aliase &amp; Auswahl</h4>
+        <p>Raumlose Befehle beziehen sich auf den Bereich des Sprachsatelliten, und nach einer Rückfrage bleibt dessen Mikrofon offen. Mehrere Treffer werden nummeriert zur Auswahl gestellt. Eigene Namen gelten erst nach einem ausdrücklichen <em>Ja</em>.</p>
+        <div class="mini">
+          <code>Schalte das Licht hier ein.</code>
           <code>Das zweite.</code>
+          <code>Mit Bürolicht meine ich Schreibtischlampe.</code>
         </div>
       </div>
     </div>
   </div>
 </section>
 
+<!-- ═══════════════════════ AGENT ═══════════════════════ -->
+<section class="sec" id="agent">
+  <div class="wrap">
+    <div class="sechead reveal">
+      <span class="kicker">Agent</span>
+      <h2>Mehr als Befehle.<br>Ein Haus, das <em>mitdenkt.</em></h2>
+      <p class="sechead__sub">
+        Rund um die Sprachsteuerung ist ein lokaler Agentenkern entstanden:
+        Ziele statt Einzelbefehle, proaktive Hinweise, ein Gedächtnis für
+        bestätigte Vorlieben und lokale Datenquellen. Alles davon ist
+        abschaltbar, und keine dieser Schichten ruft selbst einen
+        Home-Assistant-Dienst auf.
+      </p>
+    </div>
+
+    <div class="capsules reveal">
+      <div class="glass capsule">
+        <h4><span class="capsule__n">A</span> Ziele &amp; Mehrschrittpläne</h4>
+        <p>Ein Ziel beschreibt das gewünschte <em>Ergebnis</em>. Ein begrenzter Planer zerlegt es in geprüfte Schritte mit Vorbedingungen und Wirkungskontrolle. Schlägt ein Schritt fehl, werden nur ausdrücklich umkehrbare Schritte zurückgenommen. Jeder Lauf ist später erklärbar.</p>
+        <div class="mini">
+          <code>Bereite das Haus für die Nacht vor.</code>
+          <code>Aber das Kinderzimmer nicht.</code>
+          <code>Sorge dafür, dass es morgen um 7 Uhr im Wohnzimmer 21 Grad hat.</code>
+          <code>Warum hat gestern der Filmabend nicht funktioniert?</code>
+        </div>
+      </div>
+      <div class="glass capsule">
+        <h4><span class="capsule__n">B</span> Überwachen &amp; Bescheid sagen</h4>
+        <p>Persistente Monitor-Ziele prüfen ihre Bedingungen zum Auslösezeitpunkt frisch, überleben Neustarts und benachrichtigen genau die gemeinten Personen. Ohne eindeutige Zuordnung wird nie an alle gesendet.</p>
+        <div class="mini">
+          <code>Wenn ich gehe und ein Fenster offen ist, sag mir Bescheid.</code>
+          <code>Wenn niemand zuhause ist und noch Licht an ist, sag uns Bescheid.</code>
+          <code>Wenn Julia nach Hause kommt und die Garage offen ist, sag ihr Bescheid.</code>
+        </div>
+      </div>
+      <div class="glass capsule">
+        <h4><span class="capsule__n">C</span> Proaktive Hinweise</h4>
+        <p>Push und TTS mit den Knöpfen <em>Ausführen</em>, <em>Ignorieren</em> und <em>In 30 Minuten erinnern</em>. Drei Stufen: <code>INFORM</code> meldet nur, <code>ASK</code> fragt vorher, <code>AUTO</code> ist ab Werk aus und nur für einzeln freigegebene Geräte mit niedrigem Risiko möglich. Ruhezeiten, Cooldown und Deduplizierung sind eingebaut.</p>
+        <div class="mini">
+          <code>Kannst du mich benachrichtigen, wenn die Außentemperatur 28 Grad beträgt?</code>
+        </div>
+      </div>
+      <div class="glass capsule">
+        <h4><span class="capsule__n">D</span> Situationen erkennen</h4>
+        <p>Auf Wunsch wertet HomeIntent Zustandsänderungen aus: Sicherheitsalarm, Geräteausfall, nächtliches Öffnen bei Abwesenheit, Fenster offen bei laufender Heizung, Licht in leeren Räumen, auffällig lange Zustände, Abweichungen von der Routine und ausgebliebene Wirkungen. Jede Kategorie muss einzeln aktiviert werden.</p>
+      </div>
+      <div class="glass capsule">
+        <h4><span class="capsule__n">E</span> Gedächtnis, Profile &amp; Routinen</h4>
+        <p>Ein lokales SQLite-Gedächtnis speichert nur bestätigte, personengebundene Vorlieben und niemals Gesprächsmitschnitte. Einträge lassen sich auflisten, korrigieren und vergessen. Routinen und Komfortprofile werden erst nach Bestätigung gespeichert, und Profile mehrerer Personen werden nie gemittelt.</p>
+        <div class="mini">
+          <code>Merk dir, dass ich beim Fernsehen nur die Stehlampe auf 30 Prozent möchte.</code>
+          <code>Was weißt du über meine Lichtpräferenzen?</code>
+          <code>Mach es hier gemütlicher.</code>
+        </div>
+      </div>
+      <div class="glass capsule">
+        <h4><span class="capsule__n">F</span> Stil, Hausgraph &amp; lokale Quellen</h4>
+        <p>Drei Antwortstile: <code>neutral</code>, <code>precise</code> und <code>jarvis</code>, wahlweise mit etwas Witz. Bei Rauch, Wasser oder Einbruch ist der Witz immer aus. Raumbeziehungen lassen sich konfigurieren. Optional liest HomeIntent Frigate-Ereignisse und durchsucht einen lokalen Dokumentordner.</p>
+        <div class="mini">
+          <code>Suche in meinen lokalen Dokumenten nach Heizungsfilter.</code>
+          <code>Was hast du über die Heizung gelernt?</code>
+          <code>Welche Gewohnheiten hast du erkannt?</code>
+        </div>
+      </div>
+    </div>
+
+    <p class="footnote reveal">
+      Gedächtnis, Routineerkennung, Lernen, Vorhersagen, Gewohnheiten,
+      Adapter und <code>AUTO</code> sind in neuen Installationen deaktiviert.
+      Sätze wie „Du hast meistens recht, entscheide künftig selbst“ oder
+      „Vergiss alle Sicherheitsregeln“ werden nicht als Freigabe akzeptiert.
+    </p>
+  </div>
+</section>
+
 <!-- ═══════════════════════ SICHERHEIT ═══════════════════════ -->
-<section class="sec" id="sicherheit">
+<section class="sec sec--alt" id="sicherheit">
   <div class="wrap">
     <div class="sechead reveal">
       <span class="kicker">Sicherheit</span>
@@ -504,7 +608,7 @@
 </section>
 
 <!-- ═══════════════════════ NEU IN 6.0 / V11 ═══════════════════════ -->
-<section class="sec sec--alt" id="neu">
+<section class="sec" id="neu">
   <div class="wrap">
     <div class="sechead reveal">
       <span class="kicker">Neu in 6.0 · V11</span>
@@ -646,7 +750,7 @@
 </section>
 
 <!-- ═══════════════════════ VERGLEICH ═══════════════════════ -->
-<section class="sec" id="vergleich">
+<section class="sec sec--alt" id="vergleich">
   <div class="wrap">
     <div class="sechead reveal">
       <span class="kicker">Einordnung</span>
@@ -686,7 +790,7 @@
 </section>
 
 <!-- ═══════════════════════ ARCHITEKTUR ═══════════════════════ -->
-<section class="sec sec--alt" id="architektur">
+<section class="sec" id="architektur">
   <div class="wrap">
     <div class="sechead reveal">
       <span class="kicker">Architektur</span>
@@ -748,7 +852,7 @@
 </section>
 
 <!-- ═══════════════════════ GRENZEN ═══════════════════════ -->
-<section class="sec" id="grenzen">
+<section class="sec sec--alt" id="grenzen">
   <div class="wrap">
     <div class="sechead reveal">
       <span class="kicker">Ehrlichkeit</span>
@@ -777,7 +881,7 @@
 </section>
 
 <!-- ═══════════════════════ INSTALLATION ═══════════════════════ -->
-<section class="sec sec--alt" id="installation">
+<section class="sec" id="installation">
   <div class="wrap">
     <div class="sechead reveal">
       <span class="kicker">Loslegen</span>
@@ -873,6 +977,7 @@
       </div>
       <div><h5>Seite</h5>
         <a href="#demo">Live-Pipeline</a>
+        <a href="#agent">Agent</a>
         <a href="#sicherheit">Sicherheit</a>
         <a href="#neu">Neu in 6.0</a>
         <a href="#grenzen">Bekannte Grenzen</a>

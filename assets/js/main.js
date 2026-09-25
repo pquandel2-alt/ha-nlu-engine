@@ -94,7 +94,13 @@ const SCENES = [
     ha: 'Morgen wird es bewölkt, bis 19 Grad, mindestens 11 Grad.', ms: '0,04 ms' },
   { me: 'Wer ist zuhause?',
     sys: 'person-Domäne · kein Serviceplan erzeugt',
-    ha: 'Zuhause: Philipp.', ms: '0,03 ms' }
+    ha: 'Zuhause: Philipp.', ms: '0,03 ms' },
+  { me: 'Wenn ich gehe und ein Fenster offen ist, sag mir Bescheid.',
+    sys: 'Monitor-Ziel · Empfänger eindeutig · Vorschau',
+    ha: 'Ich würde dich benachrichtigen, wenn du gehst und ein Fenster offen ist. Soll ich das speichern?', ms: '0,09 ms' },
+  { me: 'Merk dir, dass ich beim Fernsehen nur die Stehlampe auf 30 Prozent möchte.',
+    sys: 'Präferenz · personengebunden · Bestätigung nötig',
+    ha: 'Soll ich das dauerhaft für dich speichern?', ms: '0,06 ms' }
 ];
 
 const chatBody = $('#chatBody'), chatMs = $('#chatMs'), chatBadge = $('#chatBadge');
