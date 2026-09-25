@@ -665,6 +665,96 @@
       </div>
     </div>
 
+    <h3 class="wordorder__h reveal" style="margin-top:56px">So lernt HomeIntent</h3>
+    <p class="sechead__sub reveal" style="margin:0 0 32px">
+      Gelernt wird ausschließlich aus Aktionen, die HomeIntent selbst
+      ausgeführt und deren Wirkung es anschließend beobachtet hat. Aus jeder
+      solchen Beobachtung wird eine kleine, strukturierte Erfahrung. Erst
+      wenn genug Erfahrungen vorliegen und das Modell eine Prüfung besteht,
+      darf es den Planer beraten.
+    </p>
+
+    <div class="arch reveal">
+      <div class="arch__col">
+        <div class="arch__node arch__node--in">Aktion über HomeIntent · bestätigt und ausgeführt</div>
+        <div class="arch__wire" aria-hidden="true"></div>
+        <div class="arch__node arch__node--router">GoalRun · Wirkung beobachtet oder ausgeblieben</div>
+      </div>
+
+      <div class="arch__branch">
+        <div class="arch__lane">
+          <span class="arch__lane-h">Der Lernkreislauf</span>
+          <ol>
+            <li><b>Erfahrung:</b> eine Aktion, ihr enger Kontext, Messwerte davor und danach, Wirkung und Dauer. Kein Gesprächstext, kein Zustandsabbild des Hauses.</li>
+            <li><b>Filter:</b> Unvollständige, widersprüchliche oder von außen gestörte Vorgänge werden verworfen statt gelernt.</li>
+            <li><b>Modell:</b> Ein transparentes Rechenmodell (Mediane, Quantile, kleinste Quadrate) wird schrittweise aktualisiert.</li>
+            <li><b>Prüfung:</b> Ab 15 Proben trainiert das Modell mit den älteren 80 % und wird an den neuesten 20 % gemessen.</li>
+            <li><b>Vorhersage:</b> Wert, Unsicherheitsintervall, Stichprobenzahl, Alter und Herkunft, oder ein ausdrücklicher Grund, warum es keine gibt.</li>
+            <li class="is-end">Empfehlung an den Planer, <em>keine</em> Ausführung</li>
+          </ol>
+        </div>
+
+        <div class="arch__lane">
+          <span class="arch__lane-h">Beispiel: um 7 Uhr 21 Grad im Wohnzimmer</span>
+          <ol>
+            <li><b>Ohne Modell:</b> HomeIntent fragt, ob der Sollwert um 7 Uhr gesetzt oder bis 7 Uhr erreicht werden soll. Eine Vorheizzeit wird nie erfunden.</li>
+            <li><b>Mit Modell:</b> Aus früheren Heizzyklen schätzt es zum Beispiel 40 Minuten, bei den ungünstigsten 10 % bis 52 Minuten.</li>
+            <li><b>Startzeit:</b> 7:00 − 40 min − 12 min Reserve = <b>6:08 Uhr</b>. Die Reserve stammt aus den gemessenen Abweichungen.</li>
+            <li><b>Vorschau:</b> Der normale Planer zeigt den Plan, prüft Gerät und Richtlinie und wartet auf dein Ja.</li>
+            <li><b>Zwischenprüfung:</b> Auf Kurs oder wahrscheinlich zu spät? Es gibt eine neue ETA, aber keinen Gerätebefehl und keinen höheren Sollwert.</li>
+            <li class="is-end">Um 7 Uhr: Erfolg oder Fehlschlag wird <em>gemessen</em> und wird zur nächsten Erfahrung</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+    <p class="footnote reveal">
+      Die Minutenwerte im Beispiel sind zur Veranschaulichung gewählt. Die
+      Formel ist die tatsächlich verwendete:
+      <code>Start = Frist − geschätzte Dauer − (obere Schranke − Schätzung)</code>.
+    </p>
+
+    <div class="grid4" style="margin-top:32px">
+      <div class="glass tile reveal">
+        <h4>Was gelernt wird</h4>
+        <ul>
+          <li><b>Effektzeiten:</b> Wie lange dauert es, bis ein Gerät reagiert?</li>
+          <li><b>Zuverlässigkeit:</b> Nur verifizierte Erfolge und Fehlschläge zählen.</li>
+          <li><b>Aufheizdauer:</b> pro Raum, mit fest zugeordnetem Thermostat und Sensor</li>
+          <li><b>Vorlieben und Gewohnheiten:</b> nur als Vorschlag</li>
+        </ul>
+        <p class="mt small" style="margin-top:14px">Energie, Laufzeit und Batterie sind vorgesehen, aber noch nicht umgesetzt.</p>
+      </div>
+
+      <div class="glass tile reveal" style="--d:.06s">
+        <h4>Was verworfen wird</h4>
+        <ul>
+          <li>fehlende oder widersprüchliche Zeitstempel</li>
+          <li>ein offenes Fenster während des Heizens</li>
+          <li>ein von Hand verstellter Sollwert oder HVAC-Modus</li>
+          <li>ein gewechselter Sensor und unplausible Sprünge</li>
+          <li>Wirkungen, die nie bestätigt wurden</li>
+        </ul>
+      </div>
+
+      <div class="glass tile reveal" style="--d:.12s">
+        <h4>Wenn sich etwas ändert</h4>
+        <p>Liegen fünf Vorhersagen hintereinander deutlich in dieselbe Richtung
+        daneben, gilt das Modell als <b>gedriftet</b> und berät nicht mehr.
+        Ein ersetzter Sensor, ein verschobener Raum oder veraltete Daten
+        machen ein Modell ungültig. Es muss dann neu gelernt werden.</p>
+      </div>
+
+      <div class="glass tile reveal" style="--d:.18s">
+        <h4>Deine Daten</h4>
+        <p>Alles bleibt lokal: keine Kamera- oder Gesichtsdaten, keine
+        Bewegungsprotokolle, kein Export. Die Zahl der Erfahrungen ist
+        begrenzt, alte fallen heraus.</p>
+        <p class="mt small">Frag „Was hast du über die Heizung gelernt?“.
+        Einzelne Modelle lassen sich löschen, das vollständige Zurücksetzen
+        darf nur ein Administrator.</p>
+      </div>
+    </div>
+
     <h3 class="wordorder__h reveal" style="margin-top:56px">Der Weg zu 6.0</h3>
     <div class="grid4">
       <div class="glass tile reveal">
