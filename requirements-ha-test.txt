@@ -1,0 +1,10 @@
+# Real Home Assistant test environment for tests_ha/ (Python >= 3.14.2).
+# pytest-homeassistant-custom-component 0.13.365 pins homeassistant==2026.9.2.
+pytest-homeassistant-custom-component==0.13.365
+homeassistant==2026.9.2
+# Requirements of HomeIntent's manifest dependencies (conversation, frontend)
+# as pinned by Home Assistant 2026.9.2.
+gazetteer-matcher==1.1.0
+hassil==3.12.0
+home-assistant-intents==2026.8.28
+home-assistant-frontend==20260826.7
