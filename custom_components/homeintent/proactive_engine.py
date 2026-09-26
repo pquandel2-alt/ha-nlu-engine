@@ -147,6 +147,25 @@ class DeliveryReceipt:
     push_bindings: tuple[PushActionBinding, ...] = ()
 
 
+def _delivered_channel(
+    planned: CommunicationChannel, receipt: DeliveryReceipt
+) -> CommunicationChannel:
+    """The channel the history may claim: what was actually delivered (F25).
+
+    A notify entity cannot carry reply buttons, so a planned interactive push
+    that arrived as a plain push is recorded (and explained) as a push.
+    """
+    if not receipt.delivered:
+        return CommunicationChannel.HISTORY_ONLY
+    if (
+        planned is CommunicationChannel.INTERACTIVE_PUSH
+        and CommunicationChannel.INTERACTIVE_PUSH not in receipt.delivered
+        and CommunicationChannel.PUSH in receipt.delivered
+    ):
+        return CommunicationChannel.PUSH
+    return planned
+
+
 @dataclass(frozen=True)
 class OutgoingMessage:
     """A rendered message plus its routing; carries no device action."""
@@ -590,7 +609,7 @@ class ProactiveContextEngine:
                         ) or proposal
             self._record(
                 situation, outcome, recipient.user_id,
-                decision.channel if receipt.delivered else CommunicationChannel.HISTORY_ONLY,
+                _delivered_channel(decision.channel, receipt),
                 priority, privacy,
                 "delivered" if receipt.delivered else "delivery_failed",
                 (*reasons, *attention.reasons, *decision.reasons, *receipt.errors), anticipation,
@@ -990,7 +1009,7 @@ class ProactiveContextEngine:
         record = self.history.latest_for_subject(subject_words)
         if record is None or (
             record.privacy >= PrivacyLevel.PERSONAL
-            and (user_id is None or record.recipient_user_id != user_id)
+            and not record.addressed_to(user_id)
         ):
             return "Dazu habe ich in letzter Zeit keinen Hinweis gegeben."
         local = self.ports.local_now()
@@ -1003,7 +1022,7 @@ class ProactiveContextEngine:
             if item.result == "delivered"
             and (
                 item.privacy < PrivacyLevel.PERSONAL
-                or (user_id is not None and item.recipient_user_id == user_id)
+                or item.addressed_to(user_id)
             )
         ]
         labels = tuple(dict.fromkeys(item.subject_label for item in records if item.subject_label))

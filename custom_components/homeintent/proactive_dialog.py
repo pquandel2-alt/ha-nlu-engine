@@ -283,7 +283,7 @@ class ProactiveDialogHandler:
             return DialogOutcome("Ich kann diese Einstellung nur einem angemeldeten Benutzer zuordnen.")
         record = next(
             (item for item in reversed(self._engine.history.records())
-             if item.recipient_user_id == user_id and item.result == "delivered"),
+             if item.addressed_to(user_id) and item.result == "delivered"),
             None,
         )
         if record is None:
