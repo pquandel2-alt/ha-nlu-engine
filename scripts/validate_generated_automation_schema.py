@@ -5,11 +5,15 @@ from __future__ import annotations
 import asyncio
 from datetime import date, datetime, time, timezone
 
-import voluptuous as vol
 from homeassistant.components.automation.config import PLATFORM_SCHEMA
 from homeassistant.components.calendar import CREATE_EVENT_SCHEMA
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
+
+# Imported after ``homeassistant``: newer HA installs its own validator as
+# ``voluptuous`` at import time, and schema markers must come from the same
+# implementation ``cv`` uses.
+import voluptuous as vol  # noqa: E402
 
 from homeintent.calendar_event import CalendarEventDraft, build_calendar_event_service_call
 from homeintent.entities import EntitySnapshot
