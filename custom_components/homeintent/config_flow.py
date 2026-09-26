@@ -152,6 +152,10 @@ class HomeIntentConfigFlow(_DomainConfigFlow, domain=DOMAIN):
                 CONF_AGENT_AUTO_ENABLED: False,
                 CONF_AGENT_AUTO_ENTITY_IDS: [],
                 CONF_DOCUMENTS_ENABLED: False,
+                # F26 (7.1.3): new installations reserve automation creation
+                # for administrators (households with children's accounts).
+                # Entries created before 7.1.3 keep their stored behaviour.
+                CONF_ALLOW_NON_ADMIN_AUTOMATIONS: False,
             },
         )
 

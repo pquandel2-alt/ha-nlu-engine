@@ -20,6 +20,7 @@ from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.homeintent.const import (
+    CONF_ALLOW_NON_ADMIN_AUTOMATIONS,
     CONF_ADMIN_ONLY_ENTITIES,
     CONF_AGENT_AUTO_ENTITY_IDS,
     CONF_AGENT_MEDIA_PLAYERS,
@@ -91,6 +92,7 @@ SETUP_OPTIONS: dict[str, Any] = {
     "agent_auto_enabled": False,
     CONF_AGENT_AUTO_ENTITY_IDS: [],
     "documents_enabled": False,
+    CONF_ALLOW_NON_ADMIN_AUTOMATIONS: False,
 }
 
 
@@ -313,3 +315,13 @@ async def test_fixed_selection_hiding_exposed_entities_raises_a_repair_issue(
     # The deliberate selection itself is never rewritten.
     assert entry.options[CONF_SELECTED_ENTITIES] == ["light.kueche"]
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_new_entry_reserves_automation_creation_for_admins(hass: HomeAssistant) -> None:
+    """F26: a fresh installation stores the safer default explicitly."""
+    assert await async_setup_component(hass, "homeassistant", {})
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    assert result["type"] == "create_entry"
+    assert result["options"][CONF_ALLOW_NON_ADMIN_AUTOMATIONS] is False
+    assert result["options"] == SETUP_OPTIONS
+    await hass.async_block_till_done()
