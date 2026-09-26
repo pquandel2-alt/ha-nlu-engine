@@ -352,6 +352,19 @@ def test_standing_permission_requires_preview_and_explicit_yes(tmp_path, monkeyp
     assert h.world.engine.permissions.active(h.world.ports.clock) == ()
 
 
+def test_confirming_the_same_standing_permission_twice_keeps_one(tmp_path, monkeypatch):
+    """F7: a repeated confirmation renews the instruction instead of duplicating it."""
+    h = Harness(tmp_path, monkeypatch, config=ProactiveConfig(enabled=True, standing_permissions_enabled=True))
+    h.say(PERMISSION)
+    assert h.say("Ja").response.speech.startswith("Gespeichert.")
+    h.say(PERMISSION)
+    again = h.say("Ja")
+    assert again.response.speech.startswith("Diese Daueranweisung gab es schon")
+    assert len(h.world.engine.permissions.all()) == 1
+    for question in ("Was darfst du ohne Rückfrage?", "Was machst du automatisch?"):
+        assert h.say(question).response.speech.startswith("1 Daueranweisung aktiv"), question
+
+
 def test_standing_permission_no_stores_nothing(tmp_path, monkeypatch):
     h = Harness(tmp_path, monkeypatch, config=ProactiveConfig(enabled=True, standing_permissions_enabled=True))
     h.say(PERMISSION)

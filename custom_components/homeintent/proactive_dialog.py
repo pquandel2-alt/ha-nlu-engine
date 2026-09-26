@@ -56,8 +56,10 @@ _HISTORY_RE = re.compile(
     r"(?:\s+heute)?\s*\??$"
 )
 _LIST_PERMISSIONS_RE = re.compile(
-    r"^welche\s+(?:automatischen\s+)?(?:erlaubnisse|daueranweisungen|dauererlaubnisse)\s+"
-    r"(?:gibt\s+es|hast\s+du|sind\s+(?:aktiv|gespeichert))\s*\??$"
+    r"^(?:welche\s+(?:automatischen\s+)?(?:erlaubnisse|daueranweisungen|dauererlaubnisse)\s+"
+    r"(?:gibt\s+es|hast\s+du|sind\s+(?:aktiv|gespeichert))"
+    r"|was\s+(?:darfst|machst|tust)\s+du\s+(?:alles\s+)?(?:ohne\s+(?:rueckfrage|nachfrage|"
+    r"(?:mich\s+)?(?:zu\s+)?fragen)|automatisch|von\s+selbst|selbststaendig))\s*\??$"
 )
 _REVOKE_ALL_RE = re.compile(
     r"^(?:widerrufe|loesche|entferne)\s+alle\s+(?:automatischen\s+)?"
@@ -261,10 +263,16 @@ class ProactiveDialogHandler:
         self._dialogs.cancel(conversation_id, task.task_id)
         permission = draft.to_permission(self._engine.ports.now())
         try:
-            self._engine.permissions.add(permission)
+            stored = self._engine.permissions.add(permission)
         except ValueError as err:
             return DialogOutcome(finish_sentence(str(err)))
         await self._engine.async_persist()
+        if stored.permission_id != permission.permission_id:
+            return DialogOutcome(
+                "Diese Daueranweisung gab es schon; ich habe sie verlängert. Ich schalte das "
+                "Licht nur aus, wenn zu diesem Zeitpunkt wirklich niemand zu Hause ist, "
+                "und prüfe die Wirkung."
+            )
         return DialogOutcome(
             "Gespeichert. Ich schalte das Licht nur aus, wenn zu diesem Zeitpunkt wirklich niemand "
             "zu Hause ist, und prüfe die Wirkung."
@@ -318,7 +326,10 @@ class ProactiveDialogHandler:
         ]
         if not active:
             return "Es sind keine Daueranweisungen gespeichert."
-        parts = [item.description or item.situation_kind.value for item in active]
+        parts = [
+            item.description or "Licht ausschalten, wenn niemand zu Hause ist"
+            for item in active
+        ]
         noun = "Daueranweisung" if len(parts) == 1 else "Daueranweisungen"
         return finish_sentence(f"{len(parts)} {noun} aktiv: {join_german(tuple(parts))}")
 
