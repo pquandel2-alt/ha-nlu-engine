@@ -75,6 +75,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 task.cancel()
             type(ent).__init__(ent, hass, key, name, opts)
             ent.async_write_ha_state()
+        # Mirrored sensors (room temperatures) would read "unknown" until the
+        # next 10 s tick after re-initialisation; derive them right away.
+        for ent in list(data["entities"].values()):
+            if getattr(ent, "_opts", {}).get("mirror") and hasattr(ent, "tick"):
+                ent.tick()
         for key in LOG_KEYS:
             data[key].clear()
 

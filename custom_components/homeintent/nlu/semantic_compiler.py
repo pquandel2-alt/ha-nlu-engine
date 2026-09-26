@@ -945,6 +945,7 @@ def _single_named_capable_entity(
     return matches[0] if len(matches) == 1 else None
 
 
+_ROOM_LIGHT_RE = re.compile(r"\b(?:das|den)\s+licht\b|^\s*licht\b", re.I)
 _WH_LIST_QUESTION_RE = re.compile(r"^\s*(?:und\s+)?welche[nmrs]?\b", re.I)
 _SETUP_WITHOUT_VALUE_RE = re.compile(
     r"^\s*(?:bitte\s+|kannst\s+du\s+)?stell\w*\s+.+\s+ein\s*[.!?]*$", re.I
@@ -1483,6 +1484,24 @@ class SemanticCommandCompiler:
         if intent == "HassSetPercentage" and domain not in {"cover", "light"}:
             return None
 
+        if (
+            quantity is None
+            and domain == "light"
+            and not explicit
+            and len(locations) == 1
+            and locations[0][1] is not None
+            and _ROOM_LIGHT_RE.search(positive_text) is not None
+            and sum(
+                1 for entity in entities
+                if entity.domain == "light" and entity.area_id == locations[0][1]
+            ) > 1
+        ):
+            # Documented rule (F20): "das Licht im <Raum>" means every light
+            # of that room, like Home Assistant's own agent; the target limit
+            # of the execution policy still applies. A named device or
+            # "die Lampe" keeps selecting (and asking about) one device.
+            quantity = Quantifier("all")
+
         if quantity is not None:
             if exclusion_names and quantity.kind in {"both", "count"}:
                 # "genau drei außer X" has two plausible counts (before or
@@ -1857,6 +1876,25 @@ class SemanticQueryCompiler:
                 entities,
                 index=(world_model.entity_index if world_model is not None else None),
             )
+        if (
+            len(named_mentions) == 1
+            and _SINGULAR_NAMED_QUERY_RE.search(text) is not None
+            and (named_mentions[0].domain, named_mentions[0].device_class) not in targets
+            and all(
+                domain != named_mentions[0].domain for domain, _device_class in targets
+            )
+            and normalize_for_compare(named_mentions[0].friendly_name)
+            not in {
+                normalize_for_compare(name)
+                for entity in entities
+                for name in (entity.area_name or "", *entity.area_aliases)
+                if name
+            }
+        ):
+            # "Ist das Garagentor offen?" names one entity (a cover) while the
+            # class word "Garagentor" means a garage-door contact: the named
+            # entity decides the question (F12).
+            targets = [(named_mentions[0].domain, named_mentions[0].device_class)]
         if not targets:
             if named_mentions:
                 named_domains = {entity.domain for entity in named_mentions}

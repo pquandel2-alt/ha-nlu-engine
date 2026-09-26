@@ -109,10 +109,13 @@ S("dev-lawnmower", "Geräte", "Mähroboter",
   say("Starte den Mähroboter.", calls=["lawn_mower.maehroboter:start_mowing"]),
   say("Was macht der Mähroboter?", type="query_answer", any=["mäht", "aktiv"]),
   say("Schick den Mähroboter zurück zur Ladestation.", calls=["lawn_mower.maehroboter:dock"]))
-S("dev-lock", "Sicherheit", "Schloss: verriegeln direkt, entriegeln nur mit Bestätigung",
+# Locks are HIGH risk in HomeIntent's ExecutionPolicy (risk.py): locking asks
+# once as well, unlocking is CRITICAL. The scenario keeps that boundary.
+S("dev-lock", "Sicherheit", "Schloss: verriegeln und entriegeln nur mit Bestätigung",
   say("Entriegle das Haustürschloss.", no_calls=True, any=["soll", "sicher", "bestätig", "wirklich"]),
   say(YES, calls=["lock.haustuerschloss:unlock"], state={"lock.haustuerschloss": "unlocked"}),
-  say("Verriegle die Haustür.", calls=["lock.haustuerschloss:lock"], state={"lock.haustuerschloss": "locked"}))
+  say("Verriegle die Haustür.", no_calls=True, any=["haustürschloss"]),
+  say(YES, calls=["lock.haustuerschloss:lock"], state={"lock.haustuerschloss": "locked"}))
 S("dev-lock-deny", "Sicherheit", "Entriegeln abgelehnt mit Nein",
   say("Schließ das Gartentor auf.", no_calls=True),
   say("Nein.", no_calls=True, state={"lock.gartentor_schloss": "locked"}))
