@@ -58,7 +58,7 @@ from .query_command import (
     QueryTargetKind,
 )
 from .query_executor import QueryExecutor
-from .semantic_exclusion import has_exclusion_clause, split_exclusion as _split_exclusion
+from .semantic_exclusion import split_exclusion as _split_exclusion
 from .semantic_lexicon import SemanticAnalysis, SemanticKind, analyse_semantics
 from .semantic_catalog import (
     DOMAIN_WORDS,

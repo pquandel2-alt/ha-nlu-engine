@@ -83,9 +83,8 @@ from .nlu.service_mapper import map_to_service_call
 from .nlu.semantic_compiler import (
     SemanticCommandCompiler,
     SemanticQueryCompiler,
-    has_exclusion_clause,
 )
-from .nlu.semantic_exclusion import split_exclusion
+from .nlu.semantic_exclusion import has_exclusion_clause, split_exclusion
 from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
 from .nlu.semantic_state import SemanticState
 from .nlu.semantic_catalog import INTENT_BY_DOMAIN_ACTION

@@ -1377,7 +1377,7 @@ class NluConversationEntity(
 
         if is_action_edit_request(user_input.text):
             return await self._async_handle_action_edit_request(
-                user_input, response
+                user_input, response, entities
             )
 
         management_request = parse_automation_management(user_input.text)
@@ -4215,6 +4215,7 @@ class NluConversationEntity(
         self,
         user_input: conversation.ConversationInput,
         response: intent.IntentResponse,
+        entities: list[EntitySnapshot] | None = None,
     ) -> conversation.ConversationResult:
         """Resolve an automation and begin its action-only edit dialog."""
         if self._automation_executor is None:
