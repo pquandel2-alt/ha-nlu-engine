@@ -559,6 +559,84 @@ def test_low_priority_burst_is_grouped_and_smoke_bypasses(tmp_path):
     asyncio.run(scenario())
 
 
+def test_notice_right_after_a_critical_alarm_is_delivered_not_grouped(tmp_path):
+    """F28: a critical alarm must not use up the ordinary attention budget."""
+    states = garage_states() + [entity("sensor.washer", "Waschmaschine", "running", area="bath")]
+    world = build_world(
+        tmp_path, states, recipients={"philipp": philipp()},
+        household={"person.philipp": "not_home", "person.anna": "not_home"},
+    )
+    world.engine.detector = SituationDetector(DetectorConfig(
+        appliance_entity_ids=frozenset({"sensor.washer"}),
+    ))
+
+    async def scenario():
+        await world.change("binary_sensor.smoke_hall", "on")
+        assert world.ports.delivered[-1].priority is PriorityLevel.CRITICAL
+        await world.ports.advance(timedelta(seconds=20))
+        await world.change("sensor.washer", "finished")
+        assert len(world.ports.delivered) == 2
+        assert "Waschmaschine" in world.ports.delivered[-1].text
+        assert world.engine.history.records()[-1].result == "delivered"
+
+    asyncio.run(scenario())
+
+
+def test_grouped_notice_is_summarized_and_delivered(tmp_path):
+    """F28: grouping summarizes; it never silently drops a notice."""
+    states = garage_states() + [
+        entity(f"sensor.appliance_{index}", name, "running", area="bath")
+        for index, name in enumerate(("Waschmaschine", "Trockner"))
+    ]
+    world = build_world(
+        tmp_path, states, recipients={"philipp": philipp()},
+        household={"person.philipp": "not_home", "person.anna": "not_home"},
+    )
+    world.engine.detector = SituationDetector(DetectorConfig(
+        appliance_entity_ids=frozenset({"sensor.appliance_0", "sensor.appliance_1"}),
+    ))
+
+    async def scenario():
+        await world.change("sensor.appliance_0", "finished")
+        await world.ports.advance(timedelta(seconds=10))
+        await world.change("sensor.appliance_1", "finished")
+        assert len(world.ports.delivered) == 1
+        assert world.engine.history.records()[-1].result == "grouped"
+        await world.ports.advance(timedelta(minutes=3))
+        assert len(world.ports.delivered) == 2
+        assert "Trockner" in world.ports.delivered[-1].text
+        assert world.engine.history.records()[-1].result == "delivered"
+
+    asyncio.run(scenario())
+
+
+def test_undeliverable_digest_is_recorded_not_dropped(tmp_path):
+    states = garage_states() + [
+        entity(f"sensor.appliance_{index}", name, "running", area="bath")
+        for index, name in enumerate(("Waschmaschine", "Trockner"))
+    ]
+    world = build_world(
+        tmp_path, states, recipients={"philipp": philipp()},
+        household={"person.philipp": "not_home", "person.anna": "not_home"},
+    )
+    world.engine.detector = SituationDetector(DetectorConfig(
+        appliance_entity_ids=frozenset({"sensor.appliance_0", "sensor.appliance_1"}),
+    ))
+
+    async def scenario():
+        await world.change("sensor.appliance_0", "finished")
+        await world.ports.advance(timedelta(seconds=10))
+        await world.change("sensor.appliance_1", "finished")
+        world.ports.delivery_fails = True
+        await world.ports.advance(timedelta(minutes=3))
+        record = world.engine.history.records()[-1]
+        assert record.subject_label and "Trockner" in record.subject_label
+        assert record.result == "delivery_failed"
+        assert "group_delivery_failed" in record.reasons
+
+    asyncio.run(scenario())
+
+
 # --- 59 quiet hours -------------------------------------------------------------
 
 def test_quiet_hours_matrix_end_to_end(tmp_path):

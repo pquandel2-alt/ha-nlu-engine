@@ -594,7 +594,10 @@ class ProactiveContextEngine:
             if receipt.delivered:
                 delivered_any = True
                 self.counters.deliveries += 1
-                self.attention_state.record_delivery(recipient.user_id, situation.dedupe_key, now)
+                self.attention_state.record_delivery(
+                    recipient.user_id, situation.dedupe_key, now,
+                    counts_for_budget=priority < PriorityLevel.URGENT,
+                )
                 if (
                     proposal is not None and receipt.origin_device_id is not None
                     and proposal.origin_device_id is None
@@ -675,6 +678,7 @@ class ProactiveContextEngine:
             None,
         )
         if recipient is None or not recipient.push_target_ids or recipient.push_ambiguous:
+            self._record_undelivered_group(recipient_id, items, live, "group_no_push_target")
             return
         decision = CommunicationDecision(
             CommunicationChannel.PUSH, (CommunicationChannel.PUSH,), recipient_id, None,
@@ -683,6 +687,10 @@ class ProactiveContextEngine:
         receipt = await self.ports.async_deliver(OutgoingMessage(
             decision, "HomeIntent", grouped_message(tuple(live)), PriorityLevel.INFO, None, None,
         ))
+        if not receipt.delivered:
+            self._record_undelivered_group(
+                recipient_id, items, live, "group_delivery_failed", *receipt.errors,
+            )
         if receipt.delivered:
             self.counters.deliveries += 1
             self.attention_state.record_delivery(recipient_id, f"group:{recipient_id}", now)
@@ -695,6 +703,20 @@ class ProactiveContextEngine:
                         CommunicationChannel.PUSH, situation.priority_hint,
                         situation.privacy_level, "delivered", ("grouped_digest",), None,
                     )
+
+    def _record_undelivered_group(
+        self, recipient_id: str, items: tuple[GroupedItem, ...], live: list[str],
+        *reasons: str,
+    ) -> None:
+        # A digest that cannot be sent is never dropped silently (F28).
+        for item in items:
+            situation = self.situations.by_id(item.situation_id)
+            if situation is not None and item.text in live:
+                self._record(
+                    situation, OpportunityOutcome.COMMUNICATE, recipient_id,
+                    CommunicationChannel.HISTORY_ONLY, situation.priority_hint,
+                    situation.privacy_level, "delivery_failed", reasons, None,
+                )
 
     # --------------------------------------------------------------- replies
     def classify_reply(self, text: str) -> ProposalReply | None:
