@@ -196,6 +196,7 @@ from .thermal_deadline import (
     append_start_checkpoint,
     checkpoint_automation_config,
 )
+from .thermal_question import answer_thermal_question
 from .nlu.primitives import SemanticProperty
 from .nlu.unit_reasoning import normalize_measurement
 from .monitor_goal import MonitorRecord
@@ -1037,6 +1038,21 @@ class NluConversationEntity(
             )
             if document_result is not None:
                 return document_result
+            thermal_answer = answer_thermal_question(
+                user_input.text,
+                entities,
+                self._runtime_data.predictive_house,
+                dt_util.now(),
+            )
+            if thermal_answer is not None:
+                # Heating-time questions get a model-backed estimate or the
+                # documented honest no-model answer, never a guess (F24).
+                self._context_store.clear(user_input.conversation_id)
+                response.response_type = intent.IntentResponseType.QUERY_ANSWER
+                response.async_set_speech(thermal_answer)
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
             learning_result = await self._async_handle_learning_turn(
                 user_input, response, language_document
             )
