@@ -85,9 +85,6 @@ class Runner:
             elif "default" in field:
                 defaults[field["name"]] = field["default"]
         data = {k: v for k, v in defaults.items() if v is not None}
-        # Keep HomeIntent on the dynamic "exposed to Assist" set: the form is
-        # pre-filled with today's exposure, which would freeze it (finding F-UX).
-        data["selected_entities"] = []
         data.update(changes)
         res = await rest(self.session, "POST", f"/api/config/config_entries/options/flow/{flow['flow_id']}", self.tokens["admin"], json=data)
         if res.get("type") != "create_entry":

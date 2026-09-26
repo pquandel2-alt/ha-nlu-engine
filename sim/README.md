@@ -44,6 +44,6 @@ HASS=../havenv/bin/hass ./run_ha.sh        # HA starten/neu starten (Port 8123)
 Für einen sauberen Neustart `config/.storage`, `config/home-assistant_v2.db*`
 löschen und `automations.yaml` aus git wiederherstellen.
 
-Hinweis: Speichern der HomeIntent-Optionen über den Options-Flow friert die
-Entitätsauswahl ein (siehe Testbericht). `runner.py` setzt deshalb beim
-Optionswechsel `selected_entities=[]`.
+`./fresh_ha.sh` erledigt den sauberen Neustart samt `bootstrap.py` in einem
+Schritt (für Vergleichsläufe immer frisch starten: Listen, Bindungen und
+Verlauf eines früheren Laufs verfälschen sonst einzelne Szenarien).
