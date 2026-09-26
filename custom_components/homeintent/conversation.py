@@ -2944,6 +2944,20 @@ class NluConversationEntity(
             for alias in aliases:
                 if alias:
                     person_names.setdefault(alias, []).append(entity.entity_id)
+        profiles = self._runtime_data.profiles
+        routine_names: dict[str, str] = {}
+        if profiles is not None and actor_id is not None:
+            for routine in profiles.routines_for(actor_id):
+                for spoken in (routine.name, routine.routine_id.replace("_", " ")):
+                    if key := normalize_for_compare(spoken).strip():
+                        routine_names[key] = routine.routine_id
+        area_names = {
+            key: entity.area_id
+            for entity in entities
+            if entity.area_id is not None
+            for name in (entity.area_name or "", *entity.area_aliases)
+            if (key := normalize_for_compare(name).strip())
+        }
         goal = interpret_goal(
             language_document,
             current_user_id=actor_id,
@@ -2955,6 +2969,8 @@ class NluConversationEntity(
                 name: tuple(dict.fromkeys(entity_ids))
                 for name, entity_ids in person_names.items()
             },
+            routine_names=routine_names,
+            area_names=area_names,
         )
         if goal is None:
             return None

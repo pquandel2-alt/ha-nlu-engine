@@ -253,3 +253,59 @@ def test_movie_goal_uses_one_confirmed_preference_as_preview(monkeypatch, tmp_pa
     action = next(step.action for step in stored_plan.steps if step.action is not None)
     assert action.data == {"brightness_pct": 30}
     entity.hass.services.async_call.assert_not_awaited()
+
+
+def _reading_routine() -> RoutineDefinition:
+    return RoutineDefinition(
+        "lesezeit",
+        "Lesezeit",
+        "owner",
+        (
+            RoutineStepDefinition(
+                "light.living",
+                GoalScope(entity_ids=("light.living",)),
+                DesiredState("state", "off"),
+            ),
+        ),
+        True,
+    )
+
+
+def test_stored_routine_is_reachable_by_its_own_name(monkeypatch, tmp_path):
+    """F14: a routine saved via homeintent.save_routine is not limited to
+    the built-in names (schlafengehen/filmabend/abwesenheit)."""
+    for index, sentence in enumerate(
+        ("Bereite die Lesezeit vor.", "Starte die Routine Lesezeit.")
+    ):
+        entity = NluConversationEntity(ConfigEntry())
+        entity.hass = HomeAssistant()
+        profiles = ProfileStore(tmp_path / f"profiles-{index}.json")
+        asyncio.run(profiles.async_save_routine(_reading_routine(), confirmed=True))
+        entity._runtime_data.profiles = profiles
+        monkeypatch.setattr(ha_conversation, "build_entity_snapshots", lambda *_: LIGHTS)
+
+        result = asyncio.run(
+            entity._async_handle_message(
+                ConversationInput(
+                    text=sentence,
+                    conversation_id=f"reading-{index}",
+                    context=SimpleNamespace(user_id="owner"),
+                ),
+                None,
+            )
+        )
+
+        assert "Planvorschau" in result.response.speech, sentence
+        assert "Wohnzimmerlicht" in result.response.speech
+        entity.hass.services.async_call.assert_not_awaited()
+
+
+def test_goal_area_comes_from_the_area_registry():
+    from homeintent.goal_intent import interpret_goal
+    from homeintent.nlu.language_frontend import analyse_language
+
+    goal = interpret_goal(
+        analyse_language("Sorge dafür, dass es um 7 Uhr im Arbeitszimmer 21 Grad warm ist."),
+        area_names={"buero": "buero", "arbeitszimmer": "buero"},
+    )
+    assert goal is not None and goal.scope.area_id == "buero"
