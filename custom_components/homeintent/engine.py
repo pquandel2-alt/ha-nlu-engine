@@ -28,7 +28,8 @@ from .automation_composition import (
     CompositionOutcome,
     EventClarification,
     OutcomeKind,
-    compose_event_notification,
+    Readers,
+    compose_event_automation,
     log_composition_trace,
     resolve_event_clarification,
     unsupported_text,
@@ -2954,8 +2955,8 @@ class NluEngine:
         utterance = analyse_utterance(automation_shell_stripped_text)
         if utterance.speech_act is SpeechAct.QUERY:
             return None
-        composed = self.compose_event_notification(
-            automation_shell_stripped_text, entities, world_model, context
+        composed = self._compose_with_run_limits(
+            automation_shell_stripped_text, text, entities, world_model, context
         )
         if composed is not None:
             return composed
@@ -3181,25 +3182,71 @@ class NluEngine:
             return grounded.trigger
         return None
 
-    def compose_event_notification(
+    def _composition_readers(
         self,
-        text: str,
         entities: list[EntitySnapshot],
-        world_model: WorldModel | None = None,
-        context: ConversationContext | None = None,
-    ) -> AutomationMatchResult | AutomationClarificationResult | None:
-        """7.2.0 compositional EVENT + NOTIFICATION reading (both orders)."""
+        world_model: WorldModel | None,
+        context: ConversationContext | None,
+    ) -> Readers:
         parse_context = create_parse_context(
             entities,
             world_model=world_model,
             last_entities=tuple(context.last_entities) if context is not None else (),
             last_area=context.last_area if context is not None else None,
         )
-        outcome = compose_event_notification(
-            text,
-            entities,
-            lambda span: self._automation_trigger_parser.parse(span, parse_context),
-            lambda span: self._automation_condition_parser.parse(span, parse_context),
+        plain_context = create_parse_context(entities)
+
+        def read_action(span: str) -> tuple[ActionModel | ActionGroup, ...] | None:
+            # The same established action parsers; the registry-free context
+            # is a second reading for spans the world-model index rejects.
+            return self._parse_action_semantically(
+                span, parse_context
+            ) or self._parse_action_semantically(span, plain_context)
+
+        return Readers(
+            trigger=lambda span: self._automation_trigger_parser.parse(span, parse_context),
+            condition=lambda span: self._automation_condition_parser.parse(span, parse_context),
+            action=read_action,
+        )
+
+    def _compose_with_run_limits(
+        self,
+        text: str,
+        source_text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None,
+        context: ConversationContext | None,
+    ) -> AutomationMatchResult | AutomationClarificationResult | None:
+        """"einmalig"/"dreimal" qualify the whole automation, not a clause."""
+        repeat_match = _AUTOMATION_REPEAT_RE.search(text)
+        max_runs: int | None = None
+        if repeat_match is not None:
+            raw_count = (repeat_match.group("separate") or repeat_match.group("joined")).casefold()
+            max_runs = int(raw_count) if raw_count.isdigit() else _REPEAT_COUNTS[raw_count]
+            text = re.sub(r"\s+", " ", _AUTOMATION_REPEAT_RE.sub(" ", text)).strip()
+        once = bool(_AUTOMATION_ONCE_RE.search(text))
+        if once:
+            text = re.sub(r"\s+", " ", _AUTOMATION_ONCE_RE.sub(" ", text)).strip()
+        result = self.compose_event_automation(text, entities, world_model, context)
+        if isinstance(result, AutomationMatchResult) and (once or max_runs is not None):
+            model = replace(result.model, once=once, max_runs=max_runs, source_text=source_text)
+            validation_error = validate_automation(model)
+            response_text = render_automation_tree(model)
+            if validation_error is not None:
+                response_text = f"{response_text}\nvalidation_error: {validation_error.name}"
+            return AutomationMatchResult(model, response_text, validation_error)
+        return result
+
+    def compose_event_automation(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
+        context: ConversationContext | None = None,
+    ) -> AutomationMatchResult | AutomationClarificationResult | None:
+        """7.2.0 compositional EVENT clause + ACTION clause reading (both orders)."""
+        outcome = compose_event_automation(
+            text, entities, self._composition_readers(entities, world_model, context)
         )
         return self._composition_result(outcome)
 
@@ -3211,13 +3258,15 @@ class NluEngine:
             return None
         log_composition_trace(outcome.trace)
         if outcome.kind is OutcomeKind.AUTOMATION and outcome.model is not None:
+            # The engine's validator stays the single validation authority.
+            validation_error = validate_automation(outcome.model)
             response_text = render_automation_tree(outcome.model)
-            if outcome.validation_error is not None:
-                response_text = f"{response_text}\nvalidation_error: {outcome.validation_error.name}"
+            if validation_error is not None:
+                response_text = f"{response_text}\nvalidation_error: {validation_error.name}"
             return AutomationMatchResult(
                 model=outcome.model,
                 response_text=response_text,
-                validation_error=outcome.validation_error,
+                validation_error=validation_error,
             )
         return AutomationClarificationResult(
             response_text=outcome.speech or unsupported_text(None),
@@ -3233,7 +3282,9 @@ class NluEngine:
     ) -> AutomationMatchResult | AutomationClarificationResult | None:
         """Continue a clarified event-notification draft ("Die linke.")."""
         return self._composition_result(
-            resolve_event_clarification(text, pending, entities)
+            resolve_event_clarification(
+                text, pending, entities, self._composition_readers(entities, None, None)
+            )
         )
 
     def match_automation_draft_start(

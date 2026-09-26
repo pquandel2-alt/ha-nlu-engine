@@ -2,7 +2,7 @@
 
 Two deterministic, dictionary-driven stages - no sentence list, no LLM:
 
-1. **Clause segmentation** (:func:`segment_notification_automation`).  An
+1. **Clause segmentation** (:func:`segment_event_automation`).  An
    event-notification request consists of a *notification main clause*
    ("benachrichtige mich", "schick mir eine Nachricht", "ich möchte
    informiert werden", ...) and a *subordinate event clause* introduced by
@@ -33,6 +33,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from typing import Callable
 
 from .nlu.automation_lexicon import rejoin_stt, resolve_repairs
 from .nlu.automation_model import NumericComparator, PresenceEvent, SunEvent
@@ -99,16 +100,26 @@ class TemporalEvent:
     weekdays: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True)
-class NotificationAutomationFrame:
-    """Source spans of one event clause and one notification clause."""
+ActionCheck = Callable[[str], bool]
 
-    notification: NotificationClause
-    notification_text: str
+
+@dataclass(frozen=True)
+class EventActionFrame:
+    """Source spans of one event clause and one action clause.
+
+    The action clause is anything the caller's ``ActionCheck`` accepts - a
+    notification clause or device actions; this module never decides what
+    an action *means*.
+    """
+
+    action_text: str
     event_text: str  # without its connector
     connector: str
     order: ClauseOrder
     temporal: TemporalEvent | None = None
+    # "Benachrichtige mich, sobald X, mit dem Text: Y" - text dictated after
+    # the event clause still belongs to the notification.
+    trailing_message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -143,7 +154,7 @@ def _words(text: str) -> list[_Word]:
     return [_Word(match.start(), match.end(), match.group(0)) for match in re.finditer(r"\S+", text)]
 
 
-def _protected_spans(text: str) -> list[tuple[int, int]]:
+def protected_message_spans(text: str) -> list[tuple[int, int]]:
     """Character ranges of dictated message text.
 
     A colon message runs to the end of the utterance (it is the last thing
@@ -190,82 +201,92 @@ def _clean_notification_head(head: str) -> str:
     return re.sub(r"\s+", " ", cleaned).strip(" ,")
 
 
+def is_notification_text(text: str) -> bool:
+    return _notification(text) is not None
+
+
 def _notification(text: str) -> NotificationClause | None:
-    candidate = text.strip(" ,")
-    if re.match(r"dann\b", candidate, re.IGNORECASE):
-        candidate = candidate[4:].strip(" ,")
+    candidate = _strip_then(text)
     if not candidate:
         return None
     return parse_notification_clause(candidate)
 
 
-def segment_notification_automation(text: str) -> NotificationAutomationFrame | None:
-    """Find the one event clause + notification clause decomposition."""
+def _strip_then(text: str) -> str:
+    return re.sub(r"^\s*,?\s*(?:(?:dann|immer|bitte)\s+)+", "", text.strip(" ,"), flags=re.IGNORECASE).strip(" ,")
+
+
+# Imperative/modal openings of a device action clause.  Only used to decide
+# *where* an action clause may start in comma-less speech; the action's
+# meaning is always read by the established action parsers.
+_ACTION_OPENERS = frozenset({
+    "schalte", "schalt", "mach", "mache", "fahre", "fahr", "öffne", "schließe", "schliess",
+    "schliesse", "stelle", "stell", "setze", "setz", "starte", "stoppe", "aktiviere",
+    "deaktiviere", "dimme", "dimm", "drehe", "dreh", "spiele", "spiel", "kannst", "könntest",
+    "bitte", "dann", "sperre", "entsperre", "lass", "lasse",
+})
+
+
+def segment_event_automation(text: str, action_ok: ActionCheck) -> EventActionFrame | None:
+    """Find the one EVENT clause + ACTION clause decomposition, if any."""
     words = _words(text)
     if len(words) < 3:
         return None
-    protected = _protected_spans(text)
+    protected = protected_message_spans(text)
     connectors = _connector_positions(words, protected)
     if not connectors:
-        return _segment_implicit_then(text, words) or _segment_temporal(text)
-    first = connectors[0]
-    if first == 0:
-        return _segment_event_first(text, words, protected)
+        return _segment_implicit_then(text, action_ok) or _segment_temporal(text, action_ok)
+    if connectors[0] == 0:
+        return _segment_event_first(text, words, protected, action_ok)
     for index in connectors:
         head = _clean_notification_head(text[:words[index].start])
-        clause = parse_notification_clause(head) if head else None
-        if clause is None:
+        if not head or not action_ok(head):
             continue
         event_text = text[words[index].end:].strip(" ,")
+        trailing_message: str | None = None
         trailing = _TRAILING_TEXT_RE.match(event_text)
-        if trailing is not None:
-            message = trailing.group("message").strip().strip(_QUOTE_OPEN + _QUOTE_CLOSE).strip()
-            event_text = trailing.group("event").strip(" ,")
-            clause = NotificationClause(
-                clause.recipient_kind, clause.recipient_name, message or None
+        if trailing is not None and is_notification_text(head):
+            trailing_message = (
+                trailing.group("message").strip().strip(_QUOTE_OPEN + _QUOTE_CLOSE).strip() or None
             )
+            event_text = trailing.group("event").strip(" ,")
         if not event_text:
             return None
-        return NotificationAutomationFrame(
-            clause, head, event_text, words[index].key, ClauseOrder.ACTION_FIRST
+        return EventActionFrame(
+            head, event_text, words[index].key, ClauseOrder.ACTION_FIRST,
+            trailing_message=trailing_message,
         )
     return None
 
 
 def _segment_event_first(
-    text: str, words: list[_Word], protected: list[tuple[int, int]]
-) -> NotificationAutomationFrame | None:
+    text: str, words: list[_Word], protected: list[tuple[int, int]], action_ok: ActionCheck
+) -> EventActionFrame | None:
     connector = words[0]
     body_start = connector.end
-    # Comma boundaries first (the written clause boundary), then every word
-    # boundary - speech recognition rarely emits commas.
-    candidates: list[int] = [
+    # The written clause boundary first; then the word positions where an
+    # action clause can begin - speech recognition rarely emits commas.
+    commas = [
         match.start() + 1
         for match in re.finditer(",", text)
         if match.start() > body_start
         and not any(begin <= match.start() < end for begin, end in protected)
     ]
-    candidates.extend(word.start for word in words[2:])
-    seen: set[int] = set()
-    for position in candidates:
-        if position in seen:
-            continue
-        seen.add(position)
+    for position in commas:
         event_text = text[body_start:position].strip(" ,")
-        if not event_text:
+        rest = _strip_then(text[position:])
+        if event_text and rest and action_ok(rest):
+            return EventActionFrame(rest, event_text, connector.key, ClauseOrder.EVENT_FIRST)
+    for word in words[2:]:
+        if any(begin <= word.start < end for begin, end in protected):
+            break
+        event_text = text[body_start:word.start].strip(" ,")
+        rest = _strip_then(text[word.start:])
+        if not event_text or not rest:
             continue
-        rest = text[position:]
-        clause = _notification(_clean_notification_head_tail(rest))
-        if clause is not None:
-            return NotificationAutomationFrame(
-                clause, rest.strip(" ,"), event_text, connector.key, ClauseOrder.EVENT_FIRST
-            )
+        if is_notification_text(rest) or (word.key in _ACTION_OPENERS and action_ok(rest)):
+            return EventActionFrame(rest, event_text, connector.key, ClauseOrder.EVENT_FIRST)
     return None
-
-
-def _clean_notification_head_tail(rest: str) -> str:
-    """Strip "dann"/"immer" only in front of the notification clause."""
-    return re.sub(r"^\s*,?\s*(?:(?:dann|immer)\s+)+", "", rest, flags=re.IGNORECASE)
 
 
 def _weekday_table() -> dict[str, tuple[str, ...]]:
@@ -313,9 +334,15 @@ def _weekdays_for(match: re.Match[str]) -> tuple[str, ...]:
     return _WEEKDAYS.get(word, ())
 
 
-def _segment_temporal(text: str) -> NotificationAutomationFrame | None:
-    """"Benachrichtige mich bei Sonnenuntergang", "Schick mir jeden Tag um 7 Uhr
-    eine Nachricht": a temporal phrase is the event, the rest the notification."""
+def _segment_temporal(text: str, action_ok: ActionCheck) -> EventActionFrame | None:
+    """"Benachrichtige mich bei Sonnenuntergang", "Um 22 Uhr schließe den
+    Rollladen": a temporal phrase is the event, the rest the action.
+
+    A bare clock time ("um 22 Uhr") is a recurring trigger for device
+    actions (the established meaning); for a notification it additionally
+    needs an explicit recurrence ("jeden Tag"), otherwise it is a one-shot
+    reminder handled by the reminder route.
+    """
     if _ONE_SHOT_RE.search(text):
         return None
     spans: list[tuple[int, int]] = []
@@ -325,6 +352,7 @@ def _segment_temporal(text: str) -> NotificationAutomationFrame | None:
     weekdays = _weekdays_for(weekday) if weekday is not None else ()
     if weekday is not None:
         spans.append((weekday.start(), weekday.end()))
+    recurring_given = weekday is not None
     if sun is not None:
         offset: int | None = None
         if sun.group("amount") is not None:
@@ -336,17 +364,19 @@ def _segment_temporal(text: str) -> NotificationAutomationFrame | None:
         event = SunEvent.SUNSET if sun.group("sun").casefold() == "sonnenuntergang" else SunEvent.SUNRISE
         temporal = TemporalEvent(sun_event=event, offset_minutes=offset, weekdays=weekdays)
         spans.append((sun.start(), sun.end()))
+        recurring_given = True
     else:
         clock = _CLOCK_RE.search(text)
-        recurring = _RECURRING_RE.search(text)
-        if clock is None or (recurring is None and weekday is None):
+        if clock is None:
             return None
+        recurring = _RECURRING_RE.search(text)
         raw_hour = clock.group("hour")
         hour = int(raw_hour) if raw_hour.isdigit() else german_number(raw_hour)
         minute = int(clock.group("minute") or 0)
         if hour is None or not (0 <= hour <= 23 and 0 <= minute <= 59):
             return None
         if recurring is not None:
+            recurring_given = True
             spans.append((recurring.start(), recurring.end()))
             if recurring.group(0).casefold() == "jeden abend" and hour < 12:
                 hour += 12
@@ -356,27 +386,27 @@ def _segment_temporal(text: str) -> NotificationAutomationFrame | None:
     for start, end in sorted(spans, reverse=True):
         remainder = remainder[:start] + " " + remainder[end:]
     remainder = re.sub(r"\s+", " ", remainder).strip(" ,")
-    clause = parse_notification_clause(remainder)
-    if clause is None:
+    if not remainder:
+        return None
+    notification = is_notification_text(remainder)
+    if notification and not recurring_given:
+        return None
+    if not notification and not action_ok(remainder):
         return None
     event_text = " ".join(text[start:end] for start, end in sorted(spans))
-    return NotificationAutomationFrame(
-        clause, remainder, event_text, "", ClauseOrder.ACTION_FIRST, temporal
-    )
+    return EventActionFrame(remainder, event_text, "", ClauseOrder.ACTION_FIRST, temporal)
 
 
-def _segment_implicit_then(text: str, words: list[_Word]) -> NotificationAutomationFrame | None:
+def _segment_implicit_then(text: str, action_ok: ActionCheck) -> EventActionFrame | None:
     """"Terrassentür auf, dann Nachricht an mich." - "dann" marks the consequence."""
     match = re.search(r",\s*dann\s+", text, re.IGNORECASE)
     if match is None:
         return None
     event_text = text[:match.start()].strip(" ,")
-    clause = _notification(text[match.end():])
-    if clause is None or not event_text:
+    rest = text[match.end():].strip(" ,")
+    if not event_text or not rest or not action_ok(rest):
         return None
-    return NotificationAutomationFrame(
-        clause, text[match.end():].strip(), event_text, "wenn", ClauseOrder.EVENT_FIRST
-    )
+    return EventActionFrame(rest, event_text, "wenn", ClauseOrder.EVENT_FIRST)
 
 
 # --- semantic roles of the event clause ------------------------------------------
@@ -804,12 +834,15 @@ __all__ = (
     "ClauseOrder",
     "ConditionSpan",
     "EventRoles",
-    "NotificationAutomationFrame",
+    "ActionCheck",
+    "EventActionFrame",
     "PreparedText",
     "TemporalEvent",
     "ValueUnit",
     "condition_split_candidates",
     "prepare_automation_text",
     "read_event_roles",
-    "segment_notification_automation",
+    "is_notification_text",
+    "protected_message_spans",
+    "segment_event_automation",
 )

@@ -47,6 +47,13 @@ Actions: `notify(me|us|julia|philipp[,"explicit text"])`,
 `turn_on(IDS)`, `turn_off(IDS)`, `open(IDS)`, `close(IDS)`,
 `position(IDS)=N`, `brightness(IDS)=N`, `delay=SECONDS`.
 
+Two equivalences are applied to both sides before comparing (they are
+properties of Home Assistant, not of the parser): a `turn_on`/`turn_off` of a
+cover is `open`/`close` (HomeIntent generates `cover.open_cover` /
+`cover.close_cover`), and one device action on several entities equals the
+same action once per entity.  Explicit message texts are compared ignoring
+surrounding quotes, case and trailing punctuation.
+
 ## Evaluation world
 
 Current conversation user `philipp` (push target *iPhone von Philipp*);

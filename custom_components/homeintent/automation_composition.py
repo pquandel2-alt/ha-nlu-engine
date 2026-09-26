@@ -4,9 +4,9 @@ This is the projection step of the compositional automation reader::
 
     utterance
       -> prepare_automation_text()          (repairs, STT rejoins, normalize)
-      -> segment_notification_automation()  (EVENT clause + NOTIFICATION clause)
+      -> segment_event_automation()         (EVENT clause + ACTION clause)
       -> read_event_roles() / ground_event() (typed roles -> TriggerModel)
-      -> notification_action()              (existing notification authority)
+      -> read_actions()                     (notification authority / action parsers)
       -> AutomationModel                    (existing validator / preview / writer)
 
 The *canonical meaning* (:class:`CanonicalEventNotification`) is what every
@@ -22,7 +22,8 @@ Home-Assistant-free and strictly typed.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+import re
+from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 from typing import Callable, Sequence
 
@@ -31,27 +32,32 @@ from .automation_grounding import (
     GroundingStatus,
     choose_candidate,
     ground_event,
+    read_subject,
     restrict_to,
+    target_for,
 )
 from .automation_language import (
     ConditionSpan,
     EventRoles,
-    NotificationAutomationFrame,
+    EventActionFrame,
     TemporalEvent,
     condition_split_candidates,
+    is_notification_text,
     prepare_automation_text,
+    protected_message_spans,
     read_event_roles,
-    segment_notification_automation,
+    segment_event_automation,
 )
 from .automation_notification import notification_action
-from .entities import EntitySnapshot
-from .nlu.action_model import ActionModel, NotificationRecipientKind
+from .entities import EntitySnapshot, normalize_for_compare
+from .nlu.action_model import ActionGroup, ActionModel, ActionType, NotificationRecipientKind
 from .nlu.automation_model import AutomationModel, NumericComparator, TriggerModel, TriggerType
 from .nlu.automation_validator import AutomationValidationError, validate_automation
 from .nlu.condition_model import ConditionModel, ConditionNode, ConditionType, LogicalOperator
 from .nlu.measurement import MeasurementProperty, TravelDirection
 from .nlu.semantic_state import SemanticState
-from .notification_language import NotificationClause, trigger_message
+from .nlu.normalize import german_number
+from .notification_language import NotificationClause, parse_notification_clause, trigger_message
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -95,7 +101,8 @@ class EventClarification:
     """Enough state to finish the same draft after "Die linke."."""
 
     grounded: GroundedEvent
-    clause: NotificationClause
+    action_text: str
+    trailing_message: str | None
     conditions: tuple[ConditionNode, ...]
     source_text: str
 
@@ -132,6 +139,7 @@ class EventInterpretation:
     conditions: tuple[ConditionNode, ...] = ()
     grounded: GroundedEvent | None = None
     typed: bool = False
+    alternatives: tuple[TriggerModel, ...] = ()
 
 
 _UNSUPPORTED_TEXT = {
@@ -181,12 +189,37 @@ def unsupported_text(reason: str | None) -> str:
     return _UNSUPPORTED_TEXT.get(reason or "", _GENERIC_UNSUPPORTED)
 
 
+def _typed_condition(text: str, entities: Sequence[EntitySnapshot]) -> ConditionNode | None:
+    """"das Wohnzimmerlicht aus ist": the same typed grounding as triggers,
+    projected into a state or strict numeric condition."""
+    grounded = ground_event(read_event_roles(text), entities)
+    trigger = grounded.trigger
+    if grounded.status is not GroundingStatus.RESOLVED or trigger is None:
+        return None
+    if trigger.type is TriggerType.STATE and trigger.for_seconds is None:
+        return ConditionNode(condition=ConditionModel(
+            type=ConditionType.STATE, target=trigger.target, state=trigger.state
+        ))
+    if (
+        trigger.type is TriggerType.NUMERIC_STATE
+        and trigger.measurement is None
+        and trigger.comparator in {NumericComparator.ABOVE, NumericComparator.BELOW}
+    ):
+        return ConditionNode(condition=ConditionModel(
+            type=ConditionType.NUMERIC, target=trigger.target,
+            comparator=trigger.comparator, threshold=trigger.threshold,
+        ))
+    return None
+
+
 def _conditions_for(
-    spans: Sequence[ConditionSpan], parse_condition: ConditionReader
+    spans: Sequence[ConditionSpan],
+    parse_condition: ConditionReader,
+    entities: Sequence[EntitySnapshot] = (),
 ) -> tuple[ConditionNode, ...] | None:
     nodes: list[ConditionNode] = []
     for span in spans:
-        node = parse_condition(span.text)
+        node = parse_condition(span.text) or _typed_condition(span.text, entities)
         if node is None:
             return None
         nodes.append(ConditionNode(operator=LogicalOperator.NOT, children=(node,)) if span.negated else node)
@@ -202,7 +235,7 @@ def interpret_event_clause(
 ) -> EventInterpretation:
     """Typed reading first; established parsers only for untyped event kinds."""
     roles = read_event_roles(event_text)
-    embedded = _conditions_for(roles.conditions, parse_condition)
+    embedded = _conditions_for(roles.conditions, parse_condition, entities)
     if embedded is None:
         return EventInterpretation(None)
     grounded = ground_event(roles, entities)
@@ -211,25 +244,25 @@ def interpret_event_clause(
     # "X und niemand zuhause ist" / "X, aber nur wenn Y": the event plus a
     # condition the established condition parser has to accept verbatim.
     for left, span in condition_split_candidates(roles.source):
-        condition = _conditions_for((span,), parse_condition)
+        condition = _conditions_for((span,), parse_condition, entities)
         if condition is None:
             continue
         left_roles = read_event_roles(left)
-        left_conditions = _conditions_for(left_roles.conditions, parse_condition)
+        left_conditions = _conditions_for(left_roles.conditions, parse_condition, entities)
         if left_conditions is None:
             continue
         left_grounded = ground_event(left_roles, entities)
         if left_grounded.status is GroundingStatus.RESOLVED:
             return EventInterpretation(
-                left_grounded.trigger, (*embedded, *left_conditions, *condition), left_grounded, typed=True
+                left_grounded.trigger, (*left_conditions, *condition), left_grounded, typed=True
             )
         if left_grounded.status is GroundingStatus.NOT_APPLICABLE:
             legacy = parse_trigger(f"{connector} {left}")
             if legacy is not None:
-                return EventInterpretation(legacy, (*embedded, *left_conditions, *condition))
+                return EventInterpretation(legacy, (*left_conditions, *condition))
         elif left_grounded.status is not GroundingStatus.NOT_FOUND:
             return EventInterpretation(
-                None, (*embedded, *left_conditions, *condition), left_grounded
+                None, (*left_conditions, *condition), left_grounded
             )
     if grounded.status is GroundingStatus.NOT_APPLICABLE:
         legacy = parse_trigger(f"{connector} {roles.source}")
@@ -286,96 +319,317 @@ def _canonical(
     )
 
 
-def build_notification_automation(
-    trigger: TriggerModel,
-    conditions: tuple[ConditionNode, ...],
-    clause: NotificationClause,
+ActionStep = "ActionModel | ActionGroup"
+
+
+@dataclass(frozen=True)
+class Readers:
+    """The established parsers, bound to the caller's context.
+
+    They only ever receive unchanged source spans.
+    """
+
+    trigger: TriggerReader
+    condition: ConditionReader
+    action: Callable[[str], "tuple[ActionModel | ActionGroup, ...] | None"]
+
+
+_CHUNK_SPLIT_RE = re.compile(
+    r"\s*,?\s+(?:und\s+dann|und|dann|danach|anschließend)\s+(?!dass\b)", re.IGNORECASE
+)
+_REVERT_RE = re.compile(
+    r"^(?:(?:und\s+)?(?:nach|in)\s+(?P<amount>\d+|[a-zäöüß]+)\s+(?P<unit>sekunden?|minuten?|stunden?))"
+    r"\s+(?:wieder\s+)?(?P<state>aus|an|ein|zu|auf)(?:schalten|machen)?$",
+    re.IGNORECASE,
+)
+
+
+def _flatten(steps: Sequence[ActionModel | ActionGroup]) -> list[ActionModel]:
+    flat: list[ActionModel] = []
+    for step in steps:
+        if isinstance(step, ActionGroup):
+            flat.extend(_flatten(step.steps))
+        else:
+            flat.append(step)
+    return flat
+
+
+def split_action_chunks(text: str) -> list[str]:
+    """Top-level coordinated action clauses; dictated message text is inert."""
+    protected = protected_message_spans(text)
+    chunks: list[str] = []
+    last = 0
+    for match in _CHUNK_SPLIT_RE.finditer(text):
+        if any(begin <= match.start() < end for begin, end in protected):
+            continue
+        chunks.append(text[last:match.start()])
+        last = match.end()
+    chunks.append(text[last:])
+    return [chunk.strip(" ,.") for chunk in chunks if chunk.strip(" ,.")]
+
+
+def _revert_chunk(
+    chunk: str, previous: ActionModel | None
+) -> tuple[ActionModel, ActionModel] | None:
+    """"nach 3 Minuten wieder aus" after a device action: delay + inverse."""
+    match = _REVERT_RE.match(chunk)
+    if match is None or previous is None or previous.target is None:
+        return None
+    raw = match.group("amount")
+    amount = int(raw) if raw.isdigit() else german_number(raw)
+    if amount is None or amount <= 0:
+        return None
+    unit = match.group("unit").casefold()
+    seconds = amount * (1 if unit.startswith("sekunde") else 60 if unit.startswith("minute") else 3600)
+    state = match.group("state").casefold()
+    kind = ActionType.TURN_OFF if state in {"aus", "zu"} else ActionType.TURN_ON
+    return (
+        ActionModel(type=ActionType.DELAY, delay_seconds=seconds),
+        ActionModel(type=kind, target=previous.target),
+    )
+
+
+def _elliptic_chunk(
+    chunk: str, previous: ActionModel | None, entities: Sequence[EntitySnapshot]
+) -> ActionModel | None:
+    """"... und den Wohnzimmer Rollladen": the previous verb, a new object."""
+    if previous is None or previous.target is None or previous.type not in {
+        ActionType.TURN_ON, ActionType.TURN_OFF, ActionType.SET_POSITION, ActionType.SET_BRIGHTNESS,
+    }:
+        return None
+    words = chunk.split()
+    if not words or any(word.casefold() in _NON_NOUN_PHRASE for word in words):
+        return None
+    subject = read_subject(words, entities)
+    if subject.noun is None or subject.unknown_location is not None:
+        return None
+    candidates = [
+        entity for entity in entities
+        if entity.domain == subject.noun.domain
+        and (subject.noun.device_class is None or entity.device_class == subject.noun.device_class)
+        and (subject.area_id is None or entity.area_id == subject.area_id)
+    ]
+    if subject.modifiers:
+        candidates = [
+            entity for entity in candidates
+            if all(any(modifier in name for name in _names(entity)) for modifier in subject.modifiers)
+        ]
+    if len(candidates) != 1:
+        return None
+    return replace(previous, target=target_for(candidates, entities))
+
+
+_NON_NOUN_PHRASE = frozenset({
+    "an", "aus", "ein", "auf", "zu", "hoch", "runter", "wieder", "nach", "mach", "schalte",
+    "fahre", "öffne", "schließe", "bitte", "mir", "mich",
+})
+
+
+def _names(entity: EntitySnapshot) -> tuple[str, ...]:
+    return tuple(normalize_for_compare(name) for name in (entity.friendly_name, *entity.aliases) if name)
+
+
+@dataclass(frozen=True)
+class ActionReading:
+    steps: tuple[ActionModel | ActionGroup, ...]
+    notification: NotificationClause | None  # set when the clause is one notification
+    unresolved_recipient: str | None = None
+
+
+def read_actions(
+    text: str,
+    trigger: TriggerModel | None,
+    entities: Sequence[EntitySnapshot],
+    readers: Readers,
+    trailing_message: str | None = None,
+) -> ActionReading | None:
+    """Every coordinated action chunk must be understood - none is dropped."""
+    chunks = split_action_chunks(text)
+    if not chunks:
+        return None
+    steps: list[ActionModel | ActionGroup] = []
+    only_clause: NotificationClause | None = None
+    previous: ActionModel | None = None
+    for chunk in chunks:
+        clause = parse_notification_clause(chunk)
+        if clause is not None:
+            if clause.reminder or clause.test:
+                return None
+            message = clause.message or trailing_message or trigger_message(trigger, "", entities)
+            action = notification_action(clause, message, entities)
+            if action is None:
+                return ActionReading((), clause, clause.recipient_name or "diese Person")
+            steps.append(action)
+            only_clause = clause if len(chunks) == 1 else None
+            continue
+        revert = _revert_chunk(chunk, previous)
+        if revert is not None:
+            steps.extend(revert)
+            previous = revert[1]
+            continue
+        elliptic = _elliptic_chunk(chunk, previous, entities)
+        if elliptic is not None:
+            steps.append(elliptic)
+            previous = elliptic
+            continue
+        parsed = readers.action(chunk)
+        if not parsed:
+            return _whole_clause(text, chunks, readers)
+        steps.extend(parsed)
+        flat = _flatten(parsed)
+        previous = flat[-1] if flat else None
+    return ActionReading(tuple(steps), only_clause)
+
+
+def _whole_clause(text: str, chunks: list[str], readers: Readers) -> ActionReading | None:
+    """"Schalte das Flurlicht und das Wohnzimmerlicht ein" - one verb bracket.
+
+    Accepted only when the action parser demonstrably read the coordination
+    (several steps or several targets); a single-target reading of a
+    coordinated clause would silently drop a part.
+    """
+    parsed = readers.action(text)
+    if not parsed:
+        return None
+    flat = _flatten(parsed)
+    if len(chunks) > 1 and not (
+        len(flat) >= len(chunks)
+        or any(step.target is not None and len(step.target.entity_ids) >= len(chunks) for step in flat)
+    ):
+        return None
+    return ActionReading(tuple(parsed), None)
+
+
+_OR_SPLIT_RE = re.compile(r"\s*,?\s+oder\s+(?:wenn|sobald|falls|sofern)\s+", re.IGNORECASE)
+
+
+def _alternative_triggers(
+    parts: Sequence[str], connector: str, entities: Sequence[EntitySnapshot], readers: Readers
+) -> EventInterpretation:
+    """"Wenn X oder wenn Y": each alternative is its own complete trigger."""
+    triggers: list[TriggerModel] = []
+    for part in parts:
+        reading = interpret_event_clause(part, connector, entities, readers.trigger, readers.condition)
+        if reading.trigger is None or reading.conditions:
+            return EventInterpretation(None, (), reading.grounded)
+        triggers.append(reading.trigger)
+    return EventInterpretation(triggers[0], (), None, typed=True, alternatives=tuple(triggers))
+
+
+def build_automation(
+    interpreted: EventInterpretation,
+    reading: ActionReading,
     entities: Sequence[EntitySnapshot],
     source_text: str,
-    grounded: GroundedEvent | None,
     trace: CompositionTrace,
 ) -> CompositionOutcome:
-    message = clause.message or trigger_message(trigger, "", entities)
-    action: ActionModel | None = notification_action(clause, message, entities)
-    if action is None:
-        name = clause.recipient_name or "diese Person"
+    assert interpreted.trigger is not None
+    if reading.unresolved_recipient is not None:
         return CompositionOutcome(
             OutcomeKind.CLARIFY,
             speech=(
-                f"Ich finde kein eindeutiges Benachrichtigungsziel für {name}. "
+                f"Ich finde kein eindeutiges Benachrichtigungsziel für {reading.unresolved_recipient}. "
                 "Wen soll ich benachrichtigen?"
             ),
-            trace=CompositionTrace(trace.route, trace.order, trace.connector, "recipient", "recipient_unresolved",
-                                   trace.repaired, trace.event_words),
+            trace=replace(trace, grounding="recipient", reason="recipient_unresolved"),
         )
+    triggers = (
+        tuple(
+            replace(trigger, trigger_id=f"ausloeser_{index}")
+            for index, trigger in enumerate(interpreted.alternatives, start=1)
+        )
+        if interpreted.alternatives
+        else (interpreted.trigger,)
+    )
     model = AutomationModel(
-        triggers=(trigger,), conditions=conditions, actions=(action,), source_text=source_text
+        triggers=triggers, conditions=interpreted.conditions,
+        actions=reading.steps, source_text=source_text,
+    )
+    canonical = (
+        _canonical(interpreted.trigger, reading.notification, interpreted.conditions, interpreted.grounded)
+        if reading.notification is not None else None
     )
     return CompositionOutcome(
         OutcomeKind.AUTOMATION,
         model=model,
         validation_error=validate_automation(model),
-        canonical=_canonical(trigger, clause, conditions, grounded),
+        canonical=canonical,
         trace=trace,
     )
 
 
-def compose_event_notification(
+def compose_event_automation(
     raw_text: str,
     entities: Sequence[EntitySnapshot],
-    parse_trigger: TriggerReader,
-    parse_condition: ConditionReader,
+    readers: Readers,
 ) -> CompositionOutcome | None:
-    """``None`` unless the utterance is an event + notification request."""
+    """``None`` unless the utterance is one EVENT clause + one ACTION clause."""
     prepared = prepare_automation_text(raw_text)
-    frame: NotificationAutomationFrame | None = segment_notification_automation(prepared.text)
+    memo: dict[str, bool] = {}
+
+    def action_ok(text: str) -> bool:
+        if text not in memo:
+            memo[text] = read_actions(text, None, entities, readers) is not None
+        return memo[text]
+
+    frame: EventActionFrame | None = segment_event_automation(prepared.text, action_ok)
     if frame is None:
         return None
+    notification_only = is_notification_text(frame.action_text)
     trace = CompositionTrace(
-        route="event_notification",
+        route="event_notification" if notification_only else "event_action",
         order=frame.order.name,
         connector=frame.connector,
         repaired=prepared.repaired,
         event_words=len(frame.event_text.split()),
     )
-    if frame.notification.reminder or frame.notification.test:
-        # "Erinnere mich, wenn ..." and test pushes keep their own routes.
-        return None
+    alternatives = _OR_SPLIT_RE.split(frame.event_text) if frame.temporal is None else [frame.event_text]
     if frame.temporal is not None:
         interpreted = temporal_interpretation(frame.temporal)
+    elif len(alternatives) > 1:
+        interpreted = _alternative_triggers(alternatives, frame.connector, entities, readers)
     else:
         interpreted = interpret_event_clause(
-            frame.event_text, frame.connector, entities, parse_trigger, parse_condition
+            frame.event_text, frame.connector, entities, readers.trigger, readers.condition
         )
-    if interpreted.trigger is not None:
-        return build_notification_automation(
-            interpreted.trigger, interpreted.conditions, frame.notification, entities,
-            raw_text, interpreted.grounded,
-            CompositionTrace(trace.route, trace.order, trace.connector,
-                             "typed" if interpreted.typed else "established_parser",
-                             None, trace.repaired, trace.event_words),
+    if interpreted.trigger is None:
+        grounded = interpreted.grounded
+        if not notification_only and (
+            grounded is None
+            or grounded.status in {GroundingStatus.NOT_APPLICABLE, GroundingStatus.NOT_FOUND,
+                                   GroundingStatus.AMBIGUOUS}
+        ):
+            # Device automations keep their established contract: an event
+            # that cannot be grounded is no automation (never a guess).
+            return None
+        return failure_outcome(
+            grounded, frame.action_text, frame.trailing_message, raw_text, trace, interpreted.conditions
         )
-    return failure_outcome(
-        interpreted.grounded, frame.notification, raw_text, trace, interpreted.conditions
-    )
+    reading = read_actions(frame.action_text, interpreted.trigger, entities, readers, frame.trailing_message)
+    if reading is None:
+        return None
+    trace = replace(trace, grounding="typed" if interpreted.typed else "established_parser")
+    return build_automation(interpreted, reading, entities, raw_text, trace)
 
 
 def failure_outcome(
     grounded: GroundedEvent | None,
-    clause: NotificationClause,
+    action_text: str,
+    trailing_message: str | None,
     source_text: str,
     trace: CompositionTrace,
     conditions: tuple[ConditionNode, ...] = (),
 ) -> CompositionOutcome:
     status = grounded.status if grounded is not None else GroundingStatus.NOT_APPLICABLE
     reason = grounded.reason if grounded is not None else None
-    failed = CompositionTrace(trace.route, trace.order, trace.connector, status.name, reason,
-                              trace.repaired, trace.event_words)
+    failed = replace(trace, grounding=status.name, reason=reason)
     if grounded is not None and status is GroundingStatus.AMBIGUOUS:
         return CompositionOutcome(
             OutcomeKind.CLARIFY,
             speech=grounded.question,
-            clarification=EventClarification(grounded, clause, conditions, source_text),
+            clarification=EventClarification(
+                grounded, action_text, trailing_message, conditions, source_text
+            ),
             trace=failed,
         )
     if grounded is not None and status in {GroundingStatus.MISSING_SUBJECT, GroundingStatus.NOT_FOUND}:
@@ -387,6 +641,7 @@ def resolve_event_clarification(
     reply: str,
     pending: EventClarification,
     entities: Sequence[EntitySnapshot],
+    readers: Readers,
 ) -> CompositionOutcome | None:
     """Finish the same draft with the chosen candidate; ``None`` if the reply
     does not pick exactly one of them (then it is not an answer)."""
@@ -396,13 +651,20 @@ def resolve_event_clarification(
     grounded = restrict_to(pending.grounded, chosen, entities)
     if grounded.trigger is None:
         return None
-    return build_notification_automation(
-        grounded.trigger, pending.conditions, pending.clause, entities,
-        pending.source_text, grounded, CompositionTrace("event_notification_followup", grounding="typed"),
+    interpreted = EventInterpretation(grounded.trigger, pending.conditions, grounded, typed=True)
+    reading = read_actions(
+        pending.action_text, grounded.trigger, entities, readers, pending.trailing_message
+    )
+    if reading is None:
+        return None
+    return build_automation(
+        interpreted, reading, entities, pending.source_text,
+        CompositionTrace("event_clarification_followup", grounding="typed"),
     )
 
 
 __all__ = (
+    "ActionReading",
     "CanonicalEvent",
     "CanonicalEventNotification",
     "CompositionOutcome",
@@ -411,10 +673,13 @@ __all__ = (
     "EventInterpretation",
     "EventRoles",
     "OutcomeKind",
-    "compose_event_notification",
+    "Readers",
+    "compose_event_automation",
     "failure_outcome",
     "interpret_event_clause",
     "log_composition_trace",
+    "read_actions",
     "resolve_event_clarification",
+    "split_action_chunks",
     "unsupported_text",
 )

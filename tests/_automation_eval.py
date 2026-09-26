@@ -186,6 +186,13 @@ def _action_signatures(step: ActionModel | ActionGroup, entities: list[EntitySna
         name = {"open_cover": "open", "close_cover": "close", "turn_on": "turn_on",
                 "turn_off": "turn_off"}.get(service, service)
         return [(f"{name}({ids})", None)]
+    resolved = _resolve_target_entities(step.target, entities) if step.target is not None else []
+    if step.type in {ActionType.TURN_ON, ActionType.TURN_OFF} and resolved and all(
+        entity.domain == "cover" for entity in resolved
+    ):
+        # The generator emits cover.open_cover / cover.close_cover for these.
+        name = "open" if step.type is ActionType.TURN_ON else "close"
+        return [(f"{name}({ids})", None)]
     if step.type is ActionType.TURN_ON and step.duration_seconds:
         # "an und nach 5 Minuten wieder aus" - the same meaning, spelled out.
         return [(f"turn_on({ids})", None), (f"delay={step.duration_seconds}", None),
@@ -210,11 +217,31 @@ def model_meaning(model: AutomationModel, entities: list[EntitySnapshot]) -> Mea
     conditions = {
         item for node in model.conditions for item in _condition_signatures(node, entities)
     }
-    pairs = [item for step in model.actions for item in _action_signatures(step, entities)]
+    pairs = [
+        expanded
+        for step in model.actions
+        for item in _action_signatures(step, entities)
+        for expanded in _per_entity(item)
+    ]
     return Meaning(
         frozenset(triggers), frozenset(conditions),
         tuple(name for name, _ in pairs), tuple(message for _, message in pairs),
     )
+
+
+_MULTI_RE = re.compile(r"^(?P<name>[a-z_]+)\((?P<ids>[^)]*,[^)]*)\)(?P<rest>.*)$")
+
+
+def _per_entity(item: tuple[str, str | None]) -> list[tuple[str, str | None]]:
+    """One device service call on N entities means the same as N calls."""
+    name, message = item
+    match = _MULTI_RE.match(name)
+    if match is None or name.startswith("notify("):
+        return [item]
+    return [
+        (f"{match.group('name')}({entity_id}){match.group('rest')}", message)
+        for entity_id in match.group("ids").split(",")
+    ]
 
 
 _ACTION_RE = re.compile(r'^(?P<name>notify\((?P<who>[^,)]+)(?:,"(?P<message>.*)")?\))$')
@@ -235,8 +262,9 @@ def expected_meaning(expect: str) -> tuple[Meaning, tuple[str | None, ...]]:
             names.append(f"notify({match.group('who')})")
             messages.append(match.group("message"))
         else:
-            names.append(raw)
-            messages.append(None)
+            for name, _ in _per_entity((raw, None)):
+                names.append(name)
+                messages.append(None)
     return Meaning(triggers, conditions, tuple(names), tuple(messages)), tuple(messages)
 
 
