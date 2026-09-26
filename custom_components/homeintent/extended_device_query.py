@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
-from .entities import EntitySnapshot, format_spoken_number
+from .entities import EntitySnapshot, format_spoken_number, spoken_state
 from .entity_scope import DOMAIN_WORDS, resolve_entity_scope
 from .device_result import DeviceControlResult
 from .nlu.language_frontend import LanguageDocument
@@ -24,14 +24,14 @@ _QUERY_CUE = re.compile(
 def _state_text(entity: EntitySnapshot) -> str:
     if entity.domain == "humidifier":
         humidity = entity.attributes.get("humidity")
-        return f"{entity.friendly_name}: {format_spoken_number(humidity)} Prozent" if humidity is not None else f"{entity.friendly_name}: {entity.state}"
+        return f"{entity.friendly_name}: {format_spoken_number(humidity)} Prozent" if humidity is not None else f"{entity.friendly_name}: {spoken_state(entity.state)}"
     if entity.domain in {"number", "input_number"}:
         unit = entity.unit or entity.attributes.get("unit_of_measurement") or ""
         return f"{entity.friendly_name}: {format_spoken_number(entity.state)} {unit}".strip()
     if entity.domain == "water_heater":
         value = entity.attributes.get("temperature")
-        return f"{entity.friendly_name}: {format_spoken_number(value)} Grad" if value is not None else f"{entity.friendly_name}: {entity.state}"
-    return f"{entity.friendly_name}: {entity.state}"
+        return f"{entity.friendly_name}: {format_spoken_number(value)} Grad" if value is not None else f"{entity.friendly_name}: {spoken_state(entity.state)}"
+    return f"{entity.friendly_name}: {spoken_state(entity.state)}"
 
 
 _TIMER_REMAINING_RE = re.compile(

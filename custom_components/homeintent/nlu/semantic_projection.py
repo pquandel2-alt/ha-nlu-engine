@@ -15,7 +15,7 @@ from typing import Iterable
 
 from ..areas import AreaResolutionStatus, AreaSnapshot, resolve_area_scored
 from ..house_graph import RelationKind, TraversalDirection
-from ..entities import EntitySnapshot, normalize_for_compare
+from ..entities import EntitySnapshot, normalize_for_compare, spoken_state
 from ..world_model import WorldModel
 from .composition import CompositionalPlan
 from .constraint_resolver import Constraints, resolve_candidates
@@ -206,7 +206,7 @@ def _explain_reasoning_result(result: QueryResult, world: WorldModel) -> str | N
             )
     if not facts and result.entities:
         facts.extend(
-            f"{entity.friendly_name} hat den Zustand {entity.state}"
+            f"{entity.friendly_name} hat den Zustand {spoken_state(entity.state)}"
             for entity in result.entities
         )
     return "; ".join(facts).capitalize() + "." if facts else None

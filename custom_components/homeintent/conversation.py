@@ -23,7 +23,7 @@ import secrets
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
-from typing import Literal, Sequence
+from typing import Any, Literal, Mapping, Sequence
 
 from homeassistant.components import conversation
 from homeassistant.components.conversation import ConversationEntityFeature
@@ -327,6 +327,39 @@ _UNIVERSAL_CANCEL_RE = re.compile(
     r"stopp|stop|vergiss\s+(?:es|das)|egal|schon\s+gut|nicht\s+mehr\s+noetig|"
     r"nicht\s+mehr\s+nötig)(?:\s+bitte)?)[.!]?\s*"
 )
+_MEMORY_KIND_DE = {
+    "episode": "Ereignisse", "household_fact": "Haushaltsfakten",
+    "preference": "Vorlieben", "procedure": "Abläufe", "decision": "Entscheidungen",
+    "routine_grant": "Routinen-Freigaben",
+}
+
+
+_MEMORY_KIND_SINGULAR_DE = {
+    "episode": "Ereignis", "household_fact": "Haushaltsfakt", "preference": "Vorliebe",
+    "procedure": "Ablauf", "decision": "Entscheidung", "routine_grant": "Routinen-Freigabe",
+}
+
+
+def _describe_memory(record: Any, labels: Mapping[str, str]) -> str:
+    """One remembered record in plain German, without internal keys."""
+    content = record.content if isinstance(record.content, Mapping) else {}
+    entity_name = labels.get(str(content.get("entity_id", "")), "")
+    percent = content.get("brightness_percent")
+    activity = content.get("activity")
+    if record.kind.value == "preference":
+        situation = " beim Fernsehen" if activity == "television" else ""
+        if isinstance(percent, int) and entity_name:
+            return f"Vorliebe{situation}: {entity_name} auf {percent} Prozent"
+        if isinstance(percent, int):
+            return f"Vorliebe{situation}: Helligkeit {percent} Prozent"
+        if entity_name:
+            return f"Vorliebe{situation}: {entity_name}"
+        return "eine Vorliebe ohne Details"
+    text = content.get("text") or content.get("summary") or content.get("fact")
+    kind = _MEMORY_KIND_SINGULAR_DE.get(record.kind.value, "Eintrag")
+    return f"{kind}: {text}" if isinstance(text, str) and text else f"ein Eintrag ({kind})"
+
+
 # Open questions whose expected answer is itself a command (a routine being
 # defined step by step, an automation action): a command answers them.
 _COMMAND_ANSWER_TASK_KINDS = frozenset({
@@ -3824,18 +3857,20 @@ class NluConversationEntity(
             response.async_set_speech("Das lokale dauerhafte Gedächtnis ist deaktiviert.")
         elif request.operation is MemoryOperation.LIST:
             records = await store.async_list(person_id=conversation_user_id(user_input))
-            counts: dict[str, int] = {}
-            for record in records:
-                counts[record.kind.value] = counts.get(record.kind.value, 0) + 1
-            summary = ", ".join(f"{count} {kind}" for kind, count in sorted(counts.items()))
+            # Say what is remembered, in German - not internal kind names
+            # ("1 preference") (F16/F23).
+            labels = {entity.entity_id: entity.friendly_name for entity in entities}
+            described = [_describe_memory(record, labels) for record in records[:8]]
+            more = f" und {len(records) - 8} weitere Einträge" if len(records) > 8 else ""
             response.async_set_speech(
-                f"Gespeichert sind {summary}." if summary else "Für dich sind keine dauerhaften Erinnerungen gespeichert."
+                f"Ich habe mir gemerkt: {'; '.join(described)}{more}."
+                if described else "Für dich sind keine dauerhaften Erinnerungen gespeichert."
             )
         elif request.operation is MemoryOperation.EXPORT_REDACTED:
             exported = await store.async_redacted_export()
             exported_counts = exported.get("record_counts", {})
             summary = ", ".join(
-                f"{count} {kind}"
+                f"{count} {_MEMORY_KIND_DE.get(str(kind), str(kind))}"
                 for kind, count in sorted(exported_counts.items())
             ) if isinstance(exported_counts, dict) else ""
             response.async_set_speech(

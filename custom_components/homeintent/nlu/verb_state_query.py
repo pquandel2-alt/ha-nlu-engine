@@ -180,7 +180,7 @@ def _candidate_question(targets: tuple[EntitySnapshot, ...]) -> str:
 
 def _explanation(targets: tuple[EntitySnapshot, ...], predicate: str) -> str:
     states = ", ".join(
-        f"{entity.friendly_name}: {entity.state}" for entity in targets
+        f"{entity.friendly_name}: {spoken_state(entity.state)}" for entity in targets
     )
     label = _PREDICATE_LABELS.get(predicate, predicate)
     return (

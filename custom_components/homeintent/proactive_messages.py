@@ -253,8 +253,19 @@ def explain_record(record: HistoryRecord, *, local_time: datetime) -> str:
     if record.model_ref:
         parts.append(f"Verwendete Lernevidenz: {record.model_ref}")
     if record.acknowledgement:
-        parts.append(f"Antwort: {record.acknowledgement}")
+        answer = _ACKNOWLEDGEMENT_WORDS.get(record.acknowledgement, record.acknowledgement)
+        parts.append(f"Antwort: {answer}")
     return join_sentences(parts)
+
+
+# Stored acknowledgement codes spoken in German (F16).
+_ACKNOWLEDGEMENT_WORDS = {
+    "accepted": "angenommen", "accept": "angenommen", "declined": "abgelehnt",
+    "rejected": "abgelehnt", "reject": "abgelehnt", "ignore": "ignoriert",
+    "snoozed": "später erinnern", "later": "später erinnern", "dismissed": "verworfen",
+    "muted": "künftig nicht mehr melden", "expired": "abgelaufen", "cancelled": "abgebrochen",
+    "acknowledged": "zur Kenntnis genommen",
+}
 
 
 __all__ = (
