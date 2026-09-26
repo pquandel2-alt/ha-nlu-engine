@@ -3492,6 +3492,10 @@ class NluEngine:
         self._relative_time_command_parser.decompose(
             "in fünf Minuten schalte das Licht ein"
         )
+        # understanding_feedback() consults the percentage grammar for
+        # explanations during a live turn; load its YAML here, off the event
+        # loop, instead of lazily inside the turn (F18).
+        self._get_shadow_parser("percentage")
 
     def match_immediate_notification(self, text: str) -> NotificationClause | None:
         """An explicit notification to be sent *now* ("Schick mir eine

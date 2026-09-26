@@ -66,3 +66,4 @@ def test_word_alignment_ignores_stripped_punctuation():
 
     assert result is not None
     assert str(result.entities["cmd"].value).strip(" .") in {"tu das, bitte", "tu das bitte"}
+
