@@ -356,6 +356,12 @@ class ProactiveContextEngine:
             SituationKind.ENTRY_LEFT_OPEN: timedelta(minutes=self.config.entry_open_minutes),
             SituationKind.DEVICE_LEFT_ON_WHEN_LEAVING: timedelta(minutes=self.config.left_on_minutes),
         }
+        if (
+            situation.kind is SituationKind.APPLIANCE_FINISHED
+            and situation.evidence_value("source") == "power"
+        ):
+            # A power drop only means "finished" once it lasted (F15).
+            minimum[SituationKind.APPLIANCE_FINISHED] = self.detector.config.appliance_idle_duration
         muted = bool(recipients) and all(
             self.attention_state.is_muted(item.user_id, situation.kind) for item in recipients
         )

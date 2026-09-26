@@ -694,3 +694,71 @@ def test_polite_command_is_not_a_standing_permission():
     assert not looks_like_permission_request("Darfst du das Licht ausschalten?")
     assert looks_like_permission_request("Du darfst künftig das Licht ausschalten.")
     assert looks_like_permission_request("Wenn ich gehe, darfst du das Licht ausschalten.")
+
+
+# --- F15: power-metered and binary-sensor appliances ---------------------------
+
+def _power_washer(watts: str):
+    from dataclasses import replace as _replace
+
+    return _replace(
+        entity("sensor.washer_power", "Leistung Waschmaschine", watts, area="bath",
+               device_class="power"),
+        unit="W",
+    )
+
+
+def test_power_metered_washer_finishes_after_a_sustained_low_draw(tmp_path):
+    states = garage_states() + [_power_washer("0")]
+    world = _home_world(tmp_path, states=states)
+    world.engine.detector = SituationDetector(
+        DetectorConfig(appliance_entity_ids=frozenset({"sensor.washer_power"}))
+    )
+
+    async def scenario():
+        await world.change("sensor.washer_power", "1850")
+        await world.ports.advance(timedelta(minutes=30))
+        await world.change("sensor.washer_power", "2")
+        # A drop alone is not "finished" yet: nothing before the idle time.
+        await world.ports.advance(timedelta(seconds=20))
+        assert not any("Waschmaschine" in item.text for item in world.ports.delivered)
+        await world.ports.advance(timedelta(minutes=1))
+        assert any(item.text == "Die Waschmaschine ist fertig." for item in world.ports.delivered)
+        assert world.sink.device_calls == []
+
+    asyncio.run(scenario())
+
+
+def test_power_pause_shorter_than_idle_time_is_not_finished(tmp_path):
+    states = garage_states() + [_power_washer("0")]
+    world = _home_world(tmp_path, states=states)
+    world.engine.detector = SituationDetector(
+        DetectorConfig(appliance_entity_ids=frozenset({"sensor.washer_power"}))
+    )
+
+    async def scenario():
+        await world.change("sensor.washer_power", "1850")
+        await world.change("sensor.washer_power", "2")
+        await world.ports.advance(timedelta(seconds=30))
+        await world.change("sensor.washer_power", "1700")  # program continues
+        await world.ports.advance(timedelta(minutes=5))
+        assert not any("Waschmaschine" in item.text for item in world.ports.delivered)
+
+    asyncio.run(scenario())
+
+
+def test_binary_running_sensor_on_to_off_is_finished(tmp_path):
+    states = garage_states() + [
+        entity("binary_sensor.dishwasher_running", "Geschirrspüler", "on", area="kitchen",
+               device_class="running"),
+    ]
+    world = _home_world(tmp_path, states=states)
+    world.engine.detector = SituationDetector(
+        DetectorConfig(appliance_entity_ids=frozenset({"binary_sensor.dishwasher_running"}))
+    )
+
+    async def scenario():
+        await world.change("binary_sensor.dishwasher_running", "off")
+        assert any("Geschirrspüler" in item.text for item in world.ports.delivered)
+
+    asyncio.run(scenario())

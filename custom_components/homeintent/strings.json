@@ -67,7 +67,7 @@
           "standing_permissions_enabled": "V12: Ausdrücklich bestätigte Daueranweisungen erlauben",
           "critical_multi_channel_enabled": "V12: Kritische Warnungen über mehrere Kanäle",
           "proactive_entry_open_minutes": "V12: Minuten, bis ein offenes Tor oder eine offene Garage gemeldet wird",
-          "proactive_appliance_entities": "V12: Programmstatus-Entitäten von Haushaltsgeräten",
+          "proactive_appliance_entities": "V12: Haushaltsgeräte (Programmstatus, Leistungssensor in W oder Betriebs-Binärsensor)",
           "proactive_person_room_sensors": "V12: Personen-Raumsensoren (person.x = sensor.y, eine Zeile pro Person)",
           "proactive_satellite_areas": "V12: Sprachsatellit-Bereiche (assist_satellite.x = bereich_id)",
           "proactive_user_quiet_hours": "V12: Ruhezeiten je Benutzer (user_id = HH:MM-HH:MM)"
