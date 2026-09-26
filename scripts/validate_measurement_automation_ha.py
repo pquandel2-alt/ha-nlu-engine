@@ -17,16 +17,7 @@ import tempfile
 from dataclasses import replace
 from typing import Any
 
-from homeassistant import config_entries, loader
-from homeassistant.helpers import (
-    area_registry as ar,
-    category_registry as cr,
-    device_registry as dr,
-    entity_registry as er,
-    floor_registry as fr,
-    issue_registry as ir,
-    label_registry as lr,
-)
+from homeassistant import bootstrap, config_entries, loader
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.setup import async_setup_component
 
@@ -70,14 +61,12 @@ def _config(sentence: str) -> dict[str, Any]:
 
 
 async def _core(config_dir: str) -> HomeAssistant:
-    """A bare core with the registries every integration setup expects."""
+    """A bare core bootstrapped by Home Assistant's own base loader, so the
+    registries are set up the way the running HA version expects."""
     hass = HomeAssistant(config_dir)
     loader.async_setup(hass)
     hass.config_entries = config_entries.ConfigEntries(hass, {})
-    await asyncio.gather(
-        ar.async_load(hass), cr.async_load(hass), dr.async_load(hass), er.async_load(hass),
-        fr.async_load(hass), ir.async_load(hass), lr.async_load(hass),
-    )
+    await bootstrap.async_load_base_functionality(hass)
     await hass.async_start()
     return hass
 
