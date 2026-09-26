@@ -51,6 +51,7 @@ from .automation_scenarios import interpret_downstairs_shutdown
 from .automation_management import (
     AutomationManagementKind,
     AutomationManagementRequest,
+    READ_ONLY_MANAGEMENT_KINDS,
     format_scheduled_time,
     parse_automation_management,
     select_automation_management,
@@ -6427,6 +6428,8 @@ class NluConversationEntity(
 
         automations = await self._automation_executor.async_list_automations()
         selection = select_automation_management(request, entities, automations, now)
+        if request.kind in READ_ONLY_MANAGEMENT_KINDS:
+            response.response_type = intent.IntentResponseType.QUERY_ANSWER
         if selection.error_text is not None:
             response.async_set_speech(selection.error_text)
         elif request.kind is AutomationManagementKind.LIST_HOMEINTENT:

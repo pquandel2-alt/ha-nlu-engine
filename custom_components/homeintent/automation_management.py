@@ -31,6 +31,22 @@ class AutomationManagementKind(Enum):
     SIMULATE = auto()
 
 
+
+# Management requests that only read automations: answered as a question
+# (QUERY_ANSWER) for clients and satellites, never as an action (F22).
+READ_ONLY_MANAGEMENT_KINDS = frozenset({
+    AutomationManagementKind.LIST_HOMEINTENT,
+    AutomationManagementKind.LIST_SCHEDULED,
+    AutomationManagementKind.WHEN,
+    AutomationManagementKind.COUNT_ACTIVE,
+    AutomationManagementKind.COUNT_DISABLED,
+    AutomationManagementKind.EXPLAIN_TRIGGER,
+    AutomationManagementKind.CONTROLS_ENTITY,
+    AutomationManagementKind.DETAIL,
+    AutomationManagementKind.DIAGNOSE,
+    AutomationManagementKind.SIMULATE,
+})
+
 @dataclass(frozen=True)
 class AutomationManagementRequest:
     kind: AutomationManagementKind

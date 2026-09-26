@@ -450,6 +450,8 @@ async def async_handle_calendar_management(
                 f"Fehler beim Lesen des Kalenders: {err}",
             )
         else:
+            # Reading events is a question, not an action (F22).
+            response.response_type = intent.IntentResponseType.QUERY_ANSWER
             response.async_set_speech(
                 render_calendar_events(
                     flatten_calendar_response(result, request.title_filter), request
