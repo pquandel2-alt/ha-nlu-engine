@@ -18,6 +18,7 @@ _ha_stub.install()
 
 import homeintent.conversation as ha_conversation
 import homeintent.profiles as profile_module
+from _notify_sink import LEGACY_NOTIFY_SCHEMA, SEND_MESSAGE_SCHEMA
 from homeintent.agent_delivery import AgentDelivery
 from homeintent.agent_event import AgentEvent, AgentEventState, AgentMode
 from homeintent.agent_runtime import ProactiveAgentRuntime
@@ -383,17 +384,22 @@ def _agent_event() -> AgentEvent:
     )
 
 
-def test_new_notification_actions_are_canonical_only():
+def test_rule_push_to_notify_entities_matches_send_message_schema():
+    """Configured targets are notify entities; ``notify.send_message``
+    rejects any key but message/title, so no tag or button payload is sent
+    (the event stays answerable in the dashboard and by voice)."""
     hass = HomeAssistant()
     delivery = AgentDelivery(hass)
-    asyncio.run(delivery.async_deliver(_agent_event(), {
+    event = _agent_event()
+    asyncio.run(delivery.async_deliver(event, {
         "agent_delivery_channels": ["push"],
         "agent_notify_targets": ["notify.phone"],
     }))
-    actions = hass.services.async_call.await_args.args[2]["data"]["actions"]
-    assert actions
-    assert all(item["action"].startswith("HOMEINTENT_") for item in actions)
-    assert all("HA_NLU_" not in item["action"] for item in actions)
+    args = hass.services.async_call.await_args.args
+    assert args[:2] == ("notify", "send_message")
+    assert SEND_MESSAGE_SCHEMA(args[2]) == {
+        "entity_id": ["notify.phone"], "title": event.title, "message": event.message,
+    }
 
 
 @pytest.mark.parametrize("prefix", ("HOMEINTENT_IGNORE_", "HA_NLU_IGNORE_"))
@@ -429,9 +435,23 @@ def test_typed_notification_entity_and_service_paths_are_exact():
         title="Title", message="Message", dedupe_key="two", severity="warning",
         goal_id="goal", run_id="run",
     ))
-    assert hass.services.async_call.await_args_list[0].args[:2] == ("notify", "send_message")
-    assert hass.services.async_call.await_args_list[0].args[2]["entity_id"] == ["notify.phone"]
-    assert hass.services.async_call.await_args_list[1].args[:2] == ("notify", "mobile_app_phone")
+    entity_call, service_call = hass.services.async_call.await_args_list
+    assert entity_call.args[:2] == ("notify", "send_message")
+    assert SEND_MESSAGE_SCHEMA(entity_call.args[2]) == {
+        "entity_id": ["notify.phone"], "title": "Title", "message": "Message",
+    }
+    assert service_call.args[:2] == ("notify", "mobile_app_phone")
+    assert LEGACY_NOTIFY_SCHEMA(service_call.args[2])["data"]["tag"] == "two"
+
+    # Buttons cannot be carried by an entity target: refused, not dropped.
+    assert delivery.supports_actions("notify.phone", NotificationTargetKind.ENTITY) is False
+    assert delivery.supports_actions("notify.mobile_app_phone", NotificationTargetKind.SERVICE) is True
+    with pytest.raises(ValueError):
+        asyncio.run(delivery.async_deliver_typed_notification(
+            "notify.phone", target_kind=NotificationTargetKind.ENTITY,
+            title="Title", message="Message", dedupe_key="x", severity="warning",
+            goal_id="goal", run_id="run", actions=(("HOMEINTENT_V12_ACCEPT_x", "Ok"),),
+        ))
 
     with pytest.raises(ValueError):
         asyncio.run(delivery.async_deliver_typed_notification(

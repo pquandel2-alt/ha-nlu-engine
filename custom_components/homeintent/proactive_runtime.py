@@ -533,12 +533,27 @@ class ProactiveRuntime:
         if decision.push_target_ids:
             contexts = self._data.user_contexts
             for target in decision.push_target_ids:
+                kind = None
+                if contexts is not None:
+                    for user in contexts.bound_users():
+                        for item in user.notification_targets:
+                            if item.target_id == target:
+                                kind = item.kind
                 actions: tuple[tuple[str, str], ...] = ()
                 device_id = (
                     self._companion_device(decision.recipient_user_id, target)
                     if message.proposal_id is not None else None
                 )
-                if message.proposal_id is not None and device_id is not None and decision.recipient_user_id:
+                if (
+                    message.proposal_id is not None
+                    and device_id is not None
+                    and decision.recipient_user_id
+                    # Buttons exist only on a legacy mobile_app notify
+                    # service; a notify entity (``notify.send_message``)
+                    # gets a plain push and the proposal stays answerable by
+                    # voice or dashboard - no token is minted for it.
+                    and self._delivery.supports_actions(target, kind)
+                ):
                     # Buttons only for an authoritatively bound Companion
                     # device; the token reaches only that device.
                     token = f"t{secrets.token_hex(8)}"
@@ -549,12 +564,6 @@ class ProactiveRuntime:
                         (f"{PUSH_ACTION_PREFIX}IGNORE_{suffix}", "Ignorieren"),
                     )
                     bindings.append(PushActionBinding(token, decision.recipient_user_id, device_id))
-                kind = None
-                if contexts is not None:
-                    for user in contexts.bound_users():
-                        for item in user.notification_targets:
-                            if item.target_id == target:
-                                kind = item.kind
                 try:
                     await self._delivery.async_deliver_typed_notification(
                         target, target_kind=kind, title=message.title, message=message.text,

@@ -94,6 +94,18 @@ Abgeschlossene Situationen beachten anschließend den konfigurierten Cooldown.
 
 ## Push-Aktionen und Snooze
 
+**Welche Ziele Buttons tragen können (seit 7.1.2):** Home Assistant adressiert
+`notify.*`-*Entities* über `notify.send_message`. Diese Aktion akzeptiert nur
+`message` und `title`; jeder weitere Schlüssel (`data` mit Tag oder Buttons)
+wird von Home Assistant abgelehnt. HomeIntent sendet an Entities deshalb
+ausschließlich Text und Titel. Aktionsbuttons gibt es nur für eine bestätigte
+Bindung an einen Legacy-Dienst `notify.mobile_app_<gerät>` (Feld
+`notification_services` von `homeintent.bind_user_context`). Ist ein
+V12-Vorschlag an eine Entity gebunden, kommt er als normale Push-Nachricht
+ohne Buttons und ohne Aktions-Token an und bleibt per Sprache oder im Learning
+Center beantwortbar. Das gilt auch für die unter **Push-Ziele** gewählten
+Entities der Regel-Benachrichtigungen.
+
 Interaktive Push-Meldungen enthalten abhängig vom bereits bestimmten Modus:
 
 - **Ausführen** bei `ASK` und einer validierten vorgeschlagenen Aktion,

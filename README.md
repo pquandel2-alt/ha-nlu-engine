@@ -74,6 +74,13 @@ Fehlerbehebung, kein Umbau:
   Fenster offen ist“ bleibt eine Frage.
 - Neuer handgeschriebener Evaluationskorpus mit 183 Benachrichtigungs- und
   Erinnerungsfällen (`tests/eval/notification_cases.json`).
+- **Proaktive Push-Nachrichten an `notify.*`-Entities kommen wieder an.**
+  Regel-, Monitor- und V12-Meldungen schickten bisher zusätzlich `data`
+  (Tag, Buttons) an `notify.send_message`; Home Assistant lehnt das ab.
+  Entities erhalten jetzt nur Titel und Text. Aktionsbuttons gibt es nur
+  noch über eine bestätigte Bindung an einen `notify.mobile_app_*`-Dienst;
+  sonst bleibt ein V12-Vorschlag per Sprache oder im Learning Center
+  beantwortbar.
 
 ## Was ist in Version 7.1.1 neu?
 
@@ -1328,7 +1335,7 @@ python -m pytest -q tests_ha
 Geprüfter Release-Stand von Version 7.1.2:
 
 ```text
-4243 passed, 12 skipped, 0 failed
+4244 passed, 12 skipped, 0 failed
 8 passed gegen echtes Home Assistant 2026.9.2 (tests_ha)
 89 % Gesamt-Coverage
 75 % Coverage für conversation.py

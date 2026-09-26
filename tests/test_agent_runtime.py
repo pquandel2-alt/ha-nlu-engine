@@ -16,6 +16,7 @@ import _ha_stub
 
 _ha_stub.install()
 
+from _notify_sink import SEND_MESSAGE_SCHEMA  # noqa: E402
 from homeintent.agent_event import AgentEventState, AgentMode, StoredServicePlan  # noqa: E402
 from homeintent.agent_runtime import ProactiveAgentRuntime  # noqa: E402
 from homeintent.const import (  # noqa: E402
@@ -699,8 +700,15 @@ def test_low_risk_auto_executes_then_pushes_without_stale_buttons(monkeypatch, t
     assert hass.services.async_call.await_args_list[0].args[:2] == (
         "homeassistant", "turn_off"
     )
-    push_data = hass.services.async_call.await_args_list[1].args[2]
-    assert push_data["data"]["actions"] == []
+    push = hass.services.async_call.await_args_list[1].args
+    # A notify entity takes message/title only (no stale buttons, no data).
+    assert push[:2] == ("notify", "send_message")
+    assert SEND_MESSAGE_SCHEMA(push[2]) == {
+        "entity_id": ["notify.mobile_app_phone"],
+        "title": push[2]["title"],
+        "message": "Ich habe die Pumpe ausgeschaltet.",
+    }
+    assert "data" not in push[2]
 
 
 def test_unique_tts_question_accepts_voice_confirmation(monkeypatch, tmp_path):
