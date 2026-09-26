@@ -53,6 +53,9 @@
     ,"custom_components/homeintent/execution_coordinator.py"
     ,"custom_components/homeintent/storage_migration.py"
     ,"custom_components/homeintent/nlu/german_morphology.py"
+    ,"custom_components/homeintent/notification_language.py"
+    ,"custom_components/homeintent/notification_target.py"
+    ,"custom_components/homeintent/notification_request.py"
   ],
   "reportMissingImports": false
 }

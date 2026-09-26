@@ -181,6 +181,45 @@ class UserContextStore:
             "notification_target_ambiguous",
         )
 
+    def resolve_user_notification_targets(
+        self, user_id: str | None, *, channel: str = "push"
+    ) -> BindingResult:
+        """Targets explicitly bound to one authenticated HA user.
+
+        A user bound to a person uses that person's confirmed targets (the
+        same authority V10 goals use); otherwise only the user's own
+        confirmed targets count.  Never inferred from names.
+        """
+        if user_id is None or user_id not in self._users:
+            return BindingResult(BindingStatus.MISSING, reason="user_binding_missing")
+        context = self._users[user_id]
+        if context.person_entity_id is not None:
+            return self.resolve_notification_targets(
+                context.person_entity_id, channel=channel
+            )
+        targets = tuple(
+            target for target in context.notification_targets if target.channel == channel
+        )
+        if not targets:
+            return BindingResult(BindingStatus.MISSING, reason="notification_target_missing")
+        preferred = tuple(target for target in targets if target.preferred)
+        if len(preferred) == 1:
+            return BindingResult(BindingStatus.RESOLVED, targets=preferred)
+        if len(targets) == 1:
+            return BindingResult(BindingStatus.RESOLVED, targets=targets)
+        return BindingResult(
+            BindingStatus.AMBIGUOUS, targets=targets, reason="notification_target_ambiguous"
+        )
+
+    def notification_target_owners(self, *, channel: str = "push") -> dict[str, tuple[str, ...]]:
+        """Exact notify target id -> HA user ids that explicitly bound it."""
+        owners: dict[str, set[str]] = {}
+        for user_id, context in self._users.items():
+            for target in context.notification_targets:
+                if target.channel == channel:
+                    owners.setdefault(target.target_id, set()).add(user_id)
+        return {key: tuple(sorted(value)) for key, value in sorted(owners.items())}
+
     def bound_users(self) -> tuple[UserContext, ...]:
         """Explicit HA-user -> person bindings, in stable order."""
         return tuple(self._users[key] for key in sorted(self._users))

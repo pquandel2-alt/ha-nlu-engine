@@ -250,6 +250,15 @@ def _make_entity_with(monkeypatch, entities: list[EntitySnapshot]) -> NluConvers
     return entity
 
 
+PUSH_PREVIEW_9 = (
+    "Wenn das Wohnzimmer Fenster geöffnet wird, sende ich eine Push-Benachrichtigung "
+    "an „Philipp Handy“: „Das Wohnzimmer Fenster wurde geöffnet.“ Soll ich das so einrichten?"
+)
+# 7.1.2: push-only automations get a natural preview instead of the generic
+# "Automation erkannt: ..." text; both confirmation questions are guarded.
+PREVIEW_QUESTIONS = ("Soll diese Automation erstellt werden?", "Soll ich das so einrichten?")
+
+
 def test_case_9_original_bug_report_sentence_now_recognized(monkeypatch):
     entity = _make_entity(monkeypatch)
 
@@ -263,8 +272,7 @@ def test_case_9_original_bug_report_sentence_now_recognized(monkeypatch):
     entity.hass.services.async_call.assert_not_awaited()
     assert result.response.error_code is None
     assert "Ich konnte Trigger und Aktion" not in result.response.speech
-    assert "Automation erkannt" in result.response.speech
-    assert "Soll diese Automation erstellt werden?" in result.response.speech
+    assert result.response.speech == PUSH_PREVIEW_9
 
 
 def test_case_9b_recipient_first_phrasing_also_recognized(monkeypatch):
@@ -278,7 +286,7 @@ def test_case_9b_recipient_first_phrasing_also_recognized(monkeypatch):
 
     entity.hass.services.async_call.assert_not_awaited()
     assert result.response.error_code is None
-    assert "Automation erkannt" in result.response.speech
+    assert result.response.speech == PUSH_PREVIEW_9
 
 
 def test_case_9c_unknown_recipient_gives_understandable_feedback_creates_nothing(monkeypatch):
@@ -292,7 +300,7 @@ def test_case_9c_unknown_recipient_gives_understandable_feedback_creates_nothing
 
     entity.hass.services.async_call.assert_not_awaited()
     assert "Automation erkannt" not in result.response.speech
-    assert "Soll diese Automation erstellt werden?" not in result.response.speech
+    assert not any(question in result.response.speech for question in PREVIEW_QUESTIONS)
 
 
 def test_case_9d_ambiguous_recipient_creates_nothing(monkeypatch):
@@ -309,7 +317,7 @@ def test_case_9d_ambiguous_recipient_creates_nothing(monkeypatch):
 
     entity.hass.services.async_call.assert_not_awaited()
     assert "Automation erkannt" not in result.response.speech
-    assert "Soll diese Automation erstellt werden?" not in result.response.speech
+    assert not any(question in result.response.speech for question in PREVIEW_QUESTIONS)
 
 
 def test_case_9e_question_about_an_automation_does_not_create_one(monkeypatch):
@@ -323,4 +331,4 @@ def test_case_9e_question_about_an_automation_does_not_create_one(monkeypatch):
     )
 
     entity.hass.services.async_call.assert_not_awaited()
-    assert "Soll diese Automation erstellt werden?" not in result.response.speech
+    assert not any(question in result.response.speech for question in PREVIEW_QUESTIONS)

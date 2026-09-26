@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import time
+from enum import StrEnum
 from typing import Mapping
 
 from homeassistant.core import HomeAssistant
@@ -20,7 +21,7 @@ from .const import (
     CONF_AGENT_QUIET_END,
     CONF_AGENT_QUIET_START,
 )
-from .user_context import NotificationTargetKind
+from .user_context import NotificationTarget, NotificationTargetKind
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,6 +30,30 @@ _LOGGER = logging.getLogger(__name__)
 class DeliveryResult:
     delivered_channels: tuple[str, ...]
     errors: tuple[str, ...]
+
+
+class NotificationDeliveryStatus(StrEnum):
+    DELIVERED = "delivered"
+    UNAVAILABLE = "unavailable"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class NotificationDeliveryResult:
+    """Outcome of one explicit, already-addressed push delivery.
+
+    ``reason`` is an internal diagnostic code, never a service name meant
+    for the user.
+    """
+
+    status: NotificationDeliveryStatus
+    delivered_target_ids: tuple[str, ...] = ()
+    unavailable_target_ids: tuple[str, ...] = ()
+    reason: str = ""
+
+    @property
+    def delivered(self) -> bool:
+        return self.status is NotificationDeliveryStatus.DELIVERED
 
 
 class AgentDelivery:
@@ -192,6 +217,84 @@ class AgentDelivery:
             blocking=True,
         )
         return True
+
+    def notification_target_available(self, target: NotificationTarget) -> bool:
+        """Whether an exact target can currently receive a push."""
+        if target.kind is NotificationTargetKind.SERVICE:
+            service = target.target_id.partition(".")[2]
+            return bool(service) and self._hass.services.has_service("notify", service)
+        state = self._hass.states.get(target.target_id)
+        return (
+            state is not None
+            and getattr(state, "state", None) != "unavailable"
+            and self._hass.services.has_service("notify", "send_message")
+        )
+
+    async def async_send_notification(
+        self,
+        targets: tuple[NotificationTarget, ...],
+        *,
+        title: str,
+        message: str,
+    ) -> NotificationDeliveryResult:
+        """Send one plain push to already-resolved, exact targets.
+
+        This is the shared primitive for explicit user-requested pushes.
+        Recipient resolution happens before this boundary; there is no
+        broadcast and no ``persistent_notification`` fallback.  Entity
+        targets use Home Assistant's ``notify.send_message`` entity service,
+        whose schema accepts only ``message`` and ``title``; confirmed legacy
+        service bindings use their own ``notify.<service>``.  ``title`` and
+        ``message`` are inert text and never interpreted.
+        """
+        if not targets or any(not item.target_id.startswith("notify.") for item in targets):
+            return NotificationDeliveryResult(
+                NotificationDeliveryStatus.FAILED, reason="no_exact_notify_target"
+            )
+        available = tuple(item for item in targets if self.notification_target_available(item))
+        unavailable = tuple(
+            item.target_id for item in targets if item not in available
+        )
+        if not available:
+            return NotificationDeliveryResult(
+                NotificationDeliveryStatus.UNAVAILABLE,
+                unavailable_target_ids=unavailable,
+                reason="notify_target_unavailable",
+            )
+        entity_ids = [
+            item.target_id for item in available
+            if item.kind is not NotificationTargetKind.SERVICE
+        ]
+        delivered: list[str] = []
+        try:
+            if entity_ids:
+                await self._hass.services.async_call(
+                    "notify",
+                    "send_message",
+                    {"entity_id": entity_ids, "title": title, "message": message},
+                    blocking=True,
+                )
+                delivered.extend(entity_ids)
+            for item in available:
+                if item.kind is NotificationTargetKind.SERVICE:
+                    await self._hass.services.async_call(
+                        "notify",
+                        item.target_id.partition(".")[2],
+                        {"title": title, "message": message},
+                        blocking=True,
+                    )
+                    delivered.append(item.target_id)
+        except Exception as err:  # noqa: BLE001 - HA services fail heterogeneously
+            _LOGGER.warning("Push delivery failed: %s", err)
+            return NotificationDeliveryResult(
+                NotificationDeliveryStatus.FAILED,
+                tuple(delivered),
+                unavailable,
+                f"service_call_failed:{type(err).__name__}",
+            )
+        return NotificationDeliveryResult(
+            NotificationDeliveryStatus.DELIVERED, tuple(delivered), unavailable, "accepted"
+        )
 
     async def async_satellite_message(
         self, satellite_entity_id: str, message: str, *, ask: bool

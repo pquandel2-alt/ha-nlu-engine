@@ -11,9 +11,19 @@ from __future__ import annotations
 
 import re
 
-from .nlu.action_model import ActionModel, ActionType
+from .nlu.action_model import (
+    ActionModel,
+    ActionType,
+    NotificationRecipient,
+    NotificationRecipientKind,
+)
 from .entities import EntitySnapshot, normalize_for_compare
-from .nlu.automation_model import TriggerTarget
+from .nlu.automation_model import TriggerModel, TriggerTarget
+from .notification_language import (
+    NotificationClause,
+    parse_notification_clause,
+    trigger_message,
+)
 
 
 class NotificationSemantics:
@@ -131,7 +141,8 @@ def is_notification_shaped(action_text: str) -> bool:
     """
     action_stripped = action_text.strip()
     return (
-        _RECIPIENT_FIRST_NOTIFY_RE.fullmatch(action_stripped) is not None
+        parse_notification_clause(action_stripped) is not None
+        or _RECIPIENT_FIRST_NOTIFY_RE.fullmatch(action_stripped) is not None
         or _ACTION_FIRST_NOTIFY_RE.fullmatch(action_stripped) is not None
         or _ACTION_TRAILING_NOTIFY_RE.fullmatch(action_stripped) is not None
     )
@@ -141,26 +152,31 @@ def notification_action_from_request(
     action_text: str,
     trigger_text: str,
     entities: list[EntitySnapshot] | tuple[EntitySnapshot, ...] = (),
+    trigger: TriggerModel | None = None,
 ) -> ActionModel | None:
-    """Build a notification whose message describes its parsed trigger.
+    """Build a recipient-shaped notification whose message describes its trigger.
 
-    Supports both action-first forms ("benachrichtige Philipp, wenn...")
-    and action-trailing forms ("...eine Push-Nachricht an Philipp schickt").
+    Supports action-first forms ("benachrichtige Philipp, wenn..."),
+    modal forms ("kannst du mich benachrichtigen, sobald ...") and
+    action-trailing forms ("...eine Push-Nachricht an Philipp schickt").
 
-    A named addressee is resolved if exactly one matching notify.* entity
-    exists. If the recipient is a known proactive keyword ("mich", "mir",
-    "uns"), target is left None (use default proactive agent channel).
+    The recipient is typed (``NotificationRecipient``): "mich"/"mir" is the
+    authenticated current user and "uns" the confirmed household - both are
+    materialized into exact notify targets before persistence, never left
+    as a targetless (persistent) notification.  A named addressee is
+    resolved only if exactly one matching notify.* entity exists; otherwise
+    ``None`` so the caller refuses instead of silently falling back.
 
-    If a specific person is named but no matching notify.* entity exists,
-    returns None to prevent silent fallback (the caller should later ask
-    the user to configure that recipient).
-
-    Returns None if:
-      - The action text matches neither pattern
-      - A specific recipient is named but cannot be resolved
+    A clause that dictates its own message ("... dass ...") is not
+    recipient-shaped; ``notification_action_from_clause()`` owns it.
     """
-    action_stripped = action_text.strip()
+    clause = parse_notification_clause(action_text)
+    if clause is not None:
+        if clause.message is not None or clause.reminder:
+            return None
+        return notification_action_from_clause(action_text, trigger_text, entities, trigger)
 
+    action_stripped = action_text.strip()
     match = _RECIPIENT_FIRST_NOTIFY_RE.fullmatch(action_stripped)
     if match is None:
         match = _ACTION_FIRST_NOTIFY_RE.fullmatch(action_stripped)
@@ -168,26 +184,64 @@ def notification_action_from_request(
         match = _ACTION_TRAILING_NOTIFY_RE.fullmatch(action_stripped)
     if match is None:
         return None
-
     recipient = match.group("recipient")
-    is_proactive_keyword = recipient.casefold() in {"mich", "mir", "uns"}
+    lowered = recipient.casefold()
+    kind = (
+        NotificationRecipientKind.CURRENT_USER if lowered in {"mich", "mir"}
+        else NotificationRecipientKind.HOUSEHOLD if lowered == "uns"
+        else NotificationRecipientKind.EXPLICIT_TARGET
+    )
+    return notification_action(
+        NotificationClause(kind, recipient if kind is NotificationRecipientKind.EXPLICIT_TARGET else None),
+        trigger_message(trigger, trigger_text, entities),
+        entities,
+    )
 
-    if not is_proactive_keyword:
-        # Named recipient – must be resolved exactly or fail
-        target = resolve_notify_target(recipient, entities)
-        if target is None:
-            # No matching notify entity found – fail to prevent silent fallback
+
+def notification_action_from_clause(
+    action_text: str,
+    trigger_text: str,
+    entities: list[EntitySnapshot] | tuple[EntitySnapshot, ...] = (),
+    trigger: TriggerModel | None = None,
+) -> ActionModel | None:
+    """Any notification clause, including a dictated message.
+
+    An explicit message always wins over the trigger-derived description.
+    """
+    clause = parse_notification_clause(action_text)
+    if clause is None:
+        return None
+    message = clause.message or trigger_message(trigger, trigger_text, entities)
+    return notification_action(clause, message, entities)
+
+
+def notification_action(
+    clause: NotificationClause,
+    message: str,
+    entities: list[EntitySnapshot] | tuple[EntitySnapshot, ...] = (),
+) -> ActionModel | None:
+    """Typed NOTIFY action for one clause; ``None`` for an unresolved name."""
+    if clause.recipient_kind is NotificationRecipientKind.EXPLICIT_TARGET:
+        target = resolve_notify_target(clause.recipient_name or "", entities)
+        if target is None or target.entity_id is None:
+            # No or several matching notify entities - never guess.
             return None
-    else:
-        # Proactive keyword – use default channel
-        target = None
-
-    # Extract message from trigger, removing the connector word
-    message = re.sub(
-        r"^(?:wenn|sobald|falls)\s+", "", trigger_text.strip(), flags=re.IGNORECASE
-    ).strip(" ,.!?")
-    message = message[:1].upper() + message[1:] if message else "Auslöser eingetreten"
-
+        label = next(
+            (item.friendly_name for item in entities if item.entity_id == target.entity_id),
+            "",
+        )
+        return ActionModel(
+            type=ActionType.NOTIFY,
+            target=target,
+            message=message,
+            recipient=NotificationRecipient(
+                NotificationRecipientKind.EXPLICIT_TARGET,
+                entity_ids=(target.entity_id,),
+                label=label,
+            ),
+        )
     return ActionModel(
-        type=ActionType.NOTIFY, target=target, message=f"{message}."
+        type=ActionType.NOTIFY,
+        message=message,
+        recipient=NotificationRecipient(clause.recipient_kind),
     )

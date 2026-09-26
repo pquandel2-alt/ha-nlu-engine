@@ -36,10 +36,35 @@ DEVICE_CLASS_ENTRIES = (
     ),
 )
 
+# German "ein" is both the separable particle of "einschalten" ("schalte das
+# Licht ein") and the indefinite article ("wenn ein Fenster geöffnet wird").
+# Directly in front of a device noun it is always the article, so it must not
+# contribute an ON state there.  Likewise "auf" is a preposition everywhere
+# except as a predicate before a copula ("wenn das Fenster auf ist").
+_DEVICE_NOUN = regex_union([
+    expression
+    for entry in DEVICE_CLASS_ENTRIES
+    for expression in entry.expressions
+] + [
+    expression
+    for expressions in DOMAIN_EXPRESSIONS.values()
+    for expression in expressions
+])
+_COPULA = r"(?:ist|sind|steht|stehen|bleibt|bleiben)"
+
 STATE_ENTRIES = (
     CatalogueEntry(
         SemanticState.OPEN,
-        (r"offen\w*", r"geöffnet\w*", r"hochgefahren\w*", r"oben"),
+        (
+            r"offen\w*",
+            r"geöffnet\w*",
+            r"hochgefahren\w*",
+            r"oben",
+            r"aufgeh(?:t|en)",
+            r"aufgegangen",
+            r"aufgemacht",
+            r"auf(?=\s+" + _COPULA + r"\b)",
+        ),
     ),
     CatalogueEntry(
         SemanticState.CLOSED,
@@ -49,11 +74,18 @@ STATE_ENTRIES = (
             r"heruntergefahren\w*",
             r"unten",
             r"zu",
+            r"zugeh(?:t|en)",
+            r"zugemacht",
         ),
     ),
     CatalogueEntry(
         SemanticState.ON,
-        (r"an", r"ein", r"eingeschaltet\w*", r"angeschaltet\w*"),
+        (
+            r"an",
+            r"ein(?!\s+" + _DEVICE_NOUN + r"\b)",
+            r"eingeschaltet\w*",
+            r"angeschaltet\w*",
+        ),
     ),
     CatalogueEntry(SemanticState.OFF, (r"aus", r"ausgeschaltet\w*")),
     CatalogueEntry(

@@ -57,6 +57,36 @@ class ExecutionMode(Enum):
     PARALLEL = auto()
 
 
+class NotificationRecipientKind(Enum):
+    """Who a NOTIFY action addresses - kept separate from ``target`` so
+    "the authenticated caller", "a named notify target" and "the confirmed
+    household" never collapse into one magic ``target=None``.
+
+    ``CURRENT_USER`` ("mich"/"mir") and ``HOUSEHOLD`` ("uns") are semantic
+    references that must be materialized into exact notify targets before an
+    automation is persisted: the automation runs later, without a live
+    conversation user. ``EXPLICIT_TARGET`` is an already exact target.
+    """
+
+    CURRENT_USER = auto()
+    EXPLICIT_TARGET = auto()
+    HOUSEHOLD = auto()
+
+
+@dataclass(frozen=True)
+class NotificationRecipient:
+    """Typed NOTIFY recipient; exact ids are filled in by materialization."""
+
+    kind: NotificationRecipientKind
+    entity_ids: tuple[str, ...] = ()  # notify.* entities -> notify.send_message
+    service_ids: tuple[str, ...] = ()  # legacy notify.<service> ids
+    label: str = ""  # spoken device label, never an id
+
+    @property
+    def materialized(self) -> bool:
+        return bool(self.entity_ids or self.service_ids)
+
+
 @dataclass(frozen=True)
 class ActionModel:
     """One leaf action, discriminated by ``type`` - same rationale
@@ -72,6 +102,7 @@ class ActionModel:
     color_temp_kelvin: int | None = None  # SET_COLOR_TEMPERATURE
     duration_seconds: int | None = None  # TURN_ON - Duration Engine (V5.11): auto-revert after this many seconds
     message: str | None = None  # NOTIFY
+    recipient: NotificationRecipient | None = None  # NOTIFY - None only for legacy unaddressed notifications
     delay_seconds: int | None = None  # DELAY
     wait_condition: ConditionNode | None = None  # WAIT - reuses ConditionNode, see module docstring
     timeout_seconds: int | None = None  # WAIT - optional ("warte maximal 30 Minuten")
@@ -135,6 +166,12 @@ def _render_action(action: ActionModel) -> str:
         parts.append(f"duration_seconds={action.duration_seconds}")
     if action.message is not None:
         parts.append(f"message={action.message!r}")
+    if action.recipient is not None:
+        recipient = f"recipient={action.recipient.kind.name}"
+        exact = (*action.recipient.entity_ids, *action.recipient.service_ids)
+        if exact:
+            recipient += "[" + ",".join(exact) + "]"
+        parts.append(recipient)
     if action.delay_seconds is not None:
         parts.append(f"delay_seconds={action.delay_seconds}")
     if action.service_domain is not None and action.service_name is not None:

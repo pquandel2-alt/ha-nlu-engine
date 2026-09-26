@@ -310,6 +310,11 @@ def _speak_action_leaf(
 
         return f"bei {target} {describe_registered_operation(action.service_domain, action.service_name, action.service_data)}"
     if action.type is ActionType.NOTIFY:
+        if action.recipient is not None and action.recipient.label:
+            return (
+                f"eine Push-Benachrichtigung an „{action.recipient.label}“ senden: "
+                f"„{action.message}“"
+            )
         return f"eine Benachrichtigung senden: „{action.message}“"
     if action.type is ActionType.DELAY:
         return f"{_format_delay(action.delay_seconds)} warten"
@@ -337,6 +342,100 @@ def _speak_action_step(
     return _speak_action_leaf(step, entity_by_id, area_name_by_id)
 
 
+def _notification_actions(model: AutomationModel) -> tuple[ActionModel, ...] | None:
+    """All actions, if the automation does nothing but addressed notifications."""
+    leaves = tuple(
+        step for step in model.actions
+        if isinstance(step, ActionModel)
+        and step.type is ActionType.NOTIFY
+        and step.recipient is not None
+    )
+    return leaves if leaves and len(leaves) == len(model.actions) else None
+
+
+def _render_notification_preview(
+    model: AutomationModel,
+    actions: tuple[ActionModel, ...],
+    entities: list[EntitySnapshot],
+    entity_by_id: dict[str, EntitySnapshot],
+    area_name_by_id: dict[str, str],
+) -> str:
+    """Natural preview for push-only automations - no service or entity ids.
+
+    "Wenn im Wohnzimmer ein Fenster geöffnet wird, sende ich dir eine
+    Push-Benachrichtigung an dein Gerät „iPhone“: „...“ Soll ich das so
+    einrichten?"
+    """
+    # Function-local: notification_language lives outside nlu/ and imports it.
+    from ..notification_language import TEST_NOTIFICATION_MESSAGE, describe_state_event
+    from .action_model import NotificationRecipientKind
+
+    clauses: list[str] = []
+    ends_with_message = False
+    for action in actions:
+        recipient = action.recipient
+        assert recipient is not None
+        test = action.message == TEST_NOTIFICATION_MESSAGE
+        reminder = (action.message or "").startswith("Erinnerung")
+        noun = (
+            "eine Testbenachrichtigung" if test
+            else "eine Erinnerung" if reminder
+            else "eine Push-Benachrichtigung"
+        )
+        if recipient.kind is NotificationRecipientKind.CURRENT_USER:
+            text = f"sende ich dir {noun}"
+            if recipient.label:
+                text += f" an dein Gerät „{recipient.label}“"
+        elif recipient.kind is NotificationRecipientKind.HOUSEHOLD:
+            text = f"sende ich euch {noun}"
+        else:
+            text = f"sende ich {noun} an „{recipient.label or 'das gewählte Gerät'}“"
+        ends_with_message = (
+            not test and bool(action.message) and action.message[-1] in ".!?"
+        )
+        if not test and action.message:
+            text += f": „{action.message}“"
+        clauses.append(text)
+    action_text = " und ".join(clauses)
+
+    trigger = model.triggers[0] if len(model.triggers) == 1 else None
+    one_shot_time = trigger is not None and trigger.type in (
+        TriggerType.RELATIVE_TIME, TriggerType.CALENDAR_TIME
+    )
+    if model.calendar_schedule is not None:
+        sentence = f"Zum Zeitpunkt „{model.calendar_schedule.spoken}“ {action_text}"
+    elif trigger is not None and trigger.type is TriggerType.RELATIVE_TIME:
+        sentence = f"In {_format_delay(trigger.relative_offset_seconds)} {action_text}"
+    else:
+        described = [
+            describe_state_event(item, entities) for item in model.triggers
+        ]
+        trigger_text = " oder ".join(
+            phrase.subordinate if phrase is not None
+            else _speak_trigger(item, entity_by_id, area_name_by_id)
+            for item, phrase in zip(model.triggers, described)
+        )
+        if model.conditions:
+            trigger_text += " und " + " und ".join(
+                _speak_condition_node(c, entity_by_id, area_name_by_id) for c in model.conditions
+            )
+        sentence = f"Wenn {trigger_text}, {action_text}"
+    if not (ends_with_message and sentence.endswith("“")):
+        sentence += "."  # a quoted message already carries its own full stop
+    if model.once and not one_shot_time:
+        sentence += " Diese Automation wird nach der ersten Ausführung automatisch gelöscht."
+    elif model.max_runs is not None:
+        sentence += (
+            f" Diese Automation wird nach {model.max_runs} Ausführungen automatisch gelöscht."
+        )
+    if model.quiet_start_hour is not None:
+        sentence += (
+            f" Fällt der Zeitpunkt in die Ruhezeit von {model.quiet_start_hour:02d}:00 "
+            f"bis {model.quiet_end_hour:02d}:00 Uhr, wird die Erinnerung auf deren Ende verschoben."
+        )
+    return f"{sentence} Soll ich das so einrichten?"
+
+
 def render_automation_preview(model: AutomationModel, entities: list[EntitySnapshot]) -> str:
     """The V5.23/V5.24 spoken Dry-Run/Preview text: "Automation erkannt:
     Wenn ..., [und ...,] dann ... Soll diese Automation erstellt werden?" -
@@ -355,6 +454,11 @@ def render_automation_preview(model: AutomationModel, entities: list[EntitySnaps
     """
     entity_by_id = _entity_lookup(entities)
     area_name_by_id = _area_name_lookup(entities)
+    notification_actions = _notification_actions(model)
+    if notification_actions is not None:
+        return _render_notification_preview(
+            model, notification_actions, entities, entity_by_id, area_name_by_id
+        )
     if model.calendar_schedule is not None:
         trigger_text = f"der Zeitpunkt „{model.calendar_schedule.spoken}“ erreicht ist"
     else:

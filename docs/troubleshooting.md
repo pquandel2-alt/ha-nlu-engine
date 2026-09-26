@@ -43,10 +43,26 @@ Home-Assistant-Benutzer-ID.
 
 ## Eine Benachrichtigungsautomation erreicht keine Person
 
-„Mich benachrichtigen“ erzeugt eine lokale persistente Home-Assistant-
-Benachrichtigung. Für einen Namen wie „Philipp“ muss genau eine freigegebene
-`notify.*`-Entität über Friendly Name oder Alias passen. Ohne eindeutiges
-Notify-Ziel bleibt die sichere lokale Benachrichtigung erhalten.
+Seit 7.1.2 bedeutet „mich“/„mir“ den angemeldeten Home-Assistant-Benutzer
+und führt immer zu einer echten Push-Nachricht (`notify.send_message`), nie zu
+einer persistenten Home-Assistant-Benachrichtigung. Das Ziel wird so bestimmt:
+
+1. eine bestätigte Gerätezuordnung dieses Benutzers (HomeIntent-Benutzer-
+   bzw. Personenbindung) gewinnt;
+2. ohne Zuordnung wird genau ein unter **Push-Ziele** konfiguriertes
+   `notify.*`-Gerät verwendet – nicht, wenn es einem anderen Benutzer
+   zugeordnet ist;
+3. mehrere konfigurierte Ziele ohne Zuordnung: „Ich habe mehrere Push-Ziele
+   gefunden. Bitte ordne dein Gerät deinem HomeIntent-Benutzer zu.“;
+4. kein Ziel: „Ich habe noch kein eindeutiges Push-Ziel für dich.“
+
+Ist der Push-Kanal in den Optionen abgeschaltet, sendet HomeIntent auch auf
+ausdrücklichen Wunsch nichts. Die proaktive Situationserkennung muss für
+ausdrückliche Anfragen dagegen nicht aktiv sein. Antwortet HomeIntent „Dein
+Push-Ziel ist momentan nicht verfügbar.“, existiert die `notify.*`-Entität
+nicht oder ist `unavailable`. „uns“ nutzt ausschließlich den bestätigten
+Haushalt. Für einen Namen wie „Philipp“ muss genau eine freigegebene
+`notify.*`-Entität über Friendly Name oder Alias passen.
 
 ## Verlaufsfragen liefern keine Daten
 

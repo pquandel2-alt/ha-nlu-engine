@@ -121,7 +121,14 @@ from .nlu.semantic_location import (
 from .nlu.query_followup_compiler import compile_query_followup
 from .nlu.validator import validate_command
 from .automation_action_parser import AutomationActionParser
-from .automation_notification import is_notification_shaped, notification_action_from_request
+from .automation_notification import (
+    is_notification_shaped,
+    notification_action,
+    notification_action_from_clause,
+    notification_action_from_request,
+)
+from .notification_language import NotificationClause, parse_notification_clause
+from .nlu.action_model import NotificationRecipientKind
 from .automation_condition_parser import AutomationConditionParser, split_on_top_level_and
 from .nlu.automation_shell_normalization import strip_automation_shell
 from .calendar_automation import parse_calendar_automation_draft
@@ -367,6 +374,15 @@ _CALENDAR_TIME_RE = re.compile(
     r"\b(?:am|nächsten?|kommenden?)\s+"
     r"(montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonnabend|sonntag)\b|"
     r"\bam\s+\d{1,2}\.(?=\s)",
+    re.IGNORECASE,
+)
+
+# Anything that schedules or conditions a notification keeps it out of the
+# immediate-delivery path.
+_IMMEDIATE_NOTIFICATION_BLOCKER_RE = re.compile(
+    r"\b(?:wenn|sobald|falls|nachdem|bevor|sofern|um\s+\d|später|spaeter|"
+    r"nachher|jeden|jede|jedes|täglich|taeglich|abends|morgens|mittags|nachts|"
+    r"sonnenaufgang|sonnenuntergang)\b",
     re.IGNORECASE,
 )
 
@@ -2742,6 +2758,7 @@ class NluEngine:
         trigger_text: str,
         entities: list[EntitySnapshot] | tuple[EntitySnapshot, ...],
         parse_context: ParseContext,
+        trigger: TriggerModel | None = None,
     ) -> tuple[ActionModel | ActionGroup, ...] | None:
         """Prefer the dedicated notification-vocabulary reader in
         ``automation_notification.py`` over the general action parser for a
@@ -2770,7 +2787,11 @@ class NluEngine:
         as free-text message content, silently producing a wrong automation
         instead of refusing (never guess).
         """
-        notification = notification_action_from_request(action_text, trigger_text, entities)
+        notification = notification_action_from_clause(
+            action_text, trigger_text, entities, trigger
+        ) or notification_action_from_request(
+            action_text, trigger_text, entities, trigger
+        )
         if notification is not None:
             return (notification,)
         if is_notification_shaped(action_text):
@@ -2787,6 +2808,15 @@ class NluEngine:
         commands. Automation-only actions remain available through the
         established dedicated parser as the fallback.
         """
+        clause = parse_notification_clause(text)
+        if clause is not None:
+            # One notification meaning for immediate, delayed, reminder and
+            # scheduled requests; the recipient stays semantic here and is
+            # materialized into exact targets before persistence.
+            notification = notification_action(
+                clause, clause.resolved_message(), context.entities
+            )
+            return (notification,) if notification is not None else None
         document = analyse_language(text, context.entities)
         interpreted = SemanticInterpreter.interpret(
             document,
@@ -2948,6 +2978,11 @@ class NluEngine:
         split = split_automation_document(automation_document)
         if split is None:
             split = split_trigger_action(normalized)
+            if split is not None and re.match(r"dass\b", split[1], re.IGNORECASE):
+                # A comma before "dass" opens the complement of the preceding
+                # verb ("schick mir eine Nachricht, dass ..."); it is never
+                # the trigger/action boundary.
+                split = None
         if split is not None:
             # ``split_trigger_action`` assumes trigger-then-action order
             # around the first comma. When the action actually comes first
@@ -3029,6 +3064,20 @@ class NluEngine:
                     and parsed_actions
                 ):
                     candidates.append((trigger_candidate, action_candidate))
+            if re.match(r"(?:wenn|sobald|falls)\b", normalized, re.IGNORECASE):
+                # Trigger-first without a comma ("Wenn im Wohnzimmer ein
+                # Fenster aufgeht benachrichtige mich"): the clause boundary
+                # is the one word position where the remainder is a complete
+                # notification clause *and* the prefix a complete trigger.
+                for word in list(re.finditer(r"\S+", normalized))[2:]:
+                    action_candidate = normalized[word.start():].strip(" ,")
+                    if parse_notification_clause(action_candidate) is None:
+                        continue
+                    trigger_candidate = normalized[: word.start()].strip(" ,")
+                    if self._automation_trigger_parser.parse(
+                        trigger_candidate, parse_context
+                    ) is not None:
+                        candidates.append((trigger_candidate, action_candidate))
             candidates = list(dict.fromkeys(candidates))
             if len(candidates) != 1:
                 # Fallback for notification patterns trailing in trigger-first clauses:
@@ -3078,7 +3127,8 @@ class NluEngine:
             triggers = (trigger,)
 
         actions = self._parse_action_or_notification(
-            action_text, trigger_text, entities, parse_context
+            action_text, trigger_text, entities, parse_context,
+            triggers[0] if len(triggers) == 1 else None,
         )
         if not actions:
             return None
@@ -3272,6 +3322,26 @@ class NluEngine:
         self._relative_time_command_parser.decompose(
             "in fünf Minuten schalte das Licht ein"
         )
+
+    def match_immediate_notification(self, text: str) -> NotificationClause | None:
+        """An explicit notification to be sent *now* ("Schick mir eine
+        Testbenachrichtigung").
+
+        Only a complete notification clause qualifies; any trigger connector
+        or time phrase belongs to the automation/one-shot paths instead, so
+        "Benachrichtige mich, wenn ..." or "... in 10 Sekunden ..." can never
+        be delivered immediately.
+        """
+        if (
+            _IMMEDIATE_NOTIFICATION_BLOCKER_RE.search(text)
+            or _RELATIVE_TIME_RE.search(text)
+            or _CALENDAR_TIME_RE.search(text)
+        ):
+            return None
+        clause = parse_notification_clause(text)
+        if clause is None or clause.recipient_kind is NotificationRecipientKind.EXPLICIT_TARGET:
+            return None
+        return clause
 
     def match_relative_time_automation(
         self,
@@ -3622,14 +3692,20 @@ class NluEngine:
             last_entities=tuple(context.last_entities) if context is not None else (),
             last_area=context.last_area if context is not None else None,
         )
-        actions = self._parse_action_semantically(draft.action_text, parse_context)
+        event_message = (
+            f"Kalendertermin {draft.summary_contains} {draft.event == 'start' and 'beginnt' or 'endet'}."
+            if draft.summary_contains
+            else f"Ein Kalendertermin {draft.event == 'start' and 'beginnt' or 'endet'}."
+        )
+        clause = parse_notification_clause(draft.action_text)
+        if clause is not None and clause.message is None:
+            # "erinnere mich" / "benachrichtige mich": the event is the message.
+            notification = notification_action(clause, event_message, entities)
+            actions = (notification,) if notification is not None else None
+        else:
+            actions = self._parse_action_semantically(draft.action_text, parse_context)
         if not actions and re.search(r"\berinner(?:e|n|t)?\s+(?:mich|uns)\b", draft.action_text, re.IGNORECASE):
-            message = (
-                f"Kalendertermin {draft.summary_contains} {draft.event == 'start' and 'beginnt' or 'endet'}."
-                if draft.summary_contains
-                else f"Ein Kalendertermin {draft.event == 'start' and 'beginnt' or 'endet'}."
-            )
-            actions = (ActionModel(type=ActionType.NOTIFY, message=message),)
+            actions = (ActionModel(type=ActionType.NOTIFY, message=event_message),)
         if not actions:
             return None
         conditions = (

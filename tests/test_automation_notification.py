@@ -16,7 +16,11 @@ from homeintent.automation_notification import (
     resolve_notify_target,
 )
 from homeintent.entities import EntitySnapshot
-from homeintent.nlu.action_model import ActionType
+from homeintent.nlu.action_model import (
+    ActionType,
+    NotificationRecipient,
+    NotificationRecipientKind,
+)
 
 NOTIFY_PHILIPP = EntitySnapshot(
     "notify.mobile_app_philipp", "Philipp Handy", "notify", "unknown"
@@ -76,12 +80,17 @@ def test_recipient_first_infinitive_form_resolves_target():
     assert action.target.entity_id == "notify.mobile_app_philipp"
 
 
-def test_recipient_first_infinitive_form_with_mich_uses_proactive_channel():
+def test_recipient_first_infinitive_form_with_mich_is_the_typed_current_user():
+    """7.1.2: "mich" is the authenticated current user, a typed recipient -
+    never the magic ``target=None`` that used to mean "persistent
+    notification"."""
     action = notification_action_from_request(
         "Kannst du mich benachrichtigen", "wenn die Tür aufgeht", ENTITIES
     )
     assert action is not None
     assert action.target is None
+    assert action.recipient == NotificationRecipient(NotificationRecipientKind.CURRENT_USER)
+    assert not action.recipient.materialized
 
 
 def test_action_first_imperative_form_resolves_target():
@@ -184,7 +193,8 @@ def test_message_is_derived_from_trigger_when_not_explicit():
         "benachrichtige mich", "wenn das Fenster im Wohnzimmer geöffnet wird", ENTITIES
     )
     assert action is not None
-    assert action.message == "Das Fenster im Wohnzimmer geöffnet wird."
+    # 7.1.2: a grammatical main clause instead of the echoed trigger clause.
+    assert action.message == "Das Fenster im Wohnzimmer wurde geöffnet."
 
 
 def test_message_falls_back_to_generic_text_for_empty_trigger():
