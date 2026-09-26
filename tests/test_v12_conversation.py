@@ -40,9 +40,13 @@ class FakeTimers:
         self.async_ensure_audible = AsyncMock(return_value=None)
         self.async_execute = AsyncMock(side_effect=self._execute)
         self.async_cancel_all = AsyncMock(side_effect=lambda user_input: len(self.timers))
+        self.restart_note = None
 
     async def async_list_timers(self, user_input):
         return self.timers
+
+    def consume_restart_note(self):
+        return self.restart_note
 
     async def _execute(self, request, user_input, *, target=None):
         name = target.name if target is not None else request.name

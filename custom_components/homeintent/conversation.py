@@ -5441,10 +5441,14 @@ class NluConversationEntity(
                 response=response, conversation_id=conversation_id
             )
 
+        note = native_timer.consume_restart_note() if request.operation in {
+            TimerOperation.LIST, TimerOperation.STATUS,
+        } else None
+        prefix = f"{note} " if note else ""
         if not timers:
-            return done("Es läuft kein Timer.", query=True)
+            return done(f"{prefix}Es läuft kein Timer.", query=True)
         if request.operation is TimerOperation.LIST:
-            return done(describe_timers(timers), query=True)
+            return done(prefix + describe_timers(timers), query=True)
         if request.operation is TimerOperation.CANCEL_ALL:
             self._store_productivity(conversation_id, request, awaiting_confirmation=True)
             if len(timers) == 1:

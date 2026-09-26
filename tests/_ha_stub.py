@@ -267,6 +267,7 @@ def install() -> None:
         return datetime.now().astimezone()
 
     util_dt.now = _now
+    util_dt.as_local = lambda value: value.astimezone()
 
     # --- homeassistant.helpers.device_registry ----------------------------
 
