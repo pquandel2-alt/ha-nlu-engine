@@ -196,7 +196,14 @@ def install() -> None:
             self.state = state
             self.attributes = attributes or {}
 
+    def callback(func: Callable[..., Any]) -> Callable[..., Any]:
+        # Same marker the real decorator sets: HA runs marked functions in
+        # the event loop and everything else in the executor.
+        setattr(func, "_hass_callback", True)
+        return func
+
     core.HomeAssistant = HomeAssistant
+    core.callback = callback
     core.State = State
     core.ServiceCall = ServiceCall
 

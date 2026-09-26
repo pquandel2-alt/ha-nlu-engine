@@ -309,16 +309,28 @@ class StructuredAdapterRuntime:
         self._sink(evidence)
 
     async def async_start(self) -> Callable[[], None]:
+        # Event-loop callbacks: without @callback HA runs a plain function in
+        # the executor, where the evidence sink is not thread safe.
+        from homeassistant.core import callback
+
+        @callback
+        def _on_state_changed(event: _EventLike) -> None:
+            self._handle_state_changed(event)
+
+        @callback
+        def _on_frigate_event(event: _EventLike) -> None:
+            self._handle_frigate_event(event)
+
         unsubscribers: list[Callable[[], None]] = []
         bus = getattr(self._hass, "bus", None)
         listen = bus.async_listen if bus is not None else None
         if listen is not None and bool(
             self._entry.options.get(CONF_HA_SOURCES_ENABLED, False)
         ):
-            unsubscribers.append(listen("state_changed", self._handle_state_changed))
+            unsubscribers.append(listen("state_changed", _on_state_changed))
         if bool(self._entry.options.get(CONF_FRIGATE_ENABLED, False)):
             if listen is not None:
-                unsubscribers.append(listen("frigate_events", self._handle_frigate_event))
+                unsubscribers.append(listen("frigate_events", _on_frigate_event))
             mqtt_unsubscribe = await self._async_subscribe_mqtt()
             if mqtt_unsubscribe is not None:
                 unsubscribers.append(mqtt_unsubscribe)
@@ -400,9 +412,15 @@ class StructuredAdapterRuntime:
         except ValueError:
             _LOGGER.warning("Frigate MQTT topic is invalid")
             return None
+        from homeassistant.core import callback
+
+        @callback
+        def _on_mqtt_message(message: _MessageLike) -> None:
+            self._handle_mqtt_message(message)
+
         try:
             unsubscribe = await mqtt.async_subscribe(
-                self._hass, validated_topic, self._handle_mqtt_message, qos=0
+                self._hass, validated_topic, _on_mqtt_message, qos=0
             )
         except Exception:  # noqa: BLE001 - optional integration boundary
             _LOGGER.warning("Could not subscribe to Frigate MQTT metadata", exc_info=True)
