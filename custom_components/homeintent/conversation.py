@@ -591,6 +591,8 @@ class NluConversationEntity(
         self._context_store = runtime.context_store
         self._audit_trail = runtime.audit_trail
         self._runtime_data = runtime
+        # Last todo list per conversation, for follow-ups without a list name.
+        self._last_todo_lists: dict[str, str] = {}
         # Rebuilt every turn in _async_handle_message() (World Model Wave,
         # 2026-08-14); None only until the first turn.
         self._world_model: WorldModel | None = None
@@ -5498,6 +5500,20 @@ class NluConversationEntity(
         request: ProductivityRequest,
         entities: list[EntitySnapshot],
     ) -> conversation.ConversationResult:
+        last_list = self._last_todo_lists.get(user_input.conversation_id)
+        if (
+            isinstance(request, TodoRequest)
+            and request.entity_id is None
+            and last_list is not None
+            and any(item.entity_id == last_list for item in request.candidates)
+        ):
+            # "Markiere Milch und Brot als erledigt" right after using the
+            # Einkaufsliste continues on that list (F27).
+            request = replace(request, entity_id=last_list, candidates=())
+        if isinstance(request, TodoRequest) and request.entity_id is not None:
+            self._last_todo_lists[user_input.conversation_id] = request.entity_id
+            while len(self._last_todo_lists) > 64:
+                self._last_todo_lists.pop(next(iter(self._last_todo_lists)))
         if request.entity_id is None:
             if request.candidates:
                 self._store_productivity(user_input.conversation_id, request)
