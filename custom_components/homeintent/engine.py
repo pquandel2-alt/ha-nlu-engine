@@ -87,6 +87,8 @@ from .nlu.semantic_compiler import (
     SemanticQueryCompiler,
 )
 from .nlu.registered_operation_compiler import climate_in_named_area
+from .nlu.grounded_answer import join_german
+from .nlu.german_morphology import dative_location_phrase, sentence_initial
 from .nlu.semantic_exclusion import has_exclusion_clause, split_exclusion
 from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
 from .nlu.semantic_state import SemanticState
@@ -1970,6 +1972,12 @@ class NluEngine:
         normalized = re.sub(
             r"^(?:dann|danach|also)\s+", "", normalize(text), flags=re.IGNORECASE
         )
+        # "Schalte die aus": a bare demonstrative directly before the verb
+        # particle refers back like "sie" (F12).
+        normalized = re.sub(
+            r"^(\s*(?:bitte\s+)?\w+\s+)(?:die|diese|jene)(\s+(?:auch\s+)?(?:aus|an|ein|zu|auf|hoch|runter|ab)\b)",
+            r"\1sie\2", normalized, flags=re.IGNORECASE,
+        )
         remembered_entities = (
             context.memory.entities if context.memory is not None else context.last_entities
         )
@@ -2303,6 +2311,48 @@ class NluEngine:
                     resolved_entities=list(query_result.entities),
                 )
                 return self._build_match_result(parsed, entities, context)
+        if (
+            discourse_group is not None
+            and discourse_group.semantic_type == "entity"
+            and re.search(r"\b(?:davon|diese|jene)\b", normalized_reference, re.I)
+            and discourse_location is not None
+            and (discourse_location[1] is not None or discourse_location[2] is not None)
+            and world_model is not None
+        ):
+            # "Wie viele Lichter sind an?" -> "Welche davon sind im
+            # Erdgeschoss?": the previous result set, narrowed to the
+            # location and listed by name (F12).
+            members = {
+                member.removeprefix("entity:") for member in discourse_group.member_ids
+            }
+            located = [
+                entity for entity in entities
+                if entity.entity_id in members
+                and (
+                    (discourse_location[1] is not None and entity.area_id == discourse_location[1])
+                    or (discourse_location[2] is not None and entity.floor_id == discourse_location[2])
+                )
+            ]
+            if excludes_location:
+                located = [
+                    entity for entity in entities
+                    if entity.entity_id in members and entity not in located
+                ]
+            names = [entity.friendly_name for entity in located]
+            where = sentence_initial(
+                dative_location_phrase(discourse_location[0].strip())
+                if not re.match(r"(?:im|in|am|auf|beim)\b", discourse_location[0].strip(), re.I)
+                else discourse_location[0].strip()
+            )
+            speech = (
+                f"{where} ist davon keines." if not names
+                else f"{where} {'ist' if len(names) == 1 else 'sind'} davon: {join_german(tuple(names))}."
+            )
+            return MatchResult(
+                plan=None,
+                response_text=speech,
+                context_entities=tuple(located),
+            )
         if (
             discourse_group is not None
             and discourse_group.semantic_type == "area"

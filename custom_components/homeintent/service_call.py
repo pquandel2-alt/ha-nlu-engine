@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
-from .entities import SPOKEN_UNITS_DE, EntitySnapshot, format_spoken_number
+from .entities import SPOKEN_UNITS_DE, EntitySnapshot, format_spoken_number, spoken_state
 from .nlu.capabilities import Capability
 from .nlu.automation_operations import validate_registered_operation
 from .nlu.query import QueryType, derive_query_type
@@ -282,10 +282,29 @@ class QueryIntentSpec:
 _UNIT_SPOKEN_DE = SPOKEN_UNITS_DE
 
 
+def _measurement_value(entity: EntitySnapshot) -> str | None:
+    """Spoken number of a measurement, or None when HA reports no number.
+
+    Temperatures are spoken with one decimal ("21,6 Grad"), everything else
+    with at most two; "unknown"/"unavailable" never become a number (F12).
+    """
+    try:
+        number = float(str(entity.state).replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    if entity.unit in {"°C", "°F"}:
+        number = round(number, 1)
+    return format_spoken_number(number)
+
+
 def _speak_state(entity: EntitySnapshot) -> str:
     unit = _UNIT_SPOKEN_DE.get(entity.unit, entity.unit) if entity.unit else None
-    value = format_spoken_number(entity.state) if unit else entity.state
-    return f"{value} {unit}." if unit else f"{value}."
+    if unit:
+        value = _measurement_value(entity)
+        if value is None:
+            return f"{entity.friendly_name} meldet gerade keinen Messwert."
+        return f"{value} {unit}."
+    return f"{spoken_state(entity.state)}."
 
 
 # A light's ``state`` is "on"/"off", not a number - its brightness lives in
@@ -331,7 +350,7 @@ def _speak_location_measurements(
         if not numeric or any(entity.unit != unit for entity in entities):
             return f"Für {property_label} kann ich keinen eindeutigen Durchschnitt berechnen."
         spoken_unit = _UNIT_SPOKEN_DE.get(unit, unit) if unit else ""
-        value = _format_measurement_number(str(sum(numeric) / len(numeric)))
+        value = _format_measurement_number(str(round(sum(numeric) / len(numeric), 1)))
         suffix = f" {spoken_unit}" if spoken_unit else ""
         return f"Der Durchschnitt für {property_label} beträgt {value}{suffix}."
 
@@ -345,9 +364,12 @@ def _speak_location_measurements(
             )
             continue
         unit = _UNIT_SPOKEN_DE.get(entity.unit, entity.unit) if entity.unit else None
-        value = _format_measurement_number(entity.state)
+        measured = _measurement_value(entity)
+        if measured is None:
+            readings.append(f"{entity.friendly_name}: kein Messwert")
+            continue
         suffix = f" {unit}" if unit else ""
-        readings.append(f"{entity.friendly_name}: {value}{suffix}")
+        readings.append(f"{entity.friendly_name}: {measured}{suffix}")
     if len(readings) == 1:
         return readings[0] + "."
     return "; ".join(readings) + "."

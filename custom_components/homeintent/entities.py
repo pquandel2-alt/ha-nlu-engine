@@ -254,6 +254,34 @@ def spoken_unit(unit: str | None) -> str | None:
     return SPOKEN_UNITS_DE.get(unit, unit)
 
 
+# German words for raw Home Assistant states, so that no English enum value
+# ("closed", "paused", "running") is ever spoken (F16).
+SPOKEN_STATES_DE: dict[str, str] = {
+    "on": "eingeschaltet", "off": "ausgeschaltet", "open": "geöffnet",
+    "closed": "geschlossen", "opening": "öffnet gerade", "closing": "schließt gerade",
+    "locked": "verriegelt", "unlocked": "entriegelt", "locking": "wird verriegelt",
+    "unlocking": "wird entriegelt", "jammed": "blockiert", "playing": "spielt",
+    "paused": "pausiert", "idle": "inaktiv", "standby": "im Bereitschaftsmodus",
+    "buffering": "puffert", "cleaning": "reinigt", "docked": "an der Ladestation",
+    "returning": "fährt zur Ladestation", "mowing": "mäht", "error": "meldet einen Fehler",
+    "home": "zuhause", "not_home": "nicht zuhause", "away": "abwesend",
+    "heat": "im Heizbetrieb", "cool": "im Kühlbetrieb", "heat_cool": "im Automatikbetrieb",
+    "auto": "im Automatikbetrieb", "dry": "im Entfeuchtungsbetrieb", "fan_only": "im Lüfterbetrieb",
+    "eco": "im Eco-Modus", "performance": "im Leistungsmodus",
+    "armed_away": "scharf (abwesend)", "armed_home": "scharf (zuhause)",
+    "armed_night": "scharf (Nacht)", "disarmed": "unscharf", "triggered": "ausgelöst",
+    "pending": "wartet", "arming": "wird scharf geschaltet",
+    "active": "aktiv", "running": "läuft", "finished": "fertig", "stopped": "gestoppt",
+    "unknown": "unbekannt", "unavailable": "nicht verfügbar",
+    "above_horizon": "über dem Horizont", "below_horizon": "unter dem Horizont",
+}
+
+
+def spoken_state(state: str) -> str:
+    """German spoken form of a raw HA state; unknown values stay as given."""
+    return SPOKEN_STATES_DE.get(state.casefold(), state)
+
+
 # Domains whose state is the timestamp of their last activation. "unknown" is
 # their normal state until they are triggered for the first time and says
 # nothing about the device being unreachable.

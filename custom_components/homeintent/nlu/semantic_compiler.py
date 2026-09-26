@@ -945,6 +945,7 @@ def _single_named_capable_entity(
     return matches[0] if len(matches) == 1 else None
 
 
+_WH_LIST_QUESTION_RE = re.compile(r"^\s*(?:und\s+)?welche[nmrs]?\b", re.I)
 _SETUP_WITHOUT_VALUE_RE = re.compile(
     r"^\s*(?:bitte\s+|kannst\s+du\s+)?stell\w*\s+.+\s+ein\s*[.!?]*$", re.I
 )
@@ -1872,7 +1873,9 @@ class SemanticQueryCompiler:
         exists_question = (
             "exists" in analysis.values(SemanticKind.QUERY_SCOPE)
             or _INDEFINITE_EXISTS_RE.search(text) is not None
-        )
+        ) and _WH_LIST_QUESTION_RE.search(text) is None
+        # "Welche Rollläden gibt es ...?" asks for the names, not a yes/no
+        # existence answer (F12): it is a list question.
         states = [
             span.value
             for span in analysis.matching(SemanticKind.STATE)

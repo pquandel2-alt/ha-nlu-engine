@@ -440,6 +440,20 @@ async def _async_execute_comparative_history_query(
     )
 
 
+def _spoken_duration(total_seconds: float) -> str:
+    """Hours and minutes; below one minute in seconds, never "0 Minuten"."""
+    if total_seconds < 59.5:
+        seconds = round(total_seconds)
+        return f"{seconds} Sekunde" + ("" if seconds == 1 else "n")
+    minutes = round(total_seconds / 60)
+    hours, remainder = divmod(minutes, 60)
+    hour_text = f"{hours} Stunde" + ("" if hours == 1 else "n")
+    minute_text = f"{remainder} Minute" + ("" if remainder == 1 else "n")
+    if hours and remainder:
+        return f"{hour_text} und {minute_text}"
+    return hour_text if hours else minute_text
+
+
 def _state_value(item: object) -> str | None:
     if isinstance(item, dict):
         value = item.get("state", item.get("s"))
@@ -520,13 +534,7 @@ def render_state_history_result(
         )
         if end is not None:
             total_seconds += max(0.0, (min(end, query.end) - max(start, query.start)).total_seconds())
-    minutes = round(total_seconds / 60)
-    hours, remainder = divmod(minutes, 60)
-    duration = (
-        f"{hours} Stunden und {remainder} Minuten"
-        if hours and remainder
-        else f"{hours} Stunden" if hours else f"{remainder} Minuten"
-    )
+    duration = _spoken_duration(total_seconds)
     return (
         f"{query.entity.friendly_name} war {query.period_label} insgesamt "
         f"{duration} {query.target_label}."
