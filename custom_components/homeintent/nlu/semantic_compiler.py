@@ -58,6 +58,7 @@ from .query_command import (
     QueryTargetKind,
 )
 from .query_executor import QueryExecutor
+from .semantic_exclusion import has_exclusion_clause, split_exclusion as _split_exclusion
 from .semantic_lexicon import SemanticAnalysis, SemanticKind, analyse_semantics
 from .semantic_catalog import (
     DOMAIN_WORDS,
@@ -132,26 +133,6 @@ _COUNT_WORDS = {
 }
 _COUNT_RE = re.compile(r"\b(" + "|".join(_COUNT_WORDS) + r"|[2-9]|10)\b", re.I)
 _ORDERED_SUBSET_RE = re.compile(r"\b(?:erste\w*|letzte\w*)\b", re.I)
-_EXCLUSION_CUE_RE = re.compile(
-    r"\b(?:außer|ausser|mit\s+ausnahme\s+von)\b", re.I
-)
-# German separable particles can follow the exclusion: ``alle Lichter außer
-# Küchenlicht aus``.  The first alternative deliberately claims a recognised
-# command tail before the general end-of-sentence alternative can absorb it
-# into the registry name.
-_EXCLUSION_RE = re.compile(
-    r"\b(?:außer|ausser|mit\s+ausnahme\s+von)\s+(?P<targets>.+?)"
-    r"(?:\s+(?P<tail>an|ein|aus|auf|zu|hoch|runter|herunter|hinauf|hinunter|"
-    r"anmachen|ausmachen|einschalten|ausschalten|anschalten|abschalten|"
-    r"öffnen|schließen)\s*[?.!]*$|\s*[?.!]*$)",
-    re.I,
-)
-_EXCLUSION_SPLIT_RE = re.compile(r"\s*(?:,|\bund\b)\s*", re.I)
-_EXCLUSION_ARTICLE_RE = re.compile(
-    r"^(?:(?:dem|der|den|die|das|des|vom|alle[nrms]?|im|in\s+der|in\s+dem)\s+)+",
-    re.I,
-)
-
 _HALF_RE = re.compile(r"\b(?:halb|halbe(?:r|n)?|hälfte|zur\s+hälfte)\b", re.I)
 _ZERO_RE = re.compile(r"\b(?:komplett|ganz|vollständig)\s+(?:runter|herunter|zu)\b", re.I)
 _HUNDRED_RE = re.compile(r"\b(?:komplett|ganz|vollständig)\s+(?:hoch|auf)\b", re.I)
@@ -689,27 +670,6 @@ def _temperature(text: str) -> float | None:
         return None
     value = float(match.group("value").replace(",", "."))
     return value if 5 <= value <= 30 else None
-
-
-def _split_exclusion(text: str) -> tuple[str, tuple[str, ...]]:
-    """Return the positive command and independently named exclusions."""
-    match = _EXCLUSION_RE.search(text)
-    if match is None:
-        return text, ()
-    raw_targets = tuple(
-        cleaned
-        for part in _EXCLUSION_SPLIT_RE.split(match.group("targets"))
-        if (cleaned := _EXCLUSION_ARTICLE_RE.sub("", part).strip(" ,.;:!?"))
-    )
-    positive = text[:match.start()].rstrip(" ,;:")
-    if tail := match.group("tail"):
-        positive = f"{positive} {tail}"
-    return positive, raw_targets
-
-
-def has_exclusion_clause(text: str) -> bool:
-    """Return whether *text* explicitly introduces one or more exceptions."""
-    return _EXCLUSION_CUE_RE.search(text) is not None
 
 
 def canonicalize_exclusion_clause(text: str) -> str:

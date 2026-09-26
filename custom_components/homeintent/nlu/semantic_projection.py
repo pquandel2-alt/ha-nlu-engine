@@ -67,6 +67,8 @@ from .query_command import (
     ReasoningTrace,
 )
 from .query_executor import QueryExecutor
+from .normalize import normalize
+from .semantic_exclusion import has_exclusion_clause, split_exclusion
 from .semantic_graph import SemanticEdgeKind, SemanticGraph, SemanticNodeKind
 from .semantic_lexicon import SemanticKind, SemanticSpan
 from .semantic_location import resolve_coordinated_locations, resolve_semantic_location
@@ -1357,6 +1359,15 @@ def _scope_candidates(
 
 
 def _exclusion_phrases(document: LanguageDocument) -> tuple[str, ...]:
+    # "außer der Stehlampe und dem Nachtlicht" / "außer X, Y aus": the
+    # structure analysis splits such lists into loose coordinate or main
+    # clauses, which dropped every exclusion after the first one. The shared
+    # text-level split names each exclusion separately (also used by the
+    # semantic command compiler), so none of them can silently vanish.
+    if has_exclusion_clause(document.source_text):
+        _positive, targets = split_exclusion(normalize(document.source_text))
+        if targets:
+            return targets
     phrases: list[str] = []
     action_spans = document.semantics.matching(SemanticKind.ACTION)
     for clause in document.structure.clauses:

@@ -85,6 +85,7 @@ from .nlu.semantic_compiler import (
     SemanticQueryCompiler,
     has_exclusion_clause,
 )
+from .nlu.semantic_exclusion import split_exclusion
 from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
 from .nlu.semantic_state import SemanticState
 from .nlu.semantic_catalog import INTENT_BY_DOMAIN_ACTION
@@ -642,6 +643,19 @@ class CommandPlan:
     """
 
     commands: tuple[MatchResult, ...]
+
+
+def _unresolved_exclusion_text(names: tuple[str, ...]) -> str:
+    quoted = [f"„{name}“" for name in names]
+    if len(quoted) == 1:
+        subject = f"die Ausnahme {quoted[0]} nicht eindeutig"
+    else:
+        listed = f"{', '.join(quoted[:-1])} und {quoted[-1]}"
+        subject = f"nicht alle Ausnahmen ({listed}) eindeutig"
+    return (
+        f"Ich konnte {subject} zuordnen und habe deshalb nichts geschaltet. "
+        "Bitte nenne die Geräte genauer."
+    )
 
 
 class NluEngine:
@@ -1521,6 +1535,19 @@ class NluEngine:
             feedback = UnderstandingFeedback(
                 ParseFailureReason.UNSUPPORTED_PROPERTY,
                 "Die Zeitangabe wurde erkannt, ist in diesem direkten Pfad aber nicht sicher ausführbar.",
+            )
+        elif (
+            document.utterance.speech_act is SpeechAct.COMMAND
+            and has_exclusion_clause(document.utterance.normalized_text)
+            and split_exclusion(document.utterance.normalized_text)[1]
+        ):
+            # An exception that cannot be resolved stops the whole command
+            # with a clear reason - never a broader execution (F5).
+            feedback = UnderstandingFeedback(
+                ParseFailureReason.UNKNOWN_ENTITY,
+                _unresolved_exclusion_text(
+                    split_exclusion(document.utterance.normalized_text)[1]
+                ),
             )
         elif unbound_semantic_query:
             feedback = UnderstandingFeedback(
