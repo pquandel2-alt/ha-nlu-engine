@@ -34,6 +34,7 @@ from .entity_resolution import (
     rank_semantic_targets,
     resolve_entity,
     resolve_entity_scored,
+    resolve_mentioned_target,
 )
 from .frame import (
     AreaReference,
@@ -58,6 +59,7 @@ from .query_command import (
     QueryTargetKind,
 )
 from .query_executor import QueryExecutor
+from .registered_operation_compiler import climate_in_named_area
 from .semantic_exclusion import split_exclusion as _split_exclusion
 from .semantic_lexicon import SemanticAnalysis, SemanticKind, analyse_semantics
 from .semantic_catalog import (
@@ -753,6 +755,21 @@ def _compile_relative_climate(
         index=world_model.entity_index if world_model is not None else None,
     )
     candidates = [entity for entity in named if entity.domain == "climate"]
+    if not candidates:
+        # "Mach die Heizung im Schlafzimmer wärmer": the climate entity of
+        # the named room, if it is the only one there (F11).
+        location = resolve_semantic_location(text, entities, world_model)
+        if location is not None:
+            candidates = list(
+                world_model.select_entities(
+                    domain="climate", area_id=location[1], floor_id=location[2]
+                )
+                if world_model is not None
+                else resolve_candidates(
+                    entities,
+                    Constraints(domain="climate", area_id=location[1], floor_id=location[2]),
+                )
+            )
     if len(candidates) != 1:
         return None
     entity = candidates[0]
@@ -896,7 +913,93 @@ def _single_named_capable_entity(
         )
         if entity.domain == domain and capability in entity.capabilities
     ]
+    if not matches:
+        # A distinctive part of the registry name ("den LED-Streifen" for
+        # "LED-Streifen Wohnzimmer"), resolved by the same canonical
+        # resolver as on/off commands - unique or nothing (F11).
+        resolution = resolve_mentioned_target(
+            text,
+            entities,
+            frozenset({domain}),
+            index=world_model.entity_index if world_model is not None else None,
+        )
+        if (
+            resolution.status is ResolutionStatus.RESOLVED
+            and resolution.entity is not None
+            and capability in resolution.entity.capabilities
+        ):
+            return resolution.entity
+        spoken = {
+            normalize_for_compare(token)
+            for token in analyse_semantics(text).unexplained_tokens
+            if normalize_for_compare(token) not in _STOP_WORDS
+        }
+        if spoken:
+            matches = [
+                entity
+                for entity in entities
+                if entity.domain == domain
+                and capability in entity.capabilities
+                and spoken <= set(_tokens(entity.friendly_name))
+            ]
     return matches[0] if len(matches) == 1 else None
+
+
+_SETUP_WITHOUT_VALUE_RE = re.compile(
+    r"^\s*(?:bitte\s+|kannst\s+du\s+)?stell\w*\s+.+\s+ein\s*[.!?]*$", re.I
+)
+_LOCK_VERB_RE = re.compile(
+    r"^\s*(?:bitte\s+)?(?:(?P<lock>verriegl\w*|verriegel\w*|schlie(?:ß|ss)\w*\s+.+\s+ab|"
+    r"sperr\w*\s+.+\s+ab)|(?P<unlock>entriegl\w*|entriegel\w*|"
+    r"schlie(?:ß|ss)\w*\s+.+\s+auf|sperr\w*\s+.+\s+auf))\b",
+    re.I,
+)
+_LOCK_FILLER = frozenset({
+    "die", "der", "das", "den", "dem", "bitte", "mal", "ab", "auf", "jetzt", "sofort",
+})
+
+
+def _compile_lock_by_name_part(
+    text: str, entities: list[EntitySnapshot]
+) -> ParseResult | None:
+    """ "Verriegle die Haustür" -> the lock "Haustürschloss" (F11).
+
+    A lock verb only applies to locks. When the spoken name is not a lock
+    itself (the door contact "Haustür"), it is resolved among the locks by
+    the canonical resolver - unique or nothing. Unlocking stays subject to
+    the unchanged confirmation policy downstream.
+    """
+    verb = _LOCK_VERB_RE.search(text)
+    if verb is None:
+        return None
+    locks = [entity for entity in entities if entity.domain == "lock"]
+    if not locks or mentioned_entities(text, locks):
+        return None
+    words = [
+        word
+        for word in _TOKEN_RE.findall(text)
+        if normalize_for_compare(word) not in _LOCK_FILLER
+        and not re.fullmatch(
+            r"(?:verriegl|verriegel|entriegl|entriegel|schlie(?:ß|ss)|sperr)\w*", word, re.I
+        )
+    ]
+    if not words:
+        return None
+    resolution = resolve_entity_scored(" ".join(words), locks)
+    if resolution.status is not ResolutionStatus.RESOLVED or resolution.entity is None:
+        return None
+    entity = resolution.entity
+    unlock = verb.group("unlock") is not None
+    return ParseResult(
+        frame=SemanticFrame(
+            intent="HassUnlock" if unlock else "HassLock",
+            target=TargetReference(entity.friendly_name, entity.entity_id, entity.domain),
+            area=None,
+            source_text=text,
+            action=SemanticAction.UNLOCK if unlock else SemanticAction.LOCK,
+        ),
+        resolved_entities=[entity],
+    )
 
 
 def _compile_light_color(
@@ -1221,6 +1324,15 @@ class SemanticCommandCompiler:
         relative_climate = _compile_relative_climate(text, entities, world_model)
         if relative_climate is not None:
             return relative_climate
+        lock_by_part = _compile_lock_by_name_part(text, entities)
+        if lock_by_part is not None:
+            return lock_by_part
+        if _SETUP_WITHOUT_VALUE_RE.search(text) and not re.search(r"\d", text):
+            # "Stelle die Heizung im Büro ein" asks for a value ("einstellen"),
+            # it does not mean "switch on": leave it to the value dialog (F11).
+            climates = [entity for entity in entities if entity.domain == "climate"]
+            if mentioned_entities(text, climates) or climate_in_named_area(text, climates):
+                return None
         if _ORDERED_SUBSET_RE.search(text):
             return None
         positive_text, exclusion_names = _split_exclusion(text)

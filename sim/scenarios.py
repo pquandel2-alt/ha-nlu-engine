@@ -89,7 +89,9 @@ S("dev-climate-missing-value", "Geräte", "Fehlende Temperatur wird erfragt",
   say("Stelle die Heizung im Büro ein.", no_calls=True, any=["welche temperatur", "auf welche"]),
   say("Auf 21 Grad.", state={"climate.heizung_buero": {"temperature": 21}}))
 S("dev-fan", "Geräte", "Ventilator Stufe/Preset/Oszillation",
-  say("Stelle den Deckenventilator auf Stufe 3.", calls=["fan.deckenventilator:set_percentage"], state={"fan.deckenventilator": {"percentage": 60}}),
+  # fan.turn_on with percentage is Home Assistant's documented equivalent of
+  # fan.set_percentage; the observable result (60 %) is what is asserted.
+  say("Stelle den Deckenventilator auf Stufe 3.", calls=["fan.deckenventilator:turn_on"], state={"fan.deckenventilator": {"percentage": 60}}),
   say("Stelle den Deckenventilator auf Nacht.", state={"fan.deckenventilator": {"preset_mode": "Nacht"}}),
   say("Schalte beim Deckenventilator die Oszillation ein.", state={"fan.deckenventilator": {"oscillating": True}}),
   say("Schalte den Badlüfter ein.", state={"fan.badluefter": "on"}))

@@ -30,11 +30,13 @@ from .automation_results import (
     AutomationMatchResult,
     AutomationToggleMatchResult,
 )
-from .entities import EntitySnapshot
+from .entities import EntitySnapshot, normalize_for_compare
 from .nlu.entity_resolution import (
+    ResolutionStatus,
     ResolveStatus,
     all_mentioned_entities,
     resolve_entity,
+    resolve_mentioned_target,
 )
 from .nlu.entity_clarification import render_candidate_question
 from .nlu.composition import (
@@ -84,6 +86,7 @@ from .nlu.semantic_compiler import (
     SemanticCommandCompiler,
     SemanticQueryCompiler,
 )
+from .nlu.registered_operation_compiler import climate_in_named_area
 from .nlu.semantic_exclusion import has_exclusion_clause, split_exclusion
 from .nlu.semantic_lexicon import SemanticKind, analyse_semantics
 from .nlu.semantic_state import SemanticState
@@ -1718,6 +1721,47 @@ class NluEngine:
             re.IGNORECASE,
         ):
             mentioned = all_mentioned_entities(text, entities or [])
+            if not mentioned and entities:
+                # A distinctive part of a registry name ("den LED-Streifen")
+                # still names a found device: never claim that nothing was
+                # found (or suggest checking the exposure) in that case (F11).
+                partial = resolve_mentioned_target(
+                    text, entities, frozenset(entity.domain for entity in entities)
+                )
+                candidates: tuple[EntitySnapshot, ...] = ()
+                in_area = climate_in_named_area(text, entities)
+                if partial.status is ResolutionStatus.RESOLVED and partial.entity is not None:
+                    candidates = (partial.entity,)
+                elif in_area is not None:
+                    candidates = (in_area,)
+                else:
+                    area_words = {
+                        word
+                        for entity in entities
+                        for name in (entity.area_name or "", *entity.area_aliases)
+                        for word in normalize_for_compare(name).split()
+                    }
+                    spoken = {
+                        normalize_for_compare(token)
+                        for token in analyse_semantics(text).unexplained_tokens
+                        if len(token) >= 3
+                    } - area_words
+                    candidates = tuple(
+                        entity for entity in entities
+                        if spoken
+                        and spoken <= set(normalize_for_compare(entity.friendly_name).replace("-", " ").split())
+                    )
+                if len(candidates) == 1:
+                    mentioned = list(candidates)
+                elif 1 < len(candidates) <= 5:
+                    names = ", ".join(entity.friendly_name for entity in candidates)
+                    return UnderstandingFeedback(
+                        ParseFailureReason.AMBIGUOUS_TARGET,
+                        f"Ich habe mehrere passende Geräte gefunden ({names}), "
+                        "aber die gewünschte Funktion nicht eindeutig zuordnen können. "
+                        "Bitte nenne das Gerät genauer.",
+                        {"entity_ids": tuple(entity.entity_id for entity in candidates)},
+                    )
             if mentioned:
                 names = ", ".join(entity.friendly_name for entity in mentioned)
                 return UnderstandingFeedback(

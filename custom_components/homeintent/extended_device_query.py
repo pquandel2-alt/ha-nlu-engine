@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 
 from .entities import EntitySnapshot, format_spoken_number
 from .entity_scope import DOMAIN_WORDS, resolve_entity_scope
@@ -10,6 +11,7 @@ from .device_result import DeviceControlResult
 from .nlu.language_frontend import LanguageDocument
 from .nlu.normalize import normalize
 from .nlu.semantic_utterance import SpeechAct
+from .productivity import format_duration
 
 
 _DOMAINS = frozenset(DOMAIN_WORDS)
@@ -32,6 +34,56 @@ def _state_text(entity: EntitySnapshot) -> str:
     return f"{entity.friendly_name}: {entity.state}"
 
 
+_TIMER_REMAINING_RE = re.compile(
+    r"\bwie\s+(?:lange|viel\s+zeit)\s+(?:laeuft|läuft|dauert|braucht|hat)\b.*\bnoch\b", re.I
+)
+
+
+def _timer_remaining(entity: EntitySnapshot, now: datetime) -> int | None:
+    """Remaining seconds of a Home Assistant timer helper, if it runs."""
+    finishes_at = entity.attributes.get("finishes_at")
+    if entity.state == "active" and isinstance(finishes_at, str):
+        try:
+            finish = datetime.fromisoformat(finishes_at.replace("Z", "+00:00"))
+        except ValueError:
+            finish = None
+        if finish is not None:
+            if finish.tzinfo is None:
+                finish = finish.replace(tzinfo=timezone.utc)
+            return max(0, round((finish - now).total_seconds()))
+    remaining = entity.attributes.get("remaining")
+    if isinstance(remaining, str) and (match := re.fullmatch(r"(\d+):(\d{2}):(\d{2})", remaining)):
+        hours, minutes, seconds = (int(part) for part in match.groups())
+        return hours * 3600 + minutes * 60 + seconds
+    return None
+
+
+def match_timer_helper_remaining(
+    text: str, entities: list[EntitySnapshot], now: datetime | None = None
+) -> DeviceControlResult | None:
+    """ "Wie lange läuft der Waschgang noch?" for a ``timer.*`` helper (F11)."""
+    if _TIMER_REMAINING_RE.search(text) is None:
+        return None
+    scope = resolve_entity_scope(text, [item for item in entities if item.domain == "timer"], frozenset({"timer"}))
+    if scope is None or len(scope.entities) != 1:
+        return None
+    entity = scope.entities[0]
+    if entity.state == "idle":
+        return DeviceControlResult(
+            None, f"Der Timer {entity.friendly_name} läuft gerade nicht.", entity=entity, is_query=True
+        )
+    seconds = _timer_remaining(entity, now or datetime.now(timezone.utc))
+    if seconds is None:
+        return None
+    state = " (pausiert)" if entity.state == "paused" else ""
+    return DeviceControlResult(
+        None,
+        f"Der Timer {entity.friendly_name}{state} läuft noch {format_duration(seconds)}.",
+        entity=entity,
+        is_query=True,
+    )
+
+
 def match_extended_device_query(
     text: str,
     entities: list[EntitySnapshot],
@@ -39,6 +91,11 @@ def match_extended_device_query(
 ) -> DeviceControlResult | None:
     if document is not None and document.utterance.speech_act is not SpeechAct.QUERY:
         return None
+    timer_answer = match_timer_helper_remaining(
+        document.source_text if document is not None else text, entities
+    )
+    if timer_answer is not None:
+        return timer_answer
     text = document.normalized_text if document is not None else normalize(text)
     if _QUERY_CUE.search(text) is None:
         return None
