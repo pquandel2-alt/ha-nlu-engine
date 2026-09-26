@@ -21,6 +21,7 @@ from ..entities import (
     EntityIndex,
     EntitySnapshot,
     generate_aliases,
+    is_outdoor_entity,
     normalize_for_compare,
 )
 from ..name_similarity import bounded_name_similarity
@@ -75,6 +76,7 @@ from .semantic_location import (
     has_explicit_location_cue,
     resolve_coordinated_locations,
     resolve_semantic_location,
+    whole_home_phrase,
 )
 from .semantic_state import (
     QUERYABLE_STATE_DOMAINS,
@@ -407,6 +409,11 @@ def _compile_measurement_query(
             and (area_id is None or entity.area_id == area_id)
             and (floor_id is None or entity.floor_id == floor_id)
         ]
+        if area_id is None and floor_id is None and domain == "sensor":
+            # A whole-home measurement ("im ganzen Haus") means indoors: an
+            # outdoor sensor would skew the house average (F21).
+            indoor = [entity for entity in matched if not is_outdoor_entity(entity)]
+            matched = indoor or matched
     comparator = next(iter(comparators), None)
     threshold_match = re.search(r"\b\d+(?:[,.]\d+)?\b", text)
     if comparator is not None and threshold_match is None:
@@ -1359,10 +1366,24 @@ class SemanticCommandCompiler:
             value for value in analysis.values(SemanticKind.DOMAIN)
             if isinstance(value, str)
         )
+        whole_home = whole_home_phrase(positive_text, entities, world_model)
         resolution_text = re.sub(
-            r"\b(?:im|in\s+der|in\s+dem)\s+", "", positive_text, flags=re.I
+            r"\b(?:im|in\s+der|in\s+dem)\s+",
+            "",
+            positive_text.replace(whole_home, " ") if whole_home else positive_text,
+            flags=re.I,
         )
         quantity = _quantity(positive_text)
+        if quantity is None and whole_home is not None and not mentioned_entities(
+            resolution_text,
+            entities,
+            index=world_model.entity_index if world_model is not None else None,
+        ):
+            # "Mach überall das Licht aus", "im ganzen Haus das Licht" (F21):
+            # a whole-home scope is universal. The word "Haus" is scope, not
+            # part of a device name such as "Stromverbrauch Haus"; a named
+            # device still wins below, and the policy's target limit applies.
+            quantity = Quantifier("all")
         # A quantified target (``alle Lichter im Wohnzimmer``) is resolved
         # by typed domain and location. Scanning thousands of registry names
         # cannot strengthen that meaning and used to dominate the 5k gate.

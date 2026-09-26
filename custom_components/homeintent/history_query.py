@@ -9,7 +9,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum, auto
 
-from .entities import EntitySnapshot, format_spoken_number, normalize_for_compare, spoken_unit
+from .entities import (
+    EntitySnapshot,
+    format_spoken_number,
+    is_outdoor_entity,
+    normalize_for_compare,
+    spoken_unit,
+)
 from .nlu.entity_resolution import ResolutionStatus, resolve_mentioned_target
 
 _LOGGER = logging.getLogger(__name__)
@@ -90,7 +96,6 @@ _MEASUREMENT_CUES: tuple[tuple[re.Pattern[str], frozenset[str]], ...] = (
     (re.compile(r"\b(?:helligkeit|hell|dunkel)\b"), frozenset({"illuminance"})),
 )
 _OUTDOOR_RE = re.compile(r"\b(?:draussen|aussen|im freien|vor dem haus)\b")
-_OUTDOOR_MARKERS = ("aussen", "draussen", "garten", "terrasse", "balkon")
 
 _STATE_HISTORY_DOMAINS = frozenset({
     "binary_sensor", "switch", "cover", "input_boolean", "light", "fan",
@@ -134,15 +139,7 @@ def _mentioned_entity(text: str, entities: list[EntitySnapshot]) -> EntitySnapsh
 
 
 def _is_outdoor(entity: EntitySnapshot) -> bool:
-    names = (
-        entity.friendly_name, entity.area_name or "", entity.floor_name or "",
-        *entity.area_aliases,
-    )
-    return any(
-        marker in normalize_for_compare(name)
-        for name in names
-        for marker in _OUTDOOR_MARKERS
-    )
+    return is_outdoor_entity(entity)
 
 
 def _mentions_area(value: str, entity: EntitySnapshot) -> bool:

@@ -11,6 +11,7 @@ from .entities import (
     ACTIVATION_TIMESTAMP_DOMAINS,
     EntitySnapshot,
     format_spoken_number,
+    is_outdoor_entity,
     normalize_for_compare,
 )
 from .nlu.domain_operations import DOMAIN_WORDS
@@ -178,7 +179,6 @@ _AREA_ON_RE = re.compile(
     r"(?:im|in\s+der|in\s+dem|am|auf\s+dem|auf\s+der)\s+(?P<area>.+?)"
     r"(?:\s+(?:gerade|noch|alles|jetzt))*(?:\s+(?:eingeschaltet|an|aktiv|in\s+betrieb|ein))?$"
 )
-_OUTDOOR_WORDS = ("aussen", "draussen", "garten", "terrasse", "balkon")
 
 
 def _area_on_query(key: str, entities: list[EntitySnapshot]) -> DeviceControlResult | None:
@@ -209,8 +209,7 @@ def _area_on_query(key: str, entities: list[EntitySnapshot]) -> DeviceControlRes
 
 
 def _is_outdoor(entity: EntitySnapshot) -> bool:
-    names = (entity.friendly_name, entity.area_name or "", entity.floor_name or "", *entity.area_aliases)
-    return any(word in normalize_for_compare(name) for name in names for word in _OUTDOOR_WORDS)
+    return is_outdoor_entity(entity)
 
 
 def _outdoor_temperature(entities: list[EntitySnapshot]) -> EntitySnapshot | None:

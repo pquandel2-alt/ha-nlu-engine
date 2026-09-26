@@ -306,6 +306,22 @@ def normalize_for_compare(text: str) -> str:
     return " ".join(folded.split())
 
 
+
+OUTDOOR_MARKERS = ("aussen", "draussen", "garten", "terrasse", "balkon")
+
+
+def is_outdoor_entity(entity: EntitySnapshot) -> bool:
+    """Whether a device is outdoors by its name, area or floor ("Außentemperatur")."""
+    names = (
+        entity.friendly_name, entity.area_name or "", entity.floor_name or "",
+        *entity.area_aliases,
+    )
+    return any(
+        marker in normalize_for_compare(name)
+        for name in names
+        for marker in OUTDOOR_MARKERS
+    )
+
 def _score_name_pair(
     spoken: str,
     spoken_norm: str,
