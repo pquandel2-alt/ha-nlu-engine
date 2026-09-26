@@ -24,7 +24,19 @@ from hassil import Intents
 
 from .areas import AreaResolveStatus, resolve_area_name
 from .automation_summary import AutomationSummary
+from .automation_composition import (
+    CompositionOutcome,
+    EventClarification,
+    OutcomeKind,
+    compose_event_notification,
+    log_composition_trace,
+    resolve_event_clarification,
+    unsupported_text,
+)
+from .automation_grounding import GroundingStatus, ground_event
+from .automation_language import read_event_roles
 from .automation_results import (
+    AutomationClarificationResult,
     AutomationDraftMatchResult,
     AutomationDeletionMatchResult,
     AutomationMatchResult,
@@ -1570,7 +1582,7 @@ class NluEngine:
         world_model: WorldModel | None = None,
         context: ConversationContext | None = None,
         document: LanguageDocument | None = None,
-    ) -> UnderstandingOutcome[AutomationMatchResult]:
+    ) -> UnderstandingOutcome[AutomationMatchResult | AutomationClarificationResult]:
         """Canonical V8 boundary for a trigger/condition/action turn."""
         document = document or analyse_language(text, entities)
         result = self.match_automation(text, entities, world_model, context)
@@ -2894,7 +2906,7 @@ class NluEngine:
         entities: list[EntitySnapshot],
         world_model: WorldModel | None = None,
         context: ConversationContext | None = None,
-    ) -> AutomationMatchResult | None:
+    ) -> AutomationMatchResult | AutomationClarificationResult | None:
         """Match a combined spoken automation sentence ("Wenn das
         Küchenfenster geöffnet wird, schalte das Küchenlicht ein.") into an
         ``AutomationModel`` (Integration Wave Migration Step 3). Called live
@@ -2940,7 +2952,14 @@ class NluEngine:
         automation_shell_stripped_text, shell_was_present = strip_automation_shell(text)
 
         utterance = analyse_utterance(automation_shell_stripped_text)
-        if utterance.speech_act is SpeechAct.QUERY or not _AUTOMATION_TRIGGER_RE.search(automation_shell_stripped_text):
+        if utterance.speech_act is SpeechAct.QUERY:
+            return None
+        composed = self.compose_event_notification(
+            automation_shell_stripped_text, entities, world_model, context
+        )
+        if composed is not None:
+            return composed
+        if not _AUTOMATION_TRIGGER_RE.search(automation_shell_stripped_text):
             return None
 
         normalized = normalize(automation_shell_stripped_text)
@@ -3095,7 +3114,9 @@ class NluEngine:
         trigger_text, action_text = split
 
         condition_node: ConditionNode | None = None
-        trigger = self._automation_trigger_parser.parse(trigger_text, parse_context)
+        trigger = self._typed_trigger(trigger_text, entities) or self._automation_trigger_parser.parse(
+            trigger_text, parse_context
+        )
         triggers: tuple[TriggerModel, ...] = ()
         if trigger is not None:
             triggers = (trigger,)
@@ -3143,6 +3164,77 @@ class NluEngine:
         if validation_error is not None:
             response_text = f"{response_text}\nvalidation_error: {validation_error.name}"
         return AutomationMatchResult(model=model, response_text=response_text, validation_error=validation_error)
+
+    def _typed_trigger(
+        self, trigger_text: str, entities: list[EntitySnapshot]
+    ) -> TriggerModel | None:
+        """Typed (class + area) grounding of an entity event, if it resolves.
+
+        Preferred over the grammar parser's free-name slot, which resolves
+        names fuzzily ("Schlafzimmerfenster" must never become a fan).
+        """
+        roles = read_event_roles(trigger_text)
+        if roles.conditions:
+            return None
+        grounded = ground_event(roles, entities)
+        if grounded.status is GroundingStatus.RESOLVED:
+            return grounded.trigger
+        return None
+
+    def compose_event_notification(
+        self,
+        text: str,
+        entities: list[EntitySnapshot],
+        world_model: WorldModel | None = None,
+        context: ConversationContext | None = None,
+    ) -> AutomationMatchResult | AutomationClarificationResult | None:
+        """7.2.0 compositional EVENT + NOTIFICATION reading (both orders)."""
+        parse_context = create_parse_context(
+            entities,
+            world_model=world_model,
+            last_entities=tuple(context.last_entities) if context is not None else (),
+            last_area=context.last_area if context is not None else None,
+        )
+        outcome = compose_event_notification(
+            text,
+            entities,
+            lambda span: self._automation_trigger_parser.parse(span, parse_context),
+            lambda span: self._automation_condition_parser.parse(span, parse_context),
+        )
+        return self._composition_result(outcome)
+
+    @staticmethod
+    def _composition_result(
+        outcome: CompositionOutcome | None,
+    ) -> AutomationMatchResult | AutomationClarificationResult | None:
+        if outcome is None:
+            return None
+        log_composition_trace(outcome.trace)
+        if outcome.kind is OutcomeKind.AUTOMATION and outcome.model is not None:
+            response_text = render_automation_tree(outcome.model)
+            if outcome.validation_error is not None:
+                response_text = f"{response_text}\nvalidation_error: {outcome.validation_error.name}"
+            return AutomationMatchResult(
+                model=outcome.model,
+                response_text=response_text,
+                validation_error=outcome.validation_error,
+            )
+        return AutomationClarificationResult(
+            response_text=outcome.speech or unsupported_text(None),
+            clarification=outcome.clarification,
+            trace=outcome.trace,
+        )
+
+    def resolve_event_clarification(
+        self,
+        text: str,
+        pending: EventClarification,
+        entities: list[EntitySnapshot],
+    ) -> AutomationMatchResult | AutomationClarificationResult | None:
+        """Continue a clarified event-notification draft ("Die linke.")."""
+        return self._composition_result(
+            resolve_event_clarification(text, pending, entities)
+        )
 
     def match_automation_draft_start(
         self,
