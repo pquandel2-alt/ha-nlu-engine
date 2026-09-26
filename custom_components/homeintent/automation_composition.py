@@ -219,6 +219,11 @@ def _conditions_for(
 ) -> tuple[ConditionNode, ...] | None:
     nodes: list[ConditionNode] = []
     for span in spans:
+        if span.weekdays:
+            nodes.append(ConditionNode(condition=ConditionModel(
+                type=ConditionType.WEEKDAY, weekdays=span.weekdays
+            )))
+            continue
         node = parse_condition(span.text) or _typed_condition(span.text, entities)
         if node is None:
             return None

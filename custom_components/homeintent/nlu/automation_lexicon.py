@@ -128,6 +128,7 @@ _STT_REJOINS: tuple[tuple[re.Pattern[str], str], ...] = (
     # harmless spelling variants of "at home"
     (re.compile(r"\bzu\s+hause\b", re.IGNORECASE), "zuhause"),
     (re.compile(r"\bdaheim\b", re.IGNORECASE), "zuhause"),
+    (re.compile(r"\bkeiner\s+(?=(?:mehr\s+)?zuhause\b)", re.IGNORECASE), "niemand "),
 )
 
 

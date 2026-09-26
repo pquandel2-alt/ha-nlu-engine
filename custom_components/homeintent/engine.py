@@ -657,6 +657,15 @@ class CommandPlan:
     commands: tuple[MatchResult, ...]
 
 
+# "Sag mir ... Bescheid" is a request, although "sag mir" also opens
+# embedded questions ("Sag mir, ob ..."), which stay queries.
+_SAY_REQUEST_RE = re.compile(
+    r"^\s*(?:sag|sage|gib)\s+(?!.*\b(?:ob|wie|was|warum|wann|welche[rsmn]?|wer|wo|wieviel)\b)"
+    r"(?=.*\bbescheid\b)[^?]*$",
+    re.IGNORECASE,
+)
+
+
 class NluEngine:
     """Loads all intent YAML files once at construction; ``match()`` is
     stateless per call (entities are passed in fresh each time since HA
@@ -2953,13 +2962,17 @@ class NluEngine:
         automation_shell_stripped_text, shell_was_present = strip_automation_shell(text)
 
         utterance = analyse_utterance(automation_shell_stripped_text)
-        if utterance.speech_act is SpeechAct.QUERY:
+        if utterance.speech_act is SpeechAct.QUERY and not _SAY_REQUEST_RE.match(
+            automation_shell_stripped_text
+        ):
             return None
         composed = self._compose_with_run_limits(
             automation_shell_stripped_text, text, entities, world_model, context
         )
         if composed is not None:
             return composed
+        if utterance.speech_act is SpeechAct.QUERY:
+            return None
         if not _AUTOMATION_TRIGGER_RE.search(automation_shell_stripped_text):
             return None
 

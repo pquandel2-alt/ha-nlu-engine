@@ -48,6 +48,10 @@ from .notification_language import NotificationClause, parse_notification_clause
 
 _JEDES_MAL_RE = re.compile(r"\bjedes\s*mal\b\s*,?", re.IGNORECASE)
 _IMMER_DANN_RE = re.compile(r"\bimmer\s+dann\b", re.IGNORECASE)
+_WISH_GERN_RE = re.compile(
+    r"\b(ich\s+(?:hätte|haette|möchte|moechte|würde|wuerde))\s+(?:sehr\s+)?(?:gern|gerne)\b",
+    re.IGNORECASE,
+)
 _SAY_SHELL_RE = re.compile(r"^\s*(?:sag|sage)\s+(?:(?:mir|uns)\s+)?", re.IGNORECASE)
 _LEADING_NOISE_RE = re.compile(
     r"^(?:(?:also|ähm?|äh|hm+|okay|ok|so|und|hey|hallo|homeintent)\b[\s,]*)+",
@@ -68,6 +72,9 @@ def prepare_automation_text(raw: str) -> PreparedText:
     text = _JEDES_MAL_RE.sub("immer ", repair.text)
     text = _IMMER_DANN_RE.sub("immer", text)
     text = rejoin_stt(text)
+    # "ich hätte gern eine Nachricht" is a wish addressed to the speaker;
+    # normalize() would reduce it to a bare "bitte".
+    text = _WISH_GERN_RE.sub(r"\1", text)
     shell = _SAY_SHELL_RE.match(text)
     if shell is not None:
         # normalize() drops "sag (mir)" as a politeness shell; here it is
@@ -424,6 +431,8 @@ class ConditionSpan:
 
     text: str
     negated: bool = False
+    # A recurring weekday phrase ("an Werktagen") is read structurally.
+    weekdays: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -491,11 +500,6 @@ _UP_RE = re.compile(
 _TIME_CONDITION_RE = re.compile(
     r"\b(?P<rel>nach|vor)\s+(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s+uhr\b", re.IGNORECASE
 )
-_WEEKDAY_CONDITION_RE = re.compile(
-    r"\b(?:am\s+wochenende|an\s+wochenenden|wochenends|an\s+werktagen|werktags|"
-    r"unter\s+der\s+woche)\b",
-    re.IGNORECASE,
-)
 _CONDITION_SPLITS: tuple[tuple[re.Pattern[str], bool], ...] = (
     (re.compile(r"\s*,?\s+aber\s+nur\s+(?:wenn|falls|sofern)\s+", re.IGNORECASE), False),
     (re.compile(r"\s*,?\s+(?:und\s+)?nur\s+(?:wenn|falls|sofern)\s+", re.IGNORECASE), False),
@@ -541,7 +545,7 @@ _MOTION_VERBS = frozenset({
 _FULL_TRAVEL = frozenset({"ganz", "komplett", "vollständig", "voll"})
 _UP_POSITION_WORDS = frozenset({"oben"})
 _DOWN_POSITION_WORDS = frozenset({"unten"})
-_HALF_WORDS = frozenset({"halb", "hälfte"})
+_HALF_WORDS = frozenset({"halb", "hälfte", "halber", "halbe"})
 # Verbal and function material that carries no subject meaning once the
 # predicate role has been read.
 _PREDICATE_WORDS = frozenset({
@@ -555,9 +559,9 @@ _PREDICATE_WORDS = frozenset({
     "geworden", "dreht", "rotiert", "hochgefahren", "heruntergefahren", "runtergefahren",
     "offen", "geöffnet", "zu", "geschlossen", "prozent", "grad", "%", "die", "der",
     "das", "hälfte", "halb", "unten", "oben", "bleibt", "war", "kommt", "etwa",
-    "ungefähr", "circa", "genau", "hochfahren", "herunterfahren", "runterfahren",
+    "ungefähr", "circa", "genau", "so", "etwa", "hochfahren", "herunterfahren", "runterfahren",
     "beim", "angelangt", "gelangt", "mehr", "als", "über", "unter", "hell",
-    "gedimmt", "läuft", "erkannt",
+    "gedimmt", "läuft", "erkannt", "höhe", "irgendwo", "klettert", "rutscht", "wandert",
 })
 # Kept as subject material even though listed above.
 _SUBJECT_KEEP = frozenset({"die", "der", "das"})
@@ -600,9 +604,9 @@ def _extract_conditions(text: str) -> tuple[str, tuple[ConditionSpan, ...]]:
     if time_match is not None and not re.match(r"\s*(?:um)\b", text[: time_match.start()][-4:]):
         spans.append(ConditionSpan(time_match.group(0)))
         text = (text[:time_match.start()] + text[time_match.end():]).strip()
-    weekday = _WEEKDAY_CONDITION_RE.search(text)
-    if weekday is not None:
-        spans.append(ConditionSpan(weekday.group(0)))
+    weekday = _WEEKDAY_RECUR_RE.search(text)
+    if weekday is not None and _weekdays_for(weekday):
+        spans.append(ConditionSpan(weekday.group(0), weekdays=_weekdays_for(weekday)))
         text = (text[:weekday.start()] + text[weekday.end():]).strip()
     return re.sub(r"\s+", " ", text), tuple(spans)
 
@@ -698,7 +702,8 @@ def read_event_roles(event_text: str) -> EventRoles:
     if value is None:
         for index, key in enumerate(keys):
             if key in _HALF_WORDS:
-                value, unit, half, comparator = 50.0, ValueUnit.PERCENT, True, NumericComparator.EQUAL
+                value, unit, half = 50.0, ValueUnit.PERCENT, True
+                comparator = _comparator(" ".join(keys[max(0, index - 3):index]))
                 consumed.add(index)
                 break
 
@@ -731,6 +736,10 @@ def read_event_roles(event_text: str) -> EventRoles:
         elif "bewegt" in keys and "sich" in keys:
             motion, state = True, SemanticState.ON
         elif any(key in {"auslöst", "ausgelöst", "anschlägt", "reagiert"} for key in keys):
+            motion, state = True, SemanticState.ON
+        elif any(key.startswith(("bewegungsmelder", "bewegungssensor")) for key in keys) and any(
+            key in _MOTION_VERBS for key in keys
+        ):
             motion, state = True, SemanticState.ON
 
     subject: list[str] = []
@@ -802,7 +811,7 @@ def _comparator(preceding: str) -> NumericComparator:
         (_ABOVE_WORDS, NumericComparator.ABOVE),
         (_BELOW_WORDS, NumericComparator.BELOW),
     ):
-        if any(re.search(rf"\b{re.escape(word)}(?:\s+noch)?$", tail) for word in words):
+        if any(re.search(rf"\b{re.escape(word)}(?:\s+(?:noch|die|der|das))?$", tail) for word in words):
             return comparator
     return NumericComparator.EQUAL
 

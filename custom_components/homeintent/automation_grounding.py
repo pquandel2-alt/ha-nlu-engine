@@ -203,9 +203,7 @@ def read_subject(words: Sequence[str], entities: Sequence[EntitySnapshot]) -> Su
         if compound is not None and noun is None:
             prefix, entry = compound
             noun, noun_word = entry, tokens[index]
-            prefix_area = areas.get(normalize_for_compare(prefix).strip(" -"))
-            if prefix_area is None:
-                prefix_area = areas.get(normalize_for_compare(prefix.rstrip("s")).strip(" -"))
+            prefix_area = area_by_key(normalize_for_compare(prefix), areas)
             if prefix_area is not None:
                 area = prefix_area
             elif prefix.strip("-") in _OUTDOOR_WORDS or prefix.startswith("außen"):
@@ -232,14 +230,22 @@ def read_subject(words: Sequence[str], entities: Sequence[EntitySnapshot]) -> Su
     )
 
 
+def area_by_key(key: str, areas: dict[str, tuple[str, str]]) -> tuple[str, str] | None:
+    """Exact area name, or its German compound/linking form ("Küchen", "Bads")."""
+    key = key.strip(" -")
+    for candidate in (key, key[:-1] if key.endswith(("n", "s")) else "", key[:-2] if key.endswith("en") else ""):
+        if candidate and candidate in areas:
+            return areas[candidate]
+    return None
+
+
 def _match_area(
     words: Sequence[str], areas: dict[str, tuple[str, str]]
 ) -> tuple[tuple[str, str], int] | None:
     for size in (2, 1):
         if len(words) < size:
             continue
-        key = normalize_for_compare(" ".join(words[:size])).strip(" -")
-        found = areas.get(key)
+        found = area_by_key(normalize_for_compare(" ".join(words[:size])), areas)
         if found is not None:
             return found, size
     return None
@@ -631,7 +637,20 @@ def choose_candidate(
     return matching[0] if len(matching) == 1 else None
 
 
+_SELECTION_BLOCKERS = frozenset({
+    "wenn", "sobald", "falls", "schalte", "mach", "schick", "benachrichtige", "sag", "wie",
+    "was", "warum", "welche", "welcher", "abbrechen", "stopp", "nein", "ja",
+})
+
+
+def looks_like_selection_reply(reply: str) -> bool:
+    """A short noun-phrase answer ("Die mittlere.") rather than a new request."""
+    words = [word.strip(",.;:!?").casefold() for word in reply.split()]
+    return 0 < len(words) <= 4 and not any(word in _SELECTION_BLOCKERS for word in words)
+
+
 __all__ = (
+    "looks_like_selection_reply",
     "GroundedEvent",
     "GroundingStatus",
     "Quantifier",

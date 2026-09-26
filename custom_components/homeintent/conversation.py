@@ -33,6 +33,7 @@ from homeassistant.helpers import device_registry as dr, intent
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
+from .automation_grounding import looks_like_selection_reply
 from .automation_executor import AutomationExecutor
 from .alias_learning import (
     AliasLearningDraft,
@@ -1297,7 +1298,7 @@ class NluConversationEntity(
         if advanced_answer is not None:
             return self._handle_advanced_answer(user_input, response, advanced_answer)
 
-        if re.search(
+        if not automation_turn and re.search(
             r"\b(?:alarm|alarmanlage|sicherung|scharf|unscharf)\b",
             user_input.text, re.IGNORECASE,
         ):
@@ -4785,6 +4786,16 @@ class NluConversationEntity(
             user_input.text, pending.clarification, entities
         )
         if result is None:
+            if looks_like_selection_reply(user_input.text):
+                # A short answer that names no offered device is still an
+                # answer to this question - ask again, never guess.
+                response.async_set_speech(
+                    "Das konnte ich keiner der Möglichkeiten zuordnen. "
+                    + (pending.clarification.grounded.question or "Welches Gerät meinst du?")
+                )
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
             self._context_store.clear(user_input.conversation_id)
             return None
         if isinstance(result, AutomationClarificationResult):

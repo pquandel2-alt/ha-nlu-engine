@@ -129,13 +129,15 @@ _HEAD_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
         # "schick Onkel Herbert eine Nachricht", "sag Tante Erna Bescheid"
         rf"{_DATIVE_VERB}\s+(?P<recipient>[A-ZÄÖÜ][\wäöüß-]*\s+[A-ZÄÖÜ][\wäöüß-]*)\s+{_OBJECT}",
         rf"{_BESCHEID_VERB}\s+(?P<recipient>[A-ZÄÖÜ][\wäöüß-]*\s+[A-ZÄÖÜ][\wäöüß-]*)\s+bescheid",
+        rf"{_ACCUSATIVE_VERB}\s+(?P<recipient>[A-ZÄÖÜ][\wäöüß-]*\s+[A-ZÄÖÜ][\wäöüß-]*)",
     )
 )
 # First-person wishes: "ich möchte eine Nachricht bekommen", "ich will
 # benachrichtigt werden", "ich hätte gern eine Benachrichtigung".  They only
 # ever address the speaker.
 _SELF_WISH_RE = re.compile(
-    r"ich\s+(?:möchte|moechte|will|würde|wuerde|hätte|haette|wäre|waere)\s+"
+    r"(?:ich\s+(?:möchte|moechte|will|würde|wuerde|hätte|haette|wäre|waere)"
+    r"|(?:möchte|moechte|will|hätte|haette)\s+ich)\s+"
     r"(?:(?:sehr\s+)?(?:gern|gerne)\s+|dankbar\s+für\s+)?"
     r"(?:"
     r"(?:(?:eine|ne|die)\s+)?(?:push[\s-]?)?" + _NOUN + r"(?:\s+(?:bekommen|erhalten|haben))?"
@@ -145,7 +147,7 @@ _SELF_WISH_RE = re.compile(
 )
 # "melde dich (bei mir)", "ping mich (an)", "gib Bescheid"
 _SELF_CONTACT_RE = re.compile(
-    r"(?:meld(?:e)?\s+dich(?:\s+bei\s+mir)?|ping\s+mich(?:\s+an)?|gib\s+bescheid)",
+    r"(?:meld(?:e)?\s+dich(?:\s+bei\s+mir)?|ping\s+mich(?:\s+an)?|(?:gib|sag|sage)\s+bescheid)",
     re.IGNORECASE,
 )
 # "Sag mir" is stripped by ``normalize()`` as a politeness prefix, which
