@@ -139,6 +139,8 @@ def describe_registered_operation(
             spoken_value = f"{format_spoken_number(value)} Grad"
         elif isinstance(value, float):
             spoken_value = format_spoken_number(value)
+        elif key == "message" and isinstance(value, str):
+            spoken_value = f"„{value.strip().rstrip('.!')}“"
         elif isinstance(value, bool):
             spoken_value = "ein" if value else "aus"
         details.append(f"{_DATA_LABELS_DE.get(key, key)} {spoken_value}")

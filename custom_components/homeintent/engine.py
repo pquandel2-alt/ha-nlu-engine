@@ -1881,6 +1881,9 @@ class NluEngine:
             return None
 
         normalized = normalize(text).strip(" .!?\t\r\n")
+        media = self._media_followup(normalized, context)
+        if media is not None:
+            return media
         adjustment = extract_degree(normalized)
         meaning = adjustment.text.casefold().strip(" .!?")
         intent_by_meaning = {
@@ -1919,6 +1922,41 @@ class NluEngine:
         return self._build_match_result(
             ParseResult(frame=frame, resolved_entities=[entity]), list(context.last_entities), context
         )
+    def _media_followup(
+        self, normalized: str, context: ConversationContext
+    ) -> MatchResult | None:
+        """ "Bitte weiterspielen." / "Kannst du es pausieren?" for the one
+        media player of the previous turn (F13) - elliptical or with "es"."""
+        key = normalize_for_compare(normalized)
+        key = re.sub(r"^(?:bitte|kannst\s+du|koenntest\s+du|wuerdest\s+du|jetzt|und|dann)\s+", "", key)
+        key = re.sub(r"^(?:bitte|jetzt|dann)\s+", "", key)
+        key = re.sub(r"\s+(?:bitte|mal|jetzt|wieder|doch)\b", "", key).strip()
+        key = re.sub(r"^(?:es|das|ihn|sie)\s+", "", key)
+        intent = {
+            "weiterspielen": "HassMediaPlay", "weiter spielen": "HassMediaPlay",
+            "fortsetzen": "HassMediaPlay", "weiter": "HassMediaPlay",
+            "abspielen": "HassMediaPlay", "spiel weiter": "HassMediaPlay",
+            "mach weiter": "HassMediaPlay", "pausieren": "HassMediaPause",
+            "pausiere": "HassMediaPause", "pause": "HassMediaPause",
+            "anhalten": "HassMediaPause", "halt an": "HassMediaPause",
+            "stoppen": "HassMediaStop", "stopp": "HassMediaStop",
+        }.get(key)
+        if intent is None:
+            return None
+        players = [entity for entity in context.last_entities if entity.domain == "media_player"]
+        if len(players) != 1:
+            return None
+        entity = players[0]
+        frame = SemanticFrame(
+            intent=intent,
+            target=TargetReference(entity.friendly_name, entity.entity_id, entity.domain),
+            area=None,
+            source_text=normalized,
+        )
+        return self._build_match_result(
+            ParseResult(frame=frame, resolved_entities=[entity]), list(context.last_entities), context
+        )
+
     def match_contextual_property_followup(
         self,
         text: str,

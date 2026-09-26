@@ -32,7 +32,7 @@ _REGISTERED_CUE = re.compile(
     r"\w*programm|lamellen|drehzahl|"
     r"neigung|kippposition|\w*ventil|mähroboter|maehroboter|kamera|"
     r"nachricht|meldung|oszillier\w*|oszillation|schwenk\w*|richtung|unmute|"
-    r"stummschaltung|stumm|ton|laut|(?:aus)?wähl\w*|(?:aus)?waehl\w*|timer)\b"
+    r"stummschaltung|stumm|ton|laut|(?:aus)?wähl\w*|(?:aus)?waehl\w*|timer|bescheid)\b"
     # "Stelle/Schalte X auf <Option|Zahl>": the option vocabulary lives in the
     # entity attributes (source_list, options, preset_modes ...), so the
     # generic "auf <Wert>" shape must reach the per-domain handlers (F11).
@@ -384,7 +384,28 @@ def compile_registered_operation(
         return _result(text, camera, "camera", "play_stream", {"media_player": player.entity_id}, action=SemanticAction.START)
 
     notify = _entity(text, entities, {"notify"}, index)
-    if notify is not None and re.search(r"\b(?:send\w*|schick\w*)\b", text, re.I):
+    clause = None
+    if re.search(r"\b(?:send\w*|schick\w*|sag\w*|gib)\b", text, re.I):
+        # "Schick Anna eine Nachricht, dass das Essen fertig ist" (F13): the
+        # shared notification grammar extracts recipient and message; a
+        # named recipient must match exactly one notify entity.
+        from ..automation_notification import resolve_notify_target
+        from ..notification_language import NotificationRecipientKind, parse_notification_clause
+
+        clause = parse_notification_clause(text)
+        if (
+            notify is None
+            and clause is not None
+            and clause.recipient_kind is NotificationRecipientKind.EXPLICIT_TARGET
+            and (target := resolve_notify_target(clause.recipient_name or "", entities)) is not None
+        ):
+            notify = next((item for item in entities if item.entity_id == target.entity_id), None)
+    if notify is not None and re.search(r"\b(?:send\w*|schick\w*|sag\w*|gib)\b", text, re.I):
+        if clause is not None and clause.message:
+            return _result(
+                text, notify, "notify", "send_message", {"message": clause.message},
+                action=SemanticAction.START,
+            )
         message = re.search(r"\b(?:nachricht|meldung)\s+(.+)$", text, re.I)
         if message is not None and (body := message.group(1).strip(" .!?")):
             return _result(text, notify, "notify", "send_message", {"message": body}, action=SemanticAction.START)
