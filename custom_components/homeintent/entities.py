@@ -259,6 +259,11 @@ def spoken_unit(unit: str | None) -> str | None:
 # nothing about the device being unreachable.
 ACTIVATION_TIMESTAMP_DOMAINS = frozenset({"scene", "button", "input_button"})
 
+# Domains whose state never describes a current device condition: activation
+# timestamps above, notify entities (timestamp of the last message, "unknown"
+# until the first one) and scripts. "unknown" must not block an action there.
+STATELESS_ACTION_DOMAINS = ACTIVATION_TIMESTAMP_DOMAINS | frozenset({"notify", "script"})
+
 
 def normalize_for_compare(text: str) -> str:
     """Lowercase + collapse whitespace, for the 'Normalized exact' tier.
