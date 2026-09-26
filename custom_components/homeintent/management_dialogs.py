@@ -196,7 +196,7 @@ async def async_handle_automation_structure_edit_turn(
     response: intent.IntentResponse,
     pending: PendingAutomationStructureEdit,
     entities: list[EntitySnapshot],
-) -> conversation.ConversationResult:
+) -> conversation.ConversationResult | None:
     if pending.ready:
         reply = classify_confirmation_reply(user_input.text)
         if reply is ConfirmationReply.UNCLEAR:
@@ -234,6 +234,11 @@ async def async_handle_automation_structure_edit_turn(
     automation = pending.automation
     if automation is None:
         automation = select_candidate_reply(user_input.text, pending.candidates)
+        if automation is None and len(user_input.text.split()) > 3:
+            # A complete new request, not a choice between the candidates:
+            # drop the selection question instead of repeating it (F9).
+            agent._context_store.clear(user_input.conversation_id)
+            return None
         if automation is None:
             response.async_set_speech(
                 "Das ist nicht eindeutig. Bitte nenne genau eine Automation oder ihre Nummer: "

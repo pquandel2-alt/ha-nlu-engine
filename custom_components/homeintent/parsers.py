@@ -23,7 +23,7 @@ from hassil import (
 
 from .hassil_compat import recognize_aligned
 from .areas import AreaResolutionStatus, AreaResolveStatus, AreaSnapshot, resolve_area_name, resolve_area_scored
-from .automation_summary import AutomationSummary
+from .automation_summary import AutomationSummary, automations_named
 from .entities import (
     EntitySnapshot,
 )
@@ -2461,8 +2461,24 @@ class AutomationDeleteMatch:
     ``QueryExecutor``/``ResponseGenerator`` already keep for query results.
     """
 
-    entity: EntitySnapshot
+    # None when {name} named the automation itself (its alias), not a device.
+    entity: EntitySnapshot | None
     matched: tuple[AutomationSummary, ...]
+
+
+_AUTOMATION_NAME_FRAME_RE = re.compile(
+    r"^(?:(?:für|fuer)\s+(?P<for>.+)|die\s+(?P<rel>.+?)\s+(?:schaltet|steuert))$",
+    re.IGNORECASE,
+)
+
+
+def _automation_name_slot(value: str) -> str:
+    """The bare name from "für X", "die X steuert" or "X" (grammar variants)."""
+    stripped = value.strip()
+    match = _AUTOMATION_NAME_FRAME_RE.match(stripped)
+    if match is None:
+        return stripped
+    return (match.group("for") or match.group("rel") or stripped).strip()
 
 
 class AutomationDeleteParser:
@@ -2503,7 +2519,11 @@ class AutomationDeleteParser:
         if name_slot is None:
             return None  # grammar requires {name} - structurally unreachable, defense only
 
-        name = _strip_locative_prepositions(str(name_slot.value))
+        spoken = _automation_name_slot(str(name_slot.value))
+        named = automations_named(spoken, automations)
+        if named:
+            return AutomationDeleteMatch(entity=None, matched=named)
+        name = _strip_locative_prepositions(spoken)
         resolved = resolve_entity_scored(name, context.entities, index=context.index)
         if resolved.status is not ResolutionStatus.RESOLVED or resolved.entity is None:
             return None  # entity itself not found or ambiguous - never guess (Regel 4)
@@ -2524,7 +2544,8 @@ class AutomationToggleMatch:
     both share this one parser/match type rather than two near-identical
     copies (Regel 6)."""
 
-    entity: EntitySnapshot
+    # None when {name} named the automation itself (its alias), not a device.
+    entity: EntitySnapshot | None
     matched: tuple[AutomationSummary, ...]
     enable: bool
 
@@ -2566,7 +2587,11 @@ class AutomationToggleParser:
         if name_slot is None:
             return None  # grammar requires {name} - structurally unreachable, defense only
 
-        name = _strip_locative_prepositions(str(name_slot.value))
+        spoken = _automation_name_slot(str(name_slot.value))
+        named = automations_named(spoken, automations)
+        if named:
+            return AutomationToggleMatch(entity=None, matched=named, enable=enable)
+        name = _strip_locative_prepositions(spoken)
         resolved = resolve_entity_scored(name, context.entities, index=context.index)
         if resolved.status is not ResolutionStatus.RESOLVED or resolved.entity is None:
             return None  # entity itself not found or ambiguous - never guess (Regel 4)

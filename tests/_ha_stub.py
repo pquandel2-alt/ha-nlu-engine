@@ -62,6 +62,8 @@ def install() -> None:
     helpers_floor_registry = types.ModuleType("homeassistant.helpers.floor_registry")
     helpers_entity_platform = types.ModuleType("homeassistant.helpers.entity_platform")
     helpers_intent = types.ModuleType("homeassistant.helpers.intent")
+    helpers_issue_registry = types.ModuleType("homeassistant.helpers.issue_registry")
+    helpers_start = types.ModuleType("homeassistant.helpers.start")
 
     # --- homeassistant.components.conversation --------------------------
 
@@ -403,6 +405,31 @@ def install() -> None:
     AddEntitiesCallback = Callable[[list], None]
     helpers_entity_platform.AddEntitiesCallback = AddEntitiesCallback
 
+    # --- homeassistant.helpers.issue_registry / start -----------------------
+    # Repair issues are recorded per hass instance (``hass.data``) so tests
+    # can assert on them; ``async_at_started`` runs immediately (the fake
+    # HA is always "running").
+
+    class IssueSeverity(str, Enum):
+        WARNING = "warning"
+        ERROR = "error"
+
+    def async_create_issue(hass: Any, domain: str, issue_id: str, **kwargs: Any) -> None:
+        hass.data.setdefault("_stub_issues", {})[(domain, issue_id)] = kwargs
+
+    def async_delete_issue(hass: Any, domain: str, issue_id: str) -> None:
+        hass.data.setdefault("_stub_issues", {}).pop((domain, issue_id), None)
+
+    helpers_issue_registry.IssueSeverity = IssueSeverity
+    helpers_issue_registry.async_create_issue = async_create_issue
+    helpers_issue_registry.async_delete_issue = async_delete_issue
+
+    def async_at_started(hass: Any, at_start_cb: Callable[[Any], Any]) -> Callable[[], None]:
+        at_start_cb(hass)
+        return lambda: None
+
+    helpers_start.async_at_started = async_at_started
+
     # --- homeassistant.helpers.intent --------------------------------------
 
     class IntentResponseType:
@@ -451,6 +478,8 @@ def install() -> None:
     helpers.floor_registry = helpers_floor_registry
     helpers.entity_platform = helpers_entity_platform
     helpers.intent = helpers_intent
+    helpers.issue_registry = helpers_issue_registry
+    helpers.start = helpers_start
 
     sys.modules["homeassistant"] = homeassistant
     sys.modules["homeassistant.components"] = components
@@ -473,3 +502,5 @@ def install() -> None:
     sys.modules["homeassistant.helpers.floor_registry"] = helpers_floor_registry
     sys.modules["homeassistant.helpers.entity_platform"] = helpers_entity_platform
     sys.modules["homeassistant.helpers.intent"] = helpers_intent
+    sys.modules["homeassistant.helpers.issue_registry"] = helpers_issue_registry
+    sys.modules["homeassistant.helpers.start"] = helpers_start

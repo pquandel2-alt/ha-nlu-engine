@@ -645,6 +645,18 @@ class CommandPlan:
     commands: tuple[MatchResult, ...]
 
 
+def _no_automation_text(entity: EntitySnapshot | None) -> str:
+    if entity is None:
+        return "Ich habe keine passende Automation gefunden."
+    return f"Ich habe keine Automation gefunden, die {entity.friendly_name} steuert."
+
+
+def _several_automations_text(entity: EntitySnapshot | None) -> str:
+    if entity is None:
+        return "Es gibt mehrere Automationen mit diesem Namen."
+    return f"Es gibt mehrere Automationen, die {entity.friendly_name} steuern."
+
+
 def _unresolved_exclusion_text(names: tuple[str, ...]) -> str:
     quoted = [f"„{name}“" for name in names]
     if len(quoted) == 1:
@@ -2633,13 +2645,13 @@ class NluEngine:
         if not match.matched:
             return AutomationDeletionMatchResult(
                 automation=None,
-                response_text=f"Ich habe keine Automation gefunden, die {match.entity.friendly_name} steuert.",
+                response_text=_no_automation_text(match.entity),
             )
         if len(match.matched) > 1:
             return AutomationDeletionMatchResult(
                 automation=None,
                 response_text=(
-                    f"Es gibt mehrere Automationen, die {match.entity.friendly_name} steuern. "
+                    f"{_several_automations_text(match.entity)} "
                     "Das kann ich nicht eindeutig löschen."
                 ),
             )
@@ -2701,14 +2713,14 @@ class NluEngine:
             return AutomationToggleMatchResult(
                 automation=None,
                 enable=match.enable,
-                response_text=f"Ich habe keine Automation gefunden, die {match.entity.friendly_name} steuert.",
+                response_text=_no_automation_text(match.entity),
             )
         if len(match.matched) > 1:
             return AutomationToggleMatchResult(
                 automation=None,
                 enable=match.enable,
                 response_text=(
-                    f"Es gibt mehrere Automationen, die {match.entity.friendly_name} steuern. "
+                    f"{_several_automations_text(match.entity)} "
                     f"Das kann ich nicht eindeutig {verb}."
                 ),
             )

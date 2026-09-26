@@ -319,6 +319,26 @@ from .phonetic_correction import PhoneticSuggestion, phonetic_suggestions
 
 _LOGGER = logging.getLogger(__name__)
 
+# Universal way out of any open follow-up question (F10). Matched against
+# the normalized utterance as a whole, so "Vergiss meine Vorliebe" is not a
+# cancellation.
+_UNIVERSAL_CANCEL_RE = re.compile(
+    r"\s*(?:(?:nein\s*,?\s*)?(?:lass\s+(?:das|es|gut\s+sein)|abbrechen|abbruch|brich\s+ab|"
+    r"stopp|stop|vergiss\s+(?:es|das)|egal|schon\s+gut|nicht\s+mehr\s+noetig|"
+    r"nicht\s+mehr\s+nötig)(?:\s+bitte)?)[.!]?\s*"
+)
+# Open questions whose expected answer is itself a command (a routine being
+# defined step by step, an automation action): a command answers them.
+_COMMAND_ANSWER_TASK_KINDS = frozenset({
+    DialogTaskKind.ROUTINE_DEFINITION,
+    DialogTaskKind.AUTOMATION,
+})
+_NO_CONDITION_RE = re.compile(
+    r"(?:keine|keins|nein\s*,?\s*keine|ohne|keine\s+(?:bedingung|bedingungen)|"
+    r"ohne\s+(?:bedingung|bedingungen)|keine\s+weitere(?:n)?(?:\s+bedingung(?:en)?)?|"
+    r"nichts|brauche\s+ich\s+nicht)"
+)
+
 
 # Single source of truth for "which intents are queries" (V4.2) - read state
 # and speak, never call a service - so Assist shows them as a QUERY_ANSWER
@@ -810,10 +830,14 @@ class NluConversationEntity(
                     direct_understanding = candidate
 
         active_task = manager.active(user_input.conversation_id)
+        # A complete, directly executable new command ends any open follow-up
+        # question (alias confirmation, comfort conflict, proactive
+        # clarification ...) instead of being swallowed as its answer (F10).
+        # The superseded question is discarded, never executed.
         if (
             active_dialog is None
             and active_task is not None
-            and active_task.kind is DialogTaskKind.ALIAS_CONFIRMATION
+            and active_task.kind not in _COMMAND_ANSWER_TASK_KINDS
             and language_document.utterance.speech_act is SpeechAct.COMMAND
             and language_document.utterance.safe_to_execute_directly
             and not is_contextual_followup(user_input.text)
@@ -838,10 +862,7 @@ class NluConversationEntity(
                     r"\b(?:was\s+hast\s+du\s+verstanden|warum\s+fragst\s+du)\b",
                     normalized_meta,
                 )
-                or re.fullmatch(
-                    r"\s*(?:lass\s+das|abbrechen|abbruch|stopp|stop|vergiss\s+es)[.!]?\s*",
-                    normalized_meta,
-                )
+                or _UNIVERSAL_CANCEL_RE.fullmatch(normalized_meta)
             )
             if (
                 is_meta_turn
@@ -866,10 +887,7 @@ class NluConversationEntity(
                 return conversation.ConversationResult(
                     response=response, conversation_id=user_input.conversation_id
                 )
-            if re.fullmatch(
-                r"\s*(?:lass\s+das|abbrechen|abbruch|stopp|stop|vergiss\s+es)[.!]?\s*",
-                normalized_meta,
-            ):
+            if _UNIVERSAL_CANCEL_RE.fullmatch(normalized_meta):
                 self._context_store.clear(user_input.conversation_id)
                 manager.cancel(user_input.conversation_id)
                 response.async_set_speech(
@@ -878,6 +896,16 @@ class NluConversationEntity(
                 return conversation.ConversationResult(
                     response=response, conversation_id=user_input.conversation_id
                 )
+
+        if (
+            active_dialog is None
+            and active_task is None
+            and _UNIVERSAL_CANCEL_RE.fullmatch(language_document.normalized_text.casefold())
+        ):
+            response.async_set_speech("Es ist gerade nichts offen, das ich abbrechen könnte.")
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
 
         if (
             active_dialog is None
@@ -1147,13 +1175,19 @@ class NluConversationEntity(
             and active_task is not None
             and isinstance(active_task.payload, PendingAutomationStructureEdit)
         ):
-            return await async_handle_automation_structure_edit_turn(
+            structure_turn = await async_handle_automation_structure_edit_turn(
                 self,
                 user_input,
                 response,
                 active_task.payload,
                 entities,
             )
+            if structure_turn is not None:
+                return structure_turn
+            # The reply was a new request, not a choice: continue without
+            # the discarded selection question (F9).
+            pending = None
+            active_dialog = None
 
         if (
             active_dialog is not None
@@ -1352,12 +1386,35 @@ class NluConversationEntity(
                 user_input, response, management_request, entities
             )
 
+        # "Deaktiviere/Aktiviere/Lösche die Automation <Name>" names an
+        # automation, not the device its name starts with (F9): resolve the
+        # explicit automation noun before the direct device command can
+        # read "Aktiviere ... Flurlicht" as "turn on the Flurlicht".
+        early_automation_result: (
+            AutomationDeletionMatchResult | AutomationToggleMatchResult | None
+        ) = None
+        if re.search(r"\bautomation\b", user_input.text, re.IGNORECASE) and (
+            _AUTOMATION_DELETE_RE.search(user_input.text)
+            or _AUTOMATION_DISABLE_RE.search(user_input.text)
+            or _AUTOMATION_ENABLE_RE.search(user_input.text)
+        ):
+            if self._automation_executor is None:
+                self._automation_executor = AutomationExecutor(self.hass)
+            automations = await self._automation_executor.async_list_automations()
+            early_automation_result = (
+                self._engine.match_automation_delete(user_input.text, entities, automations)
+                or self._engine.match_automation_disable(user_input.text, entities, automations)
+                or self._engine.match_automation_enable(user_input.text, entities, automations)
+            )
+        if early_automation_result is not None:
+            direct_understanding = None
+
         # Analyse command-shaped turns before the historical device matcher
         # group. Only explicitly migrated capabilities may consume this
         # early result. Automation turns stay lazy so they do not pay both
         # the direct and automation interpreters; non-command fallbacks are
         # computed below only if the established routers did not match.
-        direct_understanding = direct_understanding or (
+        direct_understanding = None if early_automation_result is not None else direct_understanding or (
             self._engine.understand(
                 user_input.text,
                 entities,
@@ -1374,7 +1431,7 @@ class NluConversationEntity(
             )
             else None
         )
-        result = (
+        result = early_automation_result or (
             direct_understanding.payload
             if direct_understanding is not None
             and direct_understanding.authority
@@ -4104,7 +4161,7 @@ class NluConversationEntity(
         automations = await self._automation_executor.async_list_automations()
         candidates = tuple(
             item
-            for item in homeintent_candidates(automations, user_input.text)
+            for item in homeintent_candidates(automations, user_input.text, entities)
             if not item.once
         )
         if not candidates:
@@ -4163,7 +4220,7 @@ class NluConversationEntity(
         if self._automation_executor is None:
             self._automation_executor = AutomationExecutor(self.hass)
         automations = await self._automation_executor.async_list_automations()
-        candidates = homeintent_candidates(automations, user_input.text)
+        candidates = homeintent_candidates(automations, user_input.text, entities)
         operation = action_edit_operation(user_input.text)
         if not candidates:
             response.async_set_speech("Ich finde keine änderbare HomeIntent-Automation.")
@@ -5048,6 +5105,12 @@ class NluConversationEntity(
 
         if state.stage is AutomationWizardStage.CONDITION_DECISION:
             reply = classify_confirmation_reply(text)
+            if reply is ConfirmationReply.UNCLEAR and _NO_CONDITION_RE.fullmatch(
+                normalize_for_compare(text).strip(" .!")
+            ):
+                # "Keine Bedingung" / "ohne Bedingung" / "keine" answer the
+                # yes/no question with no (F10).
+                reply = ConfirmationReply.NO
             if reply is ConfirmationReply.UNCLEAR:
                 response.async_set_speech("Bitte antworte mit Ja oder Nein.")
             else:
@@ -6230,10 +6293,18 @@ class NluConversationEntity(
             AutomationManagementKind.SIMULATE,
         }:
             if not selection.automations:
-                response.async_set_speech("Ich finde keine passende HomeIntent-Automation.")
+                response.async_set_speech(
+                    "Ich finde keine passende Automation."
+                    if request.kind in {
+                        AutomationManagementKind.EXPLAIN_TRIGGER,
+                        AutomationManagementKind.CONTROLS_ENTITY,
+                    }
+                    else "Ich finde keine passende HomeIntent-Automation."
+                )
             else:
                 details = [
-                    item.source_text or item.alias for item in selection.automations
+                    (item.source_text or item.alias).rstrip(" .")
+                    for item in selection.automations
                 ]
                 prefix = (
                     "Auf diesen Auslöser reagieren: "
