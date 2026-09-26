@@ -238,6 +238,22 @@ def format_spoken_number(value: object) -> str:
     return rendered.replace(".", ",")
 
 
+# Starter set of commonly seen HA units spoken in German; unknown units are
+# still spoken raw (e.g. "42 mbar"), never crash.
+SPOKEN_UNITS_DE = {
+    "°C": "Grad", "°F": "Grad Fahrenheit", "%": "Prozent", "hPa": "Hektopascal",
+    "lx": "Lux", "W": "Watt", "kW": "Kilowatt", "Wh": "Wattstunden",
+    "kWh": "Kilowattstunden", "ppm": "ppm",
+}
+
+
+def spoken_unit(unit: str | None) -> str | None:
+    """German spoken form of a Home Assistant unit of measurement."""
+    if not unit:
+        return None
+    return SPOKEN_UNITS_DE.get(unit, unit)
+
+
 # Domains whose state is the timestamp of their last activation. "unknown" is
 # their normal state until they are triggered for the first time and says
 # nothing about the device being unreachable.

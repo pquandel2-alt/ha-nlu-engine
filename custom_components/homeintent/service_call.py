@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
-from .entities import EntitySnapshot, format_spoken_number
+from .entities import SPOKEN_UNITS_DE, EntitySnapshot, format_spoken_number
 from .nlu.capabilities import Capability
 from .nlu.automation_operations import validate_registered_operation
 from .nlu.query import QueryType, derive_query_type
@@ -278,9 +278,8 @@ class QueryIntentSpec:
     allows_empty: bool = False
 
 
-# Starter set of commonly seen HA units; unknown units are still spoken
-# (raw, e.g. "42 mbar."), never crash - can be extended as needed.
-_UNIT_SPOKEN_DE = {"°C": "Grad", "%": "Prozent", "hPa": "Hektopascal", "lx": "Lux", "W": "Watt", "kWh": "Kilowattstunden"}
+# Shared with every other spoken measurement (entities.SPOKEN_UNITS_DE).
+_UNIT_SPOKEN_DE = SPOKEN_UNITS_DE
 
 
 def _speak_state(entity: EntitySnapshot) -> str:
@@ -656,7 +655,7 @@ LIGHT_EXTENDED_INTENTS: dict[str, LightExtendedIntentSpec] = {
     "HassLightSetColorTemp": LightExtendedIntentSpec(
         capability=Capability.COLOR_TEMPERATURE,
         build=lambda es, params: ServiceCallPlan(
-            "light", "turn_on", _entity_id_field(es), {"kelvin": params["color_temp_kelvin"]}
+            "light", "turn_on", _entity_id_field(es), {"color_temp_kelvin": params["color_temp_kelvin"]}
         ),
         response=lambda es, params: (
             f"{es[0].friendly_name} auf "
