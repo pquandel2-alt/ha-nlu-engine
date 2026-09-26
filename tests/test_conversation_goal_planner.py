@@ -309,3 +309,44 @@ def test_goal_area_comes_from_the_area_registry():
         area_names={"buero": "buero", "arbeitszimmer": "buero"},
     )
     assert goal is not None and goal.scope.area_id == "buero"
+
+
+def test_slow_plan_verification_answers_at_once_and_reports_only_failure(
+    monkeypatch, tmp_path
+):
+    """F17: a confirmed plan whose effect takes long must not block the reply."""
+    entity = NluConversationEntity(ConfigEntry())
+    entity.hass = HomeAssistant()
+    profiles = ProfileStore(tmp_path / "profiles.json")
+    asyncio.run(profiles.async_save_routine(_night_routine(), confirmed=True))
+    entity._runtime_data.profiles = profiles
+    from datetime import timedelta
+
+    entity._runtime_data.effect_monitor.timeout = timedelta(milliseconds=300)
+    monkeypatch.setattr(ha_conversation, "_PLAN_REPLY_BUDGET_SECONDS", 0.05)
+    # The lights never report "off": verification must fail in the background.
+    monkeypatch.setattr(ha_conversation, "build_entity_snapshots", lambda *_: LIGHTS)
+
+    async def scenario():
+        async def turn(text: str):
+            return await entity._async_handle_message(
+                ConversationInput(
+                    text=text, conversation_id="slow-plan",
+                    context=SimpleNamespace(user_id="owner"),
+                ),
+                None,
+            )
+
+        preview = await turn("Bereite das Haus für die Nacht vor.")
+        assert "Planvorschau" in preview.response.speech
+        answer = await turn("Ja")
+        assert "melde mich nur, falls etwas nicht klappt" in answer.response.speech
+        await asyncio.sleep(1.0)
+        calls = [
+            call for call in entity.hass.services.async_call.await_args_list
+            if call.args[:2] == ("persistent_notification", "create")
+        ]
+        assert len(calls) == 1
+        assert "nicht vollständig ausgeführt" in calls[0].args[2]["message"]
+
+    asyncio.run(scenario())

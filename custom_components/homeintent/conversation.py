@@ -178,6 +178,7 @@ from .planner import (
     GoalKind,
     MaterializedPlan,
     PlanExecutor,
+    PlanResult,
     PlanStatus,
     StepKind,
     effect_satisfied,
@@ -359,6 +360,10 @@ def _describe_memory(record: Any, labels: Mapping[str, str]) -> str:
     kind = _MEMORY_KIND_SINGULAR_DE.get(record.kind.value, "Eintrag")
     return f"{kind}: {text}" if isinstance(text, str) and text else f"ein Eintrag ({kind})"
 
+
+# How long a spoken plan confirmation may wait for the plan's verified
+# result before replying and continuing in the background (F17).
+_PLAN_REPLY_BUDGET_SECONDS = 2.0
 
 # Open questions whose expected answer is itself a command (a routine being
 # defined step by step, an automation action): a command answers them.
@@ -2915,34 +2920,76 @@ class NluConversationEntity(
                         return conversation.ConversationResult(
                             response=response, conversation_id=conversation_id
                         )
-                    try:
-                        result = await PlanExecutor(
-                            refresh, execute, verify, schedule
-                        ).execute(
-                            stored_plan, confirmed=True
-                        )
-                    finally:
-                        await self._runtime_data.execution_coordinator.async_release(
-                            execution_run_id
-                        )
-                    if self._runtime_data.goal_runs is not None:
-                        current_entities = {
-                            item.entity_id: item
-                            for item in build_entity_snapshots(self.hass, self.entry)
-                        }
-                        run = goal_run_from_plan_result(
-                            stored_plan, result, current_entities,
-                            run_id=execution_run_id,
-                            user_id=actor_id,
-                            person_entity_id=(
-                                self._runtime_data.user_contexts.resolve_current_person(actor_id).person_entity_id
-                                if self._runtime_data.user_contexts is not None
-                                else None
-                            ),
-                            updated_at=dt_util.utcnow().isoformat(),
-                        )
-                        await self._runtime_data.goal_runs.async_append(run)
+                    goal_runs = self._runtime_data.goal_runs
+                    user_contexts = self._runtime_data.user_contexts
+
+                    async def run_plan() -> PlanResult:
+                        try:
+                            plan_result = await PlanExecutor(
+                                refresh, execute, verify, schedule
+                            ).execute(
+                                stored_plan, confirmed=True
+                            )
+                        finally:
+                            await self._runtime_data.execution_coordinator.async_release(
+                                execution_run_id
+                            )
+                        if goal_runs is not None:
+                            current_entities = {
+                                item.entity_id: item
+                                for item in build_entity_snapshots(self.hass, self.entry)
+                            }
+                            run = goal_run_from_plan_result(
+                                stored_plan, plan_result, current_entities,
+                                run_id=execution_run_id,
+                                user_id=actor_id,
+                                person_entity_id=(
+                                    user_contexts.resolve_current_person(actor_id).person_entity_id
+                                    if user_contexts is not None
+                                    else None
+                                ),
+                                updated_at=dt_util.utcnow().isoformat(),
+                            )
+                            await goal_runs.async_append(run)
+                        return plan_result
+
+                    # Service calls are accepted within milliseconds, but
+                    # verifying slow effects (a garage door, several locks)
+                    # can take much longer than a voice satellite waits (F17).
+                    # Answer with the final result when it is quick; otherwise
+                    # confirm immediately, keep verifying in the background and
+                    # report only a failure. The GoalRun keeps every piece of
+                    # evidence for "Warum?".
+                    plan_task = self.hass.async_create_task(
+                        run_plan(), name=f"HomeIntent plan {execution_run_id}"
+                    )
+                    done, _pending = await asyncio.wait(
+                        {plan_task}, timeout=_PLAN_REPLY_BUDGET_SECONDS
+                    )
                     manager.cancel(conversation_id)
+                    if plan_task not in done:
+                        label = (stored_plan.goal.provenance.source_utterance if stored_plan.goal.provenance else "") or "Der bestätigte Plan"
+                        plan_task.add_done_callback(
+                            lambda task: self.hass.async_create_task(
+                                self._async_report_background_plan(
+                                    task, execution_run_id, label[:80], actor_id
+                                ),
+                                name=f"HomeIntent plan report {execution_run_id}",
+                            )
+                        )
+                        steps = sum(
+                            1 for step in stored_plan.steps
+                            if step.kind in {StepKind.ACTION, StepKind.NOTIFY}
+                        )
+                        response.async_set_speech(
+                            f"In Ordnung, ich führe den Plan jetzt aus ({steps} "
+                            f"{'Schritt' if steps == 1 else 'Schritte'}) und prüfe die Wirkung. "
+                            "Ich melde mich nur, falls etwas nicht klappt."
+                        )
+                        return conversation.ConversationResult(
+                            response=response, conversation_id=conversation_id
+                        )
+                    result = plan_task.result()
                     if result.status is PlanStatus.COMPLETED:
                         response.async_set_speech("Der Plan wurde vollständig ausgeführt und verifiziert.")
                     elif result.status is PlanStatus.SCHEDULED:
@@ -3317,6 +3364,50 @@ class NluConversationEntity(
             f"Planvorschau: {details}. {plan.summary} Soll ich den gesamten Plan ausführen?"
         )
         return conversation.ConversationResult(response=response, conversation_id=conversation_id)
+
+    async def _async_report_background_plan(
+        self,
+        task: "asyncio.Task[PlanResult]",
+        run_id: str,
+        label: str,
+        actor_id: str | None,
+    ) -> None:
+        """Report a plan that finished after the spoken reply - only if it failed."""
+        try:
+            result = task.result()
+        except asyncio.CancelledError:
+            failed = True
+        except Exception:  # noqa: BLE001 - reported below, never swallowed silently
+            _LOGGER.exception("HomeIntent background plan %s failed", run_id)
+            failed = True
+        else:
+            failed = result.status not in {PlanStatus.COMPLETED, PlanStatus.SCHEDULED}
+        if not failed:
+            return
+        proactive = self._runtime_data.proactive_context
+        if proactive is not None and proactive.enabled and actor_id is not None:
+            await proactive.async_report_goal_failure(
+                run_id=run_id, goal_label=label, owner_user_id=actor_id,
+            )
+            return
+        # Without the proactive layer the failure still has to reach the
+        # user: a Home Assistant notification names what did not work.
+        try:
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": "HomeIntent",
+                    "message": (
+                        f"„{label}“ wurde nicht vollständig ausgeführt. "
+                        "Frag „Warum hat das nicht funktioniert?“ für die Details."
+                    ),
+                    "notification_id": f"homeintent_plan_{run_id}",
+                },
+                blocking=False,
+            )
+        except Exception:  # noqa: BLE001 - reporting must never raise
+            _LOGGER.warning("HomeIntent could not report a failed plan", exc_info=True)
 
     def _stage_goal_plan(
         self,

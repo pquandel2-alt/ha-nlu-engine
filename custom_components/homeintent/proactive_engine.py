@@ -18,6 +18,8 @@ service sink.
 
 from __future__ import annotations
 
+import asyncio
+
 import re
 import secrets
 from dataclasses import dataclass, field, replace
@@ -41,6 +43,7 @@ from .proactive_messages import (
     full_message,
     grouped_message,
     outcome_message,
+    running_message,
     proposal_label,
     situation_message,
 )
@@ -130,6 +133,9 @@ class ProactiveConfig:
     router: RouterConfig = field(default_factory=RouterConfig)
     quiet: QuietHoursPolicy = field(default_factory=QuietHoursPolicy)
     dismiss_cooldown: timedelta = timedelta(hours=2)
+    # How long an accepting reply waits for the verified effect before it
+    # answers and keeps verifying in the background (F17).
+    reply_budget: timedelta = timedelta(seconds=2)
 
 
 @dataclass(frozen=True)
@@ -244,6 +250,7 @@ class ProactiveContextEngine:
         self._last_anticipation: dict[str, AnticipationResult] = {}
         # Desired-state proposals per situation key (never a service plan).
         self._goals: dict[str, ProposedGoal] = {}
+        self._background_executions: set[asyncio.Future[object]] = set()
 
     # ------------------------------------------------------------------ events
     async def async_observe_state(
@@ -816,19 +823,42 @@ class ProactiveContextEngine:
                 self.proposals.transition(proposal_id, ProposalState.FAILED, now=now, result="stale")
                 await self.async_persist()
                 return ReplyResult(True, outcome_message(proposal.proposed_goal, success=False, status="stale"))
-            result = await self.runner.async_execute(
-                proposal.proposed_goal, user_id=user_id, is_admin=is_admin,
-                person_entity_id=self.ports.person_for(user_id),
-                interactive_confirmed=True,
-                provenance=f"proposal:{proposal_id}", now=now,
+            active_situation = situation
+
+            async def _execute() -> ProactiveExecutionResult:
+                executed = await self.runner.async_execute(
+                    proposal.proposed_goal, user_id=user_id, is_admin=is_admin,
+                    person_entity_id=self.ports.person_for(user_id),
+                    interactive_confirmed=True,
+                    provenance=f"proposal:{proposal_id}", now=now,
+                )
+                self._finish_execution(
+                    proposal, active_situation, executed, now=now, by=by, user_id=user_id,
+                )
+                await self.async_persist()
+                return executed
+
+            # A garage door needs several seconds to report "closed"; the
+            # spoken "Ja" must not wait for it (F17). The effect is still
+            # verified and recorded; only a failure is reported afterwards.
+            task = asyncio.ensure_future(_execute())
+            done, _pending = await asyncio.wait(
+                {task}, timeout=self.config.reply_budget.total_seconds()
             )
-            self._finish_execution(proposal, situation, result, now=now, by=by, user_id=user_id)
-            await self.async_persist()
-            return ReplyResult(True, outcome_message(
-                proposal.proposed_goal,
-                success=result.status is ProactiveExecutionStatus.EXECUTED,
-                status=result.status.value,
-            ))
+            if task in done:
+                result = task.result()
+                return ReplyResult(True, outcome_message(
+                    proposal.proposed_goal,
+                    success=result.status is ProactiveExecutionStatus.EXECUTED,
+                    status=result.status.value,
+                ))
+            self._background_executions.add(task)
+            task.add_done_callback(
+                lambda finished: self._on_background_execution(
+                    finished, proposal, active_situation, user_id,
+                )
+            )
+            return ReplyResult(True, running_message(proposal.proposed_goal))
         if situation is not None:
             self.ports.cancel(f"check:{situation.dedupe_key}")
         if choice is ProposalChoice.LATER:
@@ -861,6 +891,35 @@ class ProactiveContextEngine:
         if choice is ProposalChoice.IGNORE:
             return ReplyResult(True, "Alles klar. Zu dieser Situation melde ich mich vorerst nicht mehr.")
         return ReplyResult(True, "In Ordnung. Ich lasse es so.")
+
+    def _on_background_execution(
+        self,
+        task: "asyncio.Future[ProactiveExecutionResult]",
+        proposal: PendingProposal,
+        situation: ProactiveSituation,
+        user_id: str | None,
+    ) -> None:
+        self._background_executions.discard(task)
+        failed = task.cancelled() or task.exception() is not None or (
+            task.result().status is not ProactiveExecutionStatus.EXECUTED
+        )
+        if not failed:
+            return
+        run_id = (
+            task.result().run.run_id
+            if not task.cancelled() and task.exception() is None and task.result().run is not None
+            else proposal.proposal_id
+        )
+        # Report the failure the user was promised (same path as other
+        # unattended goal failures).
+        report = self.async_report_situation(DetectionSignal(
+            SituationKind.PENDING_GOAL_REQUIRES_ATTENTION,
+            f"{SituationKind.PENDING_GOAL_REQUIRES_ATTENTION.value}:{run_id}",
+            (), situation.area_id, True, self.ports.now(),
+            (SituationEvidence("run_id", run_id),),
+            situation.subject_name or "Vorschlag", owner_user_id=user_id,
+        ))
+        self._background_executions.add(asyncio.ensure_future(report))
 
     def _finish_execution(
         self, proposal: PendingProposal, situation: ProactiveSituation,

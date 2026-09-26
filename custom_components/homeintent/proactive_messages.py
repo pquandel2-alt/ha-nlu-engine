@@ -197,6 +197,29 @@ def outcome_message(goal: ProposedGoal, *, success: bool, status: str) -> str:
     return finish_sentence("Die Aktion wurde nicht wie erwartet bestätigt. Ich wiederhole sie nicht automatisch")
 
 
+def running_message(goal: ProposedGoal) -> str:
+    """Immediate answer while the effect is still being verified (F17)."""
+    names = tuple(target.name or target.entity_id for target in goal.targets)
+    verb = _ACCEPT_VERB.get(goal.targets[0].desired_state, "ausführen") if goal.targets else "ausführen"
+    if len(names) == 1:
+        phrase = definite_entity_phrase(names[0])
+        object_text = phrase[1] if phrase is not None else f"„{names[0]}“"
+        particle = _PARTICLE.get(verb, "aus")
+        return finish_sentence(
+            f"In Ordnung, ich {_FIRST_PERSON.get(verb, 'führe')} {object_text} jetzt"
+            f"{' ' + particle if particle else ''}, prüfe die Wirkung und melde mich nur, "
+            "falls es nicht klappt"
+        )
+    return finish_sentence(
+        "In Ordnung, ich führe die Schritte jetzt aus, prüfe die Wirkung und melde mich nur, "
+        "falls etwas nicht klappt"
+    )
+
+
+_FIRST_PERSON = {"schließen": "schließe", "ausschalten": "schalte", "einschalten": "schalte", "öffnen": "öffne"}
+_PARTICLE = {"schließen": "", "ausschalten": "aus", "einschalten": "ein", "öffnen": ""}
+
+
 _PRIORITY_WORDS = {
     PriorityLevel.INFO: "Information",
     PriorityLevel.SUGGESTION: "Vorschlag",
@@ -277,6 +300,7 @@ __all__ = (
     "grouped_message",
     "join_sentences",
     "outcome_message",
+    "running_message",
     "proposal_label",
     "situation_message",
 )
