@@ -84,7 +84,7 @@ _MODAL_WRAPPER_RE = re.compile(
 # Pragmatic particles that never change the meaning of a notification head.
 _PARTICLE_RE = re.compile(
     r"\b(?:bitte|mal|doch|kurz|einfach|gleich|sofort|jetzt|nochmal|noch\s+mal|"
-    r"vielleicht|eben|eigentlich)\b",
+    r"vielleicht|eben|eigentlich|dann)\b",
     re.IGNORECASE,
 )
 _CHANNEL_RE = re.compile(

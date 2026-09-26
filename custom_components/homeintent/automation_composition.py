@@ -43,6 +43,7 @@ from .automation_language import (
     TemporalEvent,
     condition_split_candidates,
     is_notification_text,
+    looks_like_device_action,
     prepare_automation_text,
     protected_message_spans,
     read_event_roles,
@@ -231,6 +232,15 @@ def _conditions_for(
     return tuple(nodes)
 
 
+def _untyped_event(trigger: TriggerModel | None) -> TriggerModel | None:
+    """The grammar parser may read time, sun and presence phrasings; a device
+    state or number it finds through its free name slot is discarded - the
+    typed reader already rejected that device reading."""
+    if trigger is None or trigger.type in {TriggerType.STATE, TriggerType.NUMERIC_STATE}:
+        return None
+    return trigger
+
+
 def interpret_event_clause(
     event_text: str,
     connector: str,
@@ -262,7 +272,7 @@ def interpret_event_clause(
                 left_grounded.trigger, (*left_conditions, *condition), left_grounded, typed=True
             )
         if left_grounded.status is GroundingStatus.NOT_APPLICABLE:
-            legacy = parse_trigger(f"{connector} {left}")
+            legacy = _untyped_event(parse_trigger(f"{connector} {left}"))
             if legacy is not None:
                 return EventInterpretation(legacy, (*left_conditions, *condition))
         elif left_grounded.status is not GroundingStatus.NOT_FOUND:
@@ -270,12 +280,12 @@ def interpret_event_clause(
                 None, (*left_conditions, *condition), left_grounded
             )
     if grounded.status is GroundingStatus.NOT_APPLICABLE:
-        legacy = parse_trigger(f"{connector} {roles.source}")
+        legacy = _untyped_event(parse_trigger(f"{connector} {roles.source}"))
         if legacy is not None:
             return EventInterpretation(legacy, embedded)
         if roles.conditions:
             # The prepositional condition may belong to the untyped trigger.
-            legacy = parse_trigger(f"{connector} {event_text.strip(' ,.!?')}")
+            legacy = _untyped_event(parse_trigger(f"{connector} {event_text.strip(' ,.!?')}"))
             if legacy is not None:
                 return EventInterpretation(legacy, ())
     return EventInterpretation(None, embedded, grounded)
@@ -449,7 +459,8 @@ def read_actions(
     trailing_message: str | None = None,
 ) -> ActionReading | None:
     """Every coordinated action chunk must be understood - none is dropped."""
-    chunks = split_action_chunks(text)
+    whole_notification = parse_notification_clause(text.strip(" ,.")) is not None
+    chunks = [text.strip(" ,.")] if whole_notification else split_action_chunks(text)
     if not chunks:
         return None
     steps: list[ActionModel | ActionGroup] = []
@@ -461,7 +472,7 @@ def read_actions(
             if clause.reminder or clause.test:
                 return None
             message = clause.message or trailing_message or trigger_message(trigger, "", entities)
-            action = notification_action(clause, message, entities)
+            action = notification_action(clause, message, tuple(entities))
             if action is None:
                 return ActionReading((), clause, clause.recipient_name or "diese Person")
             steps.append(action)
@@ -477,7 +488,7 @@ def read_actions(
             steps.append(elliptic)
             previous = elliptic
             continue
-        parsed = readers.action(chunk)
+        parsed = readers.action(chunk) if looks_like_device_action(chunk) else None
         if not parsed:
             return _whole_clause(text, chunks, readers)
         steps.extend(parsed)
@@ -493,6 +504,8 @@ def _whole_clause(text: str, chunks: list[str], readers: Readers) -> ActionReadi
     (several steps or several targets); a single-target reading of a
     coordinated clause would silently drop a part.
     """
+    if not looks_like_device_action(text):
+        return None
     parsed = readers.action(text)
     if not parsed:
         return None

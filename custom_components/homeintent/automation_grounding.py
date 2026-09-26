@@ -452,6 +452,12 @@ def ground_event(roles: EventRoles, entities: Sequence[EntitySnapshot]) -> Groun
             GroundingStatus.UNSUPPORTED, reason="aggregate", subject=subject, roles=roles
         )
 
+    if subject.noun is None and not subject.modifiers and roles.value is not None:
+        # "im Büro 50 Prozent erreicht": a room is not a measurable subject.
+        subject = SubjectReading(
+            noun=None, noun_word=None, area_id=subject.area_id, area_name=subject.area_name,
+            unknown_location=None, modifiers=(), quantifier=subject.quantifier, implicit=True,
+        )
     if subject.noun is None and subject.implicit:
         if roles.value is not None and roles.unit is ValueUnit.DEGREE:
             subject = SubjectReading(

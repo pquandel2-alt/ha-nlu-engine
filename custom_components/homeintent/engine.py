@@ -35,7 +35,7 @@ from .automation_composition import (
     unsupported_text,
 )
 from .automation_grounding import GroundingStatus, ground_event
-from .automation_language import read_event_roles
+from .automation_language import only_quoted_connectors, read_event_roles
 from .automation_results import (
     AutomationClarificationResult,
     AutomationDraftMatchResult,
@@ -662,6 +662,34 @@ class CommandPlan:
 _SAY_REQUEST_RE = re.compile(
     r"^\s*(?:sag|sage|gib)\s+(?!.*\b(?:ob|wie|was|warum|wann|welche[rsmn]?|wer|wo|wieviel)\b)"
     r"(?=.*\bbescheid\b)[^?]*$",
+    re.IGNORECASE,
+)
+
+
+# A polite modal request ("..., kannst du mir dann Bescheid sagen?") is a
+# request even though it is phrased as a question; wh-questions never are.
+_MODAL_REQUEST_RE = re.compile(
+    r"\b(?:kannst|könntest|koenntest|würdest|wuerdest)\s+du\s+(?:\S+\s+){0,4}?"
+    r"(?:bescheid\s+(?:sagen|geben)|benachrichtigen|informieren|schicken|senden)\b",
+    re.IGNORECASE,
+)
+_WH_QUESTION_RE = re.compile(
+    r"^\s*(?:wie|was|warum|wieso|weshalb|wann|wer|wo|welche[rsmn]?|wohin|womit|ob)\b",
+    re.IGNORECASE,
+)
+_NEGATED_NOTIFICATION_RE = re.compile(
+    r"\b(?:benachrichtig\w*|informier\w*|schick\w*|send\w*|sag\w*|gib|meld\w*)\s+"
+    r"(?:\S+\s+){0,2}?(?:nicht|nie|niemals|keine?[nmrs]?|bloß\s+nicht)\b"
+    r"|\b(?:keine|kein)\s+(?:push[\s-]?)?(?:nachricht|benachrichtigung|meldung)\w*\b"
+    r"|\bnicht\s+(?:mehr\s+)?(?:benachrichtigt|informiert)\b",
+    re.IGNORECASE,
+)
+
+
+_NOTIFICATION_REQUEST_VERB_RE = re.compile(
+    r"\b(?:benachrichtig\w*|informier\w*|schick\w*|send\w*|sag\w*|gib|geb\w*|meld\w*|"
+    r"ping\w*|mach\w*|kannst|könntest|koenntest|würdest|wuerdest|möchte|moechte|will|hätte|"
+    r"haette|erinner\w*)\b",
     re.IGNORECASE,
 )
 
@@ -2962,9 +2990,17 @@ class NluEngine:
         automation_shell_stripped_text, shell_was_present = strip_automation_shell(text)
 
         utterance = analyse_utterance(automation_shell_stripped_text)
-        if utterance.speech_act is SpeechAct.QUERY and not _SAY_REQUEST_RE.match(
-            automation_shell_stripped_text
+        if utterance.speech_act is SpeechAct.QUERY and (
+            _WH_QUESTION_RE.match(automation_shell_stripped_text)
+            or not (
+                _SAY_REQUEST_RE.match(automation_shell_stripped_text)
+                or _MODAL_REQUEST_RE.search(automation_shell_stripped_text)
+            )
         ):
+            return None
+        if _NEGATED_NOTIFICATION_RE.search(automation_shell_stripped_text):
+            # "Benachrichtige mich nicht, wenn ..." asks for the opposite of
+            # an automation; no reading may turn it into one.
             return None
         composed = self._compose_with_run_limits(
             automation_shell_stripped_text, text, entities, world_model, context
@@ -2974,6 +3010,9 @@ class NluEngine:
         if utterance.speech_act is SpeechAct.QUERY:
             return None
         if not _AUTOMATION_TRIGGER_RE.search(automation_shell_stripped_text):
+            return None
+        if only_quoted_connectors(automation_shell_stripped_text):
+            # "Auf dem Zettel steht „... wenn ...“": reported, inert text.
             return None
 
         normalized = normalize(automation_shell_stripped_text)
@@ -3207,14 +3246,17 @@ class NluEngine:
             last_entities=tuple(context.last_entities) if context is not None else (),
             last_area=context.last_area if context is not None else None,
         )
-        plain_context = create_parse_context(entities)
+        plain: list[ParseContext] = []
 
         def read_action(span: str) -> tuple[ActionModel | ActionGroup, ...] | None:
             # The same established action parsers; the registry-free context
             # is a second reading for spans the world-model index rejects.
-            return self._parse_action_semantically(
-                span, parse_context
-            ) or self._parse_action_semantically(span, plain_context)
+            parsed = self._parse_action_semantically(span, parse_context)
+            if parsed or world_model is None:
+                return parsed
+            if not plain:
+                plain.append(create_parse_context(entities))
+            return self._parse_action_semantically(span, plain[0])
 
         return Readers(
             trigger=lambda span: self._automation_trigger_parser.parse(span, parse_context),
@@ -3494,6 +3536,10 @@ class NluEngine:
             or _CALENDAR_TIME_RE.search(text)
         ):
             return None
+        if not _NOTIFICATION_REQUEST_VERB_RE.search(text):
+            # "Bescheid." / "Nachricht an mich." alone are fragments, not a
+            # request to send something now.
+            return None
         clause = parse_notification_clause(text)
         if clause is None or clause.recipient_kind is NotificationRecipientKind.EXPLICIT_TARGET:
             return None
@@ -3677,7 +3723,11 @@ class NluEngine:
         replacement = f"{state} wird"
         rewritten = text[:persistent.start()] + replacement + text[persistent.end():]
         base = self.match_automation(rewritten, entities, world_model, context)
-        if base is None or base.validation_error is not None or len(base.model.triggers) != 1:
+        if (
+            not isinstance(base, AutomationMatchResult)
+            or base.validation_error is not None
+            or len(base.model.triggers) != 1
+        ):
             return None
         trigger = base.model.triggers[0]
         if trigger.type not in {TriggerType.STATE, TriggerType.NUMERIC_STATE}:
@@ -3711,7 +3761,11 @@ class NluEngine:
             rewritten = rewritten[:match.start()] + " " + rewritten[match.end():]
         rewritten = re.sub(r"\s+", " ", rewritten)
         base = self.match_automation(rewritten, entities, world_model, context)
-        if base is None or base.validation_error is not None or len(base.model.triggers) != 1:
+        if (
+            not isinstance(base, AutomationMatchResult)
+            or base.validation_error is not None
+            or len(base.model.triggers) != 1
+        ):
             return None
         trigger = base.model.triggers[0]
         if trigger.type not in {TriggerType.STATE, TriggerType.NUMERIC_STATE}:

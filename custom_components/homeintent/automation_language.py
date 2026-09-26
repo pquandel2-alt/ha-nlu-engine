@@ -37,7 +37,7 @@ from typing import Callable
 
 from .nlu.automation_lexicon import rejoin_stt, resolve_repairs
 from .nlu.automation_model import NumericComparator, PresenceEvent, SunEvent
-from .nlu.lexicon import _WEEKDAY_SLOT_LIST
+from .nlu.lexicon import weekday_vocabulary
 from .nlu.measurement import TravelDirection
 from .nlu.normalize import german_number, normalize
 from .nlu.semantic_state import SemanticState
@@ -79,12 +79,29 @@ def prepare_automation_text(raw: str) -> PreparedText:
     if shell is not None:
         # normalize() drops "sag (mir)" as a politeness shell; here it is
         # the notification verb itself ("Sag Julia Bescheid, wenn ...").
-        text = shell.group(0) + normalize(text[shell.end():])
+        text = shell.group(0) + _normalize_outside_messages(text[shell.end():])
     else:
-        text = normalize(text)
+        text = _normalize_outside_messages(text)
     text = _LEADING_NOISE_RE.sub("", text)
     text = _TRAILING_NOISE_RE.sub("", text)
     return PreparedText(re.sub(r"\s+", " ", text).strip(), repair.repaired)
+
+
+def _normalize_outside_messages(text: str) -> str:
+    """Shared normalization for the request, never for dictated message text."""
+    spans = protected_message_spans(text)
+    if not spans:
+        return normalize(text)
+    pieces: list[str] = []
+    last = 0
+    for start, end in sorted(spans):
+        if start < last:
+            continue
+        pieces.append(normalize(text[last:start]))
+        pieces.append(text[start:end].strip())
+        last = end
+    pieces.append(normalize(text[last:]))
+    return " ".join(piece for piece in pieces if piece)
 
 
 # --- clause segmentation -----------------------------------------------------------
@@ -208,6 +225,13 @@ def _clean_notification_head(head: str) -> str:
     return re.sub(r"\s+", " ", cleaned).strip(" ,")
 
 
+def only_quoted_connectors(text: str) -> bool:
+    """Every trigger connector sits inside dictated/quoted text."""
+    words = _words(text)
+    all_connectors = [word for word in words if word.key in _CONNECTORS]
+    return bool(all_connectors) and not _connector_positions(words, protected_message_spans(text))
+
+
 def is_notification_text(text: str) -> bool:
     return _notification(text) is not None
 
@@ -226,12 +250,30 @@ def _strip_then(text: str) -> str:
 # Imperative/modal openings of a device action clause.  Only used to decide
 # *where* an action clause may start in comma-less speech; the action's
 # meaning is always read by the established action parsers.
-_ACTION_OPENERS = frozenset({
+ACTION_OPENERS = frozenset({
     "schalte", "schalt", "mach", "mache", "fahre", "fahr", "öffne", "schließe", "schliess",
     "schliesse", "stelle", "stell", "setze", "setz", "starte", "stoppe", "aktiviere",
     "deaktiviere", "dimme", "dimm", "drehe", "dreh", "spiele", "spiel", "kannst", "könntest",
     "bitte", "dann", "sperre", "entsperre", "lass", "lasse",
 })
+
+
+_LEADING_POLITENESS = frozenset({"bitte", "dann", "auch", "und", "du", "doch", "noch"})
+
+
+def looks_like_device_action(text: str) -> bool:
+    """Cheap pre-selection before the (expensive) action parsers run.
+
+    A device action clause opens with an imperative or a modal request and
+    is one clause - an inner comma that does not coordinate ("Stell dir vor,
+    du würdest ...") is never an action clause.
+    """
+    stripped = text.strip(" ,.!?")
+    if re.search(r",(?!\s*(?:und|dann|danach)\b)", stripped):
+        return False
+    words = [word.strip(",.;:!?").casefold() for word in stripped.split()]
+    words = [word for word in words if word not in _LEADING_POLITENESS]
+    return bool(words) and words[0] in ACTION_OPENERS
 
 
 def segment_event_automation(text: str, action_ok: ActionCheck) -> EventActionFrame | None:
@@ -291,21 +333,12 @@ def _segment_event_first(
         rest = _strip_then(text[word.start:])
         if not event_text or not rest:
             continue
-        if is_notification_text(rest) or (word.key in _ACTION_OPENERS and action_ok(rest)):
+        if is_notification_text(rest) or (word.key in ACTION_OPENERS and action_ok(rest)):
             return EventActionFrame(rest, event_text, connector.key, ClauseOrder.EVENT_FIRST)
     return None
 
 
-def _weekday_table() -> dict[str, tuple[str, ...]]:
-    table: dict[str, tuple[str, ...]] = {}
-    for value in _WEEKDAY_SLOT_LIST.values:
-        spoken = str(getattr(value.text_in, "text", "")).casefold()
-        if spoken:
-            table[spoken] = tuple(str(value.value_out).split(","))
-    return table
-
-
-_WEEKDAYS = _weekday_table()
+_WEEKDAYS = weekday_vocabulary()
 _SUN_SPAN_RE = re.compile(
     r"\b(?:(?P<amount>\d+|[a-zäöüß]+)\s+minuten?\s+(?P<rel>vor|nach)\s+(?:dem\s+)?"
     r"|(?:bei|zum|mit\s+dem|ab)\s+)?(?P<sun>sonnenuntergang|sonnenaufgang)\b",
@@ -561,7 +594,7 @@ _PREDICATE_WORDS = frozenset({
     "das", "hälfte", "halb", "unten", "oben", "bleibt", "war", "kommt", "etwa",
     "ungefähr", "circa", "genau", "so", "etwa", "hochfahren", "herunterfahren", "runterfahren",
     "beim", "angelangt", "gelangt", "mehr", "als", "über", "unter", "hell",
-    "gedimmt", "läuft", "erkannt", "höhe", "irgendwo", "klettert", "rutscht", "wandert",
+    "gedimmt", "läuft", "erkannt", "höhe", "warm", "kalt", "heiß", "heiss", "irgendwo", "klettert", "rutscht", "wandert",
 })
 # Kept as subject material even though listed above.
 _SUBJECT_KEEP = frozenset({"die", "der", "das"})
@@ -851,7 +884,10 @@ __all__ = (
     "condition_split_candidates",
     "prepare_automation_text",
     "read_event_roles",
+    "ACTION_OPENERS",
     "is_notification_text",
+    "only_quoted_connectors",
+    "looks_like_device_action",
     "protected_message_spans",
     "segment_event_automation",
 )

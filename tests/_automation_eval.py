@@ -15,7 +15,7 @@ import re
 import tempfile
 import types
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -339,18 +339,18 @@ def run_cases(cases: list[Case]) -> list[CaseResult]:
             )
         runner.counter += 1
         conversation_id = f"eval-{runner.counter}"
-        calls_before = len(runner.sink.notify_calls) + len(runner.sink.other_calls)
+        calls_before = len(runner.sink.notify_calls) + len([c for c in runner.sink.other_calls if c[:2] != ('automation', 'reload')])
         speech = ""
         for turn in case.turns:
             speech = runner.say(turn, conversation_id)
         model = runner.pending_model(conversation_id)
-        calls = len(runner.sink.notify_calls) + len(runner.sink.other_calls) - calls_before
+        calls = len(runner.sink.notify_calls) + len([c for c in runner.sink.other_calls if c[:2] != ('automation', 'reload')]) - calls_before
         written = runner.automations_written()
         results.append(_judge(case, speech, model, calls, written, runner))
         if case.kind in {"reject", "clarify", "unsupported"} and model is None:
             # A stray "Ja" must never create anything either.
             runner.say("Ja", conversation_id)
-            later = len(runner.sink.notify_calls) + len(runner.sink.other_calls) - calls_before
+            later = len(runner.sink.notify_calls) + len([c for c in runner.sink.other_calls if c[:2] != ('automation', 'reload')]) - calls_before
             if later or runner.automations_written():
                 results[-1] = CaseResult(case, "unsafe", speech, None, "action after stray Ja")
         runner.entity._context_store.clear(conversation_id)

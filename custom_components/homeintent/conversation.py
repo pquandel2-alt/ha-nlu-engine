@@ -4651,10 +4651,12 @@ class NluConversationEntity(
         """
         if not any(trigger.presence_of_speaker for trigger in model.triggers):
             return model, None
-        binding = self._runtime_data.user_contexts.resolve_current_person(
-            conversation_user_id(user_input)
+        store = self._runtime_data.user_contexts
+        binding = (
+            store.resolve_current_person(conversation_user_id(user_input))
+            if store is not None else None
         )
-        if binding.person_entity_id is None:
+        if binding is None or binding.person_entity_id is None:
             return model, (
                 "Ich weiß noch nicht, welche Person du bist. Bitte ordne deinem "
                 "HomeIntent-Benutzer eine Person zu."
