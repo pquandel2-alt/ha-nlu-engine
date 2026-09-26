@@ -418,7 +418,9 @@ def test_action_first_notification_with_recipient_resolves_notify_target(engine)
     assert result.validation_error is None
     assert result.model.actions[0].type is ActionType.NOTIFY
     assert result.model.actions[0].target.entity_id == "notify.mobile_app_philipp"
-    assert "Wohnzimmer Fenster" in result.model.actions[0].message
+    # 7.1.2: the message describes the event grammatically instead of
+    # echoing the subordinate trigger clause ("... geöffnet wird.").
+    assert result.model.actions[0].message == "Das Wohnzimmerfenster wurde geöffnet."
 
 
 def test_action_trailing_notification_with_recipient_to_preposition(engine):
@@ -431,7 +433,9 @@ def test_action_trailing_notification_with_recipient_to_preposition(engine):
     assert result.validation_error is None
     assert result.model.actions[0].type is ActionType.NOTIFY
     assert result.model.actions[0].target.entity_id == "notify.mobile_app_philipp"
-    assert "Wohnzimmer Fenster" in result.model.actions[0].message
+    # 7.1.2: the message describes the event grammatically instead of
+    # echoing the subordinate trigger clause ("... geöffnet wird.").
+    assert result.model.actions[0].message == "Das Wohnzimmerfenster wurde geöffnet."
 
 
 def test_automation_shell_with_notification_and_recipient(engine):
@@ -445,7 +449,9 @@ def test_automation_shell_with_notification_and_recipient(engine):
     assert result.validation_error is None
     assert result.model.actions[0].type is ActionType.NOTIFY
     assert result.model.actions[0].target.entity_id == "notify.mobile_app_philipp"
-    assert "Wohnzimmer Fenster" in result.model.actions[0].message
+    # 7.1.2: the message describes the event grammatically instead of
+    # echoing the subordinate trigger clause ("... geöffnet wird.").
+    assert result.model.actions[0].message == "Das Wohnzimmerfenster wurde geöffnet."
     # Original text with shell is preserved for preview
     assert "Erstelle eine Automation" in result.model.source_text
 
@@ -487,7 +493,9 @@ def test_notification_with_generated_message_from_trigger(engine):
         NOTIFY_ENTITIES,
     )
     assert isinstance(result, AutomationMatchResult)
-    assert "Wohnzimmer Fenster" in result.model.actions[0].message
+    # 7.1.2: the message describes the event grammatically instead of
+    # echoing the subordinate trigger clause ("... geöffnet wird.").
+    assert result.model.actions[0].message == "Das Wohnzimmerfenster wurde geöffnet."
     assert "geöffnet" in result.model.actions[0].message
 
 

@@ -25,7 +25,9 @@ def test_relative_reminder_reuses_one_shot_notification_pipeline(engine):
     rewritten = reminder_automation_text(
         "Erinnere mich in fünf Minuten an die Waschmaschine"
     )
-    assert rewritten == "in fünf Minuten sende mir eine Nachricht dass die Waschmaschine"
+    # 7.1.2: the reminder clause itself is read by the shared notification
+    # language; this adapter only moves the timing to the front.
+    assert rewritten == "in fünf Minuten erinnere mich an die Waschmaschine"
     result = engine.match_relative_time_automation(rewritten, [LIGHT])
     assert result is not None
     assert result.model.once is True

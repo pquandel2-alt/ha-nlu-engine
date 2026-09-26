@@ -65,6 +65,7 @@ class GenerationError(Enum):
     UNSUPPORTED_TRIGGER_TYPE = auto()  # DEVICE, bare WEEKDAY - see module docstring
     UNSUPPORTED_CONDITION_TYPE = auto()  # DEVICE, DATE - see module docstring
     UNSUPPORTED_ACTION_TYPE = auto()  # WAIT - see module docstring
+    NOTIFY_RECIPIENT_UNRESOLVED = auto()  # "mich"/"uns" not materialized into exact notify targets
 
 
 @dataclass(frozen=True)
@@ -392,6 +393,42 @@ def _generate_condition_node(node: ConditionNode, entities: list[EntitySnapshot]
     return {"condition": "not", "conditions": translated}, None  # LogicalOperator.NOT
 
 
+def _generate_addressed_notification(
+    action: ActionModel, entities: list[EntitySnapshot]
+) -> tuple[dict[str, Any] | None, GenerationError | None]:
+    """A typed recipient always becomes a real push to its exact targets.
+
+    A semantic recipient ("mich"/"uns") that was not materialized before
+    persistence is refused - it must never degrade into a
+    ``persistent_notification`` or a broadcast.  Entity targets use Home
+    Assistant's ``notify.send_message`` entity action (``message``/``title``
+    only); confirmed legacy service bindings use ``notify.<service>``.
+    """
+    recipient = action.recipient
+    assert recipient is not None and action.message is not None
+    if not recipient.materialized:
+        return None, GenerationError.NOTIFY_RECIPIENT_UNRESOLVED
+    data = {"message": action.message, "title": "HomeIntent"}
+    steps: list[dict[str, Any]] = []
+    if recipient.entity_ids:
+        known = {entity.entity_id for entity in entities if entity.domain == "notify"}
+        if any(entity_id not in known for entity_id in recipient.entity_ids):
+            return None, GenerationError.ENTITY_NOT_FOUND
+        steps.append({
+            "action": "notify.send_message",
+            "target": {"entity_id": list(recipient.entity_ids)},
+            "data": dict(data),
+        })
+    for service_id in recipient.service_ids:
+        domain, _, service = service_id.partition(".")
+        if domain != "notify" or not service:
+            return None, GenerationError.NOTIFY_RECIPIENT_UNRESOLVED
+        steps.append({"action": service_id, "data": dict(data)})
+    if len(steps) == 1:
+        return steps[0], None
+    return {"sequence": steps}, None
+
+
 def _generate_action_leaf(action: ActionModel, entities: list[EntitySnapshot]) -> tuple[dict[str, Any] | None, GenerationError | None]:
     if action.type is ActionType.DELAY:
         assert action.delay_seconds is not None
@@ -399,6 +436,8 @@ def _generate_action_leaf(action: ActionModel, entities: list[EntitySnapshot]) -
 
     if action.type is ActionType.NOTIFY:
         assert action.message is not None
+        if action.recipient is not None:
+            return _generate_addressed_notification(action, entities)
         if action.target is not None:
             candidates = _resolve_target_entities(action.target, entities)
             if not candidates or any(entity.domain != "notify" for entity in candidates):

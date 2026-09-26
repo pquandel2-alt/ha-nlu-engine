@@ -82,6 +82,15 @@ _AUTOMATION_TRIGGER_RE = re.compile(
 )
 
 
+_COPULA_STATE_RE = re.compile(
+    r"(?P<head>(?:wenn|sobald|falls)\s+(?:der|die|das)\s+\S+)\s+"
+    r"(?P<state>offen|auf|zu|geöffnet|geschlossen|an|aus|eingeschaltet|ausgeschaltet)"
+    r"\s+(?:ist|sind)[?.!]*",
+    re.IGNORECASE,
+)
+_CLAUSE_JOIN_RE = re.compile(r",|\b(?:und|oder)\b", re.IGNORECASE)
+
+
 class AutomationTriggerParser:
     """Wraps the 7 ``intents/de/automation_trigger/*.yaml`` grammars (one
     ``Intents`` object, 7 intents - same "one parser per grammar directory,
@@ -179,7 +188,9 @@ class AutomationTriggerParser:
         }
         result = recognize(text, self._intents, slot_lists=slot_lists, language="de")
         if result is None or result.intent is None:
-            return self._parse_semantic_state_trigger(text, context)
+            return self._parse_semantic_state_trigger(
+                text, context
+            ) or self._parse_copula_state_trigger(text, context)
 
         dispatch = {
             "HassStateTrigger": self._parse_state_trigger,
@@ -197,6 +208,22 @@ class AutomationTriggerParser:
             return None
         parsed = handler(result.entities, context)
         return parsed if parsed is not None else self._parse_semantic_state_trigger(text, context)
+
+    def _parse_copula_state_trigger(self, text: str, context: ParseContext) -> TriggerModel | None:
+        """"wenn das Badezimmerfenster offen/auf ist" for a *named* entity.
+
+        The predicate form is the same state event as "... geöffnet wird".
+        Only a single-predicate clause qualifies: with "und"/"oder"/a comma
+        the name wildcard could swallow a second predicate
+        ("... geöffnet wird und das Kellerlicht an ist").
+        """
+        match = _COPULA_STATE_RE.fullmatch(text.strip())
+        if match is None or _CLAUSE_JOIN_RE.search(match.group("head")):
+            return None
+        state = match.group("state").casefold()
+        passive = {"auf": "geöffnet", "offen": "geöffnet", "zu": "geschlossen",
+                   "an": "eingeschaltet", "aus": "ausgeschaltet"}.get(state, state)
+        return self.parse(f"{match.group('head')} {passive} wird", context)
 
     @staticmethod
     def _parse_semantic_state_trigger(text: str, context: ParseContext) -> TriggerModel | None:

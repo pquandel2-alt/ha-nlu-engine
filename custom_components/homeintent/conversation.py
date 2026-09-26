@@ -204,7 +204,19 @@ from .user_context import BindingStatus
 from .procedure_intent import ProcedureOperation, interpret_procedure_intent
 from .routine_intent import interpret_routine_feedback
 from .nlu.automation_confirmation import ConfirmationReply, classify_confirmation_reply
-from .nlu.action_model import ActionModel, ActionType
+from .nlu.action_model import (
+    ActionGroup,
+    ActionModel,
+    ActionType,
+    NotificationRecipient,
+    NotificationRecipientKind,
+)
+from .agent_delivery import AgentDelivery
+from .notification_request import NotificationRequest, async_deliver_notification_request
+from .notification_target import (
+    NotificationTargetResolver,
+    resolution_failure_text,
+)
 from .nlu.automation_model import (
     AutomationModel,
     TriggerModel,
@@ -363,6 +375,10 @@ _GENERATION_ERROR_SPOKEN_DE = {
     ),
     GenerationError.UNSUPPORTED_ACTION_TYPE: (
         "Diese Aktion wird von Home Assistant nicht unterstützt. Die Automation wurde nicht erstellt."
+    ),
+    GenerationError.NOTIFY_RECIPIENT_UNRESOLVED: (
+        "Für diese Benachrichtigung fehlt ein eindeutiges Push-Ziel. "
+        "Die Automation wurde nicht erstellt."
     ),
 }
 
@@ -1577,6 +1593,15 @@ class NluConversationEntity(
             else:
                 result = correction
             if result is None:
+                notification_clause = self._engine.match_immediate_notification(
+                    user_input.text
+                )
+                if notification_clause is not None:
+                    return await self._async_handle_immediate_notification(
+                        user_input, response, NotificationRequest.from_clause(notification_clause),
+                        entities,
+                    )
+            if result is None:
                 result = self._engine.match_followup(user_input.text, pending)
             if result is None:
                 result = self._engine.match_contextual_property_followup(
@@ -1677,6 +1702,15 @@ class NluConversationEntity(
                         result = self._engine.match_relative_time_automation(
                             reminder_text, entities, self._world_model, pending
                         )
+                    named_recipient = reminder_recipient(user_input.text)
+                    if result is None and named_recipient is not None:
+                        response.async_set_speech(
+                            f"Ich finde kein eindeutig ausgewähltes Benachrichtigungsziel für {named_recipient}."
+                        )
+                        return conversation.ConversationResult(
+                            response=response,
+                            conversation_id=user_input.conversation_id,
+                        )
                     if isinstance(result, AutomationMatchResult):
                         recipient = reminder_recipient(user_input.text)
                         quiet_hours = reminder_quiet_hours(user_input.text)
@@ -1703,6 +1737,11 @@ class NluConversationEntity(
                                 updated_actions[0],
                                 target=TriggerTarget(
                                     domain="notify", entity_id=targets[0].entity_id
+                                ),
+                                recipient=NotificationRecipient(
+                                    NotificationRecipientKind.EXPLICIT_TARGET,
+                                    entity_ids=(targets[0].entity_id,),
+                                    label=targets[0].friendly_name,
                                 ),
                             )
                             actions = tuple(updated_actions)
@@ -4520,6 +4559,18 @@ class NluConversationEntity(
     ) -> conversation.ConversationResult:
         """Store a valid automation preview, or report its validation error."""
         if result.validation_error is None:
+            materialized, failure = self._materialize_notification_recipients(
+                result.model, user_input, entities
+            )
+            if failure is not None:
+                # Understood, but nobody to deliver to: say so instead of
+                # silently degrading into an HA persistent notification.
+                self._context_store.clear(user_input.conversation_id)
+                response.async_set_speech(failure)
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
+            result = replace(result, model=materialized)
             self._context_store.set(
                 user_input.conversation_id,
                 ConversationContext(
@@ -4537,6 +4588,85 @@ class NluConversationEntity(
         else:
             self._context_store.clear(user_input.conversation_id)
             response.async_set_speech(result.response_text)
+        return conversation.ConversationResult(
+            response=response, conversation_id=user_input.conversation_id
+        )
+
+    def _notification_target_resolver(
+        self, entities: list[EntitySnapshot]
+    ) -> NotificationTargetResolver:
+        labels = {item.entity_id: item.friendly_name for item in entities}
+        return NotificationTargetResolver.from_options(
+            self.entry.options,
+            self._runtime_data.user_contexts,
+            label_for=lambda target_id: labels.get(target_id, ""),
+        )
+
+    def _materialize_notification_recipients(
+        self,
+        model: AutomationModel,
+        user_input: conversation.ConversationInput,
+        entities: list[EntitySnapshot],
+    ) -> tuple[AutomationModel, str | None]:
+        """Turn "mich"/"uns" into the exact authorized notify targets.
+
+        The automation runs later without a live conversation user, so the
+        semantic recipient is resolved now - through the single
+        ``NotificationTargetResolver`` - and the exact targets are persisted.
+        """
+        resolver: NotificationTargetResolver | None = None
+        failure: str | None = None
+
+        def materialize(step: ActionModel | ActionGroup) -> ActionModel | ActionGroup:
+            nonlocal resolver, failure
+            if isinstance(step, ActionGroup):
+                return replace(step, steps=tuple(materialize(child) for child in step.steps))
+            recipient = step.recipient
+            if (
+                step.type is not ActionType.NOTIFY
+                or recipient is None
+                or recipient.materialized
+                or failure is not None
+            ):
+                return step
+            if resolver is None:
+                resolver = self._notification_target_resolver(entities)
+            resolution = resolver.resolve(recipient.kind, conversation_user_id(user_input))
+            if not resolution.resolved:
+                failure = resolution_failure_text(resolution)
+                return step
+            return replace(step, recipient=NotificationRecipient(
+                recipient.kind,
+                entity_ids=resolution.entity_ids,
+                service_ids=resolution.service_ids,
+                label=resolution.label,
+            ))
+
+        actions = tuple(materialize(step) for step in model.actions)
+        if failure is not None:
+            return model, failure
+        return replace(model, actions=actions), None
+
+    async def _async_handle_immediate_notification(
+        self,
+        user_input: conversation.ConversationInput,
+        response: intent.IntentResponse,
+        request: NotificationRequest,
+        entities: list[EntitySnapshot],
+    ) -> conversation.ConversationResult:
+        """Explicit push the user asked for right now.
+
+        Independent of proactive situation detection and V12 opportunity
+        policies; only the push channel and a safely resolved target matter.
+        """
+        self._context_store.clear(user_input.conversation_id)
+        outcome = await async_deliver_notification_request(
+            request,
+            resolver=self._notification_target_resolver(entities),
+            delivery=AgentDelivery(self.hass),
+            user_id=conversation_user_id(user_input),
+        )
+        response.async_set_speech(outcome.spoken())
         return conversation.ConversationResult(
             response=response, conversation_id=user_input.conversation_id
         )
@@ -5713,8 +5843,16 @@ class NluConversationEntity(
                 response=response, conversation_id=user_input.conversation_id
             )
 
+        materialized, failure = self._materialize_notification_recipients(
+            confirmation.model, user_input, entities
+        )
+        if failure is not None:
+            response.async_set_speech(failure)
+            return conversation.ConversationResult(
+                response=response, conversation_id=user_input.conversation_id
+            )
         try:
-            model = resolve_pending_schedule(confirmation.model, dt_util.now())
+            model = resolve_pending_schedule(materialized, dt_util.now())
         except ValueError as err:
             response.async_set_error(
                 intent.IntentResponseErrorCode.FAILED_TO_HANDLE,

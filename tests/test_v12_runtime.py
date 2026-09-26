@@ -25,6 +25,7 @@ from homeintent.proactive_model import (
     SituationKind,
 )
 from homeintent.runtime_data import HomeIntentRuntimeData
+from _notify_sink import LEGACY_NOTIFY_SCHEMA, SEND_MESSAGE_SCHEMA
 from homeintent.user_context import NotificationTarget, NotificationTargetKind, UserContextStore
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, State
@@ -64,11 +65,21 @@ def _registry(monkeypatch, entries):
     monkeypatch.setattr(dr, "async_get", lambda hass: devices)
 
 
-async def _runtime(tmp_path, monkeypatch, *, options=None, states=None):
+async def _runtime(
+    tmp_path, monkeypatch, *, options=None, states=None,
+    philipp_kind=NotificationTargetKind.SERVICE,
+):
+    """``philipp_kind`` defaults to a legacy mobile_app *service* binding:
+    only ``notify.<service>`` renders actionable buttons.  A notify entity
+    (``notify.send_message``) accepts nothing but message/title."""
     hass = HomeAssistant()
     calls: list = []
 
     async def record(domain, service, data, blocking=False):
+        if domain == "notify":
+            # The exact schemas Home Assistant 2026.9 enforces - an extra
+            # ``data`` key on send_message fails here as it does in HA.
+            (SEND_MESSAGE_SCHEMA if service == "send_message" else LEGACY_NOTIFY_SCHEMA)(dict(data))
         calls.append((domain, service, dict(data)))
 
     hass.services.async_call = AsyncMock(side_effect=record)
@@ -91,7 +102,7 @@ async def _runtime(tmp_path, monkeypatch, *, options=None, states=None):
     contexts = UserContextStore(tmp_path / "users.json")
     await contexts.async_set_user(
         "philipp", person_entity_id="person.philipp", confirmed=True,
-        notification_targets=(NotificationTarget("notify.mobile_app_philipp", NotificationTargetKind.ENTITY),),
+        notification_targets=(NotificationTarget("notify.mobile_app_philipp", philipp_kind),),
     )
     await contexts.async_set_user(
         "anna", person_entity_id="person.anna", confirmed=True,
@@ -208,8 +219,9 @@ def test_voice_and_push_delivery_payloads(tmp_path, monkeypatch, scheduled):
         receipt = await runtime.async_deliver(push)
         assert receipt.delivered == (CommunicationChannel.INTERACTIVE_PUSH,)
         domain, service, payload = calls[-1]
-        assert (domain, service) == ("notify", "send_message")
-        assert payload["entity_id"] == ["notify.mobile_app_philipp"]
+        # Buttons travel only through the bound legacy mobile_app service.
+        assert (domain, service) == ("notify", "mobile_app_philipp")
+        assert "entity_id" not in payload
         actions = payload["data"]["actions"]
         assert [item["title"] for item in actions] == ["Schließen", "Später", "Ignorieren"]
         for item in actions:
@@ -229,6 +241,36 @@ def test_voice_and_push_delivery_payloads(tmp_path, monkeypatch, scheduled):
         )
         house_result = await runtime.async_deliver(house)
         assert house_result.errors == ("voice:ValueError",)  # no TTS configured -> no broadcast
+
+    asyncio.run(scenario())
+
+
+def test_entity_push_target_gets_a_schema_valid_plain_push(tmp_path, monkeypatch):
+    """A notify *entity* cannot carry buttons: the proposal is still pushed
+    as plain text (answerable by voice/dashboard), no action token is
+    minted, and the payload passes HA's notify.send_message schema."""
+    _registry(monkeypatch, [
+        SimpleNamespace(entity_id="notify.mobile_app_philipp", area_id=None, device_id="phone_p"),
+    ])
+
+    async def scenario():
+        runtime, hass, calls, entities, data = await _runtime(
+            tmp_path, monkeypatch, philipp_kind=NotificationTargetKind.ENTITY
+        )
+        push = OutgoingMessage(
+            CommunicationDecision(CommunicationChannel.INTERACTIVE_PUSH, (CommunicationChannel.INTERACTIVE_PUSH,),
+                                  "philipp", None, ("notify.mobile_app_philipp",), True, False, ()),
+            "HomeIntent", "Die Garage ist noch offen. Soll ich sie schließen?",
+            PriorityLevel.IMPORTANT, "p" + "c" * 32, "Schließen",
+        )
+        receipt = await runtime.async_deliver(push)
+        assert receipt.delivered == (CommunicationChannel.PUSH,)
+        assert receipt.push_bindings == ()
+        assert calls[-1] == ("notify", "send_message", {
+            "entity_id": ["notify.mobile_app_philipp"],
+            "title": "HomeIntent",
+            "message": "Die Garage ist noch offen. Soll ich sie schließen?",
+        })
 
     asyncio.run(scenario())
 

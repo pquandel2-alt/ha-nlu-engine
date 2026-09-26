@@ -77,7 +77,7 @@ Maßgeblich ist der identische Lauf auf dem unbelasteten GitHub-CI-Runner.
 - [x] Shadow: 3.772 Turns, 0 Divergenzen, 0 Action-Leakage
 - [x] vollständiges Pyright: 0 Fehler; CI-identischer Strict-Scope: 0 Fehler
 - [x] lokaler Schema-Smoke mit echtem Home Assistant 2025.1.4:
-  `HOME_ASSISTANT_AUTOMATION_AND_CALENDAR_SCHEMA_OK`
+  `HOME_ASSISTANT_AUTOMATION_CALENDAR_AND_PUSH_SCHEMA_OK`
 - [x] unverändertes 5k-Performance-Gate in GitHub Actions: grün; höchster
   gemessener V9-p95 21,55 ms (verschachtelter Filter), produktiver
   Discourse-Follow-up 2,19 ms

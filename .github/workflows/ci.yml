@@ -37,7 +37,7 @@ jobs:
         if: matrix.python-version == '3.12'
         run: >-
           python scripts/v7_shadow_report.py
-          --check docs/perf/v7-shadow-baseline-7.1.1.json
+          --check docs/perf/v7-shadow-baseline-7.1.2.json
           --quiet
       - name: V9-Latenzbudget bei großer Registry prüfen
         if: matrix.python-version == '3.12'
@@ -120,6 +120,9 @@ jobs:
           python -m pyright
           custom_components/homeintent/agent_action_policy.py
           custom_components/homeintent/agent_delivery.py
+          custom_components/homeintent/notification_language.py
+          custom_components/homeintent/notification_target.py
+          custom_components/homeintent/notification_request.py
           custom_components/homeintent/native_timer.py
           custom_components/homeintent/agent_event.py
           custom_components/homeintent/agent_event_store.py

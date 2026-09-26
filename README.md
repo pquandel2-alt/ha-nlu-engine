@@ -2,7 +2,7 @@
 
 **Lokale, schnelle und nachvollziehbare Sprachsteuerung für Home Assistant Assist – ohne LLM zur Laufzeit.**
 
-- Aktuelle Version: **7.1.1** (V12 + Learning Center)
+- Aktuelle Version: **7.1.2** (V12 + Learning Center)
 - Sprache: **Deutsch**
 - Installation: **HACS Custom Repository**
 - Verarbeitung: **lokal in Home Assistant**
@@ -41,6 +41,46 @@ HomeIntent benötigt für die Sprachverarbeitung:
 Der gleiche Satz führt bei gleichem Home-Assistant-Zustand und gleichem
 Dialogkontext zum gleichen Ergebnis. Bei echter Mehrdeutigkeit fragt HomeIntent
 nach oder führt nichts aus.
+
+## Was ist in Version 7.1.2 neu?
+
+**HomeIntent 7.1.2 — Push Notifications & Natural Language Fix.** Gezielte
+Fehlerbehebung, kein Umbau:
+
+- **„Schick mir eine Testbenachrichtigung.“** sendet sofort genau eine
+  Push-Nachricht an dein Handy (`notify.send_message` an das aufgelöste
+  Ziel) und antwortet „Die Testbenachrichtigung wurde gesendet.“ – erst,
+  nachdem Home Assistant den Aufruf angenommen hat.
+- **„Kannst du mir in 10 Sekunden eine Test Benachrichtigung schicken?“**
+  wird als einmalige, persistente Home-Assistant-Automation mit absolutem
+  Zeitpunkt, Datumsschutz und Selbstlöschung geplant – kein `sleep`.
+- **„Benachrichtige mich sobald ein Fenster geöffnet wird“**,
+  **„Kannst du mich benachrichtigen sobald im Wohnzimmer die Fenster auf
+  ist?“** und **„Sobald die Fenster im Wohnzimmer geöffnet werden,
+  benachrichtige mich, dass im Wohnzimmer ein Fenster offen ist.“** werden
+  als Push-Automation erkannt. „ein Fenster“ / „die Fenster im Wohnzimmer“
+  bedeutet: *irgendein* passendes Fenster öffnet sich.
+- **„mich“ ist der angemeldete Home-Assistant-Benutzer.** Eine bestätigte
+  Gerätezuordnung dieses Benutzers gewinnt; ohne Zuordnung wird genau ein
+  konfiguriertes HomeIntent-Push-Ziel verwendet. Bei mehreren Zielen fragt
+  HomeIntent nach einer Zuordnung statt an alle zu senden; ohne Ziel gibt
+  es einen Konfigurationshinweis. „mich“ wird nie mehr stillschweigend zu
+  `persistent_notification.create`.
+- Nachrichten ohne eigenen Text werden aus dem Auslöser formuliert
+  („Im Wohnzimmer wurde ein Fenster geöffnet.“); ein diktierter Text
+  („…, dass im Wohnzimmer ein Fenster offen ist“) gewinnt immer.
+- Erinnerungen, Benachrichtigungen, „Sag mir Bescheid“ und „Schick mir
+  eine Nachricht“ teilen eine gemeinsame Bedeutung. „Sag mir, ob das
+  Fenster offen ist“ bleibt eine Frage.
+- Neuer handgeschriebener Evaluationskorpus mit 183 Benachrichtigungs- und
+  Erinnerungsfällen (`tests/eval/notification_cases.json`).
+- **Proaktive Push-Nachrichten an `notify.*`-Entities kommen wieder an.**
+  Regel-, Monitor- und V12-Meldungen schickten bisher zusätzlich `data`
+  (Tag, Buttons) an `notify.send_message`; Home Assistant lehnt das ab.
+  Entities erhalten jetzt nur Titel und Text. Aktionsbuttons gibt es nur
+  noch über eine bestätigte Bindung an einen `notify.mobile_app_*`-Dienst;
+  sonst bleibt ein V12-Vorschlag per Sprache oder im Learning Center
+  beantwortbar.
 
 ## Was ist in Version 7.1.1 neu?
 
@@ -1292,10 +1332,10 @@ python -m pip install --requirement requirements-ha-test.txt
 python -m pytest -q tests_ha
 ```
 
-Geprüfter Release-Stand von Version 7.1.1:
+Geprüfter Release-Stand von Version 7.1.2:
 
 ```text
-3962 passed, 12 skipped, 0 failed
+4244 passed, 12 skipped, 0 failed
 8 passed gegen echtes Home Assistant 2026.9.2 (tests_ha)
 89 % Gesamt-Coverage
 75 % Coverage für conversation.py
@@ -1335,7 +1375,7 @@ Serviceausführung über den versionierten Shadow-Report vergleichen:
 
 ```bash
 python scripts/v7_shadow_report.py \
-  --check docs/perf/v7-shadow-baseline-7.1.1.json --quiet
+  --check docs/perf/v7-shadow-baseline-7.1.2.json --quiet
 ```
 
 Erweiterte direkte Geräteoperationen laufen inzwischen ebenfalls durch die
